@@ -129,6 +129,14 @@ gantt
 
 ### Phase 1: POC for Model Migration Assessment (September 21 – October 16, 2026)
 
+| Sprint | User Stories | Tasks & Owners |
+| :--- | :--- | :--- |
+| **Sprint 0**<br/>*(Sep 21 – Sep 27)* | **Environment Setup & Kickoff Alignment**: Provision non-production GCP environment & git repo, input training, test and reference datasets.| Google FDE & PSO Teams & Unilever Team |
+| **Sprint 1**<br/>*(Sep 28 – Oct 11)* | Develop Gemini/Gemma based pipelines for **MT MarketShare** and **MT Merchandising** Benchmark them for latency, quality and cost against current state. | Google FDEs / Unilever & Partner Team |
+| **Sprint 2**<br/>*(Oct 12 – Oct 16)* | Develop Gemini/Gemma based pipelines for **MT Toker Compliance** and **Share of Shelf (SOS) Pipeline** Benchmark them for latency, quality and cost against current state. Deliver **POC Completion Milestone (Oct 16)** presentation, benchmark report, and Phase 2 MVP architecture. | Google FDEs / Unilever Leads |
+
+#### Detailed Milestone Breakdown — Phase 1
+
 1.  **Environment Access, Preparation and Setup (Sep 21 – Sep 27, 2026)**
     *   *Goal:* Establish GCP project access, IAM service accounts, storage buckets, model artifact repositories, and benchmarking environments.
     *   *Activities:* Provision non-production GCP project resources, configure Vertex AI APIs and developer permissions, ingest baseline shelf imagery and weights for the 13-model inventory, and establish automated throughput/accuracy benchmarking harnesses.
