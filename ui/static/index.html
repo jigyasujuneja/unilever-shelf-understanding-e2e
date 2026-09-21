@@ -3,213 +3,272 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Unilever Retail Vision — Interactive Shelf Understanding &amp; GCP Benchmark Suite</title>
-  <meta name="description" content="Interactive executive and engineering workbench demonstrating Unilever HUL 7-dimension shelf product detection, depth-stacked facing NMS, multi-approach bounding-box classification, hybrid vector search, and Gemini fine-tuning on Google Cloud Vertex AI." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet" />
+  <title>Unilever Shelf Understanding — 4-Path Step-by-Step Benchmark Studio</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <!-- Top Executive Header -->
-  <header class="app-header" id="main-header">
-    <div class="header-inner">
-      <div class="brand-identity">
-        <div class="brand-mark" aria-hidden="true">UL</div>
-        <div class="brand-titles">
-          <h1>Unilever Shelf Understanding &amp; Computer Vision Benchmark Suite</h1>
-          <div class="brand-subtitle">
-            <span>HUL 7-Dimension Retail Taxonomy &amp; Front-Facing Depth NMS</span>
-            <span class="gcp-chip" id="chip-gcp-project">GCP: unilever-shelf-understanding</span>
-            <span class="gcp-chip" id="chip-gcs-image">gs://unilever-shelf-understanding-shelf-images/shelf-image.png</span>
-          </div>
-        </div>
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-logo">U</div>
+      <div>
+        <h1>Unilever Shelf Understanding — Use-Case Pipeline &amp; Benchmark Studio</h1>
+        <p class="subtitle">
+          4 Separated Architectural Paths &bull; Linear Step-by-Step Visual Flow per Use Case &bull; Live Vertex AI Execution Studio
+        </p>
       </div>
-
-      <div class="header-controls">
-        <div class="control-group" role="group" aria-label="Active Gemini Model Selection">
-          <span class="control-label">Vertex AI Model</span>
-          <button type="button" class="model-pill active" id="btn-model-38" data-model="gemini-3.8-flash">gemini-3.8-flash</button>
-          <button type="button" class="model-pill" id="btn-model-37" data-model="gemini-3.7-flash">gemini-3.7-flash</button>
-          <button type="button" class="model-pill" id="btn-model-35" data-model="gemini-3.5-flash-lite">gemini-3.5-flash-lite</button>
-        </div>
-
-        <button type="button" class="btn-secondary" id="btn-open-gt-modal" title="Inspect Ground Truth &amp; Test Dataset Integration Placeholder">
-          <span>Ground Truth &amp; Buckets:</span>
-          <span class="badge badge-non-hul" id="header-gt-badge">PLACEHOLDER READY</span>
-        </button>
-
-        <button type="button" class="btn-primary" id="btn-trigger-live-api">
-          <span>&#9654; Run Live Vertex AI API Call</span>
-        </button>
-      </div>
+    </div>
+    <div class="topbar-badges">
+      <span class="badge badge-gcp" id="badge-project">GCP: unilever-shelf-understanding</span>
+      <span class="badge badge-tax">Taxonomy: configs/taxonomy.yaml</span>
+      <span class="badge badge-gt">Ground Truth: Placeholder (Ready to Swap)</span>
     </div>
   </header>
 
-  <!-- Interactive 5-Stage Pipeline Navigation -->
-  <nav class="pipeline-stepper" aria-label="Shelf Understanding Pipeline Stages">
-    <button type="button" class="step-tab active" id="tab-step-detection" data-step="detection">
-      <div class="step-header">
-        <span class="step-num">STEP 01</span>
-        <span class="step-badge" id="step1-badge">17 Front Facings</span>
-      </div>
-      <div class="step-title">Object Detection &amp; Depth NMS</div>
-      <div class="step-desc">Front-facing bounding boxes with horizontal column depth de-duplication</div>
+  <nav class="main-nav" aria-label="Use Case Navigation">
+    <button class="nav-btn active" data-tab="tab-overview">
+      <span class="nav-step">All 4 Paths</span>
+      Overview &amp; Compare
     </button>
-
-    <button type="button" class="step-tab" id="tab-step-classification" data-step="classification">
-      <div class="step-header">
-        <span class="step-num">STEP 02</span>
-        <span class="step-badge" id="step2-badge">3 Approaches</span>
-      </div>
-      <div class="step-title">7-Dim HUL Classification</div>
-      <div class="step-desc">Single-Pass vs. Bbox-Guided vs. Physical Per-Facing Crops</div>
+    <button class="nav-btn" data-tab="tab-path-1">
+      <span class="nav-step">Use Case 1</span>
+      Path 1: Single-Pass VLM
     </button>
-
-    <button type="button" class="step-tab" id="tab-step-matching" data-step="matching">
-      <div class="step-header">
-        <span class="step-num">STEP 03</span>
-        <span class="step-badge">3072-D Vectors</span>
-      </div>
-      <div class="step-title">Hybrid Vector Search</div>
-      <div class="step-desc">Lexical BM25 keywords + Vertex AI gemini-embedding-001 matching</div>
+    <button class="nav-btn" data-tab="tab-path-2">
+      <span class="nav-step">Use Case 2</span>
+      Path 2: 2-Stage BBox + Depth NMS
     </button>
-
-    <button type="button" class="step-tab" id="tab-step-finetuning" data-step="finetuning">
-      <div class="step-header">
-        <span class="step-num">STEP 04</span>
-        <span class="step-badge">Vertex AI SFT</span>
-      </div>
-      <div class="step-title">Supervised Fine-Tuning</div>
-      <div class="step-desc">Automated SFT JSONL dataset generation &amp; GCS tuning pipeline</div>
+    <button class="nav-btn" data-tab="tab-path-3">
+      <span class="nav-step">Use Case 3</span>
+      Path 3: 2-Stage Physical Crop
     </button>
-
-    <button type="button" class="step-tab" id="tab-step-benchmarks" data-step="benchmarks">
-      <div class="step-header">
-        <span class="step-num">STEP 05</span>
-        <span class="step-badge">18 Runs + GT Hub</span>
-      </div>
-      <div class="step-title">Cost, Latency &amp; GT Placeholder</div>
-      <div class="step-desc">Executive comparison matrix, OTel spans &amp; plug-and-play test dataset hub</div>
+    <button class="nav-btn" data-tab="tab-path-4">
+      <span class="nav-step">Use Case 4</span>
+      Path 4: 3-Stage Class-Agnostic + 1408-D Vector
+    </button>
+    <button class="nav-btn nav-btn-live" data-tab="tab-run-live">
+      <span class="nav-step nav-step-live">&#9889; Live API</span>
+      Run Live Studio
+    </button>
+    <button class="nav-btn" data-tab="tab-sft-config">
+      <span class="nav-step">Config &amp; SFT</span>
+      Fine-Tuning &amp; Taxonomy
     </button>
   </nav>
 
-  <!-- Main Workspace Container -->
-  <main class="workspace-container">
-    <!-- Live KPI Strip for Current Selection -->
-    <section class="kpi-strip" aria-label="Current Stage Performance Metrics">
-      <div class="kpi-card">
-        <div class="kpi-label">Front Facings Counted</div>
-        <div class="kpi-value" id="kpi-facings-count">17</div>
-        <div class="kpi-sub" id="kpi-depth-sub">1 back-row unit filtered by Depth NMS</div>
+  <main class="container">
+    <!-- TAB 1: OVERVIEW & 4-PATH SIDE-BY-SIDE COMPARISON -->
+    <section id="tab-overview" class="tab-panel active">
+      <div class="section-header">
+        <div>
+          <h2>Executive Comparison of All 4 Architectural Use-Case Paths</h2>
+          <p>
+            Each path solves front-facing detection, depth deduplication, 7-dimension taxonomy extraction, and catalog vector matching with a distinct sequence of stages. Click any Use-Case card below to inspect its full linear step-by-step flow, or jump to <strong>Run Live Studio</strong> to execute any path in real time.
+          </p>
+        </div>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-label">HUL Portfolio Share</div>
-        <div class="kpi-value" id="kpi-hul-share">82.4%</div>
-        <div class="kpi-sub" id="kpi-hul-sub">14 HUL facings vs. 3 Non-HUL</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Cost / Shelf Image</div>
-        <div class="kpi-value" id="kpi-cost-shelf">$0.00675</div>
-        <div class="kpi-sub" id="kpi-cost-sub">Vertex AI Token Pricing</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Cost / Product Facing</div>
-        <div class="kpi-value" id="kpi-cost-product">$0.00040</div>
-        <div class="kpi-sub" id="kpi-cost-prod-sub">Amortized across 17 facings</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">End-to-End Latency</div>
-        <div class="kpi-value" id="kpi-latency">27,936 ms</div>
-        <div class="kpi-sub" id="kpi-latency-sub">1,643 ms per front facing</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Accuracy Evaluation</div>
-        <div class="kpi-value" id="kpi-accuracy-state" style="font-size: 14px; color: var(--non-hul-amber);">AWAITING GT</div>
-        <div class="kpi-sub" id="kpi-accuracy-sub">Click to preview GT integration</div>
-      </div>
-    </section>
 
-    <!-- Primary Split Workbench -->
-    <div class="workbench-grid">
-      <!-- LEFT COLUMN: Interactive Shelf Visual Stage + Physical Crops Strip -->
-      <section class="panel-card" id="shelf-visual-panel">
-        <div class="panel-header">
-          <div class="panel-title-group">
-            <h2 id="canvas-panel-title">Interactive Shelf Bounding-Box &amp; Front-Facing Inspector</h2>
-            <p id="canvas-panel-subtitle">Click any bounding box on the shelf to inspect its 7-dimension HUL taxonomy, physical crop, and depth NMS status.</p>
+      <div class="usecase-cards-grid" id="overview-usecase-cards">
+        <!-- Populated dynamically by app.js -->
+      </div>
+
+      <div class="kpi-grid" id="overview-kpis"></div>
+
+      <div class="card">
+        <div class="card-header-flex">
+          <div>
+            <h3>Complete Benchmark Matrix Across All 4 Paths &amp; 3 Gemini Models (21 Live Runs)</h3>
+            <p class="muted">Compare latency, token breakdown, cost per shelf image, cost per front facing, and depth duplicate suppression.</p>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <label class="toggle-switch" id="lbl-toggle-depth" title="Toggle visibility of back-row depth-stacked duplicate products suppressed by deduplicate_depth_stacked_facings()">
-              <input type="checkbox" id="chk-show-depth-duplicates" checked />
-              <span>Show Suppressed Back-Row Duplicates (<span id="count-depth-boxes">1</span>)</span>
+          <div class="filter-controls">
+            <label>Filter Path:
+              <select id="overview-path-filter">
+                <option value="ALL">All 4 Classification Paths + Standalone Tasks</option>
+                <option value="single_pass_full_shelf">Path 1: Single-Pass Full-Shelf VLM</option>
+                <option value="two_stage_bbox_guided_nms">Path 2: 2-Stage BBox-Guided + Depth NMS</option>
+                <option value="two_stage_physical_crop_per_facing">Path 3: 2-Stage Physical Crop per Facing</option>
+                <option value="class_agnostic_visual_embedding">Path 4: 3-Stage Class-Agnostic + 1408-D Vector</option>
+              </select>
+            </label>
+            <label>Filter Model:
+              <select id="overview-model-filter">
+                <option value="ALL">All Models (3.8-flash, 3.7-flash, 3.5-flash-lite)</option>
+                <option value="gemini-3.8-flash">gemini-3.8-flash</option>
+                <option value="gemini-3.7-flash">gemini-3.7-flash</option>
+                <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+              </select>
             </label>
           </div>
         </div>
-
-        <div class="panel-body">
-          <div class="canvas-toolbar">
-            <div class="legend-items">
-              <span class="legend-item"><span class="legend-swatch swatch-hul"></span> HUL Brand Facing</span>
-              <span class="legend-item"><span class="legend-swatch swatch-non-hul"></span> Non-HUL Brand Facing</span>
-              <span class="legend-item"><span class="legend-swatch swatch-depth"></span> Back-Row Depth Duplicate (Filtered Out)</span>
-            </div>
-            <div style="font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted);" id="active-approach-indicator">
-              Approach: single_pass_facing_nms
-            </div>
-          </div>
-
-          <!-- Shelf Image + Interactive SVG Overlay -->
-          <div class="shelf-stage-wrapper" id="shelf-stage-container">
-            <img src="/shelf-image.png" alt="Retail Shelf Input Image" class="shelf-image-el" id="shelf-base-img" />
-            <svg class="bbox-overlay-svg" id="shelf-bbox-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none"></svg>
-          </div>
-
-          <!-- Physical Per-Facing Crops Gallery Strip (Generated by facing_utils.crop_facing_images) -->
-          <div style="margin-top: 16px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-              <span style="font-size: 12px; font-weight: 700; color: var(--text-secondary);">
-                Physical Per-Facing Crops (`reports/crops/<span id="crop-folder-model">gemini-3.8-flash</span>/facing_XX.png`)
-              </span>
-              <button type="button" class="btn-secondary" id="btn-view-montage" style="padding: 4px 10px; font-size: 11.5px;">
-                View Full Numbered Facing Montage
-              </button>
-            </div>
-            <div class="crops-strip" id="physical-crops-strip"></div>
-          </div>
+        <div class="table-scroll">
+          <table class="data-table" id="overview-summary-table">
+            <thead>
+              <tr>
+                <th>Use Case / Approach</th>
+                <th>Task</th>
+                <th>Model</th>
+                <th>Front Facings</th>
+                <th>Depth Filtered</th>
+                <th>Latency (ms)</th>
+                <th>Input Tok</th>
+                <th>Thinking Tok</th>
+                <th>Output Tok</th>
+                <th>Cost / Shelf ($)</th>
+                <th>Cost / Facing ($)</th>
+                <th>Inspect Flow</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
-      </section>
-
-      <!-- RIGHT COLUMN: Context-Sensitive Step Workbench -->
-      <section class="panel-card" id="step-detail-panel">
-        <div class="panel-header">
-          <div class="panel-title-group">
-            <h2 id="right-panel-title">Step 1: Front-Facing Object Detection &amp; Depth NMS</h2>
-            <p id="right-panel-subtitle">Inspect individual facings and verify how depth-stacked back units are excluded.</p>
-          </div>
-          <span class="badge badge-cobalt" id="right-panel-trace-badge">OTel Span Active</span>
-        </div>
-
-        <div class="panel-body" id="right-panel-content">
-          <!-- Dynamically populated by app.js based on active step & selected facing -->
-        </div>
-      </section>
-    </div>
-  </main>
-
-  <!-- Modal for Full Montage / Live API Execution / Ground Truth Architecture -->
-  <div id="modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.68); z-index: 999; align-items: center; justify-content: center; padding: 24px;">
-    <div class="panel-card" style="max-width: 980px; width: 100%; max-height: 90vh; display: flex; flex-direction: column;">
-      <div class="panel-header">
-        <div class="panel-title-group">
-          <h2 id="modal-title">Inspector</h2>
-          <p id="modal-subtitle"></p>
-        </div>
-        <button type="button" class="btn-secondary" id="btn-close-modal">Close &times;</button>
       </div>
-      <div class="panel-body" id="modal-body" style="overflow-y: auto;"></div>
-    </div>
-  </div>
+    </section>
+
+    <!-- TAB 2: PATH 1 (SINGLE-PASS FULL-SHELF VLM) -->
+    <section id="tab-path-1" class="tab-panel">
+      <div id="pipeline-container-path-1"></div>
+    </section>
+
+    <!-- TAB 3: PATH 2 (2-STAGE BBOX-GUIDED + DEPTH NMS) -->
+    <section id="tab-path-2" class="tab-panel">
+      <div id="pipeline-container-path-2"></div>
+    </section>
+
+    <!-- TAB 4: PATH 3 (2-STAGE PHYSICAL CROP PER FACING) -->
+    <section id="tab-path-3" class="tab-panel">
+      <div id="pipeline-container-path-3"></div>
+    </section>
+
+    <!-- TAB 5: PATH 4 (3-STAGE CLASS-AGNOSTIC DETECTOR + 1408-D VISUAL EMBEDDING + SCANN) -->
+    <section id="tab-path-4" class="tab-panel">
+      <div id="pipeline-container-path-4"></div>
+    </section>
+
+    <!-- TAB 6: RUN LIVE STUDIO (OUTPUTS FULL VISUAL STEP-BY-STEP UI LIVE) -->
+    <section id="tab-run-live" class="tab-panel">
+      <div class="card live-control-card">
+        <div class="card-header-flex">
+          <div>
+            <h2>&#9889; Run Live Benchmark Studio — Real-Time Step-by-Step Execution</h2>
+            <p class="muted">
+              Select any of the 4 Use-Case Paths and any Vertex AI Gemini model below. Clicking <strong>Run Live on Vertex AI</strong> executes the actual backend pipeline against <code>gs://unilever-shelf-understanding-shelf-images/shelf-image.png</code> and renders the full interactive Step-by-Step visual pipeline below.
+            </p>
+          </div>
+        </div>
+
+        <div class="live-studio-controls">
+          <label class="control-block">
+            <span>1. Choose Use-Case Path (4 Approaches):</span>
+            <select id="live-studio-approach">
+              <option value="single_pass_full_shelf">Path 1: Single-Pass Full-Shelf VLM (1 Call: BBox + 7-Dim Taxonomy)</option>
+              <option value="two_stage_bbox_guided_nms">Path 2: 2-Stage BBox-Guided + Depth NMS (Detect + Filter Back-Row + Classify)</option>
+              <option value="two_stage_physical_crop_per_facing" selected>Path 3: 2-Stage Physical Crop per Facing (Detect + PIL Crop Strip + Classify)</option>
+              <option value="class_agnostic_visual_embedding">Path 4: 3-Stage Class-Agnostic Detector + 1408-D Visual Embedding + ScaNN Match</option>
+            </select>
+          </label>
+
+          <label class="control-block">
+            <span>2. Choose Vertex AI Model:</span>
+            <select id="live-studio-model">
+              <option value="gemini-3.8-flash" selected>gemini-3.8-flash</option>
+              <option value="gemini-3.7-flash">gemini-3.7-flash</option>
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+            </select>
+          </label>
+
+          <div class="control-block control-block-action">
+            <button id="btn-execute-live-studio" class="btn-primary btn-live-execute">
+              &#9654; Run Selected Use Case Live on Vertex AI
+            </button>
+          </div>
+        </div>
+
+        <!-- Live Step-by-Step Progress Tracker -->
+        <div id="live-progress-banner" class="live-progress-banner">
+          <div class="live-progress-header">
+            <span id="live-status-pill" class="status-pill status-idle">READY FOR LIVE EXECUTION</span>
+            <span id="live-timer-display" class="mono">Elapsed: 0.0s</span>
+          </div>
+          <div id="live-stage-stepper" class="linear-flow-stepper"></div>
+        </div>
+      </div>
+
+      <!-- Full Visual Step-by-Step Output Container (Identical layout to Path 1..4 tabs!) -->
+      <div id="pipeline-container-live"></div>
+    </section>
+
+    <!-- TAB 7: FINE-TUNING (SFT) & CENTRALIZED TAXONOMY CONFIG -->
+    <section id="tab-sft-config" class="tab-panel">
+      <div class="section-header">
+        <div>
+          <h2>Centralized Taxonomy Configuration (<code>configs/taxonomy.yaml</code>) &amp; Vertex AI Fine-Tuning (SFT)</h2>
+          <p>
+            All taxonomy lists (categories, subcategories, packaging types, pack types, size bucket rules, and HUL/non-HUL brands) are loaded from a single configuration file (<code>configs/taxonomy.yaml</code>) without any hardcoded brand or variant counts.
+          </p>
+        </div>
+      </div>
+
+      <div class="split-2col">
+        <div class="card">
+          <h3>Centralized 7-Dimension Taxonomy (<code>configs/taxonomy.yaml</code>)</h3>
+          <p class="muted">Edit <code>configs/taxonomy.yaml</code> to update categories, subcategories, packaging types, or brand lists across all 4 paths automatically.</p>
+          <div id="taxonomy-config-viewer" class="taxonomy-viewer"></div>
+        </div>
+
+        <div class="card">
+          <h3>Pluggable Ground Truth &amp; Association Table Readiness</h3>
+          <p class="muted">Currently running in zero-fabrication placeholder mode (<code>ground_truth.provider_type: "none"</code>). Swap one YAML block in <code>configs/default_config.yaml</code> when annotations arrive.</p>
+          <pre class="code-box"># configs/default_config.yaml
+associations:
+  provider_type: "bigquery" # or "csv", "json", "bucket_discovery"
+  source_uri: "unilever-shelf-understanding.retail.shelf_associations"
+
+ground_truth:
+  provider_type: "bigquery" # Swap from "none" when ready
+  source_uri: "unilever-shelf-understanding.retail.ground_truth_labels"
+  schema_mapping:
+    image_key_field: "image_id"
+    brand_field: "brand_name"
+    bbox_field: "bbox_2d"</pre>
+          <h4 style="margin-top: 16px;">OpenTelemetry Spans (<code>reports/otel_logs.jsonl</code>)</h4>
+          <div class="table-scroll" style="max-height: 240px;">
+            <table class="data-table" id="otel-audit-table">
+              <thead>
+                <tr>
+                  <th>Trace ID</th>
+                  <th>Task / Approach</th>
+                  <th>Model</th>
+                  <th>Latency (ms)</th>
+                  <th>Total Tokens</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Vertex AI Supervised Fine-Tuning (SFT) Dataset &amp; Benchmark (<code>sft_training_examples.jsonl</code>)</h3>
+        <div class="table-scroll" style="margin-bottom: 14px;">
+          <table class="data-table" id="sft-summary-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>SFT Dataset URI</th>
+                <th>Status</th>
+                <th>Front Facings</th>
+                <th>Inference Latency (ms)</th>
+                <th>Cost / Shelf Image ($)</th>
+                <th>Cost / Facing ($)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <pre id="sft-jsonl-preview" class="code-box">Loading SFT JSONL payload...</pre>
+      </div>
+    </section>
+  </main>
 
   <script src="/app.js"></script>
 </body>

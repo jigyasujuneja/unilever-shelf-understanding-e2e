@@ -431,10 +431,50 @@ def execute_live_benchmark_task(
     else:
         raise ValueError(f"Unsupported live task_type: {task_type}")
 
+    dashboard = load_dashboard_payload()
+    crops_key = (
+        f"visual_embed_{model_name}"
+        if separation_approach == "class_agnostic_visual_embedding"
+        else model_name
+    )
+    crops_info = dashboard.get("crops_manifest", {}).get(
+        crops_key,
+        dashboard.get("crops_manifest", {}).get(model_name, {}),
+    )
+    depth_demo = dashboard.get("depth_demos", {}).get(model_name, {})
+
+    summary_record = {
+        "run_id": res.run_id,
+        "trace_id": res.trace_id,
+        "span_id": res.span_id,
+        "task_type": res.task_type,
+        "separation_approach": res.separation_approach,
+        "model_name": res.model_name,
+        "shelf_image_uri": res.shelf_image_uri,
+        "status": res.status,
+        "start_time": res.start_time,
+        "end_time": res.end_time,
+        "latency_ms": round(res.latency_ms, 2),
+        "front_facings_count": len(res.row_level_items),
+        "depth_duplicates_filtered": res.accuracy.depth_duplicates_filtered,
+        "latency_per_facing_ms": round(
+            res.latency_ms / max(len(res.row_level_items), 1), 2
+        ),
+        "input_tokens": res.tokens.input_tokens,
+        "thinking_tokens": res.tokens.thinking_tokens,
+        "output_tokens": res.tokens.output_tokens,
+        "total_tokens": res.tokens.total_tokens,
+        "cost_per_shelf_image_usd": res.cost.cost_per_shelf_image_usd,
+        "cost_per_product_usd": res.cost.cost_per_product_usd,
+        "accuracy_status": res.accuracy.accuracy_status,
+    }
+
     return {
         "run_id": res.run_id,
         "trace_id": res.trace_id,
         "span_id": res.span_id,
+        "start_time": res.start_time,
+        "end_time": res.end_time,
         "task_type": res.task_type,
         "separation_approach": res.separation_approach,
         "model_name": res.model_name,
@@ -444,7 +484,12 @@ def execute_live_benchmark_task(
         "cost": res.cost.model_dump(),
         "accuracy": res.accuracy.model_dump(),
         "front_facings_count": len(res.row_level_items),
-        "items_preview": [item.model_dump() for item in res.row_level_items[:18]],
+        "depth_duplicates_filtered": res.accuracy.depth_duplicates_filtered,
+        "summary_record": summary_record,
+        "rows": [item.model_dump() for item in res.row_level_items],
+        "items_preview": [item.model_dump() for item in res.row_level_items],
+        "crops_info": crops_info,
+        "depth_demo": depth_demo,
     }
 
 
