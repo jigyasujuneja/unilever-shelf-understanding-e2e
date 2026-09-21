@@ -1,0 +1,81 @@
+gcp:
+  project_id: "unilever-shelf-understanding"
+  location: "global"
+  tuning_location: "us-central1"
+
+buckets:
+  shelf_images_bucket: "gs://unilever-shelf-understanding-shelf-images"
+  catalog_images_bucket: "gs://unilever-shelf-understanding-catalog-images"
+  planograms_bucket: null  # Optional: bucket name not known / may not exist
+  artifacts_bucket: "gs://unilever-shelf-understanding-shelf-images"
+
+models:
+  - "gemini-3.8-flash"
+  - "gemini-3.7-flash"
+  - "gemini-3.5-flash-lite"
+
+# Centralized product taxonomy configuration (Categories, Subcategories, HUL & Non-HUL Brands, Packaging, Pack Types, Size Buckets)
+taxonomy_file: "configs/taxonomy.yaml"
+
+pricing_per_million_tokens:
+  gemini-3.8-flash:
+    input: 0.30
+    thinking: 0.30
+    output: 2.50
+  gemini-3.7-flash:
+    input: 0.25
+    thinking: 0.25
+    output: 2.00
+  gemini-3.5-flash-lite:
+    input: 0.10
+    thinking: 0.10
+    output: 0.40
+  gemini-2.5-flash:
+    input: 0.30
+    thinking: 0.30
+    output: 2.50
+  gemini-2.5-flash-lite:
+    input: 0.10
+    thinking: 0.10
+    output: 0.40
+  gemini-2.5-pro:
+    input: 1.25
+    thinking: 1.25
+    output: 10.00
+  default:
+    input: 0.30
+    thinking: 0.30
+    output: 2.50
+
+associations:
+  provider_type: "json"  # Supports: "json", "csv", "bigquery", "bucket_discovery"
+  source_uri: "configs/sample_associations.json"
+  schema_mapping:
+    association_id_field: "association_id"
+    shelf_image_uri_field: "shelf_image_uri"
+    catalog_uri_field: "catalog_uri"
+    planogram_uri_field: "planogram_uri"
+    store_id_field: "store_id"
+    ground_truth_id_field: "ground_truth_id"
+
+# Ground truth is configured as a ready-to-swap placeholder ("none" / "placeholder")
+# until the production ground truth schema and dataset are provided.
+ground_truth:
+  provider_type: "none"  # Swap to "json", "csv", or "bigquery" when ground truth data arrives
+  source_uri: null       # e.g., "gs://my-gt-bucket/gt.json" or "project.dataset.gt_table"
+  schema_mapping:
+    image_key_field: "image_id"
+    items_list_field: "items"
+    brand_field: "brand"
+    product_name_field: "product_name"
+    sku_id_field: "sku_id"
+    bbox_field: "bbox_2d"
+    shelf_row_field: "shelf_row"
+
+telemetry:
+  service_name: "unilever-shelf-benchmark"
+  otel_log_path: "reports/otel_logs.jsonl"
+  export_to_console: false
+
+reporting:
+  output_dir: "reports"

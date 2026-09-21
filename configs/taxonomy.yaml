@@ -1,0 +1,126 @@
+# ==============================================================================
+# Unilever Shelf Understanding — Centralized Product Taxonomy Configuration
+# ==============================================================================
+# Edit this single file (or override under `taxonomy:` in `configs/default_config.yaml`)
+# to update categories, subcategories, HUL portfolio brands, competitor brands,
+# packaging types, pack types, and size bucket thresholds across all VLM prompts,
+# rule-based classifiers, vector search matchers, reports, and the Web UI.
+# ==============================================================================
+
+categories:
+  - "Hair Care"
+  - "Oral Care"
+  - "Laundry"
+  - "Skin Care"
+  - "Skin Cleansing"
+  - "Deodorants & Fragrances"
+  - "Home & Surface Care"
+  - "Tea & Coffee"
+  - "Packaged Foods"
+  - "Health & Nutrition"
+
+subcategories:
+  - "Shampoo"
+  - "Conditioner"
+  - "Hair Oil"
+  - "Mouthwash"
+  - "Toothpaste"
+  - "Soaps"
+  - "Body Wash"
+  - "Face Wash"
+  - "Moisturizer / Cream"
+  - "Facial Gel / Serum"
+  - "Detergent Bar"
+  - "Detergent Powder"
+  - "Liquid Detergent"
+  - "Fabric Conditioner"
+
+packaging_types:
+  - "box"
+  - "jar"
+  - "sachet"
+  - "tube"
+  - "bottle"
+  - "pouch"
+  - "bar"
+
+pack_types:
+  - "Single"
+  - "Multiple"
+
+size_buckets:
+  sachet_label: "Sachet / Trial (<25g/ml)"
+  small_label: "Small / Compact (25-55g/ml)"
+  medium_label: "Medium / Regular (56-110g/ml)"
+  large_label: "Large / Family (>110g/ml)"
+  sachet_max_grams: 25
+  small_max_grams: 55
+  medium_max_grams: 110
+  small_bbox_height_ratio: 0.82
+  large_bbox_height_ratio: 1.08
+
+hul_brands:
+  - "Pond's"
+  - "Glow & Lovely"
+  - "Fair & Lovely"
+  - "Lakme"
+  - "Pears"
+  - "Dove"
+  - "Lifebuoy"
+  - "Lux"
+  - "Sunsilk"
+  - "Clinic Plus"
+  - "TRESemmé"
+  - "Indulgeo"
+  - "Vaseline"
+  - "Rexona"
+  - "Axe"
+  - "Pepsodent"
+  - "Closeup"
+  - "Surf Excel"
+  - "Rin"
+  - "Wheel"
+  - "Sunlight"
+  - "Comfort"
+  - "Vim"
+  - "Domex"
+  - "Cif"
+  - "Brooke Bond"
+  - "Lipton"
+  - "Bru"
+  - "Kissan"
+  - "Knorr"
+  - "Kwality Wall's"
+  - "Horlicks"
+  - "Boost"
+  - "Breeze"
+  - "Hamam"
+  - "Motee"
+  - "Liril"
+  - "Ayush"
+  - "Love Beauty and Planet"
+  - "Simple"
+  - "St. Ives"
+  - "Clear"
+
+non_hul_brands:
+  - "Himalaya"
+  - "Nivea"
+  - "Clean & Clear"
+  - "Everyuth"
+  - "Garnier"
+  - "Olay"
+  - "Neutrogena"
+  - "Cetaphil"
+  - "Biotique"
+  - "Mamaearth"
+  - "Colgate"
+  - "Sensodyne"
+  - "Oral-B"
+  - "Ariel"
+  - "Tide"
+  - "Pantene"
+  - "Head & Shoulders"
+  - "L'Oréal"
+  - "Dettol"
+  - "Santoor"

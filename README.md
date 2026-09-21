@@ -1,7 +1,137 @@
-# unilever-shelf-understanding-with-cv
+# Unilever Shelf Understanding — GCP & Vertex AI Gemini Benchmark Suite
 
-## Overview
-Code samples for unilever-shelf-understanding-with-cv engagement. 
+A modular, scalable computer vision & multimodal LLM benchmark suite built on **Google Cloud Platform (GCP)** and **Vertex AI (`google-genai`)** for evaluating retail shelf understanding across four separated capabilities:
 
-## Access Notice
-Access is temporary (30 days). Ensure you have cloned the content before 2026-10-17.
+1. **Zero-Shot Product Detection (`detection`)**: Locates all product facings on a retail shelf (`[ymin, xmin, ymax, xmax]` normalized 0–1000 coordinates, shelf row, horizontal slot index, and visual cues) without requiring any prior SKU catalog.
+2. **Zero-Shot Product Classification (`classification`)**: Visually classifies shelf products (standalone from raw shelf images or conditioned on detected bounding boxes) into structured attributes (`brand`, `product_name`, `variant`, `category`, `packaging_type`, `confidence`) read directly from packaging OCR and visual identity.
+3. **Product Matching via Hybrid Search (`matching`)**:
+   - **Zero-Catalog Hybrid Search Mode (Default)**: When no SKU catalog is provided yet, generates both **sparse lexical BM25 keywords** (`lexical_search_keywords`: brand, sub-brand, OCR claims, variant, packaging) and **dense vector embedding passages** (`dense_embedding_text`), and computes dense vector embeddings via Vertex AI `gemini-embedding-001` (`3072`-dimensional vectors) ready to query Vertex AI Vector Search or BigQuery Vector Search.
+   - **Connected Catalog & Optional Planogram Mode**: When a product catalog (`catalog_uri`) and/or optional planogram (`planogram_uri`) are connected via the association table, matches each facing to its catalog `sku_id` and evaluates planogram slot compliance.
+4. **Fine-Tuning (`fine_tuning`)**: Generates Vertex AI Gemini Supervised Fine-Tuning (SFT) JSONL datasets (`contents` with `fileData` GCS URIs and structured JSON targets), uploads datasets to GCS, supports launching/monitoring Vertex AI tuning jobs (`client.tunings.tune(...)`), and benchmarks structured SFT inference.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph GCP["Google Cloud Storage & BigQuery (Pluggable Sources)"]
+        B1["Shelf Images Bucket\n(gs://...-shelf-images)"]
+        B2["Product Catalog Bucket\n(gs://...-catalog-images)"]
+        B3["Optional Planograms Bucket\n(gs://...-planograms)"]
+        ASSOC["Association Table\n(BigQuery / CSV / JSON / Auto-Discovery)"]
+        GT["Ground Truth Placeholder\n(Swap to BigQuery / CSV / JSON when ready)"]
+    end
+
+    subgraph Tasks["Separated Benchmark Tasks (shelf_benchmark.tasks)"]
+        T1["1. ProductDetectionTask\n(Zero-Shot BBoxes)"]
+        T2["2. ProductClassificationTask\n(Zero-Shot Brand & Variant)"]
+        T3["3. ProductMatchingTask\n(Hybrid Vector + Lexical Search)"]
+        T4["4. GeminiFineTuningTask\n(Vertex AI SFT JSONL & Job)"]
+    end
+
+    subgraph Models["Vertex AI Gemini Models"]
+        M1["gemini-3.8-flash"]
+        M2["gemini-3.7-flash"]
+        M3["gemini-3.5-flash-lite"]
+        EMB["gemini-embedding-001\n(3072-D Dense Vectors)"]
+    end
+
+    subgraph Observability["Reporting & OpenTelemetry"]
+        OTEL["OpenTelemetry JSONL Logs & Spans\n(start_time, end_time, input/thinking/output tokens)"]
+        REP["Detailed Reports\n- row_level_report.csv / .json\n- benchmark_summary.csv / .json\n- benchmark_report.md"]
+    end
+
+    B1 & B2 & B3 & ASSOC --> Tasks
+    Tasks --> M1 & M2 & M3
+    T3 --> EMB
+    GT -.->|"Pluggable Evaluator"| Tasks
+    Tasks --> OTEL
+    Tasks --> REP
+```
+
+---
+
+## Quick Start (Out of the Box)
+
+### 1. Run the Full Benchmark on `gemini-3.8-flash`, `gemini-3.7-flash`, and `gemini-3.5-flash-lite`
+
+```bash
+.venv/bin/shelf-benchmark \
+  --config configs/default_config.yaml \
+  --tasks classification detection matching fine_tuning \
+  --models gemini-3.8-flash gemini-3.7-flash gemini-3.5-flash-lite
+```
+
+### 2. Benchmark Any Local Image (Auto-Uploading to GCS) or Specific Model
+
+```bash
+.venv/bin/shelf-benchmark \
+  --image shelf-image.png \
+  --upload-to-gcs \
+  --tasks classification \
+  --models gemini-3.8-flash gemini-3.7-flash gemini-3.5-flash-lite
+```
+
+### 3. Run Unit Tests
+
+```bash
+.venv/bin/pytest -v
+```
+
+---
+
+## Ground Truth Placeholder & Schema Swapping (`configs/default_config.yaml`)
+
+By default, Ground Truth is set to **placeholder mode** (`provider_type: "none"`), reporting `PLACEHOLDER_AWAITING_GROUND_TRUTH` alongside all cost, latency, token, and row-level predictions.
+
+When your Ground Truth dataset and Association Table arrive, simply update [`configs/default_config.yaml`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/configs/default_config.yaml) without changing any code:
+
+```yaml
+associations:
+  provider_type: "bigquery"  # Supports: "bigquery", "csv", "json", "bucket_discovery"
+  source_uri: "unilever-shelf-understanding.retail_dataset.shelf_associations"
+  schema_mapping:
+    association_id_field: "row_id"
+    shelf_image_uri_field: "gcs_shelf_uri"
+    catalog_uri_field: "gcs_catalog_uri"
+    planogram_uri_field: "gcs_planogram_uri"  # Optional column
+    store_id_field: "outlet_code"
+    ground_truth_id_field: "gt_id"
+
+ground_truth:
+  provider_type: "bigquery"  # Swap from "none" to "bigquery", "csv", or "json"
+  source_uri: "unilever-shelf-understanding.retail_dataset.ground_truth_annotations"
+  schema_mapping:
+    image_key_field: "image_filename"
+    items_list_field: "annotations"
+    brand_field: "brand_label"
+    product_name_field: "sku_description"
+    sku_id_field: "unilever_ean"
+    bbox_field: "bounding_box_2d"
+    shelf_row_field: "bay_level"
+```
+
+---
+
+## Centralized Product Taxonomy Configuration (`configs/taxonomy.yaml`)
+
+All taxonomy dimensions (`categories`, `subcategories`, `packaging_types`, `pack_types`, `size_buckets`, `hul_brands`, and `non_hul_brands`) are configured in a single, centralized YAML file ([`configs/taxonomy.yaml`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/configs/taxonomy.yaml)) loaded into `BenchmarkConfig.taxonomy` (`TaxonomyConfig` in [`src/shelf_benchmark/config.py`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/src/shelf_benchmark/config.py)).
+
+When updated category, subcategory, packaging, or brand lists become available, edit `configs/taxonomy.yaml` (or point `taxonomy_file` in `configs/default_config.yaml` to a new YAML file) and every task prompt, rule-derived size calculator, HUL brand matcher, and Web UI badge updates automatically without modifying any code.
+
+
+---
+
+## OpenTelemetry-Compliant Logging (`reports/otel_logs.jsonl`)
+
+Every task execution creates an OpenTelemetry span and writes a structured OpenTelemetry Log Data Model record to `reports/otel_logs.jsonl` via [`OpenTelemetryBenchmarkLogger`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/src/shelf_benchmark/telemetry.py). Every log entry includes:
+
+- `start_time` & `end_time` (ISO-8601 UTC) + `start_time_unix_nano` & `end_time_unix_nano`
+- `latency_ms`
+- `input_token_count` (`gen_ai.usage.input_tokens`)
+- `thinking_token_count` (`gen_ai.usage.thinking_tokens` / `thoughts_token_count`)
+- `output_token_count` (`gen_ai.usage.output_tokens`)
+- `total_token_count` (`gen_ai.usage.total_tokens`)
+- `shelf_benchmark.cost_per_shelf_image_usd` & `shelf_benchmark.cost_per_product_usd`
+- `TraceId`, `SpanId`, and `Resource` (`service.name`, `cloud.account.id`, `cloud.region`).

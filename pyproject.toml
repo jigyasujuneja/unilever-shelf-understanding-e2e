@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unilever-shelf-benchmark"
+version = "0.1.0"
+description = "Scalable GCP & Vertex AI Gemini Benchmark Suite for Retail Shelf Understanding (Detection, Classification, Matching, Fine-Tuning)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-genai>=1.5.0",
+    "google-cloud-storage>=2.14.0",
+    "google-cloud-bigquery>=3.17.0",
+    "google-auth>=2.28.0",
+    "pydantic>=2.6.0",
+    "pyyaml>=6.0.1",
+    "opentelemetry-api>=1.24.0",
+    "opentelemetry-sdk>=1.24.0",
+    "pillow>=10.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+shelf-benchmark = "shelf_benchmark.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
