@@ -1,21 +1,34 @@
-"""Sample 06: Customizing Product Taxonomy (`TaxonomyConfig`) & Swapping Ground Truth Schemas.
+#!/usr/bin/env python3
+"""Sample 06: Customise the taxonomy, then swap in a real ground-truth source.
 
-Demonstrates how developers can:
-  1. Override `categories`, `subcategories`, `packaging_types`, `pack_types`, `size_buckets`,
-     and `hul_brands` in one place (`configs/taxonomy.yaml` or via `TaxonomyConfig` in Python)
-     without any hardcoded brand or variant counts.
-  2. Configure custom BigQuery / CSV / JSON Ground Truth and Association Table schema mappings
-     when real annotated datasets become available on GCP.
+Run it (no GCP project, no credentials, no network):
+
+    .venv/bin/python code_samples/06_custom_taxonomy_and_ground_truth_swap.py
+
+Part 1 shows that `categories`, `subcategories`, `packaging_types`, `pack_types`, `size_buckets`,
+`hul_brands` and `non_hul_brands` live in exactly one place (`configs/taxonomy.yaml`, or a
+`TaxonomyConfig` built in Python). Prompts, the size-bucket rule and the HUL brand check all read
+from it, so there are no hard-coded category or brand lists anywhere in the pipeline.
+
+Part 2 shows the ground-truth swap. It is a config change, not a code change. The file used here,
+`configs/sample_ground_truth.json`, is the canonical worked example of the suite-native schema;
+`docs/GROUND_TRUTH_CONTRACT.md` specifies it field by field.
 """
 
-from shelf_benchmark import BenchmarkConfig, ShelfBenchmarkSDK, TaxonomyConfig
+from __future__ import annotations
+
+from shelf_benchmark import BenchmarkConfig, TaxonomyConfig
 from shelf_benchmark.config import SizeBucketRulesConfig
+from shelf_benchmark.data.ground_truth import create_ground_truth_provider
+from shelf_benchmark.data.storage import StorageManager
 from shelf_benchmark.tasks.classification import build_classification_prompt
 from shelf_benchmark.tasks.facing_utils import check_is_hul_brand, derive_size_bucket_from_bbox
 
+SAMPLE_GT_FILE = "configs/sample_ground_truth.json"
+
 
 def main() -> None:
-    # 1. Define or override a custom taxonomy programmatically (or load from a custom YAML file)
+    # ---------------------------------------------------------------- Part 1: taxonomy
     custom_taxonomy = TaxonomyConfig(
         categories=["Oral Care", "Skin Care", "Hair Care", "Home & Hygiene"],
         subcategories=["Toothpaste", "Mouthwash", "Face Wash", "Shampoo", "Laundry Bar"],
@@ -34,11 +47,10 @@ def main() -> None:
         non_hul_brands=["Colgate", "Sensodyne", "Himalaya", "Garnier", "Ariel"],
     )
 
-    # 2. Verify dynamic prompt & size rule generation (zero hardcoded counts!)
     prompt = build_classification_prompt(custom_taxonomy)
-    print("=== Dynamically Generated Classification Prompt Preview ===")
+    print("=== first 10 lines of the generated classification prompt ===")
     print("\n".join(prompt.splitlines()[:10]))
-    print("...")
+    print(f"[prompt is {len(prompt.splitlines())} lines, {len(prompt)} characters]")
 
     size_label = derive_size_bucket_from_bbox(
         bbox_2d=[535, 386, 795, 440],
@@ -47,17 +59,53 @@ def main() -> None:
         model_size_hint="45g",
         taxonomy=custom_taxonomy,
     )
-    print(f"\nDerived Size Bucket for 45g tube: {size_label}")
-    print(f"Is 'Pepsodent' HUL Brand? {check_is_hul_brand('Pepsodent', taxonomy=custom_taxonomy)}")
-    print(f"Is 'Sensodyne' HUL Brand? {check_is_hul_brand('Sensodyne', taxonomy=custom_taxonomy)}")
+    print(f"\nsize bucket for a 45g tube      : {size_label}")
+    print(f"is 'Pepsodent' a HUL brand?     : {check_is_hul_brand('Pepsodent', taxonomy=custom_taxonomy)}")
+    print(f"is 'Sensodyne' a HUL brand?     : {check_is_hul_brand('Sensodyne', taxonomy=custom_taxonomy)}")
 
-    # 3. Show how Ground Truth & Association Table schemas can be swapped in 5 lines when ready on GCP
+    # ------------------------------------------------------- Part 2: ground-truth swap
     cfg = BenchmarkConfig.from_yaml("configs/default_config.yaml")
     cfg.taxonomy = custom_taxonomy
-    cfg.ground_truth.provider_type = "none"  # Change to "bigquery", "csv", or "json" when GT table is ready
+    print(f"\nconfigured provider out of the box: {cfg.ground_truth.provider_type}")
+
+    # Swap to a real source. Supported provider types: json, jsonl, csv, coco, bigquery, none.
+    cfg.ground_truth.provider_type = "json"
+    cfg.ground_truth.source_uri = SAMPLE_GT_FILE
+    cfg.ground_truth.gt_version = "sample-v1"
+    # Declare the coordinate convention of the incoming boxes. Getting this wrong produces
+    # plausible-looking but wrong numbers rather than an error, so it is stated explicitly.
+    cfg.ground_truth.schema_mapping.bbox_format = "ymin_xmin_ymax_xmax_1000"
+    cfg.offline.enabled = True
+
+    storage = StorageManager(
+        project_id=cfg.gcp.project_id,
+        bucket_config=cfg.buckets,
+        offline=cfg.offline.enabled,
+    )
+    provider = create_ground_truth_provider(
+        gt_config=cfg.ground_truth,
+        storage_manager=storage,
+        project_id=cfg.gcp.project_id,
+    )
+    print(f"loaded provider                   : {provider.describe()}")
+
+    record = provider.get_ground_truth(
+        shelf_image_uri="gs://unilever-shelf-understanding-shelf-images/shelf_sample_01.png",
+        ground_truth_id="shelf_sample_01.png",
+    )
+    print(f"facings in ground truth           : {record.total_main_shelf_facings}")
+    print(f"items after back-row exclusion    : {len(record.items)}")
+    print(f"gt_version stamped on every row   : {record.gt_version}")
+
+    # A vendor delivering different column names needs a schema_mapping, not a code change:
     cfg.ground_truth.schema_mapping.brand_field = "annotated_brand_name"
     cfg.ground_truth.schema_mapping.bbox_field = "annotated_bbox_2d"
-    print(f"\nConfigured Ground Truth Provider: {cfg.ground_truth.provider_type} (Ready to swap to BigQuery/CSV/JSON)")
+    print(
+        "\nFor arbitrary vendor field names, set ground_truth.schema_mapping.* "
+        "(see docs/GROUND_TRUTH_CONTRACT.md).\n"
+        "Verify any new annotation file before running a benchmark against it:\n"
+        f"  .venv/bin/shelf-benchmark validate-gt --gt-provider json --ground-truth-uri {SAMPLE_GT_FILE}"
+    )
 
 
 if __name__ == "__main__":

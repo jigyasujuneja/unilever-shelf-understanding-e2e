@@ -11,7 +11,11 @@ import os
 import subprocess
 from typing import Optional
 
+# Must be set BEFORE importing google.auth / google.genai to avoid mTLS client-cert errors on Cloudtop
+os.environ["GOOGLE_API_USE_CLIENT_CERTIFICATE"] = "false"
+
 import google.auth
+import google.auth.transport.requests
 from google import genai
 from google.cloud import bigquery, storage
 from google.oauth2 import credentials
@@ -19,13 +23,23 @@ from google.oauth2 import credentials
 
 def ensure_gcp_env() -> None:
     """Disable client certificate mTLS override if not configured for API endpoints."""
-    if os.environ.get("GOOGLE_API_USE_CLIENT_CERTIFICATE", "").lower() != "false":
-        os.environ["GOOGLE_API_USE_CLIENT_CERTIFICATE"] = "false"
+    os.environ["GOOGLE_API_USE_CLIENT_CERTIFICATE"] = "false"
 
 
 def get_gcp_credentials(project_id: str = "unilever-shelf-understanding") -> google.auth.credentials.Credentials:
-    """Obtain valid GCP credentials with quota_project_id set."""
+    """Obtain valid GCP credentials with quota_project_id set (prioritizing Application Default Credentials)."""
     ensure_gcp_env()
+    try:
+        creds, _ = google.auth.default(quota_project_id=project_id)
+        if hasattr(creds, "with_quota_project"):
+            creds = creds.with_quota_project(project_id)
+        if not getattr(creds, "token", None) or getattr(creds, "expired", False):
+            creds.refresh(google.auth.transport.requests.Request())
+        if getattr(creds, "token", None):
+            return creds
+    except Exception:
+        pass
+
     try:
         token = subprocess.check_output(
             ["gcloud", "auth", "print-access-token"],

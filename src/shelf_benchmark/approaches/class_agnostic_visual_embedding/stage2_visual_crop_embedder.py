@@ -11,14 +11,12 @@ from __future__ import annotations
 
 import base64
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
 from shelf_benchmark.approaches.base import CommonLayerContext
 from shelf_benchmark.auth import get_gcp_credentials
-
 
 # Vertex AI Multimodal Embedding (`multimodalembedding@001`) pricing: $0.0001 per image
 VERTEX_IMAGE_EMBEDDING_COST_PER_CROP_USD = 0.0001

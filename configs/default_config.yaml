@@ -46,11 +46,16 @@ tasks:
   - "matching"
   - "fine_tuning"
 
-# Active bounding-box separation & classification approaches (All 4 Use-Case Paths)
+# Active bounding-box separation & classification approaches.
+# Run `shelf-benchmark list-approaches` to see every id the registry knows about,
+# including plugins you have added yourself.
 approaches:
   - "single_pass_full_shelf"
   - "two_stage_bbox_guided_nms"
   - "two_stage_physical_crop_per_facing"
+  # `class_agnostic_visual_embedding` returns `Unknown` for every facing unless
+  # `embeddings.reference_catalog.source_uri` below points at a real catalog.
+  # That is deliberate: it used to invent a brand name, which looked like a result.
   - "class_agnostic_visual_embedding"
 
 # Centralized product taxonomy configuration (Categories, Subcategories, Brands, Packaging, Pack Types, Size Rules)
@@ -64,6 +69,16 @@ embeddings:
   visual_embedding_dimensions: 1408
   hybrid_dense_weight: 0.65
   hybrid_sparse_weight: 0.35
+
+  # Reference catalog used by the class-agnostic visual embedding approach to turn a
+  # crop embedding into a brand/SKU. Without it the approach reports
+  # `catalog_status: NO_CATALOG_INDEXED` and brand `Unknown` rather than guessing.
+  reference_catalog:
+    source_uri: null                # e.g. "gs://my-bucket/reference_catalog.json" or a local path
+    min_match_similarity: 0.10      # Below this floor the match is reported as BELOW_MATCH_THRESHOLD
+    unknown_brand_label: "Unknown"
+    # configs/demo_visual_prototypes.json is a DEMO-ONLY catalog with hand-written
+    # prototypes. Never use it to produce numbers you intend to report.
 
 # Front-Facing Depth Deduplication Rules (suppresses back-row stacked products in the same horizontal column)
 depth_deduplication:
@@ -81,26 +96,62 @@ fine_tuning:
 # =============================================================================
 # GCP BILLING, PROVISIONED THROUGHPUT (GSU), CLOUD RUN & INVOICE RECONCILIATION
 # =============================================================================
-# Why both Live GCP Billing Catalog API + Fallback Pricing exist:
-# 1. Vertex AI `generate_content` returns `usage_metadata` (exact input, thinking,
-#    output, cached token counts and `traffic_type`: ON_DEMAND vs PROVISIONED_THROUGHPUT),
-#    NOT a dollar string inside the inference payload.
-# 2. When `pricing_source: "gcp_billing_catalog_api"`, the engine queries Google Cloud's
-#    official Cloud Billing Catalog API (`cloudbilling.googleapis.com/v1/services/6F81-5844-456A/skus`)
-#    live to fetch the exact SKU rates and falls back to `pricing_per_million_tokens` only if offline.
-# 3. Every Vertex AI and Cloud Run request is tagged with GCP Billing `labels` (`run_id`,
-#    `approach`, `task`, `model`) so BigQuery Cloud Billing Export (`gcp_billing_export_resource_v1_*`)
-#    reconciles the 100% true GCP invoice down to each individual run and cost component.
+# What is MEASURED vs what is MODELLED. Read this before quoting a cost number.
+#
+#  MEASURED  Vertex AI token counts. `generate_content` returns `usage_metadata`
+#            with exact input / thinking / output / cached token counts and the
+#            `traffic_type` (ON_DEMAND vs PROVISIONED_THROUGHPUT). Those counts are
+#            real; only the USD rate applied to them comes from a table or the API.
+#  MODELLED  Cloud Run compute, GCS operations, and Cloud Logging volume. These are
+#            derived from wall-clock latency and the per-unit rates below, not from
+#            your actual invoice. They are EXCLUDED from cost totals unless you set
+#            `include_infrastructure_costs: true`.
+#  MODELLED  Per-facing embedding / vision cost (see `embeddings_and_vision`).
+#
+# `pricing_source: "gcp_billing_catalog_api"` asks the engine to query the Cloud
+# Billing Catalog API for live SKU rates. It only reports
+# `billing_source: gcp_billing_catalog_api` when BOTH an input and an output rate
+# were genuinely parsed; otherwise it falls back to `pricing_per_million_tokens`
+# below and says so via `billing_source: yaml_rate_table`. Check that field before
+# trusting a cost comparison.
+#
+# For a reconciled invoice, use BigQuery Cloud Billing Export. Every request is
+# tagged with billing labels (`run_id`, `approach`, `task`, `model`) so export rows
+# can be attributed back to an individual run.
 billing:
   pricing_source: "gcp_billing_catalog_api"  # "gcp_billing_catalog_api" | "bigquery_billing_export" | "yaml_table"
   vertex_ai_service_id: "6F81-5844-456A"
   cloud_run_service_id: "152E-C115-5142"
+  catalog_api_timeout_seconds: 2.5           # Keep short: a slow catalog must not slow the benchmark
+  traffic_mode: "auto"                       # "auto" | "on_demand" | "provisioned_throughput"
   bigquery_billing_export_table: null        # e.g., "unilever-shelf-understanding.billing_export.gcp_billing_export_resource_v1_XXXXXX"
   attach_gcp_billing_labels: true
   billing_label_prefix: "unilever_shelf"
-  gcs_and_logging_overhead_per_image_usd: 0.000015
 
-  # Vertex AI Provisioned Throughput (GSU — Generative AI Scale Units)
+  # When false (the default), modelled infrastructure costs are still computed and
+  # reported in their own fields but are NOT added to the headline total. Turn this on
+  # only when you want a fully-loaded estimate and understand that it is an estimate.
+  include_infrastructure_costs: false
+
+  # Rates used for the modelled infrastructure buckets above.
+  gcs_and_logging_overhead_per_image_usd: 0.000015
+  gcs_class_a_per_thousand_ops_usd: 0.005
+  gcs_class_b_per_thousand_ops_usd: 0.0004
+  cloud_logging_per_gib_usd: 0.50
+  estimated_log_bytes_per_run: 4096
+
+  # Per-facing embedding and vision API cost. Approaches that crop each facing and
+  # embed it (for example `class_agnostic_visual_embedding`) incur a cost that never
+  # shows up in Vertex token counts, so it is modelled here per facing.
+  embeddings_and_vision:
+    enabled: true
+    default_per_facing_usd: 0.000025
+    per_approach_per_facing_usd: {}          # e.g. {class_agnostic_visual_embedding: 0.000025}
+    per_task_per_facing_usd: {}              # e.g. {matching: 0.00001}
+
+  # Vertex AI Provisioned Throughput (GSU — Generative AI Scale Units).
+  # A GSU charge is only reported when traffic actually ran as PROVISIONED_THROUGHPUT.
+  # On-demand traffic never accrues a provisioned-throughput cost.
   provisioned_throughput:
     enabled: false                           # Set true when using reserved GSUs (or auto-detected from response.usage_metadata.traffic_type)
     gsu_count: 1
@@ -109,7 +160,8 @@ billing:
     target_images_per_hour_per_gsu: 1800
     allow_payg_spillover: true               # When traffic_type == ON_DEMAND_SPILLOVER, bills excess tokens to PAYG
 
-  # Google Cloud Run Hosting & Compute Cost Separation (vCPU-seconds + GiB-seconds + Requests)
+  # Google Cloud Run Hosting & Compute Cost Separation (vCPU-seconds + GiB-seconds + Requests).
+  # MODELLED from measured latency; gated by `include_infrastructure_costs` above.
   cloud_run:
     enabled: true
     service_name: "unilever-shelf-benchmark-service"
@@ -169,18 +221,75 @@ associations:
     store_id_field: "store_id"
     ground_truth_id_field: "ground_truth_id"
 
-# Pluggable Ground Truth Configuration (Ready-to-swap placeholder until production GT arrives)
+# =============================================================================
+# GROUND TRUTH
+# =============================================================================
+# Ground truth does not exist yet, so `provider_type` is "none". In that state every
+# accuracy metric is reported as null with `accuracy_status:
+# PLACEHOLDER_AWAITING_GROUND_TRUTH`. It is NOT reported as 0.0 -- "we did not measure
+# this" and "the model scored zero" must never look the same in a report.
+#
+# When annotations arrive:
+#   1. Point `source_uri` at the file and set `provider_type`.
+#   2. Set `bbox_format` to match the vendor's convention. Getting this wrong produces
+#      plausible-but-wrong numbers, which is the worst possible failure mode.
+#   3. Run `shelf-benchmark validate-gt --config configs/default_config.yaml` and check
+#      the reported image/item counts against what you expect.
+#   4. Re-score existing runs for free with `shelf-benchmark score` -- no model calls.
+# See docs/GROUND_TRUTH_CONTRACT.md for the full schema and worked examples.
 ground_truth:
-  provider_type: "none"  # Swap to "json", "csv", or "bigquery" when ground truth data arrives
-  source_uri: null       # e.g., "gs://my-gt-bucket/gt.json" or "unilever-shelf-understanding.retail.gt_table"
+  provider_type: "none"  # "none" | "json" | "jsonl" | "csv" | "coco" | "bigquery"
+  source_uri: null       # e.g., "gs://my-gt-bucket/gt.json" or "project.dataset.gt_table"
+  gt_version: "unversioned"      # Stamped onto every scored row. Bump it whenever annotations change.
+  strict: true                   # Fail loudly if the source parses to zero images
+  exclude_back_row_items: true   # Score only front-facing items, matching what the models are asked for
+  min_matched_image_ratio: 0.0   # Raise to e.g. 0.8 to fail a run when most images have no ground truth
   schema_mapping:
+    # Rename these to match your vendor's field names. Unknown keys are rejected
+    # rather than silently ignored, so a typo fails fast instead of scoring zero.
     image_key_field: "image_id"
     items_list_field: "items"
+    item_id_field: "item_id"
     brand_field: "brand"
     product_name_field: "product_name"
     sku_id_field: "sku_id"
     bbox_field: "bbox_2d"
     shelf_row_field: "shelf_row"
+    category_field: "category"
+    subcategory_field: "subcategory"
+    variant_field: "variant"
+    packaging_type_field: "packaging_type"
+    pack_type_field: "pack_type"
+    size_field: "size"
+    back_row_field: "back_row"
+    occluded_field: "occluded"
+    # How to read the four numbers in `bbox_field`. Options:
+    #   ymin_xmin_ymax_xmax_1000  Gemini convention, normalized to 0-1000 (default)
+    #   xmin_ymin_xmax_ymax_px    Absolute pixels
+    #   xmin_ymin_xmax_ymax_norm  Normalized to 0-1
+    #   coco_xywh_px              COCO: [x, y, width, height] in absolute pixels
+    #   yolo_xywh_norm            YOLO: [x_center, y_center, width, height] normalized to 0-1
+    bbox_format: "ymin_xmin_ymax_xmax_1000"
+    image_width_field: "image_width"
+    image_height_field: "image_height"
+    default_image_width: null    # Required for pixel/COCO/YOLO formats if the file omits per-image dims
+    default_image_height: null
+
+# =============================================================================
+# EVALUATION
+# =============================================================================
+# Changing anything here changes what the numbers mean. A run scored at one
+# iou_threshold is NOT comparable to a run scored at another. See
+# docs/EVALUATION_PROTOCOL.md.
+evaluation:
+  iou_threshold: 0.50            # A prediction is a true positive at or above this IoU
+  pairing_strategy: "iou_greedy" # Global best-IoU-first greedy matching; order independent
+  require_iou_for_pairing: true  # Pair on geometry ONLY, so localization and naming score independently
+  brand_matcher: "strict"        # "strict" | "alias" | "normalized"
+  product_matcher: "strict"      # "strict" | "token_overlap"
+  product_token_overlap_threshold: 0.80   # Only used when product_matcher is "token_overlap"
+  brand_aliases: {}              # Curated, explicit table. e.g. {"ponds": "Pond's"}
+  product_stopwords: []          # e.g. ["pack", "ml", "g"]
 
 # OpenTelemetry Logging & Tracing Configuration (Exports locally + GCP Cloud Logging + GCS)
 telemetry:
@@ -197,3 +306,17 @@ reporting:
   output_dir: "reports"
   sync_reports_to_gcs: true
   gcs_reports_prefix: "reports"
+  # With five engineers running concurrently against one checkout, set this to true so
+  # each run lands in `<output_dir>/<user>-<UTC timestamp>-<run_id>/` instead of
+  # overwriting a shared file.
+  isolate_runs: false
+  # Writes `predictions.json`, which `shelf-benchmark score` can re-score against
+  # ground truth later without re-running a single model call. Keep this on.
+  write_predictions_file: true
+
+# Offline mode: no network, no GCP. Used by the test lane and by anyone who wants to
+# exercise the pipeline before their project credentials are sorted out.
+# See `shelf_benchmark.testing.make_offline_sdk()`.
+offline:
+  enabled: false
+  fail_on_network_access: true   # Raise instead of silently degrading when something reaches for the network

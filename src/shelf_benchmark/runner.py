@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
-import uuid
 
 from shelf_benchmark.config import BenchmarkConfig
 from shelf_benchmark.data.associations import create_association_provider
@@ -47,13 +47,9 @@ class BenchmarkRunner:
             storage_manager=self.storage,
             project_id=self.config.gcp.project_id,
         )
-        self.report_generator = BenchmarkReportGenerator(
-            output_dir=self.config.reporting.output_dir,
-            project_id=self.config.gcp.project_id,
-            bucket_name=self.config.buckets.shelf_images_bucket,
-            sync_to_gcs=self.config.reporting.sync_reports_to_gcs,
-            gcs_reports_prefix=self.config.reporting.gcs_reports_prefix,
-        )
+        # `from_config` (rather than hand-passing a subset of fields) so that reporting settings
+        # such as isolate_runs and write_predictions_file cannot be silently dropped.
+        self.report_generator = BenchmarkReportGenerator.from_config(self.config)
 
         self.detection_task = ProductDetectionTask(self.config, self.storage, self.telemetry)
         self.classification_task = ProductClassificationTask(self.config, self.storage, self.telemetry)
@@ -128,15 +124,13 @@ class BenchmarkRunner:
 
                     elif t_norm == "classification":
                         from shelf_benchmark.approaches import (
-                            CommonLayerContext,
                             GLOBAL_APPROACH_REGISTRY,
+                            CommonLayerContext,
+                        )
+                        from shelf_benchmark.approaches.registry import (
+                            BUILTIN_VLM_CLASSIFICATION_APPROACHES,
                         )
 
-                        builtin_approaches = {
-                            "single_pass_full_shelf",
-                            "two_stage_bbox_guided_nms",
-                            "two_stage_physical_crop_per_facing",
-                        }
                         ctx = CommonLayerContext(
                             config=self.config,
                             storage=self.storage,
@@ -148,7 +142,7 @@ class BenchmarkRunner:
                             print(
                                 f"[BenchmarkRunner] task='classification' approach='{approach}' model='{model_name}' ..."
                             )
-                            if approach in builtin_approaches:
+                            if approach in BUILTIN_VLM_CLASSIFICATION_APPROACHES:
                                 res = self.classification_task.execute(
                                     model_name=model_name,
                                     shelf_image_uri=rec.shelf_image_uri,
@@ -159,11 +153,7 @@ class BenchmarkRunner:
                                     detected_boxes=cached_detected_boxes if approach != "single_pass_full_shelf" else None,
                                 )
                             else:
-                                plugin = GLOBAL_APPROACH_REGISTRY.get(approach)
-                                if plugin is None:
-                                    raise ValueError(
-                                        f"Unknown approach plugin '{approach}'. Registered plugins: {GLOBAL_APPROACH_REGISTRY.list_ids()}"
-                                    )
+                                plugin = GLOBAL_APPROACH_REGISTRY.require(approach)
                                 res = plugin.execute(
                                     ctx=ctx,
                                     model_name=model_name,

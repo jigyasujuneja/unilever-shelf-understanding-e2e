@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
+import logging
 import re
 import statistics
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image, ImageDraw
 
 from shelf_benchmark.config import TaxonomyConfig
 from shelf_benchmark.data.storage import StorageManager
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_TAXONOMY = TaxonomyConfig.from_yaml_or_defaults()
 
@@ -158,15 +161,45 @@ def derive_size_bucket_from_bbox(
     return sb.medium_label
 
 
-def load_pil_image(storage: StorageManager, shelf_image_uri: str, local_fallback: str = "shelf-image.png") -> Image.Image:
-    """Load a PIL Image from local path or GCS URI."""
-    if not shelf_image_uri.startswith("gs://") and Path(shelf_image_uri).exists():
-        return Image.open(shelf_image_uri).convert("RGB")
-    if Path(local_fallback).exists():
-        return Image.open(local_fallback).convert("RGB")
-    bucket_name, blob_name = storage.parse_gcs_uri(shelf_image_uri)
-    data = storage.client.bucket(bucket_name).blob(blob_name).download_as_bytes()
-    return Image.open(io.BytesIO(data)).convert("RGB")
+def load_pil_image(
+    storage: StorageManager,
+    shelf_image_uri: str,
+    local_fallback: Optional[str] = None,
+) -> Image.Image:
+    """Load the shelf image named by `shelf_image_uri` (local path or `gs://` URI).
+
+    The requested source always wins. `local_fallback` is only consulted if the requested source
+    cannot be read, and using it emits a warning, because quietly substituting a different
+    photograph makes every crop, embedding and metric downstream describe the wrong shelf.
+    """
+    if not shelf_image_uri:
+        raise ValueError("shelf_image_uri is required to load a shelf image.")
+
+    try:
+        if shelf_image_uri.startswith("gs://"):
+            bucket_name, blob_name = storage.parse_gcs_uri(shelf_image_uri)
+            data = storage.client.bucket(bucket_name).blob(blob_name).download_as_bytes()
+            return Image.open(io.BytesIO(data)).convert("RGB")
+        path = Path(shelf_image_uri)
+        if path.exists():
+            return Image.open(path).convert("RGB")
+        raise FileNotFoundError(f"Shelf image not found: {shelf_image_uri}")
+    except Exception as primary_error:
+        if not local_fallback:
+            raise
+        fallback_path = Path(local_fallback)
+        if not fallback_path.exists():
+            raise
+        logger.warning(
+            "Could not read shelf image '%s' (%s). Falling back to local file '%s'. "
+            "Crops, embeddings and metrics for this run describe the FALLBACK image, not '%s'.",
+            shelf_image_uri,
+            primary_error,
+            local_fallback,
+            shelf_image_uri,
+        )
+        return Image.open(fallback_path).convert("RGB")
+
 
 
 def crop_detected_facings(

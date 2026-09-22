@@ -6,6 +6,8 @@ import csv
 import json
 from pathlib import Path
 
+import pytest
+
 from shelf_benchmark.models import (
     AccuracyMetrics,
     CostMetrics,
@@ -14,6 +16,9 @@ from shelf_benchmark.models import (
     TokenUsageMetrics,
 )
 from shelf_benchmark.reporting.generator import BenchmarkReportGenerator
+
+# Everything in this module runs without network or GCP credentials.
+pytestmark = pytest.mark.offline
 
 
 def test_report_generator_outputs_all_formats(tmp_path: Path):
@@ -100,7 +105,7 @@ def test_report_generator_outputs_all_formats(tmp_path: Path):
     assert Path(paths["summary_json"]).exists()
     assert Path(paths["markdown_report"]).exists()
 
-    with open(paths["row_level_csv"], "r", encoding="utf-8") as f:
+    with open(paths["row_level_csv"], encoding="utf-8") as f:
         rows_read = list(csv.DictReader(f))
     assert len(rows_read) == 1
     assert rows_read[0]["predicted_brand"] == "Pond's"

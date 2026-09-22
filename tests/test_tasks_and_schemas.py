@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from types import SimpleNamespace
+
+import pytest
 
 from shelf_benchmark.config import (
     AssociationSchemaMapping,
@@ -19,8 +19,6 @@ from shelf_benchmark.evaluation.metrics import compute_iou
 from shelf_benchmark.models import TokenUsageMetrics
 from shelf_benchmark.tasks import (
     ProductClassificationTask,
-    ProductDetectionTask,
-    ProductMatchingTask,
 )
 from shelf_benchmark.tasks.facing_utils import (
     check_is_hul_brand,
@@ -28,24 +26,10 @@ from shelf_benchmark.tasks.facing_utils import (
     derive_size_bucket_from_bbox,
 )
 from shelf_benchmark.telemetry import OpenTelemetryBenchmarkLogger
+from shelf_benchmark.testing import FakeGenAIClient
 
-
-class DummyFakeGenAIClient:
-    """Fake GenAI Client returning deterministic structured JSON and token usage."""
-
-    def __init__(self, response_payload: dict, prompt_tokens: int = 1106, thought_tokens: int = 250, out_tokens: int = 300):
-        self.payload = response_payload
-        self.usage = SimpleNamespace(
-            prompt_token_count=prompt_tokens,
-            thoughts_token_count=thought_tokens,
-            candidates_token_count=out_tokens,
-            cached_content_token_count=0,
-            total_token_count=prompt_tokens + thought_tokens + out_tokens,
-        )
-        self.models = SimpleNamespace(generate_content=self._generate_content)
-
-    def _generate_content(self, **kwargs):
-        return SimpleNamespace(text=json.dumps(self.payload), usage_metadata=self.usage)
+# Everything in this module runs without network or GCP credentials.
+pytestmark = pytest.mark.offline
 
 
 def test_facing_depth_deduplication_and_size_rules():
@@ -138,7 +122,7 @@ def test_separated_tasks_and_7_dimension_hul_schema(tmp_path: Path):
     sm = StorageManager(cfg.gcp.project_id, cfg.buckets)
     otel = OpenTelemetryBenchmarkLogger(cfg.telemetry, cfg.gcp.project_id, cfg.gcp.location)
 
-    cls_client = DummyFakeGenAIClient(
+    cls_client = FakeGenAIClient(
         {
             "total_classified_products": 1,
             "distinct_brands_found": ["Pond's"],

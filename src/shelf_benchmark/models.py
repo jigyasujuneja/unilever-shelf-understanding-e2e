@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
 
 # =====================================================================
 # 1. Structured Gemini Output Schemas (used in response_schema)
@@ -163,7 +163,12 @@ class ShelfAssociationRecord(BaseModel):
 
 
 class GroundTruthProductItem(BaseModel):
-    """Canonical ground truth item for a single product facing (placeholder schema)."""
+    """Canonical ground truth item for a single product facing.
+
+    `bbox_2d` is always `[ymin, xmin, ymax, xmax]` normalized to 0..1000 by the provider layer,
+    whatever format the annotation vendor delivered (see `GroundTruthSchemaMapping.bbox_format`).
+    """
+
     item_id: int
     brand: str
     product_name: str
@@ -176,14 +181,26 @@ class GroundTruthProductItem(BaseModel):
     sku_id: Optional[str] = None
     bbox_2d: List[int] = Field(default_factory=lambda: [0, 0, 0, 0])
     shelf_row: str = "middle"
+    back_row: bool = Field(
+        default=False,
+        description="True if this unit sits behind a front facing (excluded from front-facing scoring).",
+    )
+    occluded: bool = Field(default=False, description="True if substantially occluded by another product.")
 
 
 class ImageGroundTruth(BaseModel):
     """Canonical ground truth for a shelf image."""
+
     image_id: str
     total_main_shelf_facings: int
     expected_brands: List[str] = Field(default_factory=list)
     items: List[GroundTruthProductItem] = Field(default_factory=list)
+    gt_version: str = "unversioned"
+    source_key: Optional[str] = Field(
+        default=None, description="Key this entry was looked up by, for join debugging."
+    )
+    image_width: Optional[int] = None
+    image_height: Optional[int] = None
 
 
 class TokenUsageMetrics(BaseModel):
@@ -196,8 +213,16 @@ class TokenUsageMetrics(BaseModel):
 
 
 class CostMetrics(BaseModel):
-    """100% Separated All-In GCP Cost Breakdown for a single shelf image and per front-facing product."""
-    billing_source: str = "gcp_cloud_billing_catalog_live"
+    """Separated GCP cost breakdown for a single shelf image and per front-facing product.
+
+    Token cost is computed from measured `usage_metadata`. Infrastructure components are modelled
+    estimates and are only included when `billing.include_infrastructure_costs` is enabled;
+    `billing_source` and `includes_modelled_infrastructure` record exactly what went into the total.
+    """
+
+    billing_source: str = "yaml_rate_table"
+    rates_from_live_catalog: bool = False
+    includes_modelled_infrastructure: bool = False
     traffic_type: str = "ON_DEMAND"  # "ON_DEMAND", "PROVISIONED_THROUGHPUT", or "HYBRID_SPILLOVER"
     input_cost_usd: float = 0.0
     thinking_cost_usd: float = 0.0
@@ -214,22 +239,46 @@ class CostMetrics(BaseModel):
 
 
 class AccuracyMetrics(BaseModel):
-    """Accuracy metrics evaluated against Ground Truth (or placeholder status when GT is not yet connected)."""
+    """Accuracy metrics evaluated against Ground Truth (or placeholder status when GT is absent).
+
+    Field names deliberately do NOT hardcode a threshold: the operative threshold is reported in
+    `iou_threshold`, and the matchers used are reported in `brand_matcher` / `product_matcher`, so
+    a number can never be read out of context. See `docs/EVALUATION_PROTOCOL.md`.
+    """
+
     ground_truth_available: bool = False
     accuracy_status: str = "PLACEHOLDER_AWAITING_GROUND_TRUTH"
+    gt_version: str = "unversioned"
+    # Scoring policy actually applied (provenance for every number below).
+    iou_threshold: Optional[float] = None
+    pairing_strategy: Optional[str] = None
+    brand_matcher: Optional[str] = None
+    product_matcher: Optional[str] = None
+
     ground_truth_count: Optional[int] = None
     predicted_count: int = 0
     depth_duplicates_filtered: int = 0
+    # Confusion-matrix counts. These are Optional for the same reason the ratios below are:
+    # "0 true positives" is a measurement meaning the model matched nothing, whereas None
+    # means no ground truth existed to match against. Collapsing the two is how an unscored
+    # benchmark comes to look like a failing one.
+    matched_pairs: Optional[int] = None
+    true_positives: Optional[int] = None
+    false_positives: Optional[int] = None
+    false_negatives: Optional[int] = None
+
     count_accuracy: Optional[float] = None
-    detection_precision_iou50: Optional[float] = None
-    detection_recall_iou50: Optional[float] = None
-    detection_f1_iou50: Optional[float] = None
+    detection_precision: Optional[float] = None
+    detection_recall: Optional[float] = None
+    detection_f1: Optional[float] = None
     mean_iou: Optional[float] = None
+    mean_iou_matched: Optional[float] = None
     brand_classification_accuracy: Optional[float] = None
     brand_set_recall: Optional[float] = None
     product_classification_accuracy: Optional[float] = None
     sku_matching_accuracy: Optional[float] = None
     planogram_compliance_rate: Optional[float] = None
+
 
 
 class RowLevelReportItem(BaseModel):
@@ -271,13 +320,16 @@ class RowLevelReportItem(BaseModel):
     embedding_vector_dim: Optional[int] = None
     matched_sku_id: Optional[str] = None
     planogram_compliant: Optional[bool] = None
-    # Ground Truth Placeholder Fields
-    gt_status: str = "PLACEHOLDER_AWAITING_GT"
+    # Ground Truth Evaluation Fields (populated only when ground truth is connected)
+    gt_status: str = "PLACEHOLDER_AWAITING_GT"  # PLACEHOLDER_AWAITING_GT | MATCHED | UNMATCHED_FALSE_POSITIVE
+    gt_version: str = "unversioned"
     gt_item_id: Optional[int] = None
     gt_brand: Optional[str] = None
     gt_product_name: Optional[str] = None
     gt_sku_id: Optional[str] = None
     iou_with_gt: Optional[float] = None
+    iou_threshold: Optional[float] = None
+    is_true_positive: Optional[bool] = None
     brand_correct: Optional[bool] = None
     product_correct: Optional[bool] = None
     sku_correct: Optional[bool] = None
@@ -286,7 +338,7 @@ class RowLevelReportItem(BaseModel):
     thinking_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
-    billing_source: str = "gcp_cloud_billing_catalog_live"
+    billing_source: str = "yaml_rate_table"
     traffic_type: str = "ON_DEMAND"
     vertex_ai_payg_tokens_usd: float = 0.0
     vertex_ai_provisioned_throughput_usd: float = 0.0

@@ -16,9 +16,9 @@ from __future__ import annotations
 import base64
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 from google.genai import types
 from pydantic import BaseModel, Field
-import requests
 
 from shelf_benchmark.approaches.base import CommonLayerContext
 from shelf_benchmark.auth import create_genai_client, get_gcp_credentials

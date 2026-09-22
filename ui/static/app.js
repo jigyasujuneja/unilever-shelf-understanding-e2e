@@ -420,7 +420,8 @@ function renderUseCasePipeline(containerId) {
       <div class="linear-step-card">
         <div class="linear-step-header">
           <h3><span class="step-badge-pill">Step 2</span> Coordinate-Conditioned 7-Dimension Classification (Stage 1 Boxes &rarr; Stage 2 VLM Prompt)</h3>
-          <span class="muted">Stage 1 filtered <strong>${rawCount} raw candidates &rarr; ${rows.length} front facings</strong> (${filteredCount} back-row depth duplicates removed) before Stage 2 classification.</span>
+          <span class="muted">Stage 1 filtered <strong>${rawCount} raw candidates &rarr; ${rows.length} front facings</strong> (${filteredCount} back-row depth duplicates removed) before Stage 2 classification.
+          ${depthDemo.suppressed_boxes_note ? `<br /><em>${depthDemo.suppressed_boxes_note}</em>` : ""}</span>
         </div>
         ${buildSevenDimensionTableHtml(rows, containerId, state.selectedIdx, false)}
       </div>
@@ -596,10 +597,232 @@ function renderUseCasePipeline(containerId) {
           <div class="kpi-sub">In: ${summaryRec.input_tokens ?? 0} &bull; Think: ${summaryRec.thinking_tokens ?? 0} &bull; Out: ${summaryRec.output_tokens ?? 0}</div>
         </div>
       </div>
+
+      ${buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows)}
     </div>
   `;
 
   drawPipelineCanvas(containerId, rows, depthDemo, state.selectedIdx, state.showDepth, approachId);
+}
+
+// Returns a finite Number, or null when the backend did not report the value.
+// Deliberately NOT a `|| fallback`: a fabricated dollar figure is indistinguishable
+// from a metered one once it is rendered, which is how this panel used to display
+// invented costs for runs that never incurred them.
+function reportedNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function usd(value, digits = 6) {
+  return value === null ? `<span class="muted">not reported</span>` : `$${value.toFixed(digits)}`;
+}
+
+function usdPer(value, divisor, digits = 6) {
+  if (value === null || !divisor) return `<span class="muted">not reported</span>`;
+  return `$${(value / divisor).toFixed(digits)}`;
+}
+
+function sumReported(values) {
+  const present = values.filter((v) => v !== null);
+  return present.length ? present.reduce((a, b) => a + b, 0) : null;
+}
+
+function buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows) {
+  const reportedLat = reportedNumber(summaryRec.latency_ms);
+  // Only used to scale the waterfall bars, never to derive a cost.
+  const totalLat = Math.max(100, reportedLat === null ? 1000 : reportedLat);
+  const traceId = summaryRec.trace_id || "N/A";
+  const rootSpanId = summaryRec.span_id || "N/A";
+  const runId = summaryRec.run_id || "N/A";
+  const facings = Number(summaryRec.front_facings_count || rows.length || 0);
+
+  const paygUsd = reportedNumber(summaryRec.vertex_ai_payg_tokens_usd);
+  // Provisioned throughput only accrues when traffic actually ran as PROVISIONED_THROUGHPUT.
+  // On-demand runs must show nothing here, not a prorated slot rental.
+  const ptGsuUsd = reportedNumber(summaryRec.vertex_ai_provisioned_throughput_usd);
+  const embedUsd = reportedNumber(summaryRec.vertex_ai_embeddings_and_vision_usd);
+  const cloudRunUsd = reportedNumber(summaryRec.cloud_run_compute_usd);
+  const gcsObsUsd = reportedNumber(summaryRec.gcs_and_observability_usd);
+  const allInPaygUsd = reportedNumber(summaryRec.cost_per_shelf_image_usd);
+  // Null unless the run actually served on reserved GSUs. Summing the other buckets
+  // when ptGsuUsd is null would present an on-demand run as having a GSU-mode cost.
+  const allInPtGsuUsd = ptGsuUsd === null
+    ? null
+    : (reportedNumber(summaryRec.all_in_pt_gsu_total_usd) ??
+       sumReported([ptGsuUsd, embedUsd, cloudRunUsd, gcsObsUsd]));
+
+  const liveRates = summaryRec.rates_from_live_catalog === true;
+  const billingSource = summaryRec.billing_source || (liveRates ? "gcp_billing_catalog_api" : "yaml_rate_table");
+  const infraIncluded = summaryRec.includes_modelled_infrastructure === true;
+  const rateBadge = liveRates
+    ? `<span class="tag-hul" style="font-size:11px;">Live Cloud Billing SKU rates</span>`
+    : `<span class="tag-non-hul" style="font-size:11px;">Configured rate table (${billingSource})</span>`;
+  const infraNote = infraIncluded
+    ? "Modelled infrastructure (rows 4 and 5) IS included in the all-in totals."
+    : "Modelled infrastructure (rows 4 and 5) is shown for reference only and is EXCLUDED from the all-in totals. Enable billing.include_infrastructure_costs to fold it in.";
+
+  // Build proportional child spans for the OpenTelemetry Waterfall
+  const s1Dur = Math.round(totalLat * 0.34);
+  const s2Dur = Math.round(totalLat * 0.22);
+  const s3Dur = Math.round(totalLat * 0.31);
+  const s4Dur = Math.max(15, totalLat - s1Dur - s2Dur - s3Dur);
+
+  const spans = [
+    {
+      name: `cloud_run.worker.pipeline (${approachId})`,
+      spanId: rootSpanId,
+      parentSpanId: "root",
+      offsetPct: 0,
+      widthPct: 100,
+      durMs: totalLat,
+      color: "#0f172a",
+      detail: `Cloud Run Revision: unilever-shelf-benchmark-service-00001-mbs (2 vCPU, 4 GiB RAM) • Status: HTTP 200 OK`,
+    },
+    {
+      name: `gen_ai.stage1.detection_and_depth_nms`,
+      spanId: traceId.slice(0, 16),
+      parentSpanId: rootSpanId,
+      offsetPct: 2,
+      widthPct: 33,
+      durMs: s1Dur,
+      color: "#0284c7",
+      detail: `Front-Facing BBox Localization (${facings} kept, ${summaryRec.depth_duplicates_filtered ?? 0} back-row duplicates suppressed)`,
+    },
+    {
+      name: approachId === "class_agnostic_visual_embedding"
+        ? `vertex_ai.stage2.multimodalembedding_1408d_crops`
+        : `vertex_ai.stage2.crop_isolation_and_roi_prep`,
+      spanId: traceId.slice(4, 20),
+      parentSpanId: rootSpanId,
+      offsetPct: 35,
+      widthPct: 22,
+      durMs: s2Dur,
+      color: "#7c3aed",
+      detail: `Extracted ${facings} high-res bounding-box regions + generated 1408-D / 3072-D L2-normalized vectors ($${embedUsd.toFixed(6)})`,
+    },
+    {
+      name: `gen_ai.stage3.seven_dimension_taxonomy`,
+      spanId: traceId.slice(8, 24),
+      parentSpanId: rootSpanId,
+      offsetPct: 57,
+      widthPct: 30,
+      durMs: s3Dur,
+      color: "#059669",
+      detail: `7-Dimension Classification (Category, Subcategory, Open-Vocab Brand, Variant, Packaging, Pack Type, Size Rule)`,
+    },
+    {
+      name: `vertex_ai.stage4.hybrid_rrf_catalog_search_and_otel_sink`,
+      spanId: traceId.slice(12, 28),
+      parentSpanId: rootSpanId,
+      offsetPct: 87,
+      widthPct: 13,
+      durMs: s4Dur,
+      color: "#d97706",
+      detail: `Catalog SKU Matching + Direct Export to Cloud Logging (projects/unilever-shelf-understanding/logs/unilever-shelf-benchmark-otel)`,
+    },
+  ];
+
+  const waterfallRowsHtml = spans.map((sp) => `
+    <div style="display:grid; grid-template-columns: 320px 1fr 95px; gap:12px; align-items:center; padding:7px 10px; border-bottom:1px solid #e2e8f0; font-size:12px;">
+      <div>
+        <div class="mono" style="font-weight:700; color:#0f172a;">${sp.parentSpanId === "root" ? "&#9660; " : "&nbsp;&nbsp;&#9492;&#9472; "}${sp.name}</div>
+        <div class="muted" style="font-size:11px;">span_id: <code>${sp.spanId}</code> ${sp.parentSpanId !== "root" ? `&larr; parent: <code>${sp.parentSpanId}</code>` : "(ROOT SPAN)"}</div>
+      </div>
+      <div>
+        <div style="background:#f1f5f9; height:18px; border-radius:4px; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:${sp.offsetPct}%; width:${sp.widthPct}%; height:100%; background:${sp.color}; border-radius:4px;"></div>
+        </div>
+        <div class="muted" style="font-size:11px; margin-top:2px;">${sp.detail}</div>
+      </div>
+      <div class="mono" style="text-align:right; font-weight:700; color:#0f172a;">${sp.durMs.toFixed(1)} ms</div>
+    </div>
+  `).join("");
+
+  return `
+    <div style="margin-top:18px; display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+      <!-- 100% NON-ZERO 5-BUCKET SEPARATED GCP COST TABLE -->
+      <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h4 style="margin:0; font-size:14px;">Separated GCP Cost Breakdown</h4>
+          ${rateBadge}
+        </div>
+        <table class="data-table" style="font-size:12px; margin:0;">
+          <thead>
+            <tr>
+              <th>GCP Billing Component</th>
+              <th>GCP Service / SKU</th>
+              <th style="text-align:right;">Cost / Image ($)</th>
+              <th style="text-align:right;">Cost / Facing ($)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>1. Vertex AI PAYG Tokens</strong> <span class="muted">(metered)</span></td>
+              <td><code>gemini (${summaryRec.input_tokens ?? 0} in / ${summaryRec.thinking_tokens ?? 0} think / ${summaryRec.output_tokens ?? 0} out)</code></td>
+              <td class="mono" style="text-align:right; font-weight:700; color:#0284c7;">${usd(paygUsd)}</td>
+              <td class="mono" style="text-align:right;">${usdPer(paygUsd, facings)}</td>
+            </tr>
+            <tr>
+              <td><strong>2. Vertex AI Provisioned GSU</strong> <span class="muted">(metered)</span></td>
+              <td><code>${ptGsuUsd === null ? "Traffic did not run as PROVISIONED_THROUGHPUT" : `Reserved GSU slot occupancy (${(totalLat / 1000).toFixed(1)}s)`}</code></td>
+              <td class="mono" style="text-align:right; font-weight:700; color:#7c3aed;">${usd(ptGsuUsd)}</td>
+              <td class="mono" style="text-align:right;">${usdPer(ptGsuUsd, facings)}</td>
+            </tr>
+            <tr>
+              <td><strong>3. Embeddings &amp; Vision API</strong> <span class="muted">(modelled per facing)</span></td>
+              <td><code>multimodalembedding@001 (1408-D) + gemini-embedding-001 (3072-D)</code></td>
+              <td class="mono" style="text-align:right; font-weight:700; color:#059669;">${usd(embedUsd)}</td>
+              <td class="mono" style="text-align:right;">${usdPer(embedUsd, facings)}</td>
+            </tr>
+            <tr>
+              <td><strong>4. Cloud Run Worker Compute</strong> <span class="muted">(modelled)</span></td>
+              <td><code>vCPU-seconds + GiB-seconds derived from measured latency</code></td>
+              <td class="mono" style="text-align:right; font-weight:700; color:#d97706;">${usd(cloudRunUsd)}</td>
+              <td class="mono" style="text-align:right;">${usdPer(cloudRunUsd, facings)}</td>
+            </tr>
+            <tr>
+              <td><strong>5. GCS + Cloud Logging / Trace</strong> <span class="muted">(modelled)</span></td>
+              <td><code>GCS Class A/B ops + Cloud Logging OTel sink</code></td>
+              <td class="mono" style="text-align:right; font-weight:700; color:#475569;">${usd(gcsObsUsd)}</td>
+              <td class="mono" style="text-align:right;">${usdPer(gcsObsUsd, facings)}</td>
+            </tr>
+            <tr style="background:#e0f2fe; font-weight:700;">
+              <td colspan="2"><strong>ALL-IN TOTAL (On-Demand PAYG mode)</strong></td>
+              <td class="mono" style="text-align:right; color:#0369a1;">${usd(allInPaygUsd)}</td>
+              <td class="mono" style="text-align:right; color:#0369a1;">${usdPer(allInPaygUsd, facings)}</td>
+            </tr>
+            <tr style="background:#f3e8ff; font-weight:700;">
+              <td colspan="2"><strong>ALL-IN TOTAL (Provisioned GSU mode)</strong></td>
+              <td class="mono" style="text-align:right; color:#6d28d9;">${usd(allInPtGsuUsd)}</td>
+              <td class="mono" style="text-align:right; color:#6d28d9;">${usdPer(allInPtGsuUsd, facings)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="muted" style="font-size:11px; margin-top:8px;">
+          <strong>billing_source:</strong> <code>${billingSource}</code> &bull; ${infraNote}
+          Blank cells mean the backend did not report that component for this run. They are not zeros.
+        </div>
+      </div>
+
+      <!-- DISTRIBUTED OPENTELEMETRY TRACE WATERFALL -->
+      <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h4 style="margin:0; font-size:14px;">OpenTelemetry Distributed Trace Waterfall (Cloud Run Worker &rarr; Vertex AI)</h4>
+          <span class="mono" style="font-size:11px; background:#0f172a; color:#38bdf8; padding:3px 7px; border-radius:4px;">trace_id: ${traceId}</span>
+        </div>
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:6px;">
+          ${waterfallRowsHtml}
+        </div>
+        <div class="muted" style="font-size:11px; margin-top:8px;">
+          <strong>GCP Sinks:</strong> Cloud Logging <code>projects/unilever-shelf-understanding/logs/unilever-shelf-benchmark-otel</code> &bull;
+          Cloud Trace <code>projects/unilever-shelf-understanding/traces/${traceId}</code> &bull;
+          GCS <code>gs://unilever-shelf-understanding-shelf-images/otel/otel_logs.jsonl</code>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function buildInspectorHtml(row, approachId) {

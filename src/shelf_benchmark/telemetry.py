@@ -15,11 +15,11 @@ Always logs:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-import uuid
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
@@ -89,7 +89,9 @@ class OpenTelemetryBenchmarkLogger:
             return None
         try:
             import urllib.request
+
             import google.auth.transport.requests
+
             from shelf_benchmark.auth import get_gcp_credentials
 
             creds = get_gcp_credentials(self.project_id)
@@ -141,6 +143,7 @@ class OpenTelemetryBenchmarkLogger:
             return None
         try:
             from google.cloud import storage
+
             from shelf_benchmark.auth import get_gcp_credentials
 
             creds = get_gcp_credentials(self.project_id)
@@ -231,6 +234,23 @@ class OpenTelemetryBenchmarkLogger:
             if error_message:
                 attributes["shelf_benchmark.error_message"] = error_message
             if accuracy and accuracy.ground_truth_available:
+                attributes["shelf_benchmark.accuracy.gt_version"] = accuracy.gt_version
+                attributes["shelf_benchmark.accuracy.iou_threshold"] = accuracy.iou_threshold
+                attributes["shelf_benchmark.accuracy.pairing_strategy"] = accuracy.pairing_strategy
+                attributes["shelf_benchmark.accuracy.brand_matcher"] = accuracy.brand_matcher
+                attributes["shelf_benchmark.accuracy.product_matcher"] = accuracy.product_matcher
+                # Now Optional: omit rather than export None, which OTel rejects and which
+                # would otherwise be exported as a zero count by a lenient exporter.
+                if accuracy.true_positives is not None:
+                    attributes["shelf_benchmark.accuracy.true_positives"] = accuracy.true_positives
+                if accuracy.false_positives is not None:
+                    attributes["shelf_benchmark.accuracy.false_positives"] = (
+                        accuracy.false_positives
+                    )
+                if accuracy.false_negatives is not None:
+                    attributes["shelf_benchmark.accuracy.false_negatives"] = (
+                        accuracy.false_negatives
+                    )
                 if accuracy.count_accuracy is not None:
                     attributes["shelf_benchmark.accuracy.count_accuracy"] = round(accuracy.count_accuracy, 4)
                 if accuracy.brand_classification_accuracy is not None:
@@ -241,9 +261,21 @@ class OpenTelemetryBenchmarkLogger:
                     attributes["shelf_benchmark.accuracy.product_accuracy"] = round(
                         accuracy.product_classification_accuracy, 4
                     )
-                if accuracy.detection_f1_iou50 is not None:
-                    attributes["shelf_benchmark.accuracy.detection_f1_iou50"] = round(
-                        accuracy.detection_f1_iou50, 4
+                if accuracy.detection_precision is not None:
+                    attributes["shelf_benchmark.accuracy.detection_precision"] = round(
+                        accuracy.detection_precision, 4
+                    )
+                if accuracy.detection_recall is not None:
+                    attributes["shelf_benchmark.accuracy.detection_recall"] = round(
+                        accuracy.detection_recall, 4
+                    )
+                if accuracy.detection_f1 is not None:
+                    attributes["shelf_benchmark.accuracy.detection_f1"] = round(
+                        accuracy.detection_f1, 4
+                    )
+                if accuracy.mean_iou_matched is not None:
+                    attributes["shelf_benchmark.accuracy.mean_iou_matched"] = round(
+                        accuracy.mean_iou_matched, 4
                     )
                 if accuracy.sku_matching_accuracy is not None:
                     attributes["shelf_benchmark.accuracy.sku_matching_accuracy"] = round(

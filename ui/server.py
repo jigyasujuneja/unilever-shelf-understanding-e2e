@@ -40,13 +40,19 @@ REPORTS_DIR = REPO_ROOT / "reports"
 CONFIG_PATH = REPO_ROOT / "configs" / "default_config.yaml"
 
 
-def _build_depth_demo_candidates(
+def _build_real_depth_candidates(
     kept_products: List[Dict[str, Any]],
-    depth_filtered_count: int,
 ) -> List[Dict[str, Any]]:
-    """Reconstructs raw candidate boxes (front-facing + depth-stacked back-row units)
-    and runs `deduplicate_depth_stacked_facings` from `shelf_benchmark.tasks.facing_utils`
-    to annotate which boxes were kept vs. suppressed by the Front-Facing Depth NMS filter.
+    """Returns ONLY the real, model-produced front-facing boxes from the row-level report.
+
+    Each box is re-run through `deduplicate_depth_stacked_facings` from
+    `shelf_benchmark.tasks.facing_utils` so the UI can show the genuine Depth NMS decision
+    for the boxes that were actually persisted.
+
+    The boxes that Depth NMS suppressed are NOT reconstructed here: the reports persist only
+    the suppressed *count* (`depth_duplicates_filtered`), not their coordinates. Fabricating
+    plausible-looking back-row boxes for the visualization would put boxes on screen that no
+    model ever emitted, so this function never invents geometry.
     """
     candidates: List[Dict[str, Any]] = []
     for p in kept_products:
@@ -65,44 +71,22 @@ def _build_depth_demo_candidates(
                 "brand": p.get("predicted_brand", ""),
                 "variant": p.get("predicted_variant", ""),
                 "confidence": p.get("confidence", 0.95),
+                "source": "model_output",
+                "synthetic_demo_data": False,
             }
         )
 
-    back_row_Candidates: List[Dict[str, Any]] = []
-    if depth_filtered_count > 0 and kept_products:
-        step = max(1, len(kept_products) // depth_filtered_count)
-        for idx in range(depth_filtered_count):
-            front_ref = kept_products[min(idx * step + 1, len(kept_products) - 1)]
-            ymin = max(10, int(front_ref.get("bbox_ymin", 550)) - 34)
-            xmin = min(985, int(front_ref.get("bbox_xmin", 100)) + 4)
-            ymax = max(ymin + 80, int(front_ref.get("bbox_ymax", 780)) - 38)
-            xmax = min(995, int(front_ref.get("bbox_xmax", 160)) - 2)
-            back_row_Candidates.append(
-                {
-                    "product_index": 100 + idx + 1,
-                    "bbox_2d": [ymin, xmin, ymax, xmax],
-                    "shelf_row": front_ref.get("shelf_row", "middle"),
-                    "position_on_shelf": front_ref.get("position_on_shelf", 1),
-                    "is_front_facing": True,
-                    "brand": front_ref.get("predicted_brand", "Pond's"),
-                    "variant": f"Back-row depth duplicate behind slot #{front_ref.get('position_on_shelf', 1)} ({front_ref.get('predicted_brand', '')})",
-                    "confidence": 0.84,
-                    "synthetic_depth_candidate": True,
-                    "occluded_by_slot": front_ref.get("position_on_shelf", 1),
-                    "front_ymax": front_ref.get("bbox_ymax", 780),
-                }
-            )
+    if not candidates:
+        return []
 
-    raw_pool = candidates + back_row_Candidates
-    kept_after_nms, filtered_count = deduplicate_depth_stacked_facings(
-        raw_pool, x_overlap_threshold=0.45
+    kept_after_nms, _filtered_count = deduplicate_depth_stacked_facings(
+        candidates, x_overlap_threshold=0.45
     )
     kept_coords = {tuple(item["bbox_2d"]) for item in kept_after_nms}
 
     annotated: List[Dict[str, Any]] = []
-    for item in raw_pool:
-        coords = tuple(item["bbox_2d"])
-        is_kept = coords in kept_coords and not item.get("synthetic_depth_candidate", False)
+    for item in candidates:
+        is_kept = tuple(item["bbox_2d"]) in kept_coords
         annotated.append(
             {
                 **item,
@@ -110,10 +94,7 @@ def _build_depth_demo_candidates(
                 "nms_reason": (
                     "Front-most unit in horizontal shelf slot (highest y_max base)"
                     if is_kept
-                    else (
-                        f"Suppressed by Depth NMS: 1D X-overlap >= 0.45 with Slot #{item.get('occluded_by_slot')} "
-                        f"and lower shelf base (y_max={item['bbox_2d'][2]} < {item.get('front_ymax')})"
-                    )
+                    else "Suppressed by Depth NMS: 1D X-overlap >= 0.45 with a nearer facing"
                 ),
             }
         )
@@ -153,7 +134,9 @@ def load_dashboard_payload() -> Dict[str, Any]:
                 except Exception:
                     pass
 
-    # Build per-model detection depth NMS visualization data
+    # Build per-model detection depth NMS visualization data.
+    # Only real, model-produced boxes are exposed here. The coordinates of boxes suppressed by
+    # Depth NMS are not persisted in the reports (only their count is), so they cannot be drawn.
     depth_demos: Dict[str, Any] = {}
     for s in summary_data.get("summary", []):
         if s.get("task_type") == "detection":
@@ -163,14 +146,26 @@ def load_dashboard_payload() -> Dict[str, Any]:
                 for r in rows_data
                 if r.get("task_type") == "detection" and r.get("model_name") == model_name
             ]
+            real_boxes = _build_real_depth_candidates(det_rows)
             depth_demos[model_name] = {
+                "synthetic_demo_data": False,
+                "data_source": "row_level_report.json (model output only)",
+                "suppressed_box_coordinates_available": False,
+                "suppressed_boxes_note": (
+                    "Depth NMS suppressed "
+                    f"{int(s.get('depth_duplicates_filtered', 0))} back-row candidate(s). "
+                    "Only the count is persisted by the benchmark, so no back-row boxes are drawn."
+                ),
                 "front_facings_count": s.get("front_facings_count", len(det_rows)),
                 "depth_duplicates_filtered": s.get("depth_duplicates_filtered", 0),
                 "raw_detections_count": s.get("front_facings_count", len(det_rows))
                 + s.get("depth_duplicates_filtered", 0),
-                "boxes": _build_depth_demo_candidates(
-                    det_rows, int(s.get("depth_duplicates_filtered", 0))
-                ),
+                "raw_candidate_count": len(real_boxes),
+                "raw_candidates": real_boxes,
+                "kept_front_facings": [
+                    b for b in real_boxes if b.get("kept_by_depth_nms")
+                ],
+                "boxes": real_boxes,
             }
 
     # Discover available physical crop images per model
@@ -464,9 +459,53 @@ def execute_live_benchmark_task(
         "thinking_tokens": res.tokens.thinking_tokens,
         "output_tokens": res.tokens.output_tokens,
         "total_tokens": res.tokens.total_tokens,
+        "vertex_ai_payg_tokens_usd": res.cost.vertex_ai_payg_tokens_usd,
+        "vertex_ai_provisioned_throughput_usd": res.cost.vertex_ai_provisioned_throughput_usd,
+        "vertex_ai_embeddings_and_vision_usd": res.cost.vertex_ai_embeddings_and_vision_usd,
+        "cloud_run_compute_usd": res.cost.cloud_run_compute_usd,
+        "gcs_and_observability_usd": res.cost.gcs_and_observability_usd,
         "cost_per_shelf_image_usd": res.cost.cost_per_shelf_image_usd,
         "cost_per_product_usd": res.cost.cost_per_product_usd,
+        # Only meaningful when the run actually served on reserved GSUs. Reporting
+        # `0 + modelled infrastructure` here made on-demand runs look like they had a
+        # provisioned-throughput cost, so it is left null instead.
+        "all_in_pt_gsu_total_usd": (
+            round(
+                res.cost.vertex_ai_provisioned_throughput_usd
+                + res.cost.vertex_ai_embeddings_and_vision_usd
+                + res.cost.cloud_run_compute_usd
+                + res.cost.gcs_and_observability_usd,
+                8,
+            )
+            if res.cost.vertex_ai_provisioned_throughput_usd > 0
+            else None
+        ),
+        "cloud_run_worker_service": os.environ.get("K_SERVICE") or "local (not Cloud Run)",
+        "billing_source": res.cost.billing_source,
+        "rates_from_live_catalog": res.cost.rates_from_live_catalog,
+        "includes_modelled_infrastructure": res.cost.includes_modelled_infrastructure,
+        # Accuracy values are null (not zero) whenever ground truth was unavailable.
+        "ground_truth_available": res.accuracy.ground_truth_available,
         "accuracy_status": res.accuracy.accuracy_status,
+        "gt_version": res.accuracy.gt_version,
+        "iou_threshold": res.accuracy.iou_threshold,
+        "pairing_strategy": res.accuracy.pairing_strategy,
+        "brand_matcher": res.accuracy.brand_matcher,
+        "product_matcher": res.accuracy.product_matcher,
+        "matched_pairs": res.accuracy.matched_pairs,
+        "true_positives": res.accuracy.true_positives,
+        "false_positives": res.accuracy.false_positives,
+        "false_negatives": res.accuracy.false_negatives,
+        "count_accuracy": res.accuracy.count_accuracy,
+        "mean_iou_matched": res.accuracy.mean_iou_matched,
+        "detection_precision": res.accuracy.detection_precision,
+        "detection_recall": res.accuracy.detection_recall,
+        "detection_f1": res.accuracy.detection_f1,
+        "brand_classification_accuracy": res.accuracy.brand_classification_accuracy,
+        "brand_set_recall": res.accuracy.brand_set_recall,
+        "product_classification_accuracy": res.accuracy.product_classification_accuracy,
+        "sku_matching_accuracy": res.accuracy.sku_matching_accuracy,
+        "planogram_compliance_rate": res.accuracy.planogram_compliance_rate,
     }
 
     return {
@@ -588,10 +627,12 @@ class BenchmarkUIRequestHandler(BaseHTTPRequestHandler):
 
         if route == "/api/run-live":
             try:
-                task_type = body.get("task_type", "detection")
-                model_name = body.get("model_name", "gemini-3.5-flash-lite")
-                separation_approach = body.get(
-                    "separation_approach", "single_pass_full_shelf"
+                task_type = body.get("task_type") or body.get("task") or "detection"
+                model_name = body.get("model_name") or body.get("model") or "gemini-3.8-flash"
+                separation_approach = (
+                    body.get("separation_approach")
+                    or body.get("approach")
+                    or "single_pass_full_shelf"
                 )
                 result = execute_live_benchmark_task(
                     task_type=task_type,

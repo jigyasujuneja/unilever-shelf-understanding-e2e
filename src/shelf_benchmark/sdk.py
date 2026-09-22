@@ -16,25 +16,23 @@ and generates row-level CSV/JSON and Markdown summary reports.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
 
 from shelf_benchmark.approaches import (
+    GLOBAL_APPROACH_REGISTRY,
     BaseShelfApproachPlugin,
     CommonLayerContext,
-    GLOBAL_APPROACH_REGISTRY,
 )
+from shelf_benchmark.approaches.registry import BUILTIN_VLM_CLASSIFICATION_APPROACHES
 from shelf_benchmark.config import BenchmarkConfig, ModelPricing, TaxonomyConfig
 from shelf_benchmark.data.storage import StorageManager
-from shelf_benchmark.evaluation.cost import compute_cost_metrics
 from shelf_benchmark.models import (
-    AccuracyMetrics,
-    CostMetrics,
     ImageGroundTruth,
     RowLevelReportItem,
     ShelfAssociationRecord,
@@ -52,6 +50,7 @@ from shelf_benchmark.tasks.fine_tuning import GeminiFineTuningTask
 from shelf_benchmark.tasks.matching import ProductMatchingTask
 from shelf_benchmark.telemetry import OpenTelemetryBenchmarkLogger
 
+logger = logging.getLogger(__name__)
 
 ModelProviderFamily = Literal[
     "vertex_gemini",
@@ -240,6 +239,7 @@ def register_approach_function(
                 model_name: str,
                 record: ShelfAssociationRecord,
                 gt_record: Optional[ImageGroundTruth] = None,
+                prior_detection: Optional[TaskExecutionResult] = None,
             ) -> TaskExecutionResult:
                 run_id = f"custom-{approach_id}-{model_name}"
                 start_dt = ctx.telemetry.now_utc()
@@ -258,28 +258,11 @@ def register_approach_function(
                     output_tokens=total_out,
                     total_tokens=total_in + total_think + total_out,
                 )
-                cost = ctx.compute_cost(tokens, model_name, max(len(raw_outputs), 1))
+                cost = ctx.compute_cost(tokens, model_name, max(len(raw_outputs), 1), approach_id=approach_id)
                 per_facing_cost = round(
                     cost.cost_per_shelf_image_usd / max(len(raw_outputs), 1), 8
                 )
-                accuracy = AccuracyMetrics(
-                    ground_truth_available=False,
-                    accuracy_status="PLACEHOLDER_AWAITING_GROUND_TRUTH",
-                    predicted_count=len(raw_outputs),
-                    depth_duplicates_filtered=int(raw_outputs[0].get("_depth_filtered", 0)) if raw_outputs else 0,
-                )
-                trace_id, span_id, _ = ctx.telemetry.log_task_execution(
-                    run_id=run_id,
-                    task_type="classification",
-                    model_name=model_name,
-                    shelf_image_uri=record.shelf_image_uri,
-                    start_dt=start_dt,
-                    end_dt=end_dt,
-                    tokens=tokens,
-                    cost=cost,
-                    accuracy=accuracy,
-                    extra_attributes={"shelf_benchmark.separation_approach": approach_id},
-                )
+                depth_filtered = int(raw_outputs[0].get("_depth_filtered", 0)) if raw_outputs else 0
 
                 row_items: List[RowLevelReportItem] = []
                 for idx, item in enumerate(raw_outputs, start=1):
@@ -301,8 +284,8 @@ def register_approach_function(
                     row_items.append(
                         RowLevelReportItem(
                             run_id=run_id,
-                            trace_id=trace_id,
-                            span_id=span_id,
+                            trace_id="",
+                            span_id="",
                             start_time=ctx.telemetry.format_iso(start_dt),
                             end_time=ctx.telemetry.format_iso(end_dt),
                             image_latency_ms=latency_ms,
@@ -340,6 +323,28 @@ def register_approach_function(
                         )
                     )
 
+                accuracy = ctx.evaluate_accuracy(
+                    task_type="classification",
+                    rows=row_items,
+                    gt_record=gt_record,
+                    depth_duplicates_filtered=depth_filtered,
+                )
+                trace_id, span_id, _ = ctx.telemetry.log_task_execution(
+                    run_id=run_id,
+                    task_type="classification",
+                    model_name=model_name,
+                    shelf_image_uri=record.shelf_image_uri,
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    tokens=tokens,
+                    cost=cost,
+                    accuracy=accuracy,
+                    extra_attributes={"shelf_benchmark.separation_approach": approach_id},
+                )
+                for r in row_items:
+                    r.trace_id = trace_id
+                    r.span_id = span_id
+
                 return TaskExecutionResult(
                     run_id=run_id,
                     trace_id=trace_id,
@@ -373,9 +378,34 @@ class ShelfBenchmarkSDK:
         taxonomy_path: Optional[str | Path] = None,
         output_dir: Optional[str | Path] = None,
     ):
-        self.config = BenchmarkConfig.from_yaml(config_path)
+        config = BenchmarkConfig.from_yaml(config_path)
         if taxonomy_path is not None:
-            self.config.taxonomy = TaxonomyConfig.from_yaml_or_defaults(taxonomy_path)
+            config.taxonomy = TaxonomyConfig.from_yaml_or_defaults(taxonomy_path)
+        self._init_from_config(config, output_dir=output_dir)
+
+    @classmethod
+    def from_config(
+        cls,
+        config: BenchmarkConfig,
+        output_dir: Optional[str | Path] = None,
+    ) -> "ShelfBenchmarkSDK":
+        """Build an SDK around an already-constructed config.
+
+        Use this when the config is assembled in code rather than read from YAML, notably
+        `shelf_benchmark.testing.offline_config()` for laptop runs with no GCP access.
+        """
+        sdk = cls.__new__(cls)
+        sdk._init_from_config(config, output_dir=output_dir)
+        return sdk
+
+    def _init_from_config(
+        self,
+        config: BenchmarkConfig,
+        output_dir: Optional[str | Path] = None,
+    ) -> None:
+        from shelf_benchmark.data.ground_truth import create_ground_truth_provider
+
+        self.config = config
         if output_dir is not None:
             self.config.reporting.output_dir = str(output_dir)
             self.config.telemetry.otel_log_path = str(Path(output_dir) / "otel_logs.jsonl")
@@ -383,15 +413,26 @@ class ShelfBenchmarkSDK:
         self.storage = StorageManager(
             project_id=self.config.gcp.project_id,
             bucket_config=self.config.buckets,
+            offline=self.config.offline.enabled,
         )
         self.telemetry = OpenTelemetryBenchmarkLogger(
             config=self.config.telemetry,
             project_id=self.config.gcp.project_id,
             location=self.config.gcp.location,
         )
-        self.report_generator = BenchmarkReportGenerator(
-            output_dir=self.config.reporting.output_dir
+        self.gt_provider = create_ground_truth_provider(
+            gt_config=self.config.ground_truth,
+            storage_manager=self.storage,
+            project_id=self.config.gcp.project_id,
         )
+        logger.info("Ground truth: %s", self.gt_provider.describe())
+        # `from_config` so reporting settings (isolate_runs, GCS sync, predictions file) are all
+        # honoured. Passing only output_dir previously dropped the rest on the floor.
+        self.report_generator = BenchmarkReportGenerator.from_config(self.config)
+        # Built-in approaches must be discovered before any user code registers its own, otherwise
+        # a custom registration at import time can hide them.
+        GLOBAL_APPROACH_REGISTRY.ensure_discovered()
+
         self._model_specs: Dict[str, UniversalModelSpec] = {}
         for alias, ep_cfg in self.config.model_endpoints.items():
             self._model_specs[alias] = UniversalModelSpec(
@@ -402,6 +443,76 @@ class ShelfBenchmarkSDK:
                 api_version=ep_cfg.api_version,
                 location=ep_cfg.location,
             )
+
+    def connect_ground_truth(
+        self,
+        provider_type: Literal["json", "jsonl", "csv", "coco", "bigquery", "none"] = "json",
+        source_uri: Optional[str] = None,
+        schema_mapping: Optional[Dict[str, str]] = None,
+        bbox_format: Optional[str] = None,
+        gt_version: Optional[str] = None,
+        strict: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Plug in ground truth at runtime and report what was actually loaded.
+
+        This is the seam the whole suite is built around: until annotations exist, runs produce
+        predictions with `accuracy_status="NO_GROUND_TRUTH"`; the moment a file lands, point this
+        at it and every metric populates with no other code change.
+
+        Args:
+            provider_type: Backing store. `coco` reads a standard COCO detection JSON.
+            source_uri: Local path or GCS URI of the annotations.
+            schema_mapping: Overrides for field names, mapping `GroundTruthSchemaMapping`
+                attribute names onto the names your annotator used, e.g.
+                `{"brand_field": "manufacturer", "bbox_field": "box"}`.
+            bbox_format: One of `ymin_xmin_ymax_xmax_1000` (suite-native), `coco_xywh_px`,
+                `xyxy_px`, `xyxy_norm`, `yxyx_norm`. Declare this: guessing it wrong is the single
+                most common cause of detection metrics that look plausible but are meaningless.
+            gt_version: Label stamped on every report row and OTel span, so results computed
+                against different annotation revisions are never silently compared.
+            strict: Raise if the source cannot be read or yields zero images.
+
+        Returns:
+            A dict of load statistics (images loaded, items loaded, and a human-readable summary).
+
+        Raises:
+            GroundTruthError: If the source is unreadable, empty, or malformed while `strict`.
+        """
+        from shelf_benchmark.data.ground_truth import create_ground_truth_provider
+
+        self.config.ground_truth.provider_type = provider_type
+        self.config.ground_truth.source_uri = source_uri
+        if bbox_format is not None:
+            self.config.ground_truth.schema_mapping.bbox_format = bbox_format
+        if gt_version is not None:
+            self.config.ground_truth.gt_version = gt_version
+        if strict is not None:
+            self.config.ground_truth.strict = strict
+        if schema_mapping:
+            unknown = [
+                k for k in schema_mapping
+                if not hasattr(self.config.ground_truth.schema_mapping, k)
+            ]
+            if unknown:
+                valid = sorted(type(self.config.ground_truth.schema_mapping).model_fields)
+                raise ValueError(
+                    f"Unknown ground-truth schema_mapping key(s): {unknown}. "
+                    f"A typo here used to be ignored, leaving the default field name in place and "
+                    f"producing empty ground truth. Valid keys: {valid}"
+                )
+            for k, v in schema_mapping.items():
+                setattr(self.config.ground_truth.schema_mapping, k, v)
+
+        self.gt_provider = create_ground_truth_provider(
+            gt_config=self.config.ground_truth,
+            storage_manager=self.storage,
+            project_id=self.config.gcp.project_id,
+        )
+        stats = dict(getattr(self.gt_provider, "load_stats", {}) or {})
+        stats["summary"] = self.gt_provider.describe()
+        stats["gt_version"] = self.config.ground_truth.gt_version
+        logger.info("Ground truth connected: %s", stats["summary"])
+        return stats
 
     def register_model(self, spec: UniversalModelSpec) -> None:
         """Register a GEAP model, Gemma model, Fine-Tuned endpoint, or custom model with optional pricing."""
@@ -513,8 +624,10 @@ class ShelfBenchmarkSDK:
         tasks: Optional[Sequence[str]] = None,
         approaches: Optional[Sequence[str]] = None,
         shelf_image_uri: str = "gs://unilever-shelf-understanding-shelf-images/shelf-image.png",
+        ground_truth: Optional[ImageGroundTruth] = None,
+        ground_truth_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run the benchmark suite across the requested models, tasks, and approaches with full OpenTelemetry logging."""
+        """Run the benchmark suite across the requested models, tasks, and approaches with full OpenTelemetry logging and Ground Truth evaluation."""
         selected_models = list(models) if models is not None else list(self.config.models)
         selected_tasks = list(tasks) if tasks is not None else list(self.config.tasks)
         selected_approaches = list(approaches) if approaches is not None else list(self.config.approaches)
@@ -522,6 +635,11 @@ class ShelfBenchmarkSDK:
             association_id="sdk-run-001",
             shelf_image_uri=shelf_image_uri,
             store_id="store-sdk",
+            ground_truth_id=ground_truth_id or Path(shelf_image_uri).name,
+        )
+        gt_record = ground_truth or self.gt_provider.get_ground_truth(
+            shelf_image_uri=shelf_image_uri,
+            ground_truth_id=record.ground_truth_id,
         )
 
         results: List[TaskExecutionResult] = []
@@ -539,19 +657,27 @@ class ShelfBenchmarkSDK:
                 det_task = ProductDetectionTask(
                     self.config, self.storage, self.telemetry, genai_client=custom_client
                 )
-                results.append(det_task.execute(model_name=model_name, shelf_image_uri=shelf_image_uri))
+                results.append(
+                    det_task.execute(
+                        model_name=model_name,
+                        shelf_image_uri=shelf_image_uri,
+                        ground_truth=gt_record,
+                    )
+                )
 
             if "classification" in selected_tasks:
-                builtin_vlm_approaches = {
-                    "single_pass_full_shelf",
-                    "two_stage_bbox_guided_nms",
-                    "two_stage_physical_crop_per_facing",
-                }
                 for app_id in selected_approaches:
-                    plugin = GLOBAL_APPROACH_REGISTRY.get(app_id)
-                    if plugin is not None and (custom_client is None or app_id not in builtin_vlm_approaches):
-                        results.append(plugin.execute(ctx=ctx, model_name=model_name, record=record))
-                    else:
+                    # `require` raises with the list of valid ids rather than silently running a
+                    # different pipeline under the requested label.
+                    plugin = (
+                        None
+                        if app_id in BUILTIN_VLM_CLASSIFICATION_APPROACHES
+                        else GLOBAL_APPROACH_REGISTRY.require(app_id)
+                    )
+                    use_builtin_task = plugin is None or (
+                        custom_client is not None and app_id in BUILTIN_VLM_CLASSIFICATION_APPROACHES
+                    )
+                    if use_builtin_task:
                         cls_task = ProductClassificationTask(
                             self.config, self.storage, self.telemetry, genai_client=custom_client
                         )
@@ -560,6 +686,16 @@ class ShelfBenchmarkSDK:
                                 model_name=model_name,
                                 shelf_image_uri=shelf_image_uri,
                                 separation_approach=app_id,
+                                ground_truth=gt_record,
+                            )
+                        )
+                    else:
+                        results.append(
+                            plugin.execute(
+                                ctx=ctx,
+                                model_name=model_name,
+                                record=record,
+                                gt_record=gt_record,
                             )
                         )
 
@@ -567,17 +703,30 @@ class ShelfBenchmarkSDK:
                 mat_task = ProductMatchingTask(
                     self.config, self.storage, self.telemetry, genai_client=custom_client
                 )
-                results.append(mat_task.execute(model_name=model_name, shelf_image_uri=shelf_image_uri))
+                results.append(
+                    mat_task.execute(
+                        model_name=model_name,
+                        shelf_image_uri=shelf_image_uri,
+                        ground_truth=gt_record,
+                    )
+                )
 
             if "fine_tuning" in selected_tasks:
                 ft_task = GeminiFineTuningTask(
                     self.config, self.storage, self.telemetry, genai_client=custom_client
                 )
-                results.append(ft_task.execute(model_name=model_name, shelf_image_uri=shelf_image_uri))
+                results.append(
+                    ft_task.execute(
+                        model_name=model_name,
+                        shelf_image_uri=shelf_image_uri,
+                        ground_truth=gt_record,
+                    )
+                )
 
         artifact_paths = self.report_generator.generate_all_reports(results)
         return {
             "results": results,
             "artifacts": artifact_paths,
+            "reports": artifact_paths,
             "otel_log_path": self.config.telemetry.otel_log_path,
         }

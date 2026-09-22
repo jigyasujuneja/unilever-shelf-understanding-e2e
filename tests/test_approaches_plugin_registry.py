@@ -1,10 +1,14 @@
 """Tests for the Pluggable Approach Registry (`src/shelf_benchmark/approaches/`)."""
 
+import pytest
+
 from shelf_benchmark.approaches import (
-    BaseShelfApproachPlugin,
-    CommonLayerContext,
     GLOBAL_APPROACH_REGISTRY,
+    BaseShelfApproachPlugin,
 )
+
+# Everything in this module runs without network or GCP credentials.
+pytestmark = pytest.mark.offline
 
 
 def test_approach_registry_auto_discovers_all_plugins() -> None:
@@ -70,6 +74,7 @@ def test_centralized_taxonomy_config_and_prompts() -> None:
 def test_developer_sdk_universal_model_and_custom_approach_decorator(tmp_path) -> None:
     """Verify ShelfBenchmarkSDK supports custom Gemma/GEAP models and @register_approach_function with full OTel logging."""
     from pathlib import Path
+
     from shelf_benchmark import (
         ModelPricing,
         ShelfBenchmarkSDK,
@@ -141,6 +146,40 @@ def test_developer_sdk_universal_model_and_custom_approach_decorator(tmp_path) -
     assert Path(summary["otel_log_path"]).exists()
     assert Path(summary["artifacts"]["markdown_report"]).exists()
 
+    # Verify plugging in Ground Truth at runtime scores the custom approach automatically
+    import json
 
-
-
+    gt_file = tmp_path / "sample_gt.json"
+    gt_file.write_text(
+        json.dumps(
+            {
+                "shelf-image.png": {
+                    "image_id": "shelf-image.png",
+                    "total_main_shelf_facings": 1,
+                    "expected_brands": ["Pond's"],
+                    "items": [
+                        {
+                            "item_id": 1,
+                            "brand": "Pond's",
+                            "product_name": "Pond's Bright Beauty Face Wash",
+                            "sku_id": "HUL-PONDS-50G",
+                            "bbox_2d": [535, 386, 795, 440],
+                            "shelf_row": "middle",
+                        }
+                    ],
+                }
+            }
+        )
+    )
+    sdk.connect_ground_truth(provider_type="json", source_uri=str(gt_file))
+    gt_summary = sdk.run_suite(
+        models=["gemma-3-27b-it-test"],
+        tasks=["classification"],
+        approaches=["unit_test_custom_approach"],
+    )
+    gt_res = gt_summary["results"][0]
+    assert gt_res.accuracy.ground_truth_available is True
+    assert gt_res.accuracy.count_accuracy == 1.0
+    assert gt_res.accuracy.mean_iou == 1.0
+    assert gt_res.accuracy.brand_classification_accuracy == 1.0
+    assert gt_res.row_level_items[0].brand_correct is True

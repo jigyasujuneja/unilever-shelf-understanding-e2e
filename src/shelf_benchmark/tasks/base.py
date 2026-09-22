@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
 import uuid
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from google import genai
 
 from shelf_benchmark.auth import create_genai_client
 from shelf_benchmark.config import BenchmarkConfig
 from shelf_benchmark.data.storage import StorageManager
-from shelf_benchmark.evaluation.cost import compute_cost_metrics, extract_token_usage
+from shelf_benchmark.evaluation.cost import compute_cost_metrics
 from shelf_benchmark.evaluation.metrics import evaluate_task_accuracy
 from shelf_benchmark.models import (
     ImageGroundTruth,
@@ -21,6 +22,28 @@ from shelf_benchmark.models import (
     TokenUsageMetrics,
 )
 from shelf_benchmark.telemetry import OpenTelemetryBenchmarkLogger
+
+logger = logging.getLogger(__name__)
+
+_WARNED_UNPRICED_MODELS: Set[str] = set()
+
+
+def _warn_unpriced_model(model_name: str) -> None:
+    """Warn once per process that a model is being costed off the generic 'default' rate card.
+
+    Without this, an unrecognized model name produces plausible-looking dollar figures that are
+    really just the default Gemini Flash rates, which silently corrupts cost comparisons.
+    """
+    if model_name in _WARNED_UNPRICED_MODELS:
+        return
+    _WARNED_UNPRICED_MODELS.add(model_name)
+    logger.warning(
+        "No explicit token pricing for model '%s'; falling back to the 'default' rate card. "
+        "Cost figures for this model are estimates. Add an entry under "
+        "'pricing_per_million_tokens' in your config to fix this.",
+        model_name,
+    )
+
 
 
 class BaseBenchmarkTask(ABC):
@@ -103,9 +126,20 @@ class BaseBenchmarkTask(ABC):
                 break
             except Exception as exc:
                 status = "ERROR"
-                error_message = str(exc)
+                error_message = f"{type(exc).__name__}: {exc}"
                 if attempt < max_attempts:
+                    logger.warning(
+                        "Attempt %d/%d failed for task=%s model=%s image=%s: %s. Retrying.",
+                        attempt, max_attempts, self.task_type, model_name, shelf_image_uri, error_message,
+                    )
                     time.sleep(2.0 * attempt)
+                else:
+                    logger.error(
+                        "All %d attempts failed for task=%s model=%s image=%s. "
+                        "Emitting an ERROR row; this image contributes no metrics.",
+                        max_attempts, self.task_type, model_name, shelf_image_uri,
+                        exc_info=exc,
+                    )
 
         end_dt = self.telemetry.now_utc()
         end_iso = self.telemetry.format_iso(end_dt)
@@ -115,6 +149,8 @@ class BaseBenchmarkTask(ABC):
             separation_approach = rows[0].separation_approach
 
         pricing = self.config.get_pricing(model_name)
+        if self.config.warn_on_unpriced_model and not self.config.has_explicit_pricing(model_name):
+            _warn_unpriced_model(model_name)
         billing_engine = self._get_billing_engine()
         gcp_labels = billing_engine.build_gcp_billing_labels(
             run_id=active_run_id,
@@ -122,11 +158,19 @@ class BaseBenchmarkTask(ABC):
             task_type=self.task_type,
             model_name=model_name,
         )
+        eff_facings = max(1, len(rows))
+        per_facing_embed_usd = self.config.billing.embeddings_and_vision.per_facing_usd(
+            task_type=self.task_type,
+            approach_id=separation_approach,
+        )
+        extra_embed_vision_usd = round(eff_facings * per_facing_embed_usd, 8)
+
         cost = compute_cost_metrics(
             tokens=tokens,
             pricing=pricing,
             product_count=len(rows),
             latency_ms=latency_ms,
+            extra_embedding_or_vision_cost_usd=extra_embed_vision_usd,
             billing_cfg=self.config.billing,
             project_id=self.config.gcp.project_id,
             model_name=model_name,
@@ -161,8 +205,13 @@ class BaseBenchmarkTask(ABC):
             task_type=self.task_type,
             rows=rows,
             ground_truth=ground_truth,
+            config=self.config.evaluation,
         )
         accuracy.depth_duplicates_filtered = int(raw_output.get("depth_duplicates_filtered", 0) or 0)
+
+        for r in rows:
+            r.gt_version = accuracy.gt_version
+            r.iou_threshold = accuracy.iou_threshold
 
         trace_id, span_id, _ = self.telemetry.log_task_execution(
             run_id=active_run_id,

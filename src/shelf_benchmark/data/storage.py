@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
@@ -12,20 +13,42 @@ from google.genai import types
 from shelf_benchmark.auth import create_storage_client
 from shelf_benchmark.config import BucketConfig
 
+logger = logging.getLogger(__name__)
+
+
+class OfflineAccessError(RuntimeError):
+    """Raised when offline mode is active and code attempts to reach Google Cloud Storage."""
+
 
 class StorageManager:
-    """Manages GCS buckets and transparent loading of GCS URIs (`gs://...`) or local files."""
+    """Manages GCS buckets and transparent loading of GCS URIs or local files."""
 
-    def __init__(self, project_id: str, bucket_config: BucketConfig):
+    def __init__(
+        self,
+        project_id: str,
+        bucket_config: BucketConfig,
+        offline: bool = False,
+    ):
         self.project_id = project_id
         self.bucket_config = bucket_config
+        self.offline = offline
         self._client = None
+
+    def _assert_network_allowed(self, operation: str) -> None:
+        """Raise a clear error when offline mode forbids a Cloud Storage round trip."""
+        if self.offline:
+            raise OfflineAccessError(
+                f"Offline mode is enabled but '{operation}' requires Google Cloud Storage. "
+                f"Use a local path, or disable offline mode."
+            )
 
     @property
     def client(self):
         if self._client is None:
+            self._assert_network_allowed("create a Cloud Storage client")
             self._client = create_storage_client(self.project_id)
         return self._client
+
 
     @staticmethod
     def parse_gcs_uri(uri: str) -> Tuple[str, str]:
@@ -72,27 +95,46 @@ class StorageManager:
         return destination_gcs_uri
 
     def read_text(self, uri_or_path: str) -> str:
-        """Read text content from either a `gs://` URI or a local path."""
+        """Read text from a `gs://` URI or a local path.
+
+        Raises the underlying error (FileNotFoundError, google.api_core exceptions, ...) rather
+        than returning a sentinel: callers such as the ground-truth providers must be able to tell
+        "not configured" apart from "configured but unreadable".
+        """
         if uri_or_path.startswith("gs://"):
+            self._assert_network_allowed(f"read {uri_or_path}")
             bucket_name, blob_name = self.parse_gcs_uri(uri_or_path)
             bucket = self.client.bucket(bucket_name)
             blob = bucket.blob(blob_name)
             return blob.download_as_text(encoding="utf-8")
-        return Path(uri_or_path).read_text(encoding="utf-8")
+        path = Path(uri_or_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {uri_or_path}")
+        return path.read_text(encoding="utf-8")
 
-    def read_json(self, uri_or_path: Optional[str]) -> Optional[Any]:
-        """Read JSON from either a `gs://` URI or local path; falls back to local `configs/` if GCS object missing."""
+    def read_json(self, uri_or_path: Optional[str], default: Any = None) -> Optional[Any]:
+        """Read JSON from a `gs://` URI or a local path.
+
+        Returns `default` only when `uri_or_path` is empty. A configured-but-broken source raises,
+        so a typo cannot masquerade as "nothing configured".
+        """
+        if not uri_or_path:
+            return default
+        return json.loads(self.read_text(uri_or_path))
+
+    def try_read_json(self, uri_or_path: Optional[str]) -> Optional[Any]:
+        """Best-effort JSON read for genuinely optional artifacts (e.g. an absent catalog).
+
+        Logs the reason on failure so the absence is visible in the run output.
+        """
         if not uri_or_path:
             return None
         try:
-            return json.loads(self.read_text(uri_or_path))
-        except Exception:
-            if uri_or_path.startswith("gs://"):
-                _, blob_name = self.parse_gcs_uri(uri_or_path)
-                fallback = Path("configs") / Path(blob_name).name
-                if fallback.exists():
-                    return json.loads(fallback.read_text(encoding="utf-8"))
+            return self.read_json(uri_or_path)
+        except Exception as exc:  # noqa: BLE001 - optional artifact, reason is logged
+            logger.warning("Optional JSON source '%s' unavailable: %s", uri_or_path, exc)
             return None
+
 
     def list_gcs_images(self, bucket_uri: str, prefix: str = "") -> List[str]:
         """List image URIs in a GCS bucket."""

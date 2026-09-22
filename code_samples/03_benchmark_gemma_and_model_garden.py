@@ -1,14 +1,35 @@
-"""Sample 03: Benchmarking Gemma (Gemma 3 / Gemma 2 / PaliGemma) & Model Garden Endpoints.
+#!/usr/bin/env python3
+"""Sample 03: Benchmark Gemma / Model Garden / any self-hosted endpoint.
 
-Demonstrates two simple ways to benchmark open-weights Gemma models with full OpenTelemetry
-token logging, cost calculation, and 7-dimension taxonomy validation:
-  Option A: Vertex AI Model Garden / MaaS endpoint (`provider_family="vertex_gemma"`)
-  Option B: Any custom Gemma server (Cloud Run, vLLM, HuggingFace TGI, Ollama) via a simple Python function (`provider_family="custom_callable"`)
+Run it (no GCP project, no credentials, no network):
+
+    .venv/bin/python code_samples/03_benchmark_gemma_and_model_garden.py
+
+Two ways to plug a non-Gemini model into the suite:
+
+  Option A  A Vertex AI Model Garden / MaaS endpoint, via `provider_family="vertex_gemma"`
+            and an `endpoint_uri`. Needs a deployed endpoint, so it is only registered here,
+            not called.
+  Option B  Any HTTP endpoint you control (Cloud Run, vLLM, TGI, Ollama) wrapped in a Python
+            function, via `provider_family="custom_callable"`. This one runs for real below,
+            offline, against the bundled fixture image.
+
+The adapter contract for Option B is:
+
+    handler(prompt: str, image_uri: str, response_schema: Any | None) -> dict
+
+Return a dict matching the task schema. Optionally include `_token_usage` so the suite can log
+and cost real token counts from your server instead of guessing.
 """
 
+from __future__ import annotations
+
+from pathlib import Path
+import tempfile
 from typing import Any, Dict, Optional
 
-from shelf_benchmark import ModelPricing, ShelfBenchmarkSDK, UniversalModelSpec
+from shelf_benchmark import ModelPricing, UniversalModelSpec
+from shelf_benchmark.testing import OFFLINE_IMAGE_URI, make_offline_sdk
 
 
 def custom_gemma_vllm_adapter(
@@ -16,10 +37,19 @@ def custom_gemma_vllm_adapter(
     image_uri: str,
     response_schema: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """Example adapter for a Gemma 3 / PaliGemma model hosted on vLLM, Cloud Run, or Vertex AI Custom Prediction.
+    """Stand-in for a Gemma 3 / PaliGemma server.
 
-    Replace the HTTP call inside this function with your `requests.post("https://your-gemma-endpoint/v1/chat/completions", ...)`
-    call. Return a dict matching the requested task schema plus optional `_token_usage`.
+    Replace the body with your own call, for example:
+
+        resp = requests.post(
+            "https://your-gemma-endpoint/v1/chat/completions",
+            json={"model": "gemma-3-27b-it", "messages": messages},
+            timeout=120,
+        ).json()
+        return json.loads(resp["choices"][0]["message"]["content"])
+
+    `prompt` is the fully rendered task prompt (taxonomy included) and `image_uri` is the shelf
+    image the suite wants classified.
     """
     return {
         "total_classified_products": 2,
@@ -58,7 +88,7 @@ def custom_gemma_vllm_adapter(
                 "confidence": 0.95,
             },
         ],
-        # Optional: pass exact token counts from your vLLM / Gemma endpoint response for OTel logging
+        # Optional. Exact counts from your server, used for OTel logging and cost.
         "_token_usage": {
             "input_tokens": 640,
             "thinking_tokens": 0,
@@ -68,18 +98,23 @@ def custom_gemma_vllm_adapter(
 
 
 def main() -> None:
-    sdk = ShelfBenchmarkSDK(output_dir="reports/sample_03_gemma")
+    work = Path(tempfile.mkdtemp(prefix="shelf-gemma-"))
+    sdk = make_offline_sdk(work)
 
-    # Option A: Vertex AI Model Garden Endpoint (uncomment and set your deployed endpoint_uri when live)
+    # Option A: Vertex AI Model Garden endpoint. Registered only; calling it needs a live endpoint.
     gemma_vertex_endpoint_spec = UniversalModelSpec(
         model_id="gemma-3-27b-it",
         display_name="gemma-3-27b-it-vertex-endpoint",
         provider_family="vertex_gemma",
-        endpoint_uri="projects/unilever-shelf-understanding/locations/us-central1/endpoints/YOUR_GEMMA_ENDPOINT_ID",
+        endpoint_uri=(
+            "projects/unilever-shelf-understanding/locations/us-central1/"
+            "endpoints/YOUR_GEMMA_ENDPOINT_ID"
+        ),
         pricing=ModelPricing(input=0.08, thinking=0.0, output=0.24),
     )
+    sdk.register_model(gemma_vertex_endpoint_spec)
 
-    # Option B: Custom Gemma Callable (runs out-of-the-box for testing adapter integration + OTel logging)
+    # Option B: your own server behind a Python function. Runs offline, right now.
     gemma_custom_spec = UniversalModelSpec(
         model_id="gemma-3-27b-it-vllm",
         display_name="gemma-3-27b-it-vllm",
@@ -88,20 +123,31 @@ def main() -> None:
         pricing=ModelPricing(input=0.08, thinking=0.0, output=0.24),
     )
     sdk.register_model(gemma_custom_spec)
+    print(f"Registered models: {sdk.config.models}")
 
     summary = sdk.run_suite(
         models=["gemma-3-27b-it-vllm"],
         tasks=["classification"],
         approaches=["single_pass_full_shelf"],
-        shelf_image_uri="gs://unilever-shelf-understanding-shelf-images/shelf-image.png",
+        shelf_image_uri=OFFLINE_IMAGE_URI,
     )
 
     for res in summary["results"]:
         print(
-            f"[Gemma Benchmark] Model={res.model_name} | Facings={len(res.row_level_items)} | "
-            f"Tokens={res.tokens.total_tokens} | Cost/Image=${res.cost.cost_per_shelf_image_usd:.6f} | "
-            f"OTel Log={summary['otel_log_path']}"
+            f"[Gemma benchmark] model={res.model_name} "
+            f"facings={len(res.row_level_items)} "
+            f"tokens={res.tokens.total_tokens} "
+            f"(in={res.tokens.input_tokens} out={res.tokens.output_tokens}) "
+            f"cost/image=${res.cost.cost_per_shelf_image_usd:.6f} "
+            f"billing_source={res.cost.billing_source}"
         )
+        print(f"  accuracy_status={res.accuracy.accuracy_status} (no annotations connected)")
+    print(f"OTel log: {summary['otel_log_path']}")
+    print(
+        "\nTo run this against the real endpoint, build the SDK with\n"
+        "  ShelfBenchmarkSDK(config_path='configs/default_config.yaml')\n"
+        "and pass a gs:// shelf image instead of the bundled fixture."
+    )
 
 
 if __name__ == "__main__":

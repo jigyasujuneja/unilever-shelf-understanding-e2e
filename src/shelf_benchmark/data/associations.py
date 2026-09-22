@@ -11,11 +11,11 @@ are not known in advance, this module provides a swappable adapter pattern
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import csv
 import io
 import json
-from typing import Any, Callable, Dict, List, Optional
+from abc import ABC, abstractmethod
+from typing import Any, Callable, Dict, List
 
 from shelf_benchmark.auth import create_bigquery_client
 from shelf_benchmark.config import AssociationConfig, AssociationSchemaMapping, BucketConfig

@@ -26,7 +26,6 @@ from shelf_benchmark.tasks.facing_utils import (
     derive_size_bucket_from_bbox,
 )
 
-
 DETECTION_PROMPT = """You are an expert retail computer vision system for shelf facing detection.
 Analyze this shelf image and detect every distinct FRONT-FACING product slot on the main middle shelf (ordered strictly from left to right).
 

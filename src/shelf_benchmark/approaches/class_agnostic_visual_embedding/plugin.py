@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import io
 import time
-from typing import Any, Dict, List, Optional
 import uuid
+from datetime import datetime, timezone
+from typing import List, Optional
 
 from shelf_benchmark.approaches.base import BaseShelfApproachPlugin, CommonLayerContext
 from shelf_benchmark.approaches.class_agnostic_visual_embedding.stage1_class_agnostic_detector import (
@@ -24,7 +24,6 @@ from shelf_benchmark.models import (
     ShelfAssociationRecord,
     TaskExecutionResult,
 )
-from shelf_benchmark.tasks import facing_utils
 
 
 class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
@@ -78,11 +77,7 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
         start_iso = start_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         t0 = time.perf_counter()
 
-        pil_img = facing_utils.load_pil_image(
-            ctx.storage,
-            record.shelf_image_uri,
-            local_fallback=record.local_shelf_image_path or "shelf-image.png",
-        )
+        pil_img = ctx.load_shelf_image(record)
         buf = io.BytesIO()
         pil_img.save(buf, format="PNG")
         image_bytes = buf.getvalue()
@@ -144,7 +139,8 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
             bbox = item.get("bbox_2d", [0, 0, 0, 0])
             peer_idx = item.get("nearest_shelf_facing_idx")
             peer_sim = item.get("nearest_shelf_facing_visual_sim", 0.0)
-            proto_sim = item.get("contrastive_prototype_sim_1408d", 0.0)
+            match_sim = item.get("catalog_match_similarity_1408d", 0.0)
+            catalog_status = item.get("catalog_status", "NO_CATALOG_INDEXED")
             row_items.append(
                 RowLevelReportItem(
                     run_id=run_id,
@@ -166,21 +162,30 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
                     bbox_ymax=int(bbox[2]),
                     bbox_xmax=int(bbox[3]),
                     crop_image_path=item.get("crop_image_path"),
-                    predicted_category=item.get("predicted_category", "Skin Cleansing"),
-                    predicted_subcategory=item.get("predicted_subcategory", "Face Wash"),
-                    predicted_brand=item.get("predicted_brand", "Pond's"),
-                    is_hul_brand=bool(item.get("is_hul_brand", True)),
+                    predicted_category=item.get("predicted_category", ""),
+                    predicted_subcategory=item.get("predicted_subcategory", ""),
+                    predicted_brand=item.get("predicted_brand", "") or "",
+                    is_hul_brand=bool(item.get("is_hul_brand", False)),
                     predicted_variant=item.get("predicted_variant", ""),
-                    predicted_packaging=item.get("predicted_packaging", "tube"),
-                    predicted_pack_type=item.get("predicted_pack_type", "Single"),
+                    predicted_packaging=item.get("predicted_packaging", ""),
+                    predicted_pack_type=item.get("predicted_pack_type", ""),
                     predicted_size=item.get("predicted_size", ""),
                     rule_derived_size_bucket=item.get("rule_derived_size_bucket", ""),
-                    predicted_product_name=f"[Class-Agnostic 'product' -> 1408-D ViT Crop Match] {item.get('predicted_brand')} {item.get('predicted_variant')}",
-                    confidence=float(item.get("confidence", 0.95)),
-                    lexical_search_keywords=f"class:product visual_peer_slot:#{peer_idx} (sim={peer_sim}) proto_sim={proto_sim}",
-                    dense_embedding_text=f"1408-D Vertex AI multimodalembedding@001 Image Crop Vector | Closest Visual Shelf Twin: Slot #{peer_idx} (Cosine={peer_sim}) | Prototype Cosine={proto_sim}",
+                    predicted_product_name=" ".join(
+                        p for p in (item.get("predicted_brand"), item.get("predicted_variant")) if p
+                    ),
+                    confidence=float(item.get("confidence", 0.0)),
+                    lexical_search_keywords=(
+                        f"class:product visual_peer_slot:#{peer_idx} (sim={peer_sim}) "
+                        f"catalog_status={catalog_status} catalog_sim={match_sim}"
+                    ),
+                    dense_embedding_text=(
+                        f"1408-D multimodalembedding@001 crop vector | "
+                        f"closest shelf twin: slot #{peer_idx} (cosine={peer_sim}) | "
+                        f"catalog match: {catalog_status} (cosine={match_sim})"
+                    ),
                     embedding_vector_dim=int(item.get("visual_embedding_dim", 1408)),
-                    matched_sku_id=None,
+                    matched_sku_id=item.get("matched_sku_id"),
                     planogram_compliant=None,
                     input_tokens=s1_tokens.input_tokens,
                     thinking_tokens=s1_tokens.thinking_tokens,
@@ -256,6 +261,10 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
                 "montage_path": montage_path,
                 "front_facings_detected": len(matched_facings),
                 "depth_duplicates_filtered": depth_filtered,
+                "catalog_status": (
+                    matched_facings[0].get("catalog_status") if matched_facings else "NO_FACINGS"
+                ),
+                "reference_catalog_uri": ctx.config.embeddings.reference_catalog.source_uri,
                 "facings_summary": [
                     {
                         "product_index": f["product_index"],
@@ -263,12 +272,10 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
                         "bbox_2d": f["bbox_2d"],
                         "visual_embedding_dim": f["visual_embedding_dim"],
                         "nearest_shelf_facing_idx": f["nearest_shelf_facing_idx"],
-                        "nearest_shelf_facing_visual_sim": f[
-                            "nearest_shelf_facing_visual_sim"
-                        ],
-                        "contrastive_prototype_sim_1408d": f[
-                            "contrastive_prototype_sim_1408d"
-                        ],
+                        "nearest_shelf_facing_visual_sim": f["nearest_shelf_facing_visual_sim"],
+                        "catalog_match_similarity_1408d": f["catalog_match_similarity_1408d"],
+                        "catalog_status": f["catalog_status"],
+                        "matched_sku_id": f.get("matched_sku_id"),
                         "predicted_brand": f["predicted_brand"],
                         "predicted_variant": f["predicted_variant"],
                     }

@@ -1,0 +1,79 @@
+{
+  "gt_version": "sample-v1",
+  "bbox_format": "ymin_xmin_ymax_xmax_1000",
+  "images": {
+    "gs://unilever-shelf-understanding-shelf-images/shelf_sample_01.png": {
+      "image_id": "shelf_sample_01",
+      "image_width": 600,
+      "image_height": 400,
+      "total_main_shelf_facings": 3,
+      "expected_brands": ["Dove", "Pond's", "Vaseline"],
+      "items": [
+        {
+          "item_id": 1,
+          "brand": "Dove",
+          "product_name": "Dove Deeply Nourishing Body Wash",
+          "sku_id": "UL-DV-BW-500",
+          "category": "Personal Care",
+          "subcategory": "Skin Cleansing",
+          "variant": "Deeply Nourishing",
+          "packaging_type": "Bottle",
+          "pack_type": "Single",
+          "size": "500ml",
+          "bbox_2d": [125, 83, 625, 250],
+          "shelf_row": 1,
+          "back_row": false,
+          "occluded": false
+        },
+        {
+          "item_id": 2,
+          "brand": "Pond's",
+          "product_name": "Pond's Bright Beauty Face Cream",
+          "sku_id": "UL-PD-FC-050",
+          "category": "Personal Care",
+          "subcategory": "Skin Care",
+          "variant": "Bright Beauty",
+          "packaging_type": "Jar",
+          "pack_type": "Single",
+          "size": "50g",
+          "bbox_2d": [125, 383, 625, 550],
+          "shelf_row": 1,
+          "back_row": false,
+          "occluded": false
+        },
+        {
+          "item_id": 3,
+          "brand": "Vaseline",
+          "product_name": "Vaseline Intensive Care Lotion",
+          "sku_id": "UL-VS-LO-400",
+          "category": "Personal Care",
+          "subcategory": "Skin Care",
+          "variant": "Intensive Care",
+          "packaging_type": "Bottle",
+          "pack_type": "Single",
+          "size": "400ml",
+          "bbox_2d": [125, 683, 625, 850],
+          "shelf_row": 1,
+          "back_row": false,
+          "occluded": false
+        },
+        {
+          "item_id": 4,
+          "brand": "Dove",
+          "product_name": "Dove Deeply Nourishing Body Wash",
+          "sku_id": "UL-DV-BW-500",
+          "category": "Personal Care",
+          "subcategory": "Skin Cleansing",
+          "variant": "Deeply Nourishing",
+          "packaging_type": "Bottle",
+          "pack_type": "Single",
+          "size": "500ml",
+          "bbox_2d": [120, 88, 620, 255],
+          "shelf_row": 1,
+          "back_row": true,
+          "occluded": true
+        }
+      ]
+    }
+  }
+}
