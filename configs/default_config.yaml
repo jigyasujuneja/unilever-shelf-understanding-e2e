@@ -1,3 +1,11 @@
+# =============================================================================
+# UNILEVER SHELF UNDERSTANDING — MASTER SYSTEM CONFIGURATION (YAML)
+# Every operational layer (GCP, Buckets, Models, GEAP/Gemma/Tuned Endpoints,
+# Tasks, 4 Separation Approaches, Embeddings, Depth NMS, SFT Fine-Tuning,
+# Taxonomy, Associations, Ground Truth, OpenTelemetry, and Reporting)
+# is 100% configurable from this file + configs/taxonomy.yaml.
+# =============================================================================
+
 gcp:
   project_id: "unilever-shelf-understanding"
   location: "global"
@@ -6,17 +14,115 @@ gcp:
 buckets:
   shelf_images_bucket: "gs://unilever-shelf-understanding-shelf-images"
   catalog_images_bucket: "gs://unilever-shelf-understanding-catalog-images"
-  planograms_bucket: null  # Optional: bucket name not known / may not exist
+  planograms_bucket: null  # Optional: set to gs://... when planograms bucket is available
   artifacts_bucket: "gs://unilever-shelf-understanding-shelf-images"
 
+# Active models to benchmark (supports standard Gemini, GEAP preview models, Gemma, or Tuned Endpoint URIs)
 models:
   - "gemini-3.8-flash"
   - "gemini-3.7-flash"
   - "gemini-3.5-flash-lite"
 
-# Centralized product taxonomy configuration (Categories, Subcategories, HUL & Non-HUL Brands, Packaging, Pack Types, Size Buckets)
+# Optional per-model endpoint & provider routing (for GEAP v1beta1, Gemma Model Garden, or Fine-Tuned Endpoints)
+model_endpoints:
+  geap-gemini-preview-example:
+    provider_family: "vertex_geap"
+    model_id: "gemini-3.8-flash"
+    api_version: "v1beta1"
+    location: "global"
+  gemma-3-27b-it-example:
+    provider_family: "vertex_gemma"
+    model_id: "gemma-3-27b-it"
+    endpoint_uri: "projects/unilever-shelf-understanding/locations/us-central1/endpoints/YOUR_GEMMA_ENDPOINT_ID"
+  unilever-sft-tuned-example:
+    provider_family: "vertex_tuned_endpoint"
+    model_id: "unilever-shelf-classifier-tuned"
+    endpoint_uri: "projects/unilever-shelf-understanding/locations/us-central1/endpoints/YOUR_TUNED_ENDPOINT_ID"
+
+# Active benchmark tasks to run
+tasks:
+  - "detection"
+  - "classification"
+  - "matching"
+  - "fine_tuning"
+
+# Active bounding-box separation & classification approaches (All 4 Use-Case Paths)
+approaches:
+  - "single_pass_full_shelf"
+  - "two_stage_bbox_guided_nms"
+  - "two_stage_physical_crop_per_facing"
+  - "class_agnostic_visual_embedding"
+
+# Centralized product taxonomy configuration (Categories, Subcategories, Brands, Packaging, Pack Types, Size Rules)
 taxonomy_file: "configs/taxonomy.yaml"
 
+# Dense & Visual Embedding Models + Hybrid Search RRF Weights
+embeddings:
+  text_embedding_model: "gemini-embedding-001"
+  text_embedding_dimensions: 3072
+  visual_embedding_model: "multimodalembedding@001"
+  visual_embedding_dimensions: 1408
+  hybrid_dense_weight: 0.65
+  hybrid_sparse_weight: 0.35
+
+# Front-Facing Depth Deduplication Rules (suppresses back-row stacked products in the same horizontal column)
+depth_deduplication:
+  enabled: true
+  x_overlap_threshold: 0.55
+
+# Supervised Fine-Tuning (SFT) Dataset & Vertex AI Tuning Job Settings
+fine_tuning:
+  submit_live_tuning_job: false
+  tuned_model_display_name: "unilever-shelf-classifier-tuned"
+  epochs: 3
+  num_synthetic_replicas: 16
+  dataset_gcs_subpath: "tuning/shelf_sft_train.jsonl"
+
+# =============================================================================
+# GCP BILLING, PROVISIONED THROUGHPUT (GSU), CLOUD RUN & INVOICE RECONCILIATION
+# =============================================================================
+# Why both Live GCP Billing Catalog API + Fallback Pricing exist:
+# 1. Vertex AI `generate_content` returns `usage_metadata` (exact input, thinking,
+#    output, cached token counts and `traffic_type`: ON_DEMAND vs PROVISIONED_THROUGHPUT),
+#    NOT a dollar string inside the inference payload.
+# 2. When `pricing_source: "gcp_billing_catalog_api"`, the engine queries Google Cloud's
+#    official Cloud Billing Catalog API (`cloudbilling.googleapis.com/v1/services/6F81-5844-456A/skus`)
+#    live to fetch the exact SKU rates and falls back to `pricing_per_million_tokens` only if offline.
+# 3. Every Vertex AI and Cloud Run request is tagged with GCP Billing `labels` (`run_id`,
+#    `approach`, `task`, `model`) so BigQuery Cloud Billing Export (`gcp_billing_export_resource_v1_*`)
+#    reconciles the 100% true GCP invoice down to each individual run and cost component.
+billing:
+  pricing_source: "gcp_billing_catalog_api"  # "gcp_billing_catalog_api" | "bigquery_billing_export" | "yaml_table"
+  vertex_ai_service_id: "6F81-5844-456A"
+  cloud_run_service_id: "152E-C115-5142"
+  bigquery_billing_export_table: null        # e.g., "unilever-shelf-understanding.billing_export.gcp_billing_export_resource_v1_XXXXXX"
+  attach_gcp_billing_labels: true
+  billing_label_prefix: "unilever_shelf"
+  gcs_and_logging_overhead_per_image_usd: 0.000015
+
+  # Vertex AI Provisioned Throughput (GSU — Generative AI Scale Units)
+  provisioned_throughput:
+    enabled: false                           # Set true when using reserved GSUs (or auto-detected from response.usage_metadata.traffic_type)
+    gsu_count: 1
+    hourly_rate_per_gsu_usd: 22.00           # Official Vertex AI hourly rate per GSU
+    monthly_commitment_discount_pct: 0.0     # e.g. 0.20 for 1-month commitment, 0.45 for 1-year commitment
+    target_images_per_hour_per_gsu: 1800
+    allow_payg_spillover: true               # When traffic_type == ON_DEMAND_SPILLOVER, bills excess tokens to PAYG
+
+  # Google Cloud Run Hosting & Compute Cost Separation (vCPU-seconds + GiB-seconds + Requests)
+  cloud_run:
+    enabled: true
+    service_name: "unilever-shelf-benchmark-service"
+    region: "us-central1"
+    vcpu_count: 2.0
+    memory_gib: 4.0
+    concurrency: 1
+    cpu_allocation: "cpu_always_allocated"   # "cpu_always_allocated" | "cpu_only_during_request"
+    vcpu_per_second_usd: 0.00002400          # Official Cloud Run Tier-1 vCPU-second rate
+    memory_gib_per_second_usd: 0.00000250    # Official Cloud Run Tier-1 GiB-second rate
+    per_million_requests_usd: 0.40           # Official Cloud Run per-million requests rate
+
+# Token Pricing Table (USD per 1 Million Tokens — used as cache/fallback alongside live Cloud Billing Catalog API)
 pricing_per_million_tokens:
   gemini-3.8-flash:
     input: 0.30
@@ -42,11 +148,16 @@ pricing_per_million_tokens:
     input: 1.25
     thinking: 1.25
     output: 10.00
+  gemma-3-27b-it:
+    input: 0.08
+    thinking: 0.00
+    output: 0.24
   default:
     input: 0.30
     thinking: 0.30
     output: 2.50
 
+# Pluggable Association Table (links Shelf Images <-> Product Catalog <-> Optional Planograms <-> Ground Truth)
 associations:
   provider_type: "json"  # Supports: "json", "csv", "bigquery", "bucket_discovery"
   source_uri: "configs/sample_associations.json"
@@ -58,11 +169,10 @@ associations:
     store_id_field: "store_id"
     ground_truth_id_field: "ground_truth_id"
 
-# Ground truth is configured as a ready-to-swap placeholder ("none" / "placeholder")
-# until the production ground truth schema and dataset are provided.
+# Pluggable Ground Truth Configuration (Ready-to-swap placeholder until production GT arrives)
 ground_truth:
   provider_type: "none"  # Swap to "json", "csv", or "bigquery" when ground truth data arrives
-  source_uri: null       # e.g., "gs://my-gt-bucket/gt.json" or "project.dataset.gt_table"
+  source_uri: null       # e.g., "gs://my-gt-bucket/gt.json" or "unilever-shelf-understanding.retail.gt_table"
   schema_mapping:
     image_key_field: "image_id"
     items_list_field: "items"
@@ -72,10 +182,18 @@ ground_truth:
     bbox_field: "bbox_2d"
     shelf_row_field: "shelf_row"
 
+# OpenTelemetry Logging & Tracing Configuration (Exports locally + GCP Cloud Logging + GCS)
 telemetry:
   service_name: "unilever-shelf-benchmark"
   otel_log_path: "reports/otel_logs.jsonl"
   export_to_console: false
+  export_to_gcp_cloud_logging: true
+  gcp_log_name: "unilever-shelf-benchmark-otel"
+  sync_otel_logs_to_gcs: true
+  gcs_otel_logs_prefix: "otel"
 
+# Output Reports Directory & Automatic GCS Sync
 reporting:
   output_dir: "reports"
+  sync_reports_to_gcs: true
+  gcs_reports_prefix: "reports"

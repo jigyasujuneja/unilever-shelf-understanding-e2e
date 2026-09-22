@@ -1,48 +1,51 @@
-# ==============================================================================
-# Unilever Shelf Understanding — Centralized Product Taxonomy Configuration
-# ==============================================================================
-# Edit this single file (or override under `taxonomy:` in `configs/default_config.yaml`)
-# to update categories, subcategories, HUL portfolio brands, competitor brands,
-# packaging types, pack types, and size bucket thresholds across all VLM prompts,
-# rule-based classifiers, vector search matchers, reports, and the Web UI.
-# ==============================================================================
+# Centralized Product Taxonomy Configuration
+# Update this file whenever your category, subcategory, packaging, or size rules change.
+# All tasks (Detection, Classification, Hybrid Matching, Fine-Tuning) and the Web UI load this file automatically.
+# Note: Brand names (`brand`) and HUL vs. Non-HUL attribution (`is_hul_brand`) are extracted
+# openly from the shelf image / connected product catalog without requiring predefined brand lists.
 
 categories:
+  - "Skin Care"
   - "Hair Care"
   - "Oral Care"
-  - "Laundry"
-  - "Skin Care"
   - "Skin Cleansing"
+  - "Laundry"
+  - "Household Care"
   - "Deodorants & Fragrances"
-  - "Home & Surface Care"
-  - "Tea & Coffee"
-  - "Packaged Foods"
-  - "Health & Nutrition"
+  - "Food & Refreshment"
+  - "Baby Care"
+  - "Color Cosmetics"
 
 subcategories:
+  - "Face Wash"
+  - "Face Cream"
+  - "Moisturizer"
+  - "Serum"
   - "Shampoo"
   - "Conditioner"
   - "Hair Oil"
-  - "Mouthwash"
   - "Toothpaste"
-  - "Soaps"
+  - "Mouthwash"
+  - "Toothbrush"
+  - "Bath Soap"
   - "Body Wash"
-  - "Face Wash"
-  - "Moisturizer / Cream"
-  - "Facial Gel / Serum"
-  - "Detergent Bar"
+  - "Hand Wash"
   - "Detergent Powder"
   - "Liquid Detergent"
-  - "Fabric Conditioner"
+  - "Laundry Bar"
+  - "Dishwash"
+  - "Surface Cleaner"
 
 packaging_types:
+  - "tube"
   - "box"
+  - "bottle"
   - "jar"
   - "sachet"
-  - "tube"
-  - "bottle"
   - "pouch"
   - "bar"
+  - "pump"
+  - "can"
 
 pack_types:
   - "Single"
@@ -59,68 +62,7 @@ size_buckets:
   small_bbox_height_ratio: 0.82
   large_bbox_height_ratio: 1.08
 
-hul_brands:
-  - "Pond's"
-  - "Glow & Lovely"
-  - "Fair & Lovely"
-  - "Lakme"
-  - "Pears"
-  - "Dove"
-  - "Lifebuoy"
-  - "Lux"
-  - "Sunsilk"
-  - "Clinic Plus"
-  - "TRESemmé"
-  - "Indulgeo"
-  - "Vaseline"
-  - "Rexona"
-  - "Axe"
-  - "Pepsodent"
-  - "Closeup"
-  - "Surf Excel"
-  - "Rin"
-  - "Wheel"
-  - "Sunlight"
-  - "Comfort"
-  - "Vim"
-  - "Domex"
-  - "Cif"
-  - "Brooke Bond"
-  - "Lipton"
-  - "Bru"
-  - "Kissan"
-  - "Knorr"
-  - "Kwality Wall's"
-  - "Horlicks"
-  - "Boost"
-  - "Breeze"
-  - "Hamam"
-  - "Motee"
-  - "Liril"
-  - "Ayush"
-  - "Love Beauty and Planet"
-  - "Simple"
-  - "St. Ives"
-  - "Clear"
-
-non_hul_brands:
-  - "Himalaya"
-  - "Nivea"
-  - "Clean & Clear"
-  - "Everyuth"
-  - "Garnier"
-  - "Olay"
-  - "Neutrogena"
-  - "Cetaphil"
-  - "Biotique"
-  - "Mamaearth"
-  - "Colgate"
-  - "Sensodyne"
-  - "Oral-B"
-  - "Ariel"
-  - "Tide"
-  - "Pantene"
-  - "Head & Shoulders"
-  - "L'Oréal"
-  - "Dettol"
-  - "Santoor"
+# Optional brand overrides (excluded / empty by default so models detect any brand openly
+# and attribute HUL vs. Non-HUL via VLM knowledge or the connected Catalog / Ground Truth table).
+hul_brands: []
+non_hul_brands: []

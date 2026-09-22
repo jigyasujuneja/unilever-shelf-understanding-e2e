@@ -32,7 +32,8 @@ def test_centralized_taxonomy_config_and_prompts() -> None:
     assert "Oral Care" in cfg.taxonomy.categories
     assert "Toothpaste" in cfg.taxonomy.subcategories
     assert "box" in cfg.taxonomy.packaging_types
-    assert "Pepsodent" in cfg.taxonomy.hul_brands
+    assert cfg.taxonomy.hul_brands == []
+    assert cfg.taxonomy.non_hul_brands == []
 
     prompt = build_classification_prompt(cfg.taxonomy)
     assert "56 HUL" not in prompt
@@ -40,6 +41,7 @@ def test_centralized_taxonomy_config_and_prompts() -> None:
     assert "10 categories" not in prompt
     assert "960" not in prompt
     assert "953" not in prompt
+    assert "no predefined brand list required" in prompt
     assert "Oral Care" in prompt
 
     # Custom overridden TaxonomyConfig works seamlessly
@@ -63,6 +65,82 @@ def test_centralized_taxonomy_config_and_prompts() -> None:
         )
         == custom_taxonomy.size_buckets.small_label
     )
+
+
+def test_developer_sdk_universal_model_and_custom_approach_decorator(tmp_path) -> None:
+    """Verify ShelfBenchmarkSDK supports custom Gemma/GEAP models and @register_approach_function with full OTel logging."""
+    from pathlib import Path
+    from shelf_benchmark import (
+        ModelPricing,
+        ShelfBenchmarkSDK,
+        UniversalModelSpec,
+        register_approach_function,
+    )
+
+    @register_approach_function(
+        approach_id="unit_test_custom_approach",
+        display_name="Unit Test Custom Approach",
+    )
+    def my_custom_approach(ctx, model_name, shelf_image_uri):
+        return [
+            {
+                "bbox_2d": [535, 386, 795, 440],
+                "shelf_row": "middle",
+                "category": "Skin Care",
+                "subcategory": "Face Wash",
+                "brand": "Pond's",
+                "variant": "Bright Beauty",
+                "packaging_type": "tube",
+                "pack_type": "Single",
+                "size": "50g",
+                "confidence": 0.96,
+                "_input_tokens": 300,
+                "_thinking_tokens": 20,
+                "_output_tokens": 100,
+            }
+        ]
+
+    sdk = ShelfBenchmarkSDK(output_dir=tmp_path / "sdk_reports")
+    sdk.register_model(
+        UniversalModelSpec(
+            model_id="gemma-3-27b-it-test",
+            provider_family="custom_callable",
+            pricing=ModelPricing(input=0.08, thinking=0.0, output=0.24),
+            custom_handler=lambda prompt, img, schema: {
+                "total_classified_products": 1,
+                "distinct_brands_found": ["Pepsodent"],
+                "classified_products": [
+                    {
+                        "product_index": 1,
+                        "bbox_2d": [171, 676, 487, 813],
+                        "shelf_row": "top",
+                        "position_on_shelf": 1,
+                        "category": "Oral Care",
+                        "subcategory": "Toothpaste",
+                        "brand": "Pepsodent",
+                        "is_hul_brand": True,
+                        "variant": "Germi Check",
+                        "packaging_type": "box",
+                        "pack_type": "Single",
+                        "size": "150g",
+                        "product_name": "Pepsodent Germi Check",
+                        "confidence": 0.98,
+                    }
+                ],
+                "_token_usage": {"input_tokens": 400, "thinking_tokens": 0, "output_tokens": 120},
+            },
+        )
+    )
+
+    summary = sdk.run_suite(
+        models=["gemma-3-27b-it-test"],
+        tasks=["classification"],
+        approaches=["single_pass_full_shelf", "unit_test_custom_approach"],
+    )
+    assert len(summary["results"]) == 2
+    assert Path(summary["otel_log_path"]).exists()
+    assert Path(summary["artifacts"]["markdown_report"]).exists()
+
 
 
 

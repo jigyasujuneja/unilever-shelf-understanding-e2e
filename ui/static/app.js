@@ -933,8 +933,12 @@ function renderSftAndConfigTab() {
           <strong>${(tax.size_buckets || []).join(" • ")}</strong>
         </div>
         <div class="inspector-item" style="grid-column: span 2;">
-          <span>Configured HUL Brands (Sample from configs/taxonomy.yaml)</span>
-          <strong>${(tax.hul_brands || []).slice(0, 20).join(", ")}${(tax.hul_brands || []).length > 20 ? " ..." : ""}</strong>
+          <span>Brand Attribution Mode (HUL vs. Non-HUL)</span>
+          <strong>${
+            (tax.hul_brands || []).length > 0
+              ? (tax.hul_brands || []).slice(0, 20).join(", ")
+              : "Open-Vocabulary VLM &amp; Catalog Attribution (No predefined brand definitions required in configs/taxonomy.yaml)"
+          }</strong>
         </div>
       </div>
     `;

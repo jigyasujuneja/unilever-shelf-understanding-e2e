@@ -1,10 +1,11 @@
-"""Token usage extraction & Cost per Shelf Image / Cost per Product calculators."""
+"""Token usage extraction & All-In Separated GCP Cost Calculators."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict, Optional
 
-from shelf_benchmark.config import ModelPricing
+from shelf_benchmark.config import GCPBillingConfig, ModelPricing
+from shelf_benchmark.evaluation.gcp_billing import GCPBillingAndCostEngine
 from shelf_benchmark.models import CostMetrics, TokenUsageMetrics
 
 
@@ -35,20 +36,22 @@ def compute_cost_metrics(
     tokens: TokenUsageMetrics,
     pricing: ModelPricing,
     product_count: int,
+    latency_ms: float = 2500.0,
+    traffic_type: str = "ON_DEMAND",
+    extra_embedding_or_vision_cost_usd: float = 0.0,
+    billing_cfg: Optional[GCPBillingConfig] = None,
+    project_id: Optional[str] = None,
+    model_name: Optional[str] = None,
+    gcp_labels: Optional[Dict[str, str]] = None,
 ) -> CostMetrics:
-    """Compute cost per shelf image and cost per product (USD)."""
-    input_cost = (tokens.input_tokens / 1_000_000.0) * pricing.input
-    thinking_cost = (tokens.thinking_tokens / 1_000_000.0) * pricing.thinking
-    output_cost = (tokens.output_tokens / 1_000_000.0) * pricing.output
-    total_image_cost = input_cost + thinking_cost + output_cost
-    effective_products = max(product_count, 1)
-    cost_per_product = total_image_cost / effective_products
-
-    return CostMetrics(
-        input_cost_usd=round(input_cost, 8),
-        thinking_cost_usd=round(thinking_cost, 8),
-        output_cost_usd=round(output_cost, 8),
-        cost_per_shelf_image_usd=round(total_image_cost, 8),
-        cost_per_product_usd=round(cost_per_product, 8),
+    """Compute 100% separated GCP costs (Vertex AI PAYG Tokens, Provisioned Throughput GSUs, Embeddings/Vision, Cloud Run Compute, and GCS/Observability)."""
+    return GCPBillingAndCostEngine.compute_all_in_separated_gcp_cost(
+        tokens=tokens,
+        pricing=pricing,
         product_count=product_count,
+        latency_ms=latency_ms,
+        traffic_type=traffic_type,
+        extra_embedding_or_vision_cost_usd=extra_embedding_or_vision_cost_usd,
+        billing_cfg=billing_cfg,
+        gcp_labels=gcp_labels,
     )

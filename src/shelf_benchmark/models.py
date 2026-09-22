@@ -196,13 +196,21 @@ class TokenUsageMetrics(BaseModel):
 
 
 class CostMetrics(BaseModel):
-    """Cost breakdown for a single shelf image and per product."""
+    """100% Separated All-In GCP Cost Breakdown for a single shelf image and per front-facing product."""
+    billing_source: str = "gcp_cloud_billing_catalog_live"
+    traffic_type: str = "ON_DEMAND"  # "ON_DEMAND", "PROVISIONED_THROUGHPUT", or "HYBRID_SPILLOVER"
     input_cost_usd: float = 0.0
     thinking_cost_usd: float = 0.0
     output_cost_usd: float = 0.0
+    vertex_ai_payg_tokens_usd: float = 0.0
+    vertex_ai_provisioned_throughput_usd: float = 0.0
+    vertex_ai_embeddings_and_vision_usd: float = 0.0
+    cloud_run_compute_usd: float = 0.0
+    gcs_and_observability_usd: float = 0.0
     cost_per_shelf_image_usd: float = 0.0
     cost_per_product_usd: float = 0.0
     product_count: int = 0
+    gcp_billing_labels: Dict[str, str] = Field(default_factory=dict)
 
 
 class AccuracyMetrics(BaseModel):
@@ -273,11 +281,18 @@ class RowLevelReportItem(BaseModel):
     brand_correct: Optional[bool] = None
     product_correct: Optional[bool] = None
     sku_correct: Optional[bool] = None
-    # Token & Cost Fields
+    # Token & 100% Separated All-In GCP Cost Fields
     input_tokens: int = 0
     thinking_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    billing_source: str = "gcp_cloud_billing_catalog_live"
+    traffic_type: str = "ON_DEMAND"
+    vertex_ai_payg_tokens_usd: float = 0.0
+    vertex_ai_provisioned_throughput_usd: float = 0.0
+    vertex_ai_embeddings_and_vision_usd: float = 0.0
+    cloud_run_compute_usd: float = 0.0
+    gcs_and_observability_usd: float = 0.0
     cost_per_shelf_image_usd: float = 0.0
     cost_per_product_usd: float = 0.0
 

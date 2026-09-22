@@ -18,23 +18,36 @@ _DEFAULT_TAXONOMY = TaxonomyConfig.from_yaml_or_defaults()
 HUL_PORTFOLIO_BRANDS = {
     re.sub(r"[^a-z0-9\s&']", "", b.lower()).strip()
     for b in _DEFAULT_TAXONOMY.hul_brands
-} | {"ponds", "glow and lovely", "lakme", "tresemme", "close up"}
+}
 
 
 def check_is_hul_brand(
     brand_name: str,
     taxonomy: Optional[TaxonomyConfig] = None,
+    model_predicted: Optional[bool] = None,
 ) -> bool:
-    """Determine whether a predicted brand belongs to the configured HUL portfolio brands."""
+    """Determine whether a predicted brand belongs to HUL without requiring predefined brand lists in YAML.
+
+    - If the user has explicitly configured `hul_brands` (or `non_hul_brands`) in `TaxonomyConfig`, those lists take precedence.
+    - Otherwise (when `hul_brands` is empty `[]` by default), relies on `model_predicted` (`is_hul_brand` returned by the VLM or Catalog join).
+    """
     norm = re.sub(r"[^a-z0-9\s&']", "", (brand_name or "").lower()).strip()
     if not norm:
         return False
-    active_brands = (
-        {re.sub(r"[^a-z0-9\s&']", "", b.lower()).strip() for b in taxonomy.hul_brands}
-        if taxonomy is not None
-        else HUL_PORTFOLIO_BRANDS
-    )
-    return any(h in norm or norm in h for h in active_brands if h)
+
+    if taxonomy is not None and taxonomy.non_hul_brands:
+        non_hul_set = {re.sub(r"[^a-z0-9\s&']", "", b.lower()).strip() for b in taxonomy.non_hul_brands}
+        if any(nh in norm or norm in nh for nh in non_hul_set if nh):
+            return False
+
+    if taxonomy is not None and taxonomy.hul_brands:
+        hul_set = {re.sub(r"[^a-z0-9\s&']", "", b.lower()).strip() for b in taxonomy.hul_brands}
+        return any(h in norm or norm in h for h in hul_set if h)
+
+    if model_predicted is not None:
+        return bool(model_predicted)
+
+    return False
 
 
 def horizontal_overlap_ratio(box_a: List[int], box_b: List[int]) -> float:

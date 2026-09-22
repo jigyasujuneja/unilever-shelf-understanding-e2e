@@ -1,0 +1,103 @@
+{
+  "summary": [
+    {
+      "run_id": "run-10eef81b",
+      "trace_id": "351f00e416f8e3522f55c63413aa7139",
+      "span_id": "633e776f94f5ae92",
+      "task_type": "detection",
+      "separation_approach": "single_pass_full_shelf",
+      "model_name": "gemini-2.5-flash",
+      "shelf_image_uri": "gs://unilever-shelf-understanding-shelf-images/shelf-image.png",
+      "status": "ERROR",
+      "start_time": "2026-09-22T09:51:56.769937Z",
+      "end_time": "2026-09-22T09:51:58.975525Z",
+      "latency_ms": 2205.588,
+      "front_facings_count": 0,
+      "depth_duplicates_filtered": 0,
+      "latency_per_facing_ms": 2205.59,
+      "input_tokens": 0,
+      "thinking_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_per_shelf_image_usd": 0.00014063,
+      "cost_per_product_usd": 0.00014063,
+      "vertex_ai_payg_tokens_usd": 0.0,
+      "vertex_ai_provisioned_throughput_usd": 0.0,
+      "vertex_ai_embeddings_and_vision_usd": 0.0,
+      "cloud_run_compute_usd": 0.00012832,
+      "gcs_and_observability_usd": 1.231e-05,
+      "traffic_type": "ON_DEMAND",
+      "billing_source": "gcp_cloud_billing_catalog_live",
+      "accuracy_status": "PLACEHOLDER_AWAITING_GROUND_TRUTH",
+      "gt_count": null,
+      "count_accuracy": null,
+      "brand_classification_accuracy": null,
+      "product_classification_accuracy": null,
+      "error_message": "Reauthentication is needed. Please run `gcloud auth application-default login` to reauthenticate."
+    }
+  ],
+  "detailed_runs": [
+    {
+      "run_id": "run-10eef81b",
+      "trace_id": "351f00e416f8e3522f55c63413aa7139",
+      "span_id": "633e776f94f5ae92",
+      "task_type": "detection",
+      "separation_approach": "single_pass_full_shelf",
+      "model_name": "gemini-2.5-flash",
+      "shelf_image_uri": "gs://unilever-shelf-understanding-shelf-images/shelf-image.png",
+      "start_time": "2026-09-22T09:51:56.769937Z",
+      "end_time": "2026-09-22T09:51:58.975525Z",
+      "latency_ms": 2205.588,
+      "tokens": {
+        "input_tokens": 0,
+        "thinking_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cached_tokens": 0
+      },
+      "cost": {
+        "billing_source": "gcp_cloud_billing_catalog_live",
+        "traffic_type": "ON_DEMAND",
+        "input_cost_usd": 0.0,
+        "thinking_cost_usd": 0.0,
+        "output_cost_usd": 0.0,
+        "vertex_ai_payg_tokens_usd": 0.0,
+        "vertex_ai_provisioned_throughput_usd": 0.0,
+        "vertex_ai_embeddings_and_vision_usd": 0.0,
+        "cloud_run_compute_usd": 0.00012832,
+        "gcs_and_observability_usd": 1.231e-05,
+        "cost_per_shelf_image_usd": 0.00014063,
+        "cost_per_product_usd": 0.00014063,
+        "product_count": 0,
+        "gcp_billing_labels": {
+          "application": "unilever-shelf-benchmark",
+          "benchmark_run_id": "run-10eef81b",
+          "task_type": "detection",
+          "separation_approach": "single_pass_full_shelf",
+          "vertex_model": "gemini-2-5-flash"
+        }
+      },
+      "accuracy": {
+        "ground_truth_available": false,
+        "accuracy_status": "PLACEHOLDER_AWAITING_GROUND_TRUTH",
+        "ground_truth_count": null,
+        "predicted_count": 0,
+        "depth_duplicates_filtered": 0,
+        "count_accuracy": null,
+        "detection_precision_iou50": null,
+        "detection_recall_iou50": null,
+        "detection_f1_iou50": null,
+        "mean_iou": null,
+        "brand_classification_accuracy": null,
+        "brand_set_recall": null,
+        "product_classification_accuracy": null,
+        "sku_matching_accuracy": null,
+        "planogram_compliance_rate": null
+      },
+      "raw_output": {},
+      "row_level_items": [],
+      "status": "ERROR",
+      "error_message": "Reauthentication is needed. Please run `gcloud auth application-default login` to reauthenticate."
+    }
+  ]
+}

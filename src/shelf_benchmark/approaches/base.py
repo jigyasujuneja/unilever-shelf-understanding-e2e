@@ -101,21 +101,34 @@ class CommonLayerContext:
         model_name: str,
         product_count: int,
         extra_api_cost_usd: float = 0.0,
+        latency_ms: float = 0.0,
+        run_id: Optional[str] = None,
+        approach_id: str = "class_agnostic_visual_embedding",
     ) -> CostMetrics:
+        from shelf_benchmark.evaluation.gcp_billing import GCPBillingAndCostEngine
+
         pricing: ModelPricing = self.config.get_pricing(model_name)
-        base_cost = compute_cost_metrics(tokens, pricing, product_count)
-        if extra_api_cost_usd > 0.0:
-            total_shelf = round(base_cost.cost_per_shelf_image_usd + extra_api_cost_usd, 8)
-            eff_n = max(1, product_count)
-            return CostMetrics(
-                input_cost_usd=round(base_cost.input_cost_usd + extra_api_cost_usd, 8),
-                thinking_cost_usd=base_cost.thinking_cost_usd,
-                output_cost_usd=base_cost.output_cost_usd,
-                cost_per_shelf_image_usd=total_shelf,
-                cost_per_product_usd=round(total_shelf / eff_n, 8),
-                product_count=product_count,
-            )
-        return base_cost
+        engine = GCPBillingAndCostEngine(
+            project_id=self.config.gcp.project_id,
+            billing_cfg=self.config.billing,
+        )
+        gcp_labels = engine.build_gcp_billing_labels(
+            run_id=run_id or "plugin-run",
+            approach_id=approach_id,
+            task_type="end_to_end_approach",
+            model_name=model_name,
+        )
+        return compute_cost_metrics(
+            tokens=tokens,
+            pricing=pricing,
+            product_count=product_count,
+            latency_ms=latency_ms,
+            extra_embedding_or_vision_cost_usd=extra_api_cost_usd,
+            billing_cfg=self.config.billing,
+            project_id=self.config.gcp.project_id,
+            model_name=model_name,
+            gcp_labels=gcp_labels,
+        )
 
     def evaluate_accuracy(
         self,

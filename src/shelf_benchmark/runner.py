@@ -34,6 +34,7 @@ class BenchmarkRunner:
             config=self.config.telemetry,
             project_id=self.config.gcp.project_id,
             location=self.config.gcp.location,
+            bucket_name=self.config.buckets.shelf_images_bucket,
         )
         self.association_provider = create_association_provider(
             assoc_config=self.config.associations,
@@ -46,7 +47,13 @@ class BenchmarkRunner:
             storage_manager=self.storage,
             project_id=self.config.gcp.project_id,
         )
-        self.report_generator = BenchmarkReportGenerator(self.config.reporting.output_dir)
+        self.report_generator = BenchmarkReportGenerator(
+            output_dir=self.config.reporting.output_dir,
+            project_id=self.config.gcp.project_id,
+            bucket_name=self.config.buckets.shelf_images_bucket,
+            sync_to_gcs=self.config.reporting.sync_reports_to_gcs,
+            gcs_reports_prefix=self.config.reporting.gcs_reports_prefix,
+        )
 
         self.detection_task = ProductDetectionTask(self.config, self.storage, self.telemetry)
         self.classification_task = ProductClassificationTask(self.config, self.storage, self.telemetry)

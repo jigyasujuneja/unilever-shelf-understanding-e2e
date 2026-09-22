@@ -71,6 +71,9 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
                 "classified_products": [],
             }
 
+        from shelf_benchmark.tasks.classification import build_classification_prompt
+
+        dynamic_prompt = build_classification_prompt(self.config.taxonomy)
         return {
             "contents": [
                 {
@@ -82,7 +85,7 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
                                 "fileUri": shelf_image_uri,
                             }
                         },
-                        {"text": CLASSIFICATION_PROMPT},
+                        {"text": dynamic_prompt},
                     ],
                 },
                 {

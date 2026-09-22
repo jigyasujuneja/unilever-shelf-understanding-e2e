@@ -69,8 +69,8 @@ def test_facing_depth_deduplication_and_size_rules():
     large_bucket = derive_size_bucket_from_bbox([530, 386, 795, 440], all_boxes, "tube", "")
     assert "Small" in small_bucket
     assert "Large" in large_bucket
-    assert check_is_hul_brand("Pond's") is True
-    assert check_is_hul_brand("Glow & Lovely") is True
+    assert check_is_hul_brand("Pond's", model_predicted=True) is True
+    assert check_is_hul_brand("CompetitorBrand", model_predicted=False) is False
 
 
 def test_custom_association_schema_swap(tmp_path: Path):

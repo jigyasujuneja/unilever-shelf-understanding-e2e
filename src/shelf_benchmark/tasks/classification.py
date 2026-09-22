@@ -45,10 +45,15 @@ def build_classification_prompt(taxonomy: Optional[TaxonomyConfig] = None) -> st
     tax = taxonomy or TaxonomyConfig.from_yaml_or_defaults()
     cats_str = ", ".join(f"`{c}`" for c in tax.categories)
     subcats_str = ", ".join(f"`{s}`" for s in tax.subcategories[:10])
-    hul_sample_str = ", ".join(tax.hul_brands[:12])
     pkg_str = ", ".join(f"`{p}`" for p in tax.packaging_types)
     pack_str = " or ".join(f'`"{pt}"`' for pt in tax.pack_types)
     sizes_str = ", ".join(f"`{sb}`" for sb in tax.size_bucket_labels)
+
+    brand_instruction = (
+        f"Brand name read from the package (matching configured portfolio brands {', '.join(tax.hul_brands[:12])} when applicable) and set `is_hul_brand` (`true`/`false`)."
+        if tax.hul_brands
+        else "Brand name read directly from the packaging (open-vocabulary; no predefined brand list required) and set `is_hul_brand` (`true` if Hindustan Unilever / Unilever brand, `false` otherwise)."
+    )
 
     return f"""You are an expert retail shelf product classification model using the configurable 7-Dimension Retail Taxonomy.
 Visually inspect this shelf image and classify EVERY distinct FRONT-FACING product slot on the main middle shelf (ordered strictly from left to right).
@@ -60,7 +65,7 @@ CRITICAL FACING RULE:
 For EVERY front-facing product slot on the main middle shelf, extract all 7 Taxonomy Dimensions:
 1. `category`: Choose from configured categories ({cats_str}).
 2. `subcategory`: Choose or infer subcategory (e.g., {subcats_str}).
-3. `brand`: Brand name read from the package (identifying whether it belongs to the configured HUL portfolio such as {hul_sample_str}, etc. vs. non-HUL brands) and set `is_hul_brand` (`true`/`false`).
+3. `brand`: {brand_instruction}
 4. `variant`: Specific variant / active ingredient / product line read zero-shot from the packaging.
 5. `packaging_type`: Choose from configured packaging types ({pkg_str}).
 6. `pack_type`: {pack_str}.
@@ -185,9 +190,15 @@ class ProductClassificationTask(BaseBenchmarkTask):
                 box = [0, 0, 0, 0]
             pkg = item.get("packaging_type") or "tube"
             model_size = item.get("size") or ""
-            rule_size = derive_size_bucket_from_bbox(box, all_boxes, pkg, model_size)
+            rule_size = derive_size_bucket_from_bbox(
+                box, all_boxes, pkg, model_size, taxonomy=self.config.taxonomy
+            )
             brand_val = item.get("brand") or ""
-            hul_flag = check_is_hul_brand(brand_val)
+            hul_flag = check_is_hul_brand(
+                brand_val,
+                taxonomy=self.config.taxonomy,
+                model_predicted=item.get("is_hul_brand"),
+            )
             crop_path = crop_paths[idx - 1] if idx - 1 < len(crop_paths) else None
 
             rows.append(

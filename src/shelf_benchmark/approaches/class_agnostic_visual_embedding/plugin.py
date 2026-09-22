@@ -131,6 +131,9 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
             model_name=model_name,
             product_count=len(matched_facings),
             extra_api_cost_usd=total_extra_api_cost,
+            latency_ms=total_latency_ms,
+            run_id=run_id,
+            approach_id=self.approach_id,
         )
 
         # Create temp trace/span IDs before OTel logger emits official hex IDs
@@ -185,6 +188,13 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
                     total_tokens=s1_tokens.total_tokens,
                     cost_per_shelf_image_usd=cost_metrics.cost_per_shelf_image_usd,
                     cost_per_product_usd=cost_metrics.cost_per_product_usd,
+                    vertex_ai_payg_tokens_usd=cost_metrics.vertex_ai_payg_tokens_usd,
+                    vertex_ai_provisioned_throughput_usd=cost_metrics.vertex_ai_provisioned_throughput_usd,
+                    vertex_ai_embeddings_and_vision_usd=cost_metrics.vertex_ai_embeddings_and_vision_usd,
+                    cloud_run_compute_usd=cost_metrics.cloud_run_compute_usd,
+                    gcs_and_observability_usd=cost_metrics.gcs_and_observability_usd,
+                    traffic_type=cost_metrics.traffic_type,
+                    billing_source=cost_metrics.billing_source,
                 )
             )
 

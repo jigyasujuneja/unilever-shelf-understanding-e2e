@@ -48,6 +48,14 @@ class BaseBenchmarkTask(ABC):
             location=location or self.config.gcp.location,
         )
 
+    def _get_billing_engine(self):
+        from shelf_benchmark.evaluation.gcp_billing import GCPBillingAndCostEngine
+
+        return GCPBillingAndCostEngine(
+            project_id=self.config.gcp.project_id,
+            billing_cfg=self.config.billing,
+        )
+
     @abstractmethod
     def invoke_model(
         self,
@@ -107,7 +115,23 @@ class BaseBenchmarkTask(ABC):
             separation_approach = rows[0].separation_approach
 
         pricing = self.config.get_pricing(model_name)
-        cost = compute_cost_metrics(tokens=tokens, pricing=pricing, product_count=len(rows))
+        billing_engine = self._get_billing_engine()
+        gcp_labels = billing_engine.build_gcp_billing_labels(
+            run_id=active_run_id,
+            approach_id=separation_approach,
+            task_type=self.task_type,
+            model_name=model_name,
+        )
+        cost = compute_cost_metrics(
+            tokens=tokens,
+            pricing=pricing,
+            product_count=len(rows),
+            latency_ms=latency_ms,
+            billing_cfg=self.config.billing,
+            project_id=self.config.gcp.project_id,
+            model_name=model_name,
+            gcp_labels=gcp_labels,
+        )
 
         for r in rows:
             r.run_id = active_run_id
@@ -125,6 +149,13 @@ class BaseBenchmarkTask(ABC):
             r.total_tokens = tokens.total_tokens
             r.cost_per_shelf_image_usd = cost.cost_per_shelf_image_usd
             r.cost_per_product_usd = cost.cost_per_product_usd
+            r.vertex_ai_payg_tokens_usd = cost.vertex_ai_payg_tokens_usd
+            r.vertex_ai_provisioned_throughput_usd = cost.vertex_ai_provisioned_throughput_usd
+            r.vertex_ai_embeddings_and_vision_usd = cost.vertex_ai_embeddings_and_vision_usd
+            r.cloud_run_compute_usd = cost.cloud_run_compute_usd
+            r.gcs_and_observability_usd = cost.gcs_and_observability_usd
+            r.traffic_type = cost.traffic_type
+            r.billing_source = cost.billing_source
 
         accuracy = evaluate_task_accuracy(
             task_type=self.task_type,

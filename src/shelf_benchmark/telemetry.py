@@ -31,12 +31,19 @@ from shelf_benchmark.models import AccuracyMetrics, CostMetrics, TokenUsageMetri
 
 
 class OpenTelemetryBenchmarkLogger:
-    """Manages OpenTelemetry tracing and emits OTel-compliant JSONL log records."""
+    """Manages OpenTelemetry tracing and emits OTel-compliant JSONL log records locally and to GCP Cloud Logging & GCS."""
 
-    def __init__(self, config: TelemetryConfig, project_id: str = "unilever-shelf-understanding", location: str = "global"):
+    def __init__(
+        self,
+        config: TelemetryConfig,
+        project_id: str = "unilever-shelf-understanding",
+        location: str = "global",
+        bucket_name: str = "unilever-shelf-understanding-shelf-images",
+    ):
         self.config = config
         self.project_id = project_id
         self.location = location
+        self.bucket_name = bucket_name
 
         resource = Resource.create(
             {
@@ -55,6 +62,8 @@ class OpenTelemetryBenchmarkLogger:
 
         self.log_path = Path(config.otel_log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._last_cloud_logging_status: Optional[str] = None
+        self._last_gcs_otel_uri: Optional[str] = None
 
     @staticmethod
     def now_utc() -> datetime:
@@ -67,6 +76,86 @@ class OpenTelemetryBenchmarkLogger:
     @staticmethod
     def to_unix_nano(dt: datetime) -> int:
         return int(dt.timestamp() * 1_000_000_000)
+
+    def _export_to_cloud_logging(
+        self,
+        otel_record: Dict[str, Any],
+        trace_id_hex: str,
+        span_id_hex: str,
+        gcp_labels: Dict[str, str],
+    ) -> Optional[str]:
+        """Writes the OpenTelemetry structured entry directly to Google Cloud Logging API (`logging.googleapis.com`)."""
+        if not getattr(self.config, "export_to_gcp_cloud_logging", True):
+            return None
+        try:
+            import urllib.request
+            import google.auth.transport.requests
+            from shelf_benchmark.auth import get_gcp_credentials
+
+            creds = get_gcp_credentials(self.project_id)
+            if not getattr(creds, "token", None):
+                auth_req = google.auth.transport.requests.Request()
+                creds.refresh(auth_req)
+            token = creds.token
+            if not token:
+                return None
+
+            log_name = f"projects/{self.project_id}/logs/{getattr(self.config, 'gcp_log_name', 'unilever-shelf-benchmark-otel')}"
+            payload = {
+                "logName": log_name,
+                "resource": {
+                    "type": "global",
+                    "labels": {"project_id": self.project_id},
+                },
+                "labels": {str(k): str(v) for k, v in (gcp_labels or {}).items()},
+                "entries": [
+                    {
+                        "severity": otel_record.get("SeverityText", "INFO"),
+                        "trace": f"projects/{self.project_id}/traces/{trace_id_hex}",
+                        "spanId": span_id_hex,
+                        "jsonPayload": otel_record,
+                    }
+                ],
+            }
+            req = urllib.request.Request(
+                "https://logging.googleapis.com/v2/entries:write",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "x-goog-user-project": self.project_id,
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                if resp.status in (200, 201):
+                    self._last_cloud_logging_status = f"EXPORTED ({log_name})"
+                    return log_name
+        except Exception as exc:
+            self._last_cloud_logging_status = f"FALLBACK_LOCAL_AND_GCS ({type(exc).__name__}: {exc})"
+        return None
+
+    def _sync_to_gcs(self) -> Optional[str]:
+        """Uploads the OpenTelemetry JSONL log file to Google Cloud Storage (`gs://<bucket>/otel/otel_logs.jsonl`)."""
+        if not getattr(self.config, "sync_otel_logs_to_gcs", True):
+            return None
+        try:
+            from google.cloud import storage
+            from shelf_benchmark.auth import get_gcp_credentials
+
+            creds = get_gcp_credentials(self.project_id)
+            client = storage.Client(project=self.project_id, credentials=creds)
+            clean_bucket = self.bucket_name.replace("gs://", "").strip("/").split("/")[0]
+            bucket = client.bucket(clean_bucket)
+            prefix = getattr(self.config, "gcs_otel_logs_prefix", "otel").strip("/")
+            blob_path = f"{prefix}/{self.log_path.name}"
+            blob = bucket.blob(blob_path)
+            blob.upload_from_filename(str(self.log_path), content_type="application/jsonl")
+            gcs_uri = f"gs://{clean_bucket}/{blob_path}"
+            self._last_gcs_otel_uri = gcs_uri
+            return gcs_uri
+        except Exception:
+            return None
 
     def log_task_execution(
         self,
@@ -84,7 +173,7 @@ class OpenTelemetryBenchmarkLogger:
         error_message: Optional[str] = None,
         extra_attributes: Optional[Dict[str, Any]] = None,
     ) -> tuple[str, str, Dict[str, Any]]:
-        """Create an OTel span and write an OpenTelemetry Data Model compliant JSONL record."""
+        """Create an OTel span and write an OpenTelemetry Data Model compliant JSONL record + export to GCP Cloud Logging & GCS."""
         start_iso = self.format_iso(start_dt)
         end_iso = self.format_iso(end_dt)
         start_nano = self.to_unix_nano(start_dt)
@@ -122,8 +211,23 @@ class OpenTelemetryBenchmarkLogger:
                 "shelf_benchmark.product_count": cost.product_count,
                 "shelf_benchmark.cost_per_shelf_image_usd": round(cost.cost_per_shelf_image_usd, 8),
                 "shelf_benchmark.cost_per_product_usd": round(cost.cost_per_product_usd, 8),
+                "shelf_benchmark.cost.vertex_ai_payg_tokens_usd": round(cost.vertex_ai_payg_tokens_usd, 8),
+                "shelf_benchmark.cost.vertex_ai_provisioned_throughput_usd": round(
+                    cost.vertex_ai_provisioned_throughput_usd, 8
+                ),
+                "shelf_benchmark.cost.vertex_ai_embeddings_and_vision_usd": round(
+                    cost.vertex_ai_embeddings_and_vision_usd, 8
+                ),
+                "shelf_benchmark.cost.cloud_run_compute_usd": round(cost.cloud_run_compute_usd, 8),
+                "shelf_benchmark.cost.gcs_and_observability_usd": round(cost.gcs_and_observability_usd, 8),
+                "shelf_benchmark.cost.traffic_type": cost.traffic_type,
+                "shelf_benchmark.cost.billing_source": cost.billing_source,
                 "shelf_benchmark.status": status,
             }
+            if cost.gcp_billing_labels:
+                for lk, lv in cost.gcp_billing_labels.items():
+                    attributes[f"gcp.billing.label.{lk}"] = lv
+
             if error_message:
                 attributes["shelf_benchmark.error_message"] = error_message
             if accuracy and accuracy.ground_truth_available:
@@ -165,7 +269,10 @@ class OpenTelemetryBenchmarkLogger:
                 f"[{task_type.upper()}] model={model_name} image={shelf_image_uri} "
                 f"start={start_iso} end={end_iso} latency_ms={latency_ms} "
                 f"tokens(in={tokens.input_tokens}, think={tokens.thinking_tokens}, out={tokens.output_tokens}, total={tokens.total_tokens}) "
-                f"cost_image=${cost.cost_per_shelf_image_usd:.6f} cost_product=${cost.cost_per_product_usd:.6f}"
+                f"cost_image=${cost.cost_per_shelf_image_usd:.6f} "
+                f"(payg=${cost.vertex_ai_payg_tokens_usd:.6f}, pt_gsu=${cost.vertex_ai_provisioned_throughput_usd:.6f}, "
+                f"embed=${cost.vertex_ai_embeddings_and_vision_usd:.6f}, cloud_run=${cost.cloud_run_compute_usd:.6f}, "
+                f"gcs_obs=${cost.gcs_and_observability_usd:.6f})"
             ),
             "Resource": {
                 "service.name": self.config.service_name,
@@ -182,5 +289,18 @@ class OpenTelemetryBenchmarkLogger:
 
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(otel_record) + "\n")
+
+        # Export directly to Google Cloud Logging and Google Cloud Storage
+        cloud_log_name = self._export_to_cloud_logging(
+            otel_record=otel_record,
+            trace_id_hex=trace_id_hex,
+            span_id_hex=span_id_hex,
+            gcp_labels=cost.gcp_billing_labels,
+        )
+        gcs_otel_uri = self._sync_to_gcs()
+        if cloud_log_name:
+            otel_record["Attributes"]["gcp.cloud_logging.log_name"] = cloud_log_name
+        if gcs_otel_uri:
+            otel_record["Attributes"]["gcp.gcs.otel_log_uri"] = gcs_otel_uri
 
         return trace_id_hex, span_id_hex, otel_record

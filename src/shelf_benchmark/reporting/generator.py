@@ -11,17 +11,53 @@ from shelf_benchmark.models import RowLevelReportItem, TaskExecutionResult
 
 
 class BenchmarkReportGenerator:
-    """Produces row-level CSV/JSON reports, summary CSV/JSON, and a rich Markdown report."""
+    """Produces row-level CSV/JSON reports, summary CSV/JSON, and a rich Markdown report locally and synced to GCS."""
 
-    def __init__(self, output_dir: str | Path = "reports"):
+    def __init__(
+        self,
+        output_dir: str | Path = "reports",
+        project_id: str = "unilever-shelf-understanding",
+        bucket_name: str = "unilever-shelf-understanding-shelf-images",
+        sync_to_gcs: bool = True,
+        gcs_reports_prefix: str = "reports",
+    ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.project_id = project_id
+        self.bucket_name = bucket_name
+        self.sync_to_gcs = sync_to_gcs
+        self.gcs_reports_prefix = gcs_reports_prefix.strip("/")
+
+    def _upload_reports_to_gcs(self, local_paths: Dict[str, str]) -> Dict[str, str]:
+        """Uploads all generated benchmark report artifacts to Google Cloud Storage (`gs://<bucket>/reports/`)."""
+        if not self.sync_to_gcs:
+            return {}
+        gcs_uris: Dict[str, str] = {}
+        try:
+            from google.cloud import storage
+            from shelf_benchmark.auth import get_gcp_credentials
+
+            creds = get_gcp_credentials(self.project_id)
+            client = storage.Client(project=self.project_id, credentials=creds)
+            clean_bucket = self.bucket_name.replace("gs://", "").strip("/").split("/")[0]
+            bucket = client.bucket(clean_bucket)
+            for key, local_p_str in local_paths.items():
+                p = Path(local_p_str)
+                if not p.exists():
+                    continue
+                blob_path = f"{self.gcs_reports_prefix}/{p.name}"
+                blob = bucket.blob(blob_path)
+                blob.upload_from_filename(str(p))
+                gcs_uris[f"gcs_{key}"] = f"gs://{clean_bucket}/{blob_path}"
+        except Exception:
+            pass
+        return gcs_uris
 
     def generate_all_reports(
         self,
         results: List[TaskExecutionResult],
     ) -> Dict[str, str]:
-        """Generate all report files and return a dictionary of artifact paths."""
+        """Generate all report files locally and sync them to Google Cloud Storage."""
         all_rows: List[RowLevelReportItem] = []
         for res in results:
             all_rows.extend(res.row_level_items)
@@ -39,13 +75,16 @@ class BenchmarkReportGenerator:
         self._write_summary_json(summary_records, results, summary_json_path)
         self._write_markdown_report(summary_records, all_rows, md_report_path)
 
-        return {
+        artifacts = {
             "row_level_csv": str(row_csv_path),
             "row_level_json": str(row_json_path),
             "summary_csv": str(summary_csv_path),
             "summary_json": str(summary_json_path),
             "markdown_report": str(md_report_path),
         }
+        gcs_artifacts = self._upload_reports_to_gcs(artifacts)
+        artifacts.update(gcs_artifacts)
+        return artifacts
 
     def _write_row_level_csv(self, rows: List[RowLevelReportItem], path: Path) -> None:
         fieldnames = list(RowLevelReportItem.model_fields.keys())
@@ -86,6 +125,13 @@ class BenchmarkReportGenerator:
                     "total_tokens": r.tokens.total_tokens,
                     "cost_per_shelf_image_usd": r.cost.cost_per_shelf_image_usd,
                     "cost_per_product_usd": r.cost.cost_per_product_usd,
+                    "vertex_ai_payg_tokens_usd": r.cost.vertex_ai_payg_tokens_usd,
+                    "vertex_ai_provisioned_throughput_usd": r.cost.vertex_ai_provisioned_throughput_usd,
+                    "vertex_ai_embeddings_and_vision_usd": r.cost.vertex_ai_embeddings_and_vision_usd,
+                    "cloud_run_compute_usd": r.cost.cloud_run_compute_usd,
+                    "gcs_and_observability_usd": r.cost.gcs_and_observability_usd,
+                    "traffic_type": r.cost.traffic_type,
+                    "billing_source": r.cost.billing_source,
                     "accuracy_status": (
                         "EVALUATED_AGAINST_GT"
                         if r.accuracy.ground_truth_available
@@ -134,7 +180,7 @@ class BenchmarkReportGenerator:
             "",
             "## 1. Executive Summary (Tasks & Bounding-Box Separation Approaches)",
             "",
-            "| Task | Separation Approach | Model | Status | Front Facings | Depth Filtered | Latency (ms) | Input Tokens | Thinking Tokens | Output Tokens | Cost / Image ($) | Cost / Facing ($) | GT Accuracy Status |",
+            "| Task | Separation Approach | Model | Status | Front Facings | Depth Filtered | Latency (ms) | Input Tokens | Thinking Tokens | Output Tokens | All-In Cost / Image ($) | All-In Cost / Facing ($) | GT Accuracy Status |",
             "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
         ]
 
@@ -150,6 +196,23 @@ class BenchmarkReportGenerator:
                 f"{rec['input_tokens']} | {rec['thinking_tokens']} | {rec['output_tokens']} | "
                 f"${rec['cost_per_shelf_image_usd']:.6f} | ${rec['cost_per_product_usd']:.6f} | "
                 f"{gt_summary} |"
+            )
+
+        lines.extend(
+            [
+                "",
+                "## 1B. 100% Separated All-In GCP Cost Breakdown (Vertex AI PAYG vs. Provisioned Throughput GSU vs. Embeddings vs. Cloud Run vs. GCS/Observability)",
+                "",
+                "| Approach | Model | Traffic Type | Vertex AI PAYG Tokens ($) | Vertex AI Prov. Throughput GSU ($) | Embeddings & Vision API ($) | Cloud Run vCPU + RAM ($) | GCS + Cloud Logging ($) | Total All-In / Image ($) | Billing Source |",
+                "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
+            ]
+        )
+        for rec in summary_records:
+            lines.append(
+                f"| `{rec['separation_approach']}` | `{rec['model_name']}` | `{rec['traffic_type']}` | "
+                f"${rec['vertex_ai_payg_tokens_usd']:.6f} | ${rec['vertex_ai_provisioned_throughput_usd']:.6f} | "
+                f"${rec['vertex_ai_embeddings_and_vision_usd']:.6f} | ${rec['cloud_run_compute_usd']:.6f} | "
+                f"${rec['gcs_and_observability_usd']:.6f} | **${rec['cost_per_shelf_image_usd']:.6f}** | `{rec['billing_source']}` |"
             )
 
         lines.extend(
