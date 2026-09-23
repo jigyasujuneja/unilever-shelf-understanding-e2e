@@ -950,10 +950,9 @@ class BenchmarkUIRequestHandler(BaseHTTPRequestHandler):
             from urllib.parse import parse_qs
             qs = parse_qs(parsed.query)
             uri = (qs.get("uri") or [""])[0].strip()
-            if not uri or uri.endswith("/shelf-image.png") or uri == "shelf-image.png":
-                if (REPO_ROOT / "shelf-image.png").exists():
-                    self._serve_file(REPO_ROOT / "shelf-image.png")
-                    return
+            if (not uri or uri.endswith("/shelf-image.png") or uri == "shelf-image.png") and (REPO_ROOT / "shelf-image.png").exists():
+                self._serve_file(REPO_ROOT / "shelf-image.png")
+                return
             # Check local path within repo or reports
             cand_local = (REPO_ROOT / uri).resolve()
             if str(cand_local).startswith(str(REPO_ROOT.resolve())) and cand_local.is_file():
@@ -966,6 +965,7 @@ class BenchmarkUIRequestHandler(BaseHTTPRequestHandler):
             if uri.startswith("gs://"):
                 try:
                     import tempfile
+
                     from shelf_benchmark.storage import GCSStorageClient
                     cfg_tmp = BenchmarkConfig.from_yaml(CONFIG_PATH)
                     storage_client = GCSStorageClient(project_id=cfg_tmp.gcp.project_id)

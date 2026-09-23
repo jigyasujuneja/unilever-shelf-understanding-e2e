@@ -20,6 +20,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 from typing import Any, Dict, List, Optional
 
 from shelf_benchmark.config import BenchmarkConfig
