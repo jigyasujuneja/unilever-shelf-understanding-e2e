@@ -267,6 +267,31 @@ def load_dashboard_payload() -> Dict[str, Any]:
             )
         summary_records_enriched.append(s_copy)
 
+    # Collect all distinct shelf images across summary, row_level_report, and configured associations
+    available_images: List[str] = []
+    for s_rec in summary_records_enriched:
+        u = s_rec.get("shelf_image_uri")
+        if u and u not in available_images:
+            available_images.append(str(u))
+    for r_rec in rows_data:
+        u = r_rec.get("shelf_image_uri")
+        if u and u not in available_images:
+            available_images.append(str(u))
+    if not available_images:
+        available_images.append("gs://unilever-shelf-understanding-shelf-images/shelf-image.png")
+
+    # Load any configured or sample Ground Truth records keyed by shelf_image_uri / ground_truth_id
+    ground_truth_by_image: Dict[str, Any] = {}
+    try:
+        from shelf_benchmark.data.ground_truth import GroundTruthStore
+        gt_store = GroundTruthStore(cfg.ground_truth)
+        for img_u in available_images:
+            gt_rec = gt_store.get_ground_truth(img_u, Path(img_u).name)
+            if gt_rec is not None:
+                ground_truth_by_image[img_u] = gt_rec.model_dump()
+    except Exception:
+        pass
+
     return {
         "project_info": {
             "gcp_project_id": cfg.gcp.project_id,
@@ -274,7 +299,8 @@ def load_dashboard_payload() -> Dict[str, Any]:
             "shelf_images_bucket": cfg.buckets.shelf_images_bucket,
             "catalog_images_bucket": cfg.buckets.catalog_images_bucket,
             "planograms_bucket": cfg.buckets.planograms_bucket,
-            "active_shelf_image": "gs://unilever-shelf-understanding-shelf-images/shelf-image.png",
+            "active_shelf_image": available_images[0],
+            "available_images": available_images,
             "ground_truth_provider": cfg.ground_truth.provider_type,
             "associations_provider": cfg.associations.provider_type,
             "embedding_model": embedding_model_name,
@@ -298,6 +324,9 @@ def load_dashboard_payload() -> Dict[str, Any]:
         "pricing_table": {
             k: v.model_dump() for k, v in cfg.pricing_per_million_tokens.items()
         },
+        "available_images": available_images,
+        "leaderboard": summary_data.get("leaderboard", []),
+        "ground_truth_by_image": ground_truth_by_image,
         "summary": summary_records_enriched,
         "rows": rows_data,
         "depth_demos": depth_demos,
@@ -915,6 +944,43 @@ class BenchmarkUIRequestHandler(BaseHTTPRequestHandler):
 
         if route == "/shelf-image.png":
             self._serve_file(REPO_ROOT / "shelf-image.png")
+            return
+
+        if route == "/api/shelf-image":
+            from urllib.parse import parse_qs
+            qs = parse_qs(parsed.query)
+            uri = (qs.get("uri") or [""])[0].strip()
+            if not uri or uri.endswith("/shelf-image.png") or uri == "shelf-image.png":
+                if (REPO_ROOT / "shelf-image.png").exists():
+                    self._serve_file(REPO_ROOT / "shelf-image.png")
+                    return
+            # Check local path within repo or reports
+            cand_local = (REPO_ROOT / uri).resolve()
+            if str(cand_local).startswith(str(REPO_ROOT.resolve())) and cand_local.is_file():
+                self._serve_file(cand_local)
+                return
+            cand_basename = (REPO_ROOT / Path(uri).name).resolve()
+            if str(cand_basename).startswith(str(REPO_ROOT.resolve())) and cand_basename.is_file():
+                self._serve_file(cand_basename)
+                return
+            if uri.startswith("gs://"):
+                try:
+                    import tempfile
+                    from shelf_benchmark.storage import GCSStorageClient
+                    cfg_tmp = BenchmarkConfig.from_yaml(CONFIG_PATH)
+                    storage_client = GCSStorageClient(project_id=cfg_tmp.gcp.project_id)
+                    cache_dir = Path(tempfile.gettempdir()) / "shelf_ui_img_cache"
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                    dest = cache_dir / Path(uri).name
+                    if not dest.exists():
+                        storage_client.download_file(uri, dest)
+                    self._serve_file(dest)
+                    return
+                except Exception:
+                    if (REPO_ROOT / "shelf-image.png").exists():
+                        self._serve_file(REPO_ROOT / "shelf-image.png")
+                        return
+            self.send_error(404, "Shelf image not found")
             return
 
         if route.startswith("/crops/"):

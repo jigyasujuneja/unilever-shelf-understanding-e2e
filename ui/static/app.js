@@ -414,6 +414,9 @@ function setupDelegatedActions() {
       case "change-model":
         changePipelineModel(el.getAttribute("data-container-id"), el.value);
         break;
+      case "change-image":
+        changePipelineImage(el.getAttribute("data-container-id"), el.value);
+        break;
       case "toggle-depth":
         togglePipelineDepth(el.getAttribute("data-container-id"), el.checked);
         break;
@@ -440,15 +443,24 @@ function switchToTab(targetTab) {
   if (targetTab === "tab-run-live") renderUseCasePipeline("pipeline-container-live");
 }
 
-async function loadShelfImage() {
+const SHELF_IMAGE_CACHE = {};
+
+async function loadShelfImage(uri = "/shelf-image.png") {
+  const key = uri || "/shelf-image.png";
+  if (SHELF_IMAGE_CACHE[key]) {
+    SHELF_IMAGE_OBJ = SHELF_IMAGE_CACHE[key];
+    return SHELF_IMAGE_OBJ;
+  }
+  const fetchUrl = key === "/shelf-image.png" ? "/shelf-image.png" : `/api/shelf-image?uri=${encodeURIComponent(key)}`;
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
+      SHELF_IMAGE_CACHE[key] = img;
       SHELF_IMAGE_OBJ = img;
-      resolve();
+      resolve(img);
     };
-    img.onerror = () => resolve();
-    img.src = "/shelf-image.png";
+    img.onerror = () => resolve(SHELF_IMAGE_OBJ);
+    img.src = fetchUrl;
   });
 }
 
@@ -459,6 +471,18 @@ async function fetchDashboardData() {
     const badgeProj = document.getElementById("badge-project");
     if (badgeProj) {
       badgeProj.textContent = `GCP: ${DASHBOARD_DATA.project_info.gcp_project_id} (${DASHBOARD_DATA.project_info.location}) • Host: ${DASHBOARD_DATA.project_info.cloud_run_service || "local"}`;
+    }
+    const availImgs = DASHBOARD_DATA.available_images || (DASHBOARD_DATA.project_info.available_images) || [];
+    const imgFilter = document.getElementById("overview-image-filter");
+    if (imgFilter && availImgs.length > 0) {
+      availImgs.forEach((u) => {
+        if (!Array.from(imgFilter.options).some((o) => o.value === u)) {
+          const opt = document.createElement("option");
+          opt.value = u;
+          opt.textContent = u.split("/").slice(-2).join("/");
+          imgFilter.appendChild(opt);
+        }
+      });
     }
     const registered = DASHBOARD_DATA.project_info.registered_approaches || [];
     const liveSelect = document.getElementById("live-studio-approach");
@@ -587,7 +611,7 @@ function renderOverviewTab() {
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Total Benchmark Runs Loaded</div>
-      <div class="kpi-value">${summary.length} Runs</div>
+      <div class="kpi-value">${summary.length} Runs (${(DASHBOARD_DATA.available_images || []).length || 1} Image(s))</div>
       <div class="kpi-sub">Both gemini-3.8-flash &amp; gemini-3.5-flash-lite across all 8 paths</div>
     </div>
     <div class="kpi-card">
@@ -605,13 +629,16 @@ function renderOverviewTab() {
   // Filters for Overview Table
   const pathFilter = document.getElementById("overview-path-filter");
   const modelFilter = document.getElementById("overview-model-filter");
+  const imageFilter = document.getElementById("overview-image-filter");
   const renderMatrix = () => {
     const pVal = pathFilter.value;
     const mVal = modelFilter.value;
+    const iVal = imageFilter ? imageFilter.value : "ALL";
     const tbody = document.querySelector("#overview-summary-table tbody");
     const filtered = summary.filter((r) => {
       if (pVal !== "ALL" && r.separation_approach !== pVal) return false;
       if (mVal !== "ALL" && r.model_name !== mVal) return false;
+      if (iVal !== "ALL" && r.shelf_image_uri && r.shelf_image_uri !== iVal) return false;
       return true;
     });
     tbody.innerHTML = filtered.map((r) => {
@@ -639,6 +666,7 @@ function renderOverviewTab() {
   };
   pathFilter.addEventListener("change", renderMatrix);
   modelFilter.addEventListener("change", renderMatrix);
+  if (imageFilter) imageFilter.addEventListener("change", renderMatrix);
   renderMatrix();
 }
 
@@ -670,13 +698,15 @@ function renderAllFourUseCaseTabs() {
   }
 }
 
-function getPipelineRunData(approachId, modelName, livePayload) {
+function getPipelineRunData(approachId, modelName, livePayload, imageUri = "") {
   let resolvedModel = modelName;
   let summaryRec = {};
   let rows = [];
   let cropsInfo = {};
   let depthDemo = {};
   let isLiveRun = false;
+
+  const matchImg = (rec) => !imageUri || !rec.shelf_image_uri || rec.shelf_image_uri === imageUri;
 
   if (livePayload && livePayload.separation_approach === approachId && livePayload.model_name === modelName) {
     isLiveRun = true;
@@ -686,11 +716,18 @@ function getPipelineRunData(approachId, modelName, livePayload) {
     depthDemo = livePayload.depth_demo || {};
   } else {
     summaryRec = (DASHBOARD_DATA.summary || []).find(
+      (s) => s.task_type === "classification" && s.separation_approach === approachId && s.model_name === modelName && matchImg(s)
+    ) || (DASHBOARD_DATA.summary || []).find(
       (s) => s.task_type === "classification" && s.separation_approach === approachId && s.model_name === modelName
     ) || {};
     rows = (DASHBOARD_DATA.rows || []).filter(
-      (r) => r.task_type === "classification" && r.separation_approach === approachId && r.model_name === modelName
+      (r) => r.task_type === "classification" && r.separation_approach === approachId && r.model_name === modelName && matchImg(r)
     );
+    if (rows.length === 0) {
+      rows = (DASHBOARD_DATA.rows || []).filter(
+        (r) => r.task_type === "classification" && r.separation_approach === approachId && r.model_name === modelName
+      );
+    }
     // Auto-fallback to another available model in DASHBOARD_DATA if the selected model has no rows
     if (rows.length === 0 && DASHBOARD_DATA.rows && DASHBOARD_DATA.rows.length > 0) {
       const altRow = DASHBOARD_DATA.rows.find(
@@ -699,10 +736,10 @@ function getPipelineRunData(approachId, modelName, livePayload) {
       if (altRow && altRow.model_name) {
         resolvedModel = altRow.model_name;
         summaryRec = (DASHBOARD_DATA.summary || []).find(
-          (s) => s.task_type === "classification" && s.separation_approach === approachId && s.model_name === resolvedModel
+          (s) => s.task_type === "classification" && s.separation_approach === approachId && s.model_name === resolvedModel && matchImg(s)
         ) || {};
         rows = (DASHBOARD_DATA.rows || []).filter(
-          (r) => r.task_type === "classification" && r.separation_approach === approachId && r.model_name === resolvedModel
+          (r) => r.task_type === "classification" && r.separation_approach === approachId && r.model_name === resolvedModel && matchImg(r)
         );
       }
     }
@@ -744,10 +781,15 @@ function renderUseCasePipeline(containerId) {
   const container = document.getElementById(containerId);
   if (!container || !pathMeta) return;
 
+  const availImages = DASHBOARD_DATA.available_images || (DASHBOARD_DATA.project_info && DASHBOARD_DATA.project_info.available_images) || ["gs://unilever-shelf-understanding-shelf-images/shelf-image.png"];
+  const activeImgUri = state.imageUri || availImages[0] || "";
+  state.imageUri = activeImgUri;
+
   const { isLiveRun, resolvedModel, summaryRec, rows, cropsInfo, depthDemo } = getPipelineRunData(
     approachId,
     state.model,
-    state.livePayload
+    state.livePayload,
+    activeImgUri
   );
   const modelName = resolvedModel || state.model;
   state.model = modelName;
@@ -906,11 +948,16 @@ function renderUseCasePipeline(containerId) {
         </div>
         <div class="pipeline-controls">
           <label style="font-size:12.5px; font-weight:700;">
+            Active Image (${availImages.length}):
+            <select data-action="change-image" data-container-id="${esc(containerId)}">
+              ${availImages.map((u) => `<option value="${esc(u)}" ${u === activeImgUri ? "selected" : ""}>${esc(u.split("/").slice(-2).join("/"))}</option>`).join("")}
+            </select>
+          </label>
+          <label style="font-size:12.5px; font-weight:700;">
             Active Model:
             <select data-action="change-model" data-container-id="${esc(containerId)}">
               <option value="gemini-3.8-flash" ${modelName === "gemini-3.8-flash" ? "selected" : ""}>gemini-3.8-flash</option>
               <option value="gemini-3.5-flash-lite" ${modelName === "gemini-3.5-flash-lite" ? "selected" : ""}>gemini-3.5-flash-lite</option>
-              <option value="gemini-3.7-flash" ${modelName === "gemini-3.7-flash" ? "selected" : ""}>gemini-3.7-flash</option>
             </select>
           </label>
           ${containerId !== "pipeline-container-live" ? `
@@ -999,7 +1046,9 @@ function renderUseCasePipeline(containerId) {
     </div>
   `;
 
-  drawPipelineCanvas(containerId, rows, depthDemo, state.selectedIdx, state.showDepth, approachId);
+  loadShelfImage(activeImgUri).then(() => {
+    drawPipelineCanvas(containerId, rows, depthDemo, state.selectedIdx, state.showDepth, approachId);
+  });
 }
 
 function buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId) {
@@ -1016,15 +1065,13 @@ function buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId) {
   const otelPath = otel.otel_log_path || "reports/otel_logs.jsonl";
   const jqCmd = otel.local_jq_command || `jq 'select(.TraceId == "${traceId}")' ${otelPath}`;
   const gcpQuery = otel.gcp_cloud_logging_query || `logName="projects/unilever-shelf-understanding/logs/unilever-shelf-benchmark-otel" AND trace="projects/unilever-shelf-understanding/traces/${traceId}"`;
-  // The IoU threshold a run was actually scored at. Falling back to 0.5 told the
-  // reader a threshold had been applied when none was recorded.
   const iouThreshold = reportedNumber(summaryRec.iou_threshold ?? acc.iou_threshold);
 
   const fmtMetric = (v) => (v === null || v === undefined ? `<span class="muted">None (awaiting GT)</span>` : Number(v).toFixed(4));
 
   return `
     <div style="margin-top:20px; border-top:1px solid rgba(148,163,184,0.22); padding-top:18px;">
-      <h4 style="margin:0 0 10px 0;">Engineering &amp; Onboarding Traceability Inspector (Calls, Models, Accuracy, Data &amp; OpenTelemetry)</h4>
+      <h4 style="margin:0 0 10px 0;">Engineering &amp; Onboarding Traceability Inspector (Calls, Models, Multi-Image &amp; Ground Truth Accuracy, OpenTelemetry)</h4>
       <div class="split-2col">
         <div class="inspector-box" style="padding:14px;">
           <h5 style="margin:0 0 8px 0;">1. Implementation &amp; Call Topology</h5>
@@ -1061,7 +1108,7 @@ function buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId) {
         </div>
 
         <div class="inspector-box" style="padding:14px;">
-          <h5 style="margin:0 0 8px 0;">2. Ground Truth Accuracy &amp; OpenTelemetry Lookup</h5>
+          <h5 style="margin:0 0 8px 0;">2. Object Detection &amp; 7-Dim Classification Ground Truth Accuracy</h5>
           <div class="inspector-grid">
             <div class="inspector-item">
               <span>Accuracy Status</span>
@@ -1076,15 +1123,23 @@ function buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId) {
               <strong>${fmtMetric(summaryRec.detection_precision)} / ${fmtMetric(summaryRec.detection_recall)} / ${fmtMetric(summaryRec.detection_f1)}</strong>
             </div>
             <div class="inspector-item">
+              <span>Detection AP@0.50 / mAP@[.50:.95]</span>
+              <strong>${fmtMetric(summaryRec.average_precision_at_50 ?? acc.average_precision_at_50)} / ${fmtMetric(summaryRec.map_50_95 ?? acc.map_50_95)}</strong>
+            </div>
+            <div class="inspector-item">
               <span>Brand / Product / Count Accuracy</span>
               <strong>${fmtMetric(summaryRec.brand_classification_accuracy)} / ${fmtMetric(summaryRec.product_classification_accuracy)} / ${fmtMetric(summaryRec.count_accuracy)}</strong>
+            </div>
+            <div class="inspector-item">
+              <span>7-Dim Macro Attribute / SKU Accuracy</span>
+              <strong>${fmtMetric(summaryRec.macro_attribute_accuracy ?? acc.macro_attribute_accuracy)} / ${fmtMetric(summaryRec.sku_matching_accuracy)}</strong>
             </div>
             <div class="inspector-item" style="grid-column: span 2;">
               <span>Why is Accuracy <code>${gtAvailable ? "Evaluated" : "None (not 0.0)"}</code>?</span>
               <div class="muted" style="font-size:12px;">
                 ${gtAvailable
-                  ? `Scored against connected ground truth (${esc(summaryRec.gt_version || acc.gt_version || "unversioned")}). Geometry paired first at IoU &ge; ${iouThreshold === null ? NOT_REPORTED_HTML : esc(iouThreshold)}; brand &amp; product scored on matched pairs.`
-                  : `Ground truth is not connected yet, so metrics report <code>None</code> rather than <code>0.0</code>. In Run Live Studio above, select <strong>Connect Sample GT</strong> or run <code>shelf-benchmark score</code> when annotations arrive.`}
+                  ? `Scored against connected ground truth (${esc(summaryRec.gt_version || acc.gt_version || "unversioned")}). Hungarian optimal box assignment pairs detections at IoU &ge; ${iouThreshold === null ? NOT_REPORTED_HTML : esc(iouThreshold)} before scoring Brand, Product &amp; 7-Dim attributes.`
+                  : `Ground truth is not connected yet, so metrics report <code>None</code> rather than <code>0.0</code>. Drop annotations into <code>configs/sample_ground_truth.json</code> (or pass <code>--gt &lt;file.json&gt;</code>) or select <strong>Connect GT</strong> in Run Live Studio.`}
               </div>
             </div>
             <div class="inspector-item" style="grid-column: span 2;">
@@ -1126,9 +1181,6 @@ function sumReported(values) {
   return present.length ? present.reduce((a, b) => a + b, 0) : null;
 }
 
-// Returns the OpenTelemetry records actually present for this trace id.
-// Nothing is synthesised: if the JSONL has no span, the caller renders an
-// explicit "unavailable" state.
 function realSpansForTrace(traceId) {
   if (!traceId || traceId === "N/A") return [];
   return ((DASHBOARD_DATA && DASHBOARD_DATA.otel_spans) || []).filter(
@@ -1136,9 +1188,6 @@ function realSpansForTrace(traceId) {
   );
 }
 
-// Renders one row per real span. Bar offset/width come from the recorded
-// start/end nanosecond timestamps; when those are missing the bar is omitted
-// and said to be omitted, rather than being positioned by guesswork.
 function buildRealSpanRowsHtml(spans) {
   const starts = [];
   const ends = [];
@@ -1191,15 +1240,11 @@ function buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows) {
   const facings = Number(summaryRec.front_facings_count || rows.length || 0);
 
   const paygUsd = reportedNumber(summaryRec.vertex_ai_payg_tokens_usd);
-  // Provisioned throughput only accrues when traffic actually ran as PROVISIONED_THROUGHPUT.
-  // On-demand runs must show nothing here, not a prorated slot rental.
   const ptGsuUsd = reportedNumber(summaryRec.vertex_ai_provisioned_throughput_usd);
   const embedUsd = reportedNumber(summaryRec.vertex_ai_embeddings_and_vision_usd);
   const cloudRunUsd = reportedNumber(summaryRec.cloud_run_compute_usd);
   const gcsObsUsd = reportedNumber(summaryRec.gcs_and_observability_usd);
   const allInPaygUsd = reportedNumber(summaryRec.cost_per_shelf_image_usd);
-  // Null unless the run actually served on reserved GSUs. Summing the other buckets
-  // when ptGsuUsd is null would present an on-demand run as having a GSU-mode cost.
   const allInPtGsuUsd = ptGsuUsd === null
     ? null
     : (reportedNumber(summaryRec.all_in_pt_gsu_total_usd) ??
@@ -1215,18 +1260,6 @@ function buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows) {
     ? "Modelled infrastructure (rows 4 and 5) IS included in the all-in totals."
     : "Modelled infrastructure (rows 4 and 5) is shown for reference only and is EXCLUDED from the all-in totals. Enable billing.include_infrastructure_costs to fold it in.";
 
-  // ---------------------------------------------------------------------------
-  // OpenTelemetry waterfall.
-  //
-  // The benchmark emits ONE OTel record per task execution (see
-  // reports/otel_logs.jsonl); it does not emit per-stage child spans. This panel
-  // previously manufactured four child spans by multiplying the total latency by
-  // hardcoded fractions (0.34 / 0.22 / 0.31 / remainder) and derived their
-  // span_ids by slicing substrings out of the trace id. None of those spans ever
-  // existed, and they were rendered identically to real telemetry. Only spans
-  // actually present in the JSONL are shown now; when there are none, the
-  // breakdown is reported as unavailable rather than estimated.
-  // ---------------------------------------------------------------------------
   const realSpans = realSpansForTrace(summaryRec.trace_id);
   const waterfallRowsHtml = realSpans.length
     ? buildRealSpanRowsHtml(realSpans)
@@ -1327,10 +1360,24 @@ function buildInspectorHtml(row, approachId) {
   if (!row) {
     return `<p class="muted">No product facings found for this selection.</p>`;
   }
-  const isAgnostic = approachId === "class_agnostic_visual_embedding";
+  const isAgnostic = approachId === "class_agnostic_visual_embedding" || approachId === "cloud_vision_visual_embedding";
   const badgeHtml = row.is_hul_brand
     ? `<span class="tag-hul">HUL Portfolio Brand</span>`
     : `<span class="tag-non-hul">Non-HUL Brand</span>`;
+
+  const hasGt = row.is_correct_detection !== null && row.is_correct_detection !== undefined;
+  const gtPanelHtml = hasGt
+    ? `
+      <div style="margin-top:8px; padding:8px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; font-size:11.5px;">
+        <div><strong>Ground Truth Evaluation (Detection + Classification):</strong></div>
+        <div class="mono" style="margin-top:3px;">
+          Detection Match: <strong>${row.is_correct_detection ? "✓ TP" : "✗ FP"}</strong> (IoU: <code>${row.iou_with_ground_truth != null ? Number(row.iou_with_ground_truth).toFixed(3) : "0.000"}</code>)<br/>
+          GT Brand: <strong>${esc(row.ground_truth_brand || "N/A")}</strong> (${row.is_correct_brand ? "✓ Match" : "✗ Mismatch"}) &bull;
+          GT Product: <strong>${esc(row.ground_truth_product_name || "N/A")}</strong>
+        </div>
+      </div>
+    `
+    : "";
 
   return `
     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1352,6 +1399,7 @@ function buildInspectorHtml(row, approachId) {
         <strong>${esc(row.rule_derived_size_bucket || row.predicted_size) || "--"} (OCR hint: ${esc(row.predicted_size) || "none"})</strong>
       </div>
     </div>
+    ${gtPanelHtml}
     <div style="margin-top:10px; padding:9px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; font-size:12px;">
       <div><strong>${isAgnostic ? "Stage 3 ScaNN Catalog SKU Match:" : "Hybrid Search Keywords &amp; Vector Passage:"}</strong></div>
       <div class="mono muted" style="margin-top:3px;">
@@ -1411,6 +1459,12 @@ function buildSevenDimensionTableHtml(rows, containerId, selectedIdx, isScannMod
 
 window.changePipelineModel = function (containerId, newModel) {
   CONTAINER_STATE[containerId].model = newModel;
+  CONTAINER_STATE[containerId].selectedIdx = 0;
+  renderUseCasePipeline(containerId);
+};
+
+window.changePipelineImage = function (containerId, newImageUri) {
+  CONTAINER_STATE[containerId].imageUri = newImageUri;
   CONTAINER_STATE[containerId].selectedIdx = 0;
   renderUseCasePipeline(containerId);
 };
@@ -1572,6 +1626,9 @@ function initLiveStudioTab() {
       renderLiveProgressStepper(appId, activeStageIdx, false);
     }, 300);
 
+    const imgInput = document.getElementById("live-studio-image-uri");
+    const imgUri = (imgInput && imgInput.value ? imgInput.value.trim() : "") || "shelf-image.png";
+
     try {
       const response = await fetch("/api/run-live", {
         method: "POST",
@@ -1585,6 +1642,7 @@ function initLiveStudioTab() {
           brand_mode: brandMode,
           attribute_call_mode: attrMode,
           accelerator: accelType,
+          shelf_image_uri: imgUri,
         }),
       });
       const liveResult = await response.json();
@@ -1614,8 +1672,10 @@ function initLiveStudioTab() {
 
         CONTAINER_STATE["pipeline-container-live"].approachId = appId;
         CONTAINER_STATE["pipeline-container-live"].model = modName;
+        CONTAINER_STATE["pipeline-container-live"].imageUri = liveResult.shelf_image_uri || imgUri;
         CONTAINER_STATE["pipeline-container-live"].selectedIdx = 0;
         CONTAINER_STATE["pipeline-container-live"].livePayload = liveResult;
+        loadShelfImage(CONTAINER_STATE["pipeline-container-live"].imageUri);
         renderUseCasePipeline("pipeline-container-live");
       }
     } catch (err) {

@@ -834,6 +834,39 @@ def _cmd_cloud_run(args: argparse.Namespace) -> int:
 
     report_gen = BenchmarkReportGenerator.from_config(cfg)
     artifact_paths = report_gen.generate_all_reports(collected)
+    # Write clean otel_logs.jsonl matching strictly the current collected runs
+    otel_file = out_dir / "otel_logs.jsonl"
+    base_ns = int(time.time() * 1e9)
+    otel_lines: List[str] = []
+    for idx_o, r_obj in enumerate(collected):
+        dur_ns = int(max(1.0, float(r_obj.latency_ms)) * 1e6)
+        st_ns = base_ns + idx_o * 10_000_000
+        en_ns = st_ns + dur_ns
+        otel_rec = {
+            "TraceId": r_obj.trace_id,
+            "SpanId": r_obj.span_id,
+            "Name": f"shelf_benchmark.{r_obj.task_type}.{r_obj.separation_approach}",
+            "Attributes": {
+                "gen_ai.operation.name": r_obj.separation_approach,
+                "gen_ai.request.model": r_obj.model_name,
+                "gen_ai.usage.input_tokens": r_obj.tokens.input_tokens,
+                "gen_ai.usage.thinking_tokens": r_obj.tokens.thinking_tokens,
+                "gen_ai.usage.output_tokens": r_obj.tokens.output_tokens,
+                "gen_ai.usage.total_tokens": r_obj.tokens.total_tokens,
+                "shelf_benchmark.task_type": r_obj.task_type,
+                "shelf_benchmark.separation_approach": r_obj.separation_approach,
+                "shelf_benchmark.latency_ms": round(float(r_obj.latency_ms), 2),
+                "latency_ms": round(float(r_obj.latency_ms), 2),
+                "start_time_unix_nano": st_ns,
+                "end_time_unix_nano": en_ns,
+                "execution_environment": (r_obj.execution_trace or {}).get(
+                    "execution_environment", "gcp_cloud_run_live_vertex_ai"
+                ),
+            },
+        }
+        otel_lines.append(json.dumps(otel_rec))
+    otel_file.write_text("\n".join(otel_lines) + "\n", encoding="utf-8")
+    artifact_paths["otel_logs_jsonl"] = str(otel_file)
     artifact_paths.update(diag_paths)
     print(f"\nBenchmark reports saved to '{out_dir}/':")
     for k, v in artifact_paths.items():

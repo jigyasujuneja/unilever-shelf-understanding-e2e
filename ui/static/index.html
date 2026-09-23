@@ -114,7 +114,11 @@
                 <option value="ALL">All Models (gemini-3.8-flash &amp; gemini-3.5-flash-lite)</option>
                 <option value="gemini-3.8-flash">gemini-3.8-flash</option>
                 <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
-                <option value="gemini-3.7-flash">gemini-3.7-flash</option>
+              </select>
+            </label>
+            <label>Filter Shelf Image:
+              <select id="overview-image-filter">
+                <option value="ALL">All Shelf Images (1..N Manifest)</option>
               </select>
             </label>
           </div>
@@ -176,7 +180,7 @@
           <div>
             <h2>&#9889; Run Live Benchmark Studio — Local Non-Cloud-Run vs. Remote GCP Cloud Run</h2>
             <p class="muted">
-              Select any of the 8 Approaches, choose <code>gemini-3.8-flash</code> or <code>gemini-3.5-flash-lite</code>, and choose whether to execute in your <strong>Local Non-Cloud-Run Python Process (&rarr; Live Vertex AI API)</strong> or on the <strong>Remote GCP Cloud Run Service (&rarr; Live Vertex AI API)</strong>.
+              Select any of the 8 Approaches, choose <code>gemini-3.8-flash</code> or <code>gemini-3.5-flash-lite</code>, specify any local or <code>gs://</code> shelf image URI, and execute in your <strong>Local Non-Cloud-Run Python Process (&rarr; Live Vertex AI API)</strong> or on the <strong>Remote GCP Cloud Run Service (&rarr; Live Vertex AI API)</strong>.
             </p>
           </div>
         </div>
@@ -216,10 +220,15 @@
           </label>
 
           <label class="control-block">
-            <span>4. Ground Truth Scoring:</span>
+            <span>4. Shelf Image URI (Local Path or <code>gs://</code>):</span>
+            <input id="live-studio-image-uri" type="text" value="gs://unilever-shelf-understanding-shelf-images/shelf-image.png" style="padding:7px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:12.5px;" />
+          </label>
+
+          <label class="control-block">
+            <span>5. Ground Truth Scoring (Detection + Classification):</span>
             <select id="live-studio-gt">
               <option value="none" selected>Placeholder Mode (No GT &rarr; Accuracy = None)</option>
-              <option value="sample">Connect Sample GT (Score Precision / Recall / F1 / IoU)</option>
+              <option value="sample">Connect GT (Score Detection IoU/mAP + 7-Dim Classification)</option>
             </select>
           </label>
 
