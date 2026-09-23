@@ -41,15 +41,15 @@ def test_report_generator_outputs_all_formats(tmp_path: Path):
         bbox_xmin=52,
         bbox_ymax=782,
         bbox_xmax=106,
-        predicted_brand="Pond's",
-        predicted_product_name="Pond's Bright Miracle Detox Facewash",
+        predicted_brand="Brand_A",
+        predicted_product_name="Brand_A Bright Miracle Detox Facewash",
         predicted_variant="Charcoal Black Tube",
         predicted_category="Face Wash",
         predicted_packaging="Tube",
         confidence=0.99,
         gt_item_id=3,
-        gt_brand="Pond's",
-        gt_product_name="Pond's Bright Miracle Detox Facewash",
+        gt_brand="Brand_A",
+        gt_product_name="Brand_A Bright Miracle Detox Facewash",
         gt_sku_id="UNI-PONDS-DETOX-002",
         iou_with_gt=0.92,
         brand_correct=True,
@@ -108,7 +108,7 @@ def test_report_generator_outputs_all_formats(tmp_path: Path):
     with open(paths["row_level_csv"], encoding="utf-8") as f:
         rows_read = list(csv.DictReader(f))
     assert len(rows_read) == 1
-    assert rows_read[0]["predicted_brand"] == "Pond's"
+    assert rows_read[0]["predicted_brand"] == "Brand_A"
     assert float(rows_read[0]["cost_per_product_usd"]) == 0.000424
 
     summary_data = json.loads(Path(paths["summary_json"]).read_text(encoding="utf-8"))

@@ -165,20 +165,12 @@ class EvaluationConfig(BaseModel):
         description="Fraction of significant ground-truth tokens required by the 'token_overlap' matcher.",
     )
     brand_aliases: Dict[str, str] = Field(
-        default_factory=lambda: {
-            "ponds": "ponds",
-            "pond s": "ponds",
-            "fair and lovely": "glow and lovely",
-            "fair lovely": "glow and lovely",
-            "glow lovely": "glow and lovely",
-            "lakme": "lakme",
-            "hul": "hindustan unilever",
-        },
-        description="Normalized-brand alias table applied by the 'strict' brand matcher.",
+        default_factory=dict,
+        description="Optional normalized-brand alias table (empty by default; punctuation/apostrophe normalization is automatic).",
     )
     product_stopwords: List[str] = Field(
-        default_factory=lambda: ["the", "and", "with", "new", "pack"],
-        description="Tokens ignored by the 'token_overlap' product matcher.",
+        default_factory=list,
+        description="Optional tokens ignored by the 'token_overlap' product matcher.",
     )
 
 
@@ -228,8 +220,16 @@ class SizeBucketRulesConfig(BaseModel):
     large_bbox_height_ratio: float = 1.08
 
 
+class CustomAttributeSpec(BaseModel):
+    """Schema definition for an additional product or shelf attribute beyond the base 8 dimensions."""
+
+    description: str = "Extract this attribute from the product facing."
+    allowed_values: List[str] = Field(default_factory=list)
+    value_type: str = "string"  # "string" | "boolean" | "number" | "list"
+
+
 class TaxonomyConfig(BaseModel):
-    """Centralized, configurable taxonomy for Categories, Subcategories, Brands, Packaging, Pack Types, and Size Buckets."""
+    """Centralized, configurable taxonomy for Categories, Subcategories, Brands, Packaging, Pack Types, Size Buckets, and Custom Attributes (>8 attributes)."""
 
     taxonomy_file: str = Field(default="configs/taxonomy.yaml")
     categories: List[str] = Field(
@@ -277,8 +277,54 @@ class TaxonomyConfig(BaseModel):
     )
     pack_types: List[str] = Field(default_factory=lambda: ["Single", "Multiple"])
     size_buckets: SizeBucketRulesConfig = Field(default_factory=SizeBucketRulesConfig)
+    brand_extraction_mode: str = Field(
+        default="open_vocabulary_generative",
+        description=(
+            "How brand is extracted: "
+            "'open_vocabulary_generative' (default: LLM determines and generates brand directly from visual/OCR text on package; scales to 2,000+ brands with zero prompt bloat), "
+            "'open_vocabulary_plus_catalog_resolver' (LLM generates brand openly, then post-hoc canonical resolver snaps it to a 2,000+ brand catalog), or "
+            "'closed_set_taxonomy' (injects hul_brands/non_hul_brands into prompt when <= max_prompt_brands)."
+        ),
+    )
+    max_prompt_brands: int = Field(
+        default=50,
+        description="Safety cap: if total configured brands exceed this (e.g. 2,000 brands), never inject the brand list into the VLM prompt; use open-vocabulary generation + post-hoc catalog resolution instead.",
+    )
     hul_brands: List[str] = Field(default_factory=list)
     non_hul_brands: List[str] = Field(default_factory=list)
+    custom_attributes: Dict[str, CustomAttributeSpec] = Field(
+        default_factory=dict,
+        description=(
+            "Arbitrary additional attributes beyond the core 8 dimensions (e.g., price_tag_visible, "
+            "promo_callout, flavor_or_fragrance, facing_orientation, damage_or_dent, shelf_talker_present). "
+            "Automatically added to VLM prompts, predictions, and ground-truth scoring."
+        ),
+    )
+    attribute_call_groups: List[List[str]] = Field(
+        default_factory=list,
+        description=(
+            "Optional grouping of attributes into separate VLM calls (used by configurable_multi_attribute_vlm). "
+            "If empty or 1 group, all attributes (8 core + N custom) are predicted in a single VLM call. "
+            "If 2+ groups, runs 1 targeted VLM call per attribute group and merges the results per facing."
+        ),
+    )
+
+    @property
+    def core_attribute_names(self) -> List[str]:
+        return [
+            "category",
+            "subcategory",
+            "brand",
+            "product_name",
+            "variant",
+            "packaging_type",
+            "pack_type",
+            "size",
+        ]
+
+    @property
+    def all_attribute_names(self) -> List[str]:
+        return self.core_attribute_names + list(self.custom_attributes.keys())
 
     @property
     def size_bucket_labels(self) -> List[str]:
@@ -314,7 +360,7 @@ class ProvisionedThroughputConfig(BaseModel):
 
 
 class CloudRunCostConfig(BaseModel):
-    """Official GCP Cloud Run compute & request pricing parameters for 100% separated infrastructure cost tracking."""
+    """Official GCP Cloud Run & Vertex AI/GKE Accelerator (CPU / NVIDIA L4 GPU / Cloud TPU v5e & v6e) pricing parameters."""
 
     enabled: bool = True
     service_name: str = "unilever-shelf-benchmark-service"
@@ -323,11 +369,35 @@ class CloudRunCostConfig(BaseModel):
     memory_gib: float = 4.0
     concurrency: int = 1
     cpu_allocation: str = "cpu_always_allocated"
+    accelerator_type: str = Field(
+        default="none",
+        description=(
+            "Hardware accelerator profile: 'none' (CPU-only Cloud Run), 'nvidia-l4' (Cloud Run native L4 GPU), "
+            "'tpu-v5e' (Vertex AI / GKE Cloud TPU v5e endpoint), or 'tpu-v6e' (Vertex AI / GKE Cloud TPU v6e Trillium endpoint)."
+        ),
+    )
+    accelerator_count: int = Field(default=0, description="Number of attached GPUs or TPU chips (e.g., 1).")
+    accelerator_hourly_rates_usd: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "none": 0.0,
+            "nvidia-l4": 0.67,
+            "tpu-v5e": 1.20,
+            "tpu-v6e": 2.70,
+        }
+    )
     vcpu_per_second_usd: float = 0.00002400
     memory_gib_per_second_usd: float = 0.00000250
     vcpu_second_rate_usd: float = 0.00002400  # Official GCP Cloud Run rate ($0.000024 / vCPU-sec)
     gib_second_rate_usd: float = 0.00000250   # Official GCP Cloud Run rate ($0.0000025 / GiB-sec)
     per_million_requests_usd: float = 0.40    # Official GCP Cloud Run rate ($0.40 / 1M requests)
+
+    def accelerator_per_second_usd(self) -> float:
+        acc_key = (self.accelerator_type or "none").strip().lower()
+        if acc_key in ("none", "cpu", ""):
+            return 0.0
+        eff_count = max(1, self.accelerator_count or 1)
+        hourly = float(self.accelerator_hourly_rates_usd.get(acc_key, 1.20))
+        return (hourly / 3600.0) * eff_count
 
 
 class EmbeddingAndVisionCostConfig(BaseModel):
@@ -392,9 +462,8 @@ class GCPBillingConfig(BaseModel):
     include_infrastructure_costs: bool = Field(
         default=False,
         description=(
-            "Include modelled Cloud Run vCPU/GiB-seconds and GCS/Cloud Logging overhead in "
-            "cost_per_shelf_image_usd. Off by default: a laptop run incurs no Cloud Run charge, "
-            "and mixing modelled infra into model-comparison numbers distorts the ranking."
+            "Include Cloud Run vCPU/GiB/GPU/TPU-seconds and GCS/Cloud Logging overhead in "
+            "cost_per_shelf_image_usd (enabled in default_config.yaml and Cloud Run CLI)."
         ),
     )
     provisioned_throughput: ProvisionedThroughputConfig = Field(default_factory=ProvisionedThroughputConfig)
@@ -501,6 +570,8 @@ class BenchmarkConfig(BaseModel):
     buckets: BucketConfig = Field(default_factory=BucketConfig)
     models: List[str] = Field(
         default_factory=lambda: [
+            "gemini-3-flash-preview",
+            "gemini-3.1-pro-preview",
             "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.5-flash-lite",
@@ -517,6 +588,9 @@ class BenchmarkConfig(BaseModel):
     approaches: List[str] = Field(
         default_factory=lambda: [
             "single_pass_full_shelf",
+            "open_vocab_brand_plus_catalog_resolver",
+            "configurable_multi_attribute_vlm",
+            "single_step_detect_classify_and_match",
             "two_stage_bbox_guided_nms",
             "two_stage_physical_crop_per_facing",
         ]
@@ -528,12 +602,12 @@ class BenchmarkConfig(BaseModel):
     fine_tuning: FineTuningConfig = Field(default_factory=FineTuningConfig)
     pricing_per_million_tokens: Dict[str, ModelPricing] = Field(
         default_factory=lambda: {
+            "gemini-3-flash-preview": ModelPricing(input=0.30, thinking=0.30, output=2.50),
+            "gemini-3.1-pro-preview": ModelPricing(input=1.25, thinking=1.25, output=10.00),
+            "gemini-3.0-flash": ModelPricing(input=0.30, thinking=0.30, output=2.50),
             "gemini-3.8-flash": ModelPricing(input=0.30, thinking=0.30, output=2.50),
             "gemini-3.7-flash": ModelPricing(input=0.25, thinking=0.25, output=2.00),
             "gemini-3.5-flash-lite": ModelPricing(input=0.10, thinking=0.10, output=0.40),
-            "gemini-2.5-flash": ModelPricing(input=0.30, thinking=0.30, output=2.50),
-            "gemini-2.5-flash-lite": ModelPricing(input=0.10, thinking=0.10, output=0.40),
-            "gemini-2.5-pro": ModelPricing(input=1.25, thinking=1.25, output=10.00),
             "gemma-3-27b-it": ModelPricing(input=0.08, thinking=0.00, output=0.24),
             "default": ModelPricing(input=0.30, thinking=0.30, output=2.50),
         }
@@ -589,8 +663,8 @@ class BenchmarkConfig(BaseModel):
     def get_pricing(self, model_name: str) -> ModelPricing:
         """Resolve token pricing for a model.
 
-        Matching is exact first, then longest-substring, so `gemini-2.5-flash-lite` can never be
-        priced as `gemini-2.5-flash` just because of dictionary insertion order.
+        Matching is exact first, then longest-substring, so `gemini-3.5-flash-lite` can never be
+        priced as `gemini-3-flash-preview` just because of dictionary insertion order.
         """
         clean_name = model_name.split("/")[-1]
         if clean_name in self.pricing_per_million_tokens:
@@ -603,5 +677,18 @@ class BenchmarkConfig(BaseModel):
         if candidates:
             return self.pricing_per_million_tokens[max(candidates, key=len)]
         return self.pricing_per_million_tokens.get("default", ModelPricing())
+
+
+def normalize_vertex_gemini_model_id(model_name: str, for_live_vertex: bool = False) -> str:
+    """Enforce the no-legacy-models policy (rejecting 1.x / 2.0 / 2.5) while keeping model_name 100% verbatim under user control."""
+    raw = str(model_name or "gemini-3-flash-preview").strip()
+    lower = raw.lower()
+    if any(legacy in lower for legacy in ("gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0")):
+        raise ValueError(
+            f"Legacy model '{raw}' is prohibited by benchmark policy (too old). "
+            "Pass the exact Gemini 3+ or custom model ID you want to test (e.g., 'gemini-3-flash-preview', 'gemini-3.1-pro-preview')."
+        )
+    # Return the exact model ID specified by the user — never substitute or rewrite it.
+    return raw
 
 

@@ -111,6 +111,26 @@ def run_stage2_visual_crop_embedding(
         idx: (c_bytes, c_path) for idx, c_bytes, c_path in crop_tuples
     }
 
+    if ctx.config.offline.enabled:
+        enriched_facings = []
+        for facing in detected_facings:
+            p_idx = int(facing.get("product_index", 1))
+            _, c_path = crop_map.get(p_idx, (b"", ""))
+            vec_1408 = [1.0] + [0.0] * 1407
+            enriched_facings.append(
+                {
+                    **facing,
+                    "crop_image_path": c_path,
+                    "visual_embedding_model": "multimodalembedding@001",
+                    "visual_embedding_dim": len(vec_1408),
+                    "visual_embedding_vector": vec_1408,
+                }
+            )
+        stage2_cost_usd = round(
+            len(enriched_facings) * VERTEX_IMAGE_EMBEDDING_COST_PER_CROP_USD, 8
+        )
+        return enriched_facings, montage_path, stage2_cost_usd
+
     creds = get_gcp_credentials(project_id=ctx.config.gcp.project_id)
     project_id = ctx.config.gcp.project_id
 

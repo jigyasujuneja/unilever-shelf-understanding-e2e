@@ -58,8 +58,8 @@ EXAMPLE_SFT_LINE = {
                         {
                             "product_index": 1,
                             "bbox_2d": [535, 386, 795, 440],
-                            "brand": "Pond's",
-                            "product_name": "Pond's Bright Beauty Face Wash",
+                            "brand": "Brand_A",
+                            "product_name": "Brand_A Radiance Daily Cleanser",
                             "category": "Skin Care",
                             "subcategory": "Face Wash",
                             "variant": "Bright Beauty",

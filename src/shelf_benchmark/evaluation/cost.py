@@ -43,8 +43,9 @@ def compute_cost_metrics(
     project_id: Optional[str] = None,
     model_name: Optional[str] = None,
     gcp_labels: Optional[Dict[str, str]] = None,
+    container_cpu_active_ms: Optional[float] = None,
 ) -> CostMetrics:
-    """Compute 100% separated GCP costs (Vertex AI PAYG Tokens, Provisioned Throughput GSUs, Embeddings/Vision, Cloud Run Compute, and GCS/Observability)."""
+    """Compute 100% separated GCP costs (Vertex AI PAYG Tokens, Provisioned Throughput GSUs, Embeddings/Vision, Granular Cloud Run Compute/Accelerators, and GCS/Observability)."""
     return GCPBillingAndCostEngine.compute_all_in_separated_gcp_cost(
         tokens=tokens,
         pricing=pricing,
@@ -54,4 +55,5 @@ def compute_cost_metrics(
         extra_embedding_or_vision_cost_usd=extra_embedding_or_vision_cost_usd,
         billing_cfg=billing_cfg,
         gcp_labels=gcp_labels,
+        container_cpu_active_ms=container_cpu_active_ms,
     )

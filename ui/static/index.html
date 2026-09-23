@@ -157,27 +157,75 @@
 
         <div class="live-studio-controls">
           <label class="control-block">
-            <span>1. Choose Use-Case Path (4 Approaches):</span>
+            <span>1. Choose Approach Plugin (All 8 Registered):</span>
             <select id="live-studio-approach">
-              <option value="single_pass_full_shelf">Path 1: Single-Pass Full-Shelf VLM (1 Call: BBox + 7-Dim Taxonomy)</option>
-              <option value="two_stage_bbox_guided_nms">Path 2: 2-Stage BBox-Guided + Depth NMS (Detect + Filter Back-Row + Classify)</option>
-              <option value="two_stage_physical_crop_per_facing" selected>Path 3: 2-Stage Physical Crop per Facing (Detect + PIL Crop Strip + Classify)</option>
-              <option value="class_agnostic_visual_embedding">Path 4: 3-Stage Class-Agnostic Detector + 1408-D Visual Embedding + ScaNN Match</option>
+              <option value="single_pass_full_shelf">single_pass_full_shelf (1 Call: Open-Vocab LLM Brand + N-Dim)</option>
+              <option value="open_vocab_brand_plus_catalog_resolver">open_vocab_brand_plus_catalog_resolver (Open-Vocab + O(1) 2,000-Brand Resolver)</option>
+              <option value="configurable_multi_attribute_vlm">configurable_multi_attribute_vlm (>8 Attributes: 1-Call or Grouped Calls)</option>
+              <option value="single_step_detect_classify_and_match">single_step_detect_classify_and_match (1 Call: Detect + Classify + SKU Match)</option>
+              <option value="two_stage_bbox_guided_nms">two_stage_bbox_guided_nms (2-Stage: Detect + BBox-Guided Classify)</option>
+              <option value="two_stage_physical_crop_per_facing" selected>two_stage_physical_crop_per_facing (2-Stage: Detect + PIL Crops + Classify)</option>
+              <option value="class_agnostic_visual_embedding">class_agnostic_visual_embedding (3-Stage: CV + 1408-D Embed + ScaNN)</option>
+              <option value="cloud_vision_visual_embedding">cloud_vision_visual_embedding (3-Stage: Cloud Vision + 1408-D Embed + ScaNN)</option>
             </select>
           </label>
 
           <label class="control-block">
-            <span>2. Choose Vertex AI Model:</span>
+            <span>2. Choose Model:</span>
             <select id="live-studio-model">
               <option value="gemini-3.8-flash" selected>gemini-3.8-flash</option>
               <option value="gemini-3.7-flash">gemini-3.7-flash</option>
               <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+              <option value="gemma-3-27b-it">gemma-3-27b-it</option>
+            </select>
+          </label>
+
+          <label class="control-block">
+            <span>3. Execution Environment:</span>
+            <select id="live-studio-mode">
+              <option value="offline" selected>Offline Local Test (Instant &bull; Zero GCP Cost)</option>
+              <option value="live">Live Vertex AI / Cloud Run Execution</option>
+            </select>
+          </label>
+
+          <label class="control-block">
+            <span>4. Ground Truth Scoring:</span>
+            <select id="live-studio-gt">
+              <option value="none" selected>Placeholder Mode (No GT &rarr; Accuracy = None)</option>
+              <option value="sample">Connect Sample GT (Score Precision / Recall / F1 / IoU)</option>
+            </select>
+          </label>
+
+          <label class="control-block">
+            <span>5. Brand Strategy (2,000+ Brands):</span>
+            <select id="live-studio-brand-mode">
+              <option value="open_vocabulary_generative" selected>Open-Vocab LLM Generation (0 Prompt Brands)</option>
+              <option value="open_vocabulary_plus_catalog_resolver">Open-Vocab + O(1) 2,000-Brand Catalog Resolver</option>
+              <option value="closed_set_taxonomy">Closed-Set Taxonomy (&le;50 Brands Only)</option>
+            </select>
+          </label>
+
+          <label class="control-block">
+            <span>6. &gt;8 Attributes Call Mode:</span>
+            <select id="live-studio-attr-mode">
+              <option value="single_call" selected>Single VLM Call (All 12 Attributes Together)</option>
+              <option value="grouped_calls">Grouped VLM Calls (Split by Attribute Type)</option>
+            </select>
+          </label>
+
+          <label class="control-block">
+            <span>7. Hardware / Accelerator Profile:</span>
+            <select id="live-studio-accelerator">
+              <option value="none" selected>CPU Only (Cloud Run 2 vCPU / 4 GiB)</option>
+              <option value="nvidia-l4">NVIDIA L4 GPU ($0.67/hr)</option>
+              <option value="tpu-v5e">Cloud TPU v5e ($1.20/hr)</option>
+              <option value="tpu-v6e">Cloud TPU v6e Trillium ($2.70/hr)</option>
             </select>
           </label>
 
           <div class="control-block control-block-action">
             <button id="btn-execute-live-studio" class="btn-primary btn-live-execute">
-              &#9654; Run Selected Use Case Live on Vertex AI
+              &#9654; Execute Selected Approach &amp; Trace
             </button>
           </div>
         </div>

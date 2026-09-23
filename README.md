@@ -1,281 +1,133 @@
-# Unilever shelf understanding: CV and VLM benchmark suite
+# Unilever Shelf Understanding — CV & VLM Benchmark Suite on GCP
 
-## The problem
+A modular, production-ready benchmark and experimentation suite for retail shelf computer vision on Google Cloud Platform (`Vertex AI`, `Cloud Run`, `Cloud Vision`, `BigQuery`, `Cloud Storage`, and `OpenTelemetry`).
 
-Given a photograph of a retail shelf, find every product facing and identify what it is.
+---
 
-A *facing* is one front-most visible unit in one horizontal slot. Units stacked behind it are not
-facings and must not be counted twice. For each facing the suite predicts eight attributes:
+## 1. Core CV Tasks & Scope
 
-`brand`, `product_name`, `category`, `subcategory`, `variant`, `packaging_type`, `pack_type`,
-`size`
+Given shelf photographs of any resolution (from a single quickstart fixture locally to multi-image GCS buckets `gs://...` or BigQuery tables), this suite benchmarks approaches across three foundational computer-vision tasks (which power downstream capabilities such as recommendations, assortment optimization, planogram compliance, and shelf analytics):
 
-Those numbers feed two business questions: **share of shelf** (what fraction of facings are ours
-versus a competitor's) and **planogram compliance** (is the shelf built the way it was specified).
-
-Many approaches can do this: a single VLM call on the whole shelf, a detector followed by a
-per-crop classifier, class-agnostic detection plus visual embedding lookup against a reference
-catalog, a fine-tuned model, and combinations of those. This repository exists to say which one
-is better, on three axes that trade off against each other: **accuracy**, **latency** and
-**GCP cost**.
+1. **Front-Facing Spatial Detection (`detection`)**:
+   - Localize every front-most visible product unit in normalized `[ymin, xmin, ymax, xmax]` (`0..1000`) coordinates and suppress back-row depth-stacked units via geometric 1D-NMS (`deduplicate_depth_stacked_facings`).
+2. **Configurable N-Attribute Classification (`classification` — 8 Core + Unlimited Custom Attributes)**:
+   - Predict the 8 core dimensions (`category`, `subcategory`, `brand` + `is_hul_brand`, `product_name`, `variant`, `packaging_type`, `pack_type`, `size` + rule-derived size bucket) **plus any number of custom attributes (>8 attributes)** configured in `taxonomy.custom_attributes` (e.g., `price_tag_visible`, `promo_callout`, `facing_orientation`, `shelf_talker_present`).
+   - Supports **Single-Call VLM extraction** (`single_pass_full_shelf` or `configurable_multi_attribute_vlm` with `attribute_call_groups: []`) and **Grouped Multi-Call VLM extraction** (`configurable_multi_attribute_vlm` with `attribute_call_groups: [[...], [...]]`).
+3. **Hybrid SKU Matching (`matching`)**:
+   - Match detected facings against a product catalog using sparse BM25 lexical keywords + dense vector embeddings (`gemini-embedding-001` 3072-D or `multimodalembedding@001` 1408-D), or single-step end-to-end `single_step_detect_classify_and_match`.
 
 > [!IMPORTANT]
-> Ground truth annotations do not exist yet. Runs today produce predictions, latency, tokens and
-> cost, and accuracy metrics come back as `None` with
-> `accuracy_status="PLACEHOLDER_AWAITING_GROUND_TRUTH"`. `None` means "not measured". It is
-> deliberately not `0.0`, which would mean "measured, and the model got everything wrong". When
-> annotations arrive, every past run can be re-scored for free with `shelf-benchmark score`; no
-> inference is repeated.
+> **Ground-Truth Scope (Ingestion Only — We Do Not Produce Annotations):**
+> - This benchmark suite **does not author or produce ground-truth annotations**. It ingests existing ground-truth datasets provided externally (`sdk.connect_ground_truth` supporting BigQuery, GCS, CSV, JSON/JSONL, and COCO).
+> - Before ground truth is connected, accuracy metrics are reported as `None` with `accuracy_status="PLACEHOLDER_AWAITING_GROUND_TRUTH"` (never `0.0`).
+> - Every run saves `predictions.json`, so once the ground-truth dataset is connected, saved predictions can be scored or re-scored offline (`shelf-benchmark score`) with zero inference cost.
 
-## Start here
+---
 
-| If you want to | Read |
+## 2. Repository Directory Structure
+
+```text
+unilever-shelf-understanding-with-cv/
+├── README.md                              # Project overview, directory map & configuration cheat sheet
+├── ENGINEER_ONBOARDING_GUIDE.md           # Step-by-step 15-minute onboarding guide for new engineers
+├── Dockerfile                             # Container image for Cloud Run service & headless benchmark workers
+├── pyproject.toml                         # Package dependencies, pytest config & `shelf-benchmark` CLI entrypoint
+│
+├── configs/                               # YAML configuration files (zero hardcoded brands/aliases)
+│   ├── default_config.yaml                # Master config: GCP project, buckets, models, billing, hardware/TPU, OTel
+│   ├── taxonomy.yaml                      # Configurable N-attribute taxonomy (categories, sizes, custom_attributes, call groups)
+│   ├── sample_associations.json           # Sample shelf-image manifest for local quickstarts
+│   └── sample_ground_truth.json           # Canonical worked example of the ground-truth schema
+│
+├── code_samples/                          # 11 self-contained runnable scripts (see code_samples/README.md)
+│   ├── README.md                          # Cookbook & reference table for all 11 code samples
+│   ├── 01_quickstart_run_full_suite.py    # End-to-end quickstart (offline by default, `--live` for Vertex AI)
+│   ├── 02..09_*.py                        # Focused recipes: GEAP/Gemma models, SFT tuning, custom plugins, billing
+│   ├── 10_run_now_score_later_ground_truth.py       # Placeholder run -> connect ground truth -> zero-cost re-scoring
+│   └── 11_complete_engineer_approach_playground.py  # ALL-IN-ONE PLAYGROUND: custom plugin + 12 attrs + TPU/GPU + diagnostics
+│
+├── src/shelf_benchmark/                   # Core Python package
+│   ├── __init__.py                        # Public SDK exports (ShelfBenchmarkSDK, SimpleShelfApproachPlugin, etc.)
+│   ├── sdk.py                             # Developer facade (`connect_dataset`, `connect_ground_truth`, `run_suite`)
+│   ├── cli.py                             # `shelf-benchmark` CLI (`run`, `cloud-run`, `score`, `list-approaches`, `validate-gt`)
+│   ├── runner.py                          # Multi-model / multi-approach batch orchestrator
+│   ├── config.py                          # Pydantic config schemas (`TaxonomyConfig`, `CustomAttributeSpec`, `CloudRunCostConfig`)
+│   ├── models.py                          # Data contracts (`TaskExecutionResult`, `RowLevelReportItem`, execution traces)
+│   ├── testing.py                         # 1-line offline test harness (`benchmark_harness`, `run_offline_approach`)
+│   ├── telemetry.py                       # OpenTelemetry span logger (`otel_logs.jsonl` + GCP Cloud Logging exporter)
+│   ├── scoring.py                         # Zero-cost offline re-scorer (`score_predictions` from `predictions.json`)
+│   │
+│   ├── approaches/                        # Auto-discovered modular approach plugins (`approaches/*/plugin.py`)
+│   │   ├── base.py                        # `SimpleShelfApproachPlugin` (~15-line base class) & `CommonLayerContext`
+│   │   ├── registry.py                    # `GLOBAL_APPROACH_REGISTRY` eager plugin discovery
+│   │   ├── TEMPLATE_NEW_APPROACH.md       # Copy-paste guide for adding a new approach plugin folder
+│   │   ├── vlm_existing_approaches/       # 5 VLM plugins (`single_pass_full_shelf`, `configurable_multi_attribute_vlm`,
+│   │   │                                  #   `single_step_detect_classify_and_match`, `two_stage_bbox_guided_nms`, `two_stage_physical_crop_per_facing`)
+│   │   └── class_agnostic_visual_embedding/ # 2 CV/Embedding plugins (`class_agnostic_visual_embedding`, `cloud_vision_visual_embedding`)
+│   │
+│   ├── tasks/                             # Shared task implementations & geometric utilities
+│   │   ├── detection.py                   # `ProductDetectionTask` (0..1000 bounding boxes + 1D-NMS)
+│   │   ├── classification.py              # `ProductClassificationTask` (8 core + N custom attributes, 1-call or grouped)
+│   │   ├── matching.py                    # `ProductMatchingTask` (BM25 lexical + 3072-D dense hybrid search)
+│   │   ├── fine_tuning.py                 # `GeminiFineTuningTask` (Vertex AI SFT JSONL generator & job launcher)
+│   │   └── facing_utils.py                # Geometric 1D-NMS depth deduplication, PIL cropping & size-bucket rules
+│   │
+│   ├── data/                              # Universal schema-agnostic GCP dataset & ground-truth adapters
+│   │   ├── associations.py                # `connect_dataset`: BigQuery, GCS bucket discovery, CSV, JSON/JSONL + dot-paths
+│   │   ├── ground_truth.py                # `connect_ground_truth`: 6 bbox formats, 4-col CSV/BQ boxes, polygon vertices
+│   │   └── storage.py                     # GCS (`gs://`) and local file I/O manager
+│   │
+│   ├── evaluation/                        # Accuracy scoring & 5-bucket GCP cost attribution
+│   │   ├── metrics.py                     # Greedy/Hungarian IoU pairing, brand/product/SKU & `per_attribute_accuracy`
+│   │   ├── cost.py                        # Token usage extraction & per-image / per-facing cost computation
+│   │   └── gcp_billing.py                 # 5-bucket GCP cost engine (Tokens, GSU, Vision/Embed, Cloud Run/GPU/TPU, GCS/Logs)
+│   │
+│   └── reporting/                         # Artifact & report generators
+│       └── generator.py                   # Writes CSV/JSON/Markdown reports (`leaderboard.csv`, `benchmark_report.md`, `predictions.json`)
+│
+├── ui/                                    # Interactive Local Studio UI & Cloud Run HTTP Server
+│   ├── server.py                          # HTTP server (`/api/run-live`, `/api/dashboard`, `/api/hybrid-search`)
+│   └── static/                            # Interactive dashboard (`index.html`, `app.js`, `styles.css`)
+│
+├── docs/                                  # Technical specifications
+│   ├── EVALUATION_PROTOCOL.md             # Exact mathematical definitions of IoU pairing, F1, and attribute accuracy
+│   └── GROUND_TRUTH_CONTRACT.md           # Supported ground-truth formats, schema mappings & bbox coordinate conventions
+│
+├── tests/                                 # Fast offline contract & golden-scoring test suite (`52 passed` in ~2.5s)
+│   ├── conftest.py                        # Shared fixtures & temporary OTel/report directory isolation
+│   ├── test_onboarding_contracts_and_ui_trace.py # Contracts for all 7 approaches, >8 attributes, schema adapters & UI
+│   └── test_*.py                          # Golden scoring, depth deduplication, billing & ground-truth workflow tests
+│
+└── reports/                               # Default output directory for generated reports, crops & OTel logs
+```
+
+---
+
+## 3. Engineer Cheat Sheet: How to Configure & Test Everything
+
+| What You Want to Do | Command / File to Use |
 | :--- | :--- |
-| Run something in the next two minutes | [Quickstart](#quickstart-no-gcp-required), below |
-| Understand exactly what a metric means before you trust it | [`docs/EVALUATION_PROTOCOL.md`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/docs/EVALUATION_PROTOCOL.md) |
-| Produce or accept annotations | [`docs/GROUND_TRUTH_CONTRACT.md`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/docs/GROUND_TRUTH_CONTRACT.md) |
-| Add your own approach or model | [`ENGINEER_ONBOARDING_GUIDE.md`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/ENGINEER_ONBOARDING_GUIDE.md) |
-| Copy working code | [`code_samples/`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/code_samples/README.md) |
-| See every configurable knob, commented | [`configs/default_config.yaml`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/configs/default_config.yaml) |
+| **See all configurable levers in 1 file** (custom approach, >8 attributes, 1-call vs grouped VLM calls, GPU/TPU profile, diagnostics) | `.venv/bin/python code_samples/11_complete_engineer_approach_playground.py` |
+| **Test & compare ALL 7 approaches on live Cloud Run** (and write local reports + `diagnostic_trace_report.md`) | `.venv/bin/shelf-benchmark cloud-run --approaches all --model gemini-3.8-flash --image gs://unilever-shelf-understanding-shelf-images/shelf-image.png` |
+| **Test & compare ALL 7 approaches offline** (instant, zero GCP cost) | `.venv/bin/shelf-benchmark cloud-run --approaches all --offline --connect-sample-gt` |
+| **Configure Cloud Run / Vertex AI Hardware & Accelerators** (`none` CPU, `nvidia-l4` GPU, `tpu-v5e`, `tpu-v6e` Trillium TPU) | Pass `--accelerator tpu-v5e --include-infra-costs` (or set `billing.cloud_run.accelerator_type` in `configs/default_config.yaml`) |
+| **Predict >8 Attributes** (e.g., 12 attributes in 1 VLM call or split into attribute groups) | Add fields under `custom_attributes:` and `attribute_call_groups:` in [`configs/taxonomy.yaml`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/configs/taxonomy.yaml) and run `--approaches configurable_multi_attribute_vlm` |
+| **Write your own custom approach** (~15 lines) | Subclass `SimpleShelfApproachPlugin` (see [`code_samples/11_complete_engineer_approach_playground.py`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/code_samples/11_complete_engineer_approach_playground.py)) or pass `--plugin-module path/to/my_plugin.py` |
+| **Connect any GCP image dataset** (multi-image GCS bucket, BigQuery table/SQL, CSV, JSON) | Call `sdk.connect_dataset(provider_type="gcs_bucket" \| "bigquery" \| "csv" \| "json", source_uri=..., schema_mapping=...)` |
+| **Connect any provided Ground-Truth dataset** & re-score saved predictions for free | `.venv/bin/shelf-benchmark score --predictions reports/predictions.json --gt-provider json --ground-truth-uri <path_or_gs_uri>` |
+| **Launch the Interactive Local UI Studio** | `.venv/bin/python ui/server.py` (open `http://localhost:8080`) |
+| **Diagnose runs & inspect OpenTelemetry traces** | Open `reports/diagnostic_trace_report.md` or run `jq 'select(.TraceId == "<trace_id>")' reports/otel_logs.jsonl` |
 
-## Quickstart (no GCP required)
+---
 
-Everything below runs against the bundled 600x400 fixture image with no project, no credentials
-and no network.
+## 4. Built-in Approaches (`shelf-benchmark list-approaches`)
 
-```bash
-# What approaches exist, and where each one came from.
-.venv/bin/shelf-benchmark list-approaches
-
-# The full run-now-score-later workflow, end to end, with commentary.
-.venv/bin/python code_samples/10_run_now_score_later_ground_truth.py
-
-# A benchmark run: two approaches, all artifacts written to a temp directory.
-.venv/bin/python code_samples/01_quickstart_run_full_suite.py
-
-# Check an annotation file before you trust any accuracy number computed from it.
-.venv/bin/shelf-benchmark validate-gt \
-  --gt-provider json \
-  --ground-truth-uri configs/sample_ground_truth.json
-
-# The test suite.
-.venv/bin/pytest -q
-```
-
-In Python, the same thing:
-
-```python
-from shelf_benchmark import UniversalModelSpec
-from shelf_benchmark.testing import (
-    OFFLINE_IMAGE_URI, make_offline_sdk, perfect_prediction_payload,
-)
-
-sdk = make_offline_sdk("/tmp/shelf-demo")
-sdk.register_model(UniversalModelSpec(
-    model_id="offline-demo-model",
-    display_name="offline-demo-model",
-    provider_family="custom_callable",
-    custom_handler=lambda prompt, image_uri, schema: perfect_prediction_payload(),
-))
-summary = sdk.run_suite(
-    models=["offline-demo-model"],
-    tasks=["classification"],
-    approaches=["single_pass_full_shelf"],
-    shelf_image_uri=OFFLINE_IMAGE_URI,
-)
-print(summary["results"][0].accuracy.accuracy_status)
-```
-
-> [!WARNING]
-> Offline mode gates Cloud Storage, not model calls. Passing a real model id such as
-> `gemini-3.8-flash` to `run_suite` builds a real Vertex AI client and issues a billable request
-> even when `offline.enabled = True`. Register a `custom_callable` stand-in, as above, to stay
-> offline.
-
-For a live run, authenticate first (`gcloud auth application-default login`), then use a `gs://`
-image and real model ids.
-
-## The four CLI subcommands
-
-```bash
-.venv/bin/shelf-benchmark <command> [options]
-```
-
-| Command | What it does | Costs inference? |
+| Approach ID | Call Topology | Description |
 | :--- | :--- | :--- |
-| `run` | Execute the benchmark and write reports plus `predictions.json`. | yes |
-| `score` | Re-score an existing `predictions.json` against ground truth. | no |
-| `list-approaches` | Print every registered approach, built-in or plugin, with its id and source. | no |
-| `validate-gt` | Load an annotation file, report what was parsed, and print sample entries. | no |
-
-Invoking `shelf-benchmark` with no subcommand defaults to `run`, so older flag-only command lines
-still work.
-
-Common options: `--config`, `--output-dir`, `--offline`, `--isolated`, `--models`, `--tasks`,
-`--approaches`, `--image`, `--ground-truth-uri`, `--gt-provider`, `--gt-version`, `--bbox-format`,
-`--iou-threshold`.
-
-```bash
-# Run three models and two approaches on one image.
-.venv/bin/shelf-benchmark run \
-  --models gemini-3.8-flash gemini-3.7-flash \
-  --tasks detection classification \
-  --approaches single_pass_full_shelf two_stage_bbox_guided_nms \
-  --image gs://unilever-shelf-understanding-shelf-images/shelf-image.png
-
-# Months later, annotations arrive. Re-score the run you already paid for.
-.venv/bin/shelf-benchmark score \
-  --predictions reports/predictions.json \
-  --gt-provider json \
-  --ground-truth-uri gs://unilever-shelf-understanding-shelf-images/annotations_v1.json \
-  --gt-version v1
-```
-
-`--approaches` accepts any registered approach id. There is no hardcoded allowlist, so a plugin
-you add is usable from the CLI as soon as it is discovered; `list-approaches` is the source of
-truth for what is available. An unknown id fails loudly with the list of valid ids rather than
-silently running something else.
-
-## What gets measured
-
-### Accuracy
-
-Predictions are paired with annotations on **geometry only**: a global best-IoU-first greedy
-match at a configurable threshold (`evaluation.iou_threshold`, default `0.50`). Naming is then
-scored within the matched pairs, so a box in the right place with the wrong brand is a detection
-success and a classification failure, and cannot be confused for either.
-
-| Metric | Meaning |
-| :--- | :--- |
-| `detection_precision` | matched predictions / all predictions |
-| `detection_recall` | matched predictions / all annotated facings |
-| `detection_f1` | harmonic mean of the two |
-| `iou_threshold` | the threshold those three were computed at, reported alongside them |
-| `mean_iou_matched` | average IoU over matched pairs only, that is, how tight the good boxes are |
-| `count_accuracy` | predicted facing count versus annotated facing count |
-| `brand_classification_accuracy`, `product_classification_accuracy` | strict-match rates within matched pairs |
-| `brand_set_recall` | fraction of annotated brands found anywhere on the shelf |
-
-> [!NOTE]
-> These used to be called `detection_precision_iou50`, `detection_recall_iou50` and
-> `detection_f1_iou50`, and the threshold in the name was wrong: the code used `0.25`. The names
-> no longer encode a number, and the threshold is reported as data. Changing
-> `evaluation.iou_threshold` invalidates comparison with any run scored at a different value, so
-> the value is stamped on every row.
-
-### Cost
-
-Five buckets, of which two are measured and three are modelled:
-
-| Bucket | Basis | Counted in the total by default |
-| :--- | :--- | :--- |
-| `vertex_ai_payg_tokens_usd` | measured token counts x rate card | yes |
-| `vertex_ai_provisioned_throughput_usd` | reserved GSU amortised over throughput | only when provisioned throughput is enabled |
-| `vertex_ai_embeddings_and_vision_usd` | measured embedding and vision calls | yes |
-| `cloud_run_compute_usd` | modelled from latency and machine shape | no |
-| `gcs_and_observability_usd` | modelled from operation counts and log volume | no |
-
-`billing.include_infrastructure_costs` defaults to `false`, so the last two are reported but
-excluded from headline figures: a modelled number should not move a leaderboard.
-`CostMetrics.billing_source` says which rates were used, and reads `yaml_rate_table` unless live
-SKU rates were genuinely fetched and parsed.
-
-## Approaches
-
-`shelf-benchmark list-approaches` prints the live list. At the time of writing:
-
-| Approach id | Shape |
-| :--- | :--- |
-| `single_pass_full_shelf` | one VLM call classifies the whole shelf |
-| `two_stage_bbox_guided_nms` | detect boxes, then classify conditioned on them |
-| `two_stage_physical_crop_per_facing` | detect, crop each facing, classify each crop |
-| `class_agnostic_visual_embedding` | class-agnostic detection, then embedding lookup against a reference catalog |
-| `cloud_vision_visual_embedding` | the same, using Cloud Vision for the detection stage |
-
-> [!CAUTION]
-> `class_agnostic_visual_embedding` needs `embeddings.reference_catalog.source_uri` pointing at a
-> catalog JSON. Without one it reports `Unknown` with `NO_CATALOG_INDEXED` rather than inventing
-> brand names, which an earlier version did. `configs/demo_visual_prototypes.json` is a
-> demonstration catalog only and must not be used for any published comparison.
-
-## Ground truth
-
-The suite is built around running before annotations exist:
-
-1. **Run now.** Costs inference. Writes `predictions.json` alongside the reports.
-2. **Annotations arrive.** Any of `json`, `jsonl`, `csv`, `coco` or `bigquery`, with arbitrary
-   vendor field names mapped through `ground_truth.schema_mapping` and any of five bounding-box
-   conventions declared through `bbox_format`.
-3. **Verify** with `shelf-benchmark validate-gt` before trusting a single number.
-4. **Re-score** with `shelf-benchmark score`. Free, repeatable, and stamped with `gt_version` so
-   two annotation revisions can never be silently compared.
-
-`configs/sample_ground_truth.json` is the canonical worked example: one image, three front-row
-facings with all seven taxonomy dimensions populated, and one `back_row: true` unit that the
-loader excludes. [`docs/GROUND_TRUTH_CONTRACT.md`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/docs/GROUND_TRUTH_CONTRACT.md)
-specifies it field by field.
-
-## Configuration
-
-[`configs/default_config.yaml`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/configs/default_config.yaml)
-is the discoverable list of knobs, commented inline: `evaluation` (IoU threshold, matcher
-strictness, brand aliases), `ground_truth` (provider, schema mapping, all five `bbox_format`
-options), `billing` (rate cards, `include_infrastructure_costs`, provisioned throughput,
-embeddings and vision), `embeddings.reference_catalog`, `reporting` (`isolate_runs`,
-`write_predictions_file`), `offline`, and `telemetry`.
-
-The product taxonomy lives in
-[`configs/taxonomy.yaml`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/configs/taxonomy.yaml):
-categories, subcategories, packaging types, pack types, size-bucket rules, and the HUL and
-non-HUL brand lists. Every prompt, the rule-derived size bucket and the HUL brand check read from
-it, so changing a category list is a config edit and never a code edit.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    subgraph Sources["Pluggable data sources"]
-        IMG["Shelf images<br/>(GCS or local)"]
-        ASSOC["Association table<br/>(BigQuery / CSV / JSON / bucket discovery)"]
-        GT["Ground truth<br/>(json / jsonl / csv / coco / bigquery / none)"]
-        CAT["Reference catalog<br/>(embeddings.reference_catalog)"]
-    end
-
-    subgraph Approaches["Approach plugins (approaches/*/plugin.py)"]
-        A1["single_pass_full_shelf"]
-        A2["two_stage_bbox_guided_nms"]
-        A3["two_stage_physical_crop_per_facing"]
-        A4["class_agnostic_visual_embedding"]
-        A5["your approach"]
-    end
-
-    subgraph Common["Common layer (CommonLayerContext)"]
-        C1["depth deduplication"]
-        C2["size bucket rules + HUL check"]
-        C3["cost model (5 buckets)"]
-        C4["scoring (pairing + matchers)"]
-    end
-
-    subgraph Out["Outputs"]
-        P["predictions.json<br/>(re-scorable later)"]
-        R["row_level_report.csv / .json<br/>benchmark_summary.csv / .json<br/>leaderboard.csv<br/>benchmark_report.md"]
-        O["otel_logs.jsonl<br/>(spans, tokens, latency, cost)"]
-    end
-
-    IMG & ASSOC & CAT --> Approaches
-    Approaches --> Common
-    GT -.->|"when annotations exist"| C4
-    Common --> P & R & O
-    P -.->|"shelf-benchmark score"| C4
-```
-
-## Observability
-
-Every task execution creates an OpenTelemetry span and writes a structured record to
-`reports/otel_logs.jsonl` via `OpenTelemetryBenchmarkLogger`: `start_time` and `end_time`
-(ISO-8601 UTC plus `start_time_unix_nano` / `end_time_unix_nano`), `latency_ms`,
-`gen_ai.usage.input_tokens`, `gen_ai.usage.thinking_tokens`, `gen_ai.usage.output_tokens`,
-`gen_ai.usage.total_tokens`, `shelf_benchmark.cost_per_shelf_image_usd`,
-`shelf_benchmark.cost_per_product_usd`, and `TraceId` / `SpanId` / `Resource`
-(`service.name`, `cloud.account.id`, `cloud.region`). Export to Cloud Logging and GCS is
-configurable under `telemetry`, and is off in offline mode.
+| `single_pass_full_shelf` | **1 VLM Call (Detect + Classify)** | Detects front-row `[ymin, xmin, ymax, xmax]` boxes and classifies all configured attributes in 1 structured VLM call + 1D-NMS depth deduplication. |
+| `configurable_multi_attribute_vlm` | **1 Call or Grouped Multi-Call VLM (>8 Attributes)** | Extracts 8 core + $N$ `custom_attributes` in **1 VLM call** (`attribute_call_groups: []`) or **1 VLM call per attribute group** (`attribute_call_groups: [[...], [...]]`). |
+| `single_step_detect_classify_and_match` | **1 VLM Call (Detect + Classify + SKU Match)** | Performs spatial detection, N-attribute classification, and hybrid SKU catalog matching in a single pass. |
+| `two_stage_bbox_guided_nms` | **2 VLM Calls (Stage 1 Detect -> Stage 2 Classify)** | Stage 1 localizes & depth-deduplicates front-facing boxes; Stage 2 classifies the locked coordinates. |
+| `two_stage_physical_crop_per_facing` | **2 VLM Calls + PIL Cropping** | Stage 1 detects boxes; physically crops each facing into `reports/crops/` + a numbered montage; Stage 2 reads fine print on crops. |
+| `class_agnostic_visual_embedding` | **3 Stages (Detector + 1408-D Embed + ScaNN)** | Class-agnostic detection (`class='product'`) -> PIL crops -> `multimodalembedding@001` cosine search against reference catalog. |
+| `cloud_vision_visual_embedding` | **3 Stages (Cloud Vision + 1408-D Embed + ScaNN)** | Google Cloud Vision `OBJECT_LOCALIZATION` -> `multimodalembedding@001` visual crop search against reference catalog. |

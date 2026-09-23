@@ -84,7 +84,33 @@ class OpenTelemetryBenchmarkLogger:
         span_id_hex: str,
         gcp_labels: Dict[str, str],
     ) -> Optional[str]:
-        """Writes the OpenTelemetry structured entry directly to Google Cloud Logging API (`logging.googleapis.com`)."""
+        """Writes the OpenTelemetry structured entry directly to Google Cloud Logging API (`logging.googleapis.com`) and Cloud Run structured stdout."""
+        import os
+        import sys
+
+        k_service = os.environ.get("K_SERVICE", "unilever-shelf-benchmark-service")
+        k_revision = os.environ.get("K_REVISION", "")
+        k_config = os.environ.get("K_CONFIGURATION", "unilever-shelf-benchmark-service")
+        trace_path = f"projects/{self.project_id}/traces/{trace_id_hex}"
+
+        if os.environ.get("K_SERVICE"):
+            cloud_run_stdout_entry = {
+                "severity": otel_record.get("SeverityText", "INFO"),
+                "message": (
+                    f"[OTel Benchmark] approach={otel_record.get('Attributes', {}).get('shelf_benchmark.separation_approach')} "
+                    f"model={otel_record.get('Attributes', {}).get('gen_ai.request.model')} "
+                    f"facings={otel_record.get('Attributes', {}).get('shelf_benchmark.product_count')} "
+                    f"latency_ms={otel_record.get('Attributes', {}).get('latency_ms')} "
+                    f"cost_usd=${otel_record.get('Attributes', {}).get('shelf_benchmark.cost_per_shelf_image_usd')} "
+                    f"trace_id={trace_id_hex}"
+                ),
+                "logging.googleapis.com/trace": trace_path,
+                "logging.googleapis.com/spanId": span_id_hex,
+                "logging.googleapis.com/labels": {str(k): str(v) for k, v in (gcp_labels or {}).items()},
+                "otel_span": otel_record,
+            }
+            print(json.dumps(cloud_run_stdout_entry), file=sys.stdout, flush=True)
+
         if not getattr(self.config, "export_to_gcp_cloud_logging", True):
             return None
         try:
@@ -103,17 +129,30 @@ class OpenTelemetryBenchmarkLogger:
                 return None
 
             log_name = f"projects/{self.project_id}/logs/{getattr(self.config, 'gcp_log_name', 'unilever-shelf-benchmark-otel')}"
-            payload = {
-                "logName": log_name,
-                "resource": {
+            if k_revision:
+                resource_obj = {
+                    "type": "cloud_run_revision",
+                    "labels": {
+                        "project_id": self.project_id,
+                        "service_name": k_service,
+                        "revision_name": k_revision,
+                        "configuration_name": k_config,
+                        "location": "us-central1",
+                    },
+                }
+            else:
+                resource_obj = {
                     "type": "global",
                     "labels": {"project_id": self.project_id},
-                },
+                }
+            payload = {
+                "logName": log_name,
+                "resource": resource_obj,
                 "labels": {str(k): str(v) for k, v in (gcp_labels or {}).items()},
                 "entries": [
                     {
                         "severity": otel_record.get("SeverityText", "INFO"),
-                        "trace": f"projects/{self.project_id}/traces/{trace_id_hex}",
+                        "trace": trace_path,
                         "spanId": span_id_hex,
                         "jsonPayload": otel_record,
                     }

@@ -193,27 +193,34 @@ def _run_offline(tmp_path, label, payload):
 # ---------------------------------------------------------------------------
 
 def test_strict_brand_matcher_is_not_substring_based():
-    """'Dove' must not match 'Dover Soap'. Substring containment used to make it match."""
+    """'Brand_A' must not match 'Brand_Ar Soap'. Substring containment used to make it match."""
     cfg = EvaluationConfig(brand_matcher="strict")
-    assert brands_match("Dove", "Dove", cfg) is True
-    assert brands_match("Dove", "Dover Soap", cfg) is False
+    assert brands_match("Brand_A", "Brand_A", cfg) is True
+    assert brands_match("Brand_A", "Brand_Ar Soap", cfg) is False
 
 
 def test_brand_aliases_fold_known_renames():
-    """Curated aliases are explicit data, not inferred similarity."""
-    cfg = EvaluationConfig(brand_matcher="strict")
-    assert brands_match("Fair and Lovely", "Glow and Lovely", cfg) is True
-    assert brands_match("Pond's", "Ponds", cfg) is True
+    """Apostrophes/accents normalize generically with zero hardcoded aliases; optional aliases fold explicit renames."""
+    default_cfg = EvaluationConfig(brand_matcher="strict")
+    assert default_cfg.brand_aliases == {}
+    assert brands_match("Brand's", "Brands", default_cfg) is True
+    assert brands_match("CaféBrand", "CafeBrand", default_cfg) is True
+
+    alias_cfg = EvaluationConfig(
+        brand_matcher="strict",
+        brand_aliases={"legacy brand": "modern brand"},
+    )
+    assert brands_match("Legacy Brand", "Modern Brand", alias_cfg) is True
 
 
 def test_strict_product_matcher_rejects_unrelated_products():
     """The old keyword-group matcher treated any two 'green' products as the same product."""
     cfg = EvaluationConfig(product_matcher="strict")
     assert products_match(
-        "Himalaya Purifying Neem Face Wash", "", "Himalaya Purifying Neem Face Wash", cfg
+        "Brand_B Purifying Neem Face Wash", "", "Brand_B Purifying Neem Face Wash", cfg
     ) is True
     assert products_match(
-        "Himalaya Cucumber Face Wash", "", "Himalaya Kiwi Face Wash", cfg
+        "Brand_B Cucumber Face Wash", "", "Brand_B Kiwi Face Wash", cfg
     ) is False
 
 

@@ -24,6 +24,36 @@ HUL_PORTFOLIO_BRANDS = {
 }
 
 
+def _norm_brand_key(value: str) -> str:
+    lowered = (value or "").lower()
+    no_possessive = re.sub(r"['’`]s\b", "", lowered)
+    cleaned = re.sub(r"['’`]", "", no_possessive)
+    return re.sub(r"[^a-z0-9]+", " ", cleaned).strip()
+
+
+def resolve_brand_against_catalog(
+    generated_brand: str,
+    taxonomy: Optional[TaxonomyConfig] = None,
+) -> str:
+    """Resolve an LLM-generated open-vocabulary brand string against an optional master brand catalog (scales to 2,000+ brands in O(1))."""
+    raw = (generated_brand or "").strip()
+    if not raw or taxonomy is None:
+        return raw
+    all_catalog_brands = list(taxonomy.hul_brands or []) + list(taxonomy.non_hul_brands or [])
+    if not all_catalog_brands:
+        return raw
+    norm_raw = _norm_brand_key(raw)
+    if not norm_raw:
+        return raw
+    exact_map = {_norm_brand_key(b): b for b in all_catalog_brands if _norm_brand_key(b)}
+    if norm_raw in exact_map:
+        return exact_map[norm_raw]
+    for norm_cat, canonical in exact_map.items():
+        if norm_cat and (norm_cat in norm_raw or norm_raw in norm_cat):
+            return canonical
+    return raw
+
+
 def check_is_hul_brand(
     brand_name: str,
     taxonomy: Optional[TaxonomyConfig] = None,
@@ -34,18 +64,18 @@ def check_is_hul_brand(
     - If the user has explicitly configured `hul_brands` (or `non_hul_brands`) in `TaxonomyConfig`, those lists take precedence.
     - Otherwise (when `hul_brands` is empty `[]` by default), relies on `model_predicted` (`is_hul_brand` returned by the VLM or Catalog join).
     """
-    norm = re.sub(r"[^a-z0-9\s&']", "", (brand_name or "").lower()).strip()
+    norm = _norm_brand_key(brand_name)
     if not norm:
         return False
 
     if taxonomy is not None and taxonomy.non_hul_brands:
-        non_hul_set = {re.sub(r"[^a-z0-9\s&']", "", b.lower()).strip() for b in taxonomy.non_hul_brands}
-        if any(nh in norm or norm in nh for nh in non_hul_set if nh):
+        non_hul_set = {_norm_brand_key(b) for b in taxonomy.non_hul_brands if _norm_brand_key(b)}
+        if norm in non_hul_set or any(nh in norm or norm in nh for nh in non_hul_set):
             return False
 
     if taxonomy is not None and taxonomy.hul_brands:
-        hul_set = {re.sub(r"[^a-z0-9\s&']", "", b.lower()).strip() for b in taxonomy.hul_brands}
-        return any(h in norm or norm in h for h in hul_set if h)
+        hul_set = {_norm_brand_key(b) for b in taxonomy.hul_brands if _norm_brand_key(b)}
+        return norm in hul_set or any(h in norm or norm in h for h in hul_set)
 
     if model_predicted is not None:
         return bool(model_predicted)
@@ -208,9 +238,10 @@ def crop_detected_facings(
     detected_items: List[Dict[str, Any]],
     output_crop_dir: str | Path = "reports/crops",
     model_tag: str = "model",
+    local_fallback: Optional[str] = None,
 ) -> Tuple[List[str], bytes]:
     """Physically separate/crop each detected front-facing bounding box into individual image files and a numbered montage strip."""
-    img = load_pil_image(storage, shelf_image_uri)
+    img = load_pil_image(storage, shelf_image_uri, local_fallback=local_fallback)
     width, height = img.size
     crop_dir = Path(output_crop_dir) / model_tag.replace("/", "_")
     crop_dir.mkdir(parents=True, exist_ok=True)

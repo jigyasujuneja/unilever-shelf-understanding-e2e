@@ -241,125 +241,19 @@ def register_approach_function(
                 gt_record: Optional[ImageGroundTruth] = None,
                 prior_detection: Optional[TaskExecutionResult] = None,
             ) -> TaskExecutionResult:
-                run_id = f"custom-{approach_id}-{model_name}"
                 start_dt = ctx.telemetry.now_utc()
                 raw_outputs = func(ctx, model_name, record.shelf_image_uri)
                 end_dt = ctx.telemetry.now_utc()
-                latency_ms = max(0.1, round((end_dt - start_dt).total_seconds() * 1000.0, 3))
-
-                all_bboxes = [item.get("bbox_2d", [0, 0, 0, 0]) for item in raw_outputs]
-                total_in = sum(int(item.get("_input_tokens", 180)) for item in raw_outputs) or 350
-                total_think = sum(int(item.get("_thinking_tokens", 0)) for item in raw_outputs)
-                total_out = sum(int(item.get("_output_tokens", 90)) for item in raw_outputs) or 160
-
-                tokens = TokenUsageMetrics(
-                    input_tokens=total_in,
-                    thinking_tokens=total_think,
-                    output_tokens=total_out,
-                    total_tokens=total_in + total_think + total_out,
-                )
-                cost = ctx.compute_cost(tokens, model_name, max(len(raw_outputs), 1), approach_id=approach_id)
-                per_facing_cost = round(
-                    cost.cost_per_shelf_image_usd / max(len(raw_outputs), 1), 8
-                )
-                depth_filtered = int(raw_outputs[0].get("_depth_filtered", 0)) if raw_outputs else 0
-
-                row_items: List[RowLevelReportItem] = []
-                for idx, item in enumerate(raw_outputs, start=1):
-                    bbox = item.get("bbox_2d", [500, 100, 800, 200])
-                    brand = str(item.get("brand", "Unknown"))
-                    pkg = str(item.get("packaging_type", "box"))
-                    size_hint = str(item.get("size", ""))
-                    is_hul = item.get(
-                        "is_hul_brand",
-                        check_is_hul_brand(brand, taxonomy=ctx.config.taxonomy),
-                    )
-                    rule_size = derive_size_bucket_from_bbox(
-                        bbox,
-                        all_bboxes,
-                        packaging_type=pkg,
-                        model_size_hint=size_hint,
-                        taxonomy=ctx.config.taxonomy,
-                    )
-                    row_items.append(
-                        RowLevelReportItem(
-                            run_id=run_id,
-                            trace_id="",
-                            span_id="",
-                            start_time=ctx.telemetry.format_iso(start_dt),
-                            end_time=ctx.telemetry.format_iso(end_dt),
-                            image_latency_ms=latency_ms,
-                            task_type="classification",
-                            separation_approach=approach_id,
-                            model_name=model_name,
-                            shelf_image_uri=record.shelf_image_uri,
-                            store_id=record.store_id,
-                            product_index=idx,
-                            predicted_category=str(item.get("category", "Personal Care")),
-                            predicted_subcategory=str(item.get("subcategory", "General")),
-                            predicted_brand=brand,
-                            is_hul_brand=bool(is_hul),
-                            predicted_product_name=str(item.get("product_name", f"{brand} Product")),
-                            predicted_variant=str(item.get("variant", "Standard")),
-                            predicted_packaging=pkg,
-                            predicted_pack_type=str(item.get("pack_type", "Single")),
-                            predicted_size=size_hint,
-                            rule_derived_size_bucket=rule_size,
-                            matched_sku_id=item.get("matched_sku_id"),
-                            bbox_ymin=int(bbox[0]),
-                            bbox_xmin=int(bbox[1]),
-                            bbox_ymax=int(bbox[2]),
-                            bbox_xmax=int(bbox[3]),
-                            shelf_row=str(item.get("shelf_row", "middle")),
-                            position_on_shelf=idx,
-                            is_front_facing=True,
-                            confidence=float(item.get("confidence", 0.95)),
-                            latency_ms=round(latency_ms / max(len(raw_outputs), 1), 2),
-                            input_tokens=tokens.input_tokens // max(len(raw_outputs), 1),
-                            thinking_tokens=tokens.thinking_tokens // max(len(raw_outputs), 1),
-                            output_tokens=tokens.output_tokens // max(len(raw_outputs), 1),
-                            cost_per_product_usd=per_facing_cost,
-                            cost_per_shelf_image_usd=cost.cost_per_shelf_image_usd,
-                        )
-                    )
-
-                accuracy = ctx.evaluate_accuracy(
-                    task_type="classification",
-                    rows=row_items,
-                    gt_record=gt_record,
-                    depth_duplicates_filtered=depth_filtered,
-                )
-                trace_id, span_id, _ = ctx.telemetry.log_task_execution(
-                    run_id=run_id,
-                    task_type="classification",
+                return ctx.finalize(
+                    approach_id=approach_id,
                     model_name=model_name,
-                    shelf_image_uri=record.shelf_image_uri,
+                    record=record,
+                    raw_outputs=raw_outputs,
                     start_dt=start_dt,
                     end_dt=end_dt,
-                    tokens=tokens,
-                    cost=cost,
-                    accuracy=accuracy,
-                    extra_attributes={"shelf_benchmark.separation_approach": approach_id},
-                )
-                for r in row_items:
-                    r.trace_id = trace_id
-                    r.span_id = span_id
-
-                return TaskExecutionResult(
-                    run_id=run_id,
-                    trace_id=trace_id,
-                    span_id=span_id,
-                    task_type="classification",
-                    separation_approach=approach_id,
-                    model_name=model_name,
-                    shelf_image_uri=record.shelf_image_uri,
-                    start_time=ctx.telemetry.format_iso(start_dt),
-                    end_time=ctx.telemetry.format_iso(end_dt),
-                    latency_ms=latency_ms,
-                    tokens=tokens,
-                    cost=cost,
-                    accuracy=accuracy,
-                    row_level_items=row_items,
+                    gt_record=gt_record,
+                    run_id=f"custom-{approach_id}-{model_name}",
+                    stages_description=_stages,
                 )
 
         plugin_instance = FunctionApproachPlugin()
@@ -433,6 +327,7 @@ class ShelfBenchmarkSDK:
         # a custom registration at import time can hide them.
         GLOBAL_APPROACH_REGISTRY.ensure_discovered()
 
+        self._dataset_records: Optional[List[ShelfAssociationRecord]] = None
         self._model_specs: Dict[str, UniversalModelSpec] = {}
         for alias, ep_cfg in self.config.model_endpoints.items():
             self._model_specs[alias] = UniversalModelSpec(
@@ -443,6 +338,55 @@ class ShelfBenchmarkSDK:
                 api_version=ep_cfg.api_version,
                 location=ep_cfg.location,
             )
+
+    def connect_dataset(
+        self,
+        provider_type: Literal["default", "json", "csv", "bigquery", "gcs_bucket"] = "json",
+        source_uri: Optional[str] = None,
+        schema_mapping: Optional[Dict[str, str]] = None,
+        shelf_images_bucket: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Plug in any GCP dataset or shelf image manifest at runtime regardless of table/file schema.
+
+        Supports BigQuery tables or SQL queries (`provider_type="bigquery"`), GCS image buckets
+        (`provider_type="gcs_bucket"`), CSV files (`provider_type="csv"`), and JSON/JSONL manifests
+        (`provider_type="json"`), including nested dot-paths (e.g. `metadata.store_id`) and
+        automatic resolution of relative image filenames against `shelf_images_bucket`.
+        """
+        from shelf_benchmark.data.associations import create_association_provider
+
+        self.config.associations.provider_type = provider_type
+        self.config.associations.source_uri = source_uri
+        if shelf_images_bucket is not None:
+            self.config.buckets.shelf_images_bucket = shelf_images_bucket
+        if schema_mapping:
+            unknown = [
+                k for k in schema_mapping
+                if not hasattr(self.config.associations.schema_mapping, k)
+            ]
+            if unknown:
+                valid = sorted(type(self.config.associations.schema_mapping).model_fields)
+                raise ValueError(
+                    f"Unknown dataset schema_mapping key(s): {unknown}. Valid keys: {valid}"
+                )
+            for k, v in schema_mapping.items():
+                setattr(self.config.associations.schema_mapping, k, v)
+
+        assoc_provider = create_association_provider(
+            assoc_config=self.config.associations,
+            bucket_config=self.config.buckets,
+            storage_manager=self.storage,
+            project_id=self.config.gcp.project_id,
+        )
+        records = assoc_provider.load_associations()
+        self._dataset_records = records
+        return {
+            "provider_type": provider_type,
+            "source_uri": source_uri or self.config.buckets.shelf_images_bucket,
+            "records_loaded": len(records),
+            "records": records,
+            "image_uris": [r.shelf_image_uri for r in records],
+        }
 
     def connect_ground_truth(
         self,
@@ -489,8 +433,14 @@ class ShelfBenchmarkSDK:
         if strict is not None:
             self.config.ground_truth.strict = strict
         if schema_mapping:
+            normalized_mapping: Dict[str, str] = {}
+            for k, v in schema_mapping.items():
+                if k in ("image_uri_field", "shelf_image_uri_field"):
+                    normalized_mapping["image_key_field"] = v
+                else:
+                    normalized_mapping[k] = v
             unknown = [
-                k for k in schema_mapping
+                k for k in normalized_mapping
                 if not hasattr(self.config.ground_truth.schema_mapping, k)
             ]
             if unknown:
@@ -500,7 +450,7 @@ class ShelfBenchmarkSDK:
                     f"A typo here used to be ignored, leaving the default field name in place and "
                     f"producing empty ground truth. Valid keys: {valid}"
                 )
-            for k, v in schema_mapping.items():
+            for k, v in normalized_mapping.items():
                 setattr(self.config.ground_truth.schema_mapping, k, v)
 
         self.gt_provider = create_ground_truth_provider(
@@ -514,13 +464,43 @@ class ShelfBenchmarkSDK:
         logger.info("Ground truth connected: %s", stats["summary"])
         return stats
 
-    def register_model(self, spec: UniversalModelSpec) -> None:
-        """Register a GEAP model, Gemma model, Fine-Tuned endpoint, or custom model with optional pricing."""
+    def register_model(
+        self,
+        spec: UniversalModelSpec | str,
+        *,
+        custom_handler: Optional[Callable[[str, str, Optional[Any]], Dict[str, Any]]] = None,
+        provider_family: Optional[ModelProviderFamily] = None,
+        display_name: Optional[str] = None,
+        pricing: Optional[ModelPricing] = None,
+        endpoint_uri: Optional[str] = None,
+        api_version: Optional[str] = None,
+        location: Optional[str] = None,
+    ) -> UniversalModelSpec:
+        """Register a GEAP model, Gemma model, Fine-Tuned endpoint, or custom model with optional pricing.
+
+        Accepts either a `UniversalModelSpec` instance or a string `model_id` with keyword arguments:
+            sdk.register_model("my-model", custom_handler=lambda p, uri, schema: sample_shelf_payload())
+        """
+        if isinstance(spec, str):
+            fam: ModelProviderFamily = provider_family or (
+                "custom_callable" if custom_handler is not None else "vertex_gemini"
+            )
+            spec = UniversalModelSpec(
+                model_id=spec,
+                display_name=display_name or spec,
+                provider_family=fam,
+                custom_handler=custom_handler,
+                pricing=pricing,
+                endpoint_uri=endpoint_uri,
+                api_version=api_version,
+                location=location,
+            )
         self._model_specs[spec.effective_name] = spec
         if spec.pricing is not None:
             self.config.pricing_per_million_tokens[spec.effective_name] = spec.pricing
         if spec.effective_name not in self.config.models:
             self.config.models.append(spec.effective_name)
+        return spec
 
     def swap_models(self, models: Sequence[str | UniversalModelSpec]) -> List[str]:
         """Plug-and-play helper to swap the active benchmark models in one call (accepts model IDs, endpoint URIs, or UniversalModelSpec objects)."""
@@ -537,29 +517,39 @@ class ShelfBenchmarkSDK:
     def _get_client_for_model(self, model_name: str) -> Optional[Any]:
         spec = self._model_specs.get(model_name)
         if spec is None:
-            lower = model_name.lower()
-            # Auto-detect Fine-Tuned Vertex AI Endpoints (`projects/.../locations/.../endpoints/...`)
-            if model_name.startswith("projects/") and "/endpoints/" in model_name:
+            if self.config.offline.enabled:
+                from shelf_benchmark.testing import offline_universal_payload_handler
+
                 spec = UniversalModelSpec(
                     model_id=model_name,
-                    provider_family="vertex_tuned_endpoint",
-                    endpoint_uri=model_name,
-                )
-            # Auto-detect Gemma / PaliGemma models
-            elif "gemma" in lower:
-                spec = UniversalModelSpec(
-                    model_id=model_name,
-                    provider_family="vertex_gemma",
-                )
-            # Auto-detect GEAP / Early-Access / Experimental / Preview models
-            elif any(tag in lower for tag in ("geap", "exp", "preview")):
-                spec = UniversalModelSpec(
-                    model_id=model_name,
-                    provider_family="vertex_geap",
-                    api_version="v1beta1",
+                    display_name=model_name,
+                    provider_family="custom_callable",
+                    custom_handler=offline_universal_payload_handler,
                 )
             else:
-                return None
+                lower = model_name.lower()
+                # Auto-detect Fine-Tuned Vertex AI Endpoints (`projects/.../locations/.../endpoints/...`)
+                if model_name.startswith("projects/") and "/endpoints/" in model_name:
+                    spec = UniversalModelSpec(
+                        model_id=model_name,
+                        provider_family="vertex_tuned_endpoint",
+                        endpoint_uri=model_name,
+                    )
+                # Auto-detect Gemma / PaliGemma models
+                elif "gemma" in lower:
+                    spec = UniversalModelSpec(
+                        model_id=model_name,
+                        provider_family="vertex_gemma",
+                    )
+                # Auto-detect GEAP / Early-Access / Experimental / Preview models
+                elif any(tag in lower for tag in ("geap", "exp", "preview")):
+                    spec = UniversalModelSpec(
+                        model_id=model_name,
+                        provider_family="vertex_geap",
+                        api_version="v1beta1",
+                    )
+                else:
+                    return None
 
         return UniversalGenAIClientAdapter(
             spec=spec,
@@ -623,110 +613,140 @@ class ShelfBenchmarkSDK:
         models: Optional[Sequence[str]] = None,
         tasks: Optional[Sequence[str]] = None,
         approaches: Optional[Sequence[str]] = None,
-        shelf_image_uri: str = "gs://unilever-shelf-understanding-shelf-images/shelf-image.png",
+        shelf_image_uri: Optional[str] = None,
+        shelf_image_uris: Optional[Sequence[str]] = None,
         ground_truth: Optional[ImageGroundTruth] = None,
         ground_truth_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run the benchmark suite across the requested models, tasks, and approaches with full OpenTelemetry logging and Ground Truth evaluation."""
+        """Run the benchmark suite across the requested models, tasks, approaches, and shelf images with full OpenTelemetry logging and Ground Truth evaluation."""
         selected_models = list(models) if models is not None else list(self.config.models)
         selected_tasks = list(tasks) if tasks is not None else list(self.config.tasks)
         selected_approaches = list(approaches) if approaches is not None else list(self.config.approaches)
-        record = ShelfAssociationRecord(
-            association_id="sdk-run-001",
-            shelf_image_uri=shelf_image_uri,
-            store_id="store-sdk",
-            ground_truth_id=ground_truth_id or Path(shelf_image_uri).name,
-        )
-        gt_record = ground_truth or self.gt_provider.get_ground_truth(
-            shelf_image_uri=shelf_image_uri,
-            ground_truth_id=record.ground_truth_id,
-        )
+
+        if shelf_image_uris:
+            target_records = [
+                ShelfAssociationRecord(
+                    association_id=f"sdk-run-{idx:03d}",
+                    shelf_image_uri=uri,
+                    store_id="store-sdk",
+                    ground_truth_id=ground_truth_id or Path(uri).name,
+                )
+                for idx, uri in enumerate(shelf_image_uris, start=1)
+            ]
+        elif shelf_image_uri is not None:
+            target_records = [
+                ShelfAssociationRecord(
+                    association_id="sdk-run-001",
+                    shelf_image_uri=shelf_image_uri,
+                    store_id="store-sdk",
+                    ground_truth_id=ground_truth_id or Path(shelf_image_uri).name,
+                )
+            ]
+        elif self._dataset_records:
+            target_records = list(self._dataset_records)
+        else:
+            default_uri = f"{self.config.buckets.shelf_images_bucket.rstrip('/')}/shelf-image.png"
+            target_records = [
+                ShelfAssociationRecord(
+                    association_id="sdk-run-001",
+                    shelf_image_uri=default_uri,
+                    store_id="store-sdk",
+                    ground_truth_id=ground_truth_id or Path(default_uri).name,
+                )
+            ]
 
         results: List[TaskExecutionResult] = []
-        ctx = CommonLayerContext(
-            config=self.config,
-            storage=self.storage,
-            telemetry=self.telemetry,
-            reports_dir=Path(self.config.reporting.output_dir),
-        )
 
-        for model_name in selected_models:
-            custom_client = self._get_client_for_model(model_name)
+        for record in target_records:
+            current_uri = record.shelf_image_uri
+            gt_record = ground_truth or self.gt_provider.get_ground_truth(
+                shelf_image_uri=current_uri,
+                ground_truth_id=record.ground_truth_id,
+            )
 
-            if "detection" in selected_tasks:
-                det_task = ProductDetectionTask(
-                    self.config, self.storage, self.telemetry, genai_client=custom_client
-                )
-                results.append(
-                    det_task.execute(
-                        model_name=model_name,
-                        shelf_image_uri=shelf_image_uri,
-                        ground_truth=gt_record,
-                    )
+            for model_name in selected_models:
+                custom_client = self._get_client_for_model(model_name)
+                ctx = CommonLayerContext(
+                    config=self.config,
+                    storage=self.storage,
+                    telemetry=self.telemetry,
+                    reports_dir=Path(self.config.reporting.output_dir),
+                    genai_client=custom_client,
                 )
 
-            if "classification" in selected_tasks:
-                for app_id in selected_approaches:
-                    # `require` raises with the list of valid ids rather than silently running a
-                    # different pipeline under the requested label.
-                    plugin = (
-                        None
-                        if app_id in BUILTIN_VLM_CLASSIFICATION_APPROACHES
-                        else GLOBAL_APPROACH_REGISTRY.require(app_id)
+                if "detection" in selected_tasks:
+                    det_task = ProductDetectionTask(
+                        self.config, self.storage, self.telemetry, genai_client=custom_client
                     )
-                    use_builtin_task = plugin is None or (
-                        custom_client is not None and app_id in BUILTIN_VLM_CLASSIFICATION_APPROACHES
-                    )
-                    if use_builtin_task:
-                        cls_task = ProductClassificationTask(
-                            self.config, self.storage, self.telemetry, genai_client=custom_client
+                    results.append(
+                        det_task.execute(
+                            model_name=model_name,
+                            shelf_image_uri=current_uri,
+                            ground_truth=gt_record,
                         )
-                        results.append(
-                            cls_task.execute(
-                                model_name=model_name,
-                                shelf_image_uri=shelf_image_uri,
-                                separation_approach=app_id,
-                                ground_truth=gt_record,
+                    )
+
+                if "classification" in selected_tasks:
+                    for app_id in selected_approaches:
+                        plugin = (
+                            None
+                            if app_id in BUILTIN_VLM_CLASSIFICATION_APPROACHES
+                            else GLOBAL_APPROACH_REGISTRY.require(app_id)
+                        )
+                        use_builtin_task = plugin is None or (
+                            custom_client is not None and app_id in BUILTIN_VLM_CLASSIFICATION_APPROACHES
+                        )
+                        if use_builtin_task:
+                            cls_task = ProductClassificationTask(
+                                self.config, self.storage, self.telemetry, genai_client=custom_client
                             )
-                        )
-                    else:
-                        results.append(
-                            plugin.execute(
-                                ctx=ctx,
-                                model_name=model_name,
-                                record=record,
-                                gt_record=gt_record,
+                            results.append(
+                                cls_task.execute(
+                                    model_name=model_name,
+                                    shelf_image_uri=current_uri,
+                                    separation_approach=app_id,
+                                    ground_truth=gt_record,
+                                )
                             )
+                        else:
+                            results.append(
+                                plugin.execute(
+                                    ctx=ctx,
+                                    model_name=model_name,
+                                    record=record,
+                                    gt_record=gt_record,
+                                )
+                            )
+
+                if "matching" in selected_tasks:
+                    mat_task = ProductMatchingTask(
+                        self.config, self.storage, self.telemetry, genai_client=custom_client
+                    )
+                    results.append(
+                        mat_task.execute(
+                            model_name=model_name,
+                            shelf_image_uri=current_uri,
+                            ground_truth=gt_record,
                         )
-
-            if "matching" in selected_tasks:
-                mat_task = ProductMatchingTask(
-                    self.config, self.storage, self.telemetry, genai_client=custom_client
-                )
-                results.append(
-                    mat_task.execute(
-                        model_name=model_name,
-                        shelf_image_uri=shelf_image_uri,
-                        ground_truth=gt_record,
                     )
-                )
 
-            if "fine_tuning" in selected_tasks:
-                ft_task = GeminiFineTuningTask(
-                    self.config, self.storage, self.telemetry, genai_client=custom_client
-                )
-                results.append(
-                    ft_task.execute(
-                        model_name=model_name,
-                        shelf_image_uri=shelf_image_uri,
-                        ground_truth=gt_record,
+                if "fine_tuning" in selected_tasks:
+                    ft_task = GeminiFineTuningTask(
+                        self.config, self.storage, self.telemetry, genai_client=custom_client
                     )
-                )
+                    results.append(
+                        ft_task.execute(
+                            model_name=model_name,
+                            shelf_image_uri=current_uri,
+                            ground_truth=gt_record,
+                        )
+                    )
 
         artifact_paths = self.report_generator.generate_all_reports(results)
         return {
             "results": results,
             "artifacts": artifact_paths,
             "reports": artifact_paths,
+            "report_paths": artifact_paths,
             "otel_log_path": self.config.telemetry.otel_log_path,
         }

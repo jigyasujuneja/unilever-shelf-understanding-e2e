@@ -17,8 +17,10 @@ buckets:
   planograms_bucket: null  # Optional: set to gs://... when planograms bucket is available
   artifacts_bucket: "gs://unilever-shelf-understanding-shelf-images"
 
-# Active models to benchmark (supports standard Gemini, GEAP preview models, Gemma, or Tuned Endpoint URIs)
+# Active models to benchmark (Gemini 3 series only — legacy Gemini 2.5/2.0/1.x models are prohibited)
 models:
+  - "gemini-3-flash-preview"
+  - "gemini-3.1-pro-preview"
   - "gemini-3.8-flash"
   - "gemini-3.7-flash"
   - "gemini-3.5-flash-lite"
@@ -27,7 +29,7 @@ models:
 model_endpoints:
   geap-gemini-preview-example:
     provider_family: "vertex_geap"
-    model_id: "gemini-3.8-flash"
+    model_id: "gemini-3-flash-preview"
     api_version: "v1beta1"
     location: "global"
   gemma-3-27b-it-example:
@@ -128,10 +130,9 @@ billing:
   attach_gcp_billing_labels: true
   billing_label_prefix: "unilever_shelf"
 
-  # When false (the default), modelled infrastructure costs are still computed and
-  # reported in their own fields but are NOT added to the headline total. Turn this on
-  # only when you want a fully-loaded estimate and understand that it is an estimate.
-  include_infrastructure_costs: false
+  # Enabled by default so granular compute (vCPU + RAM + GPU/TPU) and observability costs
+  # are always calculated and included in cost/latency tradeoff comparisons.
+  include_infrastructure_costs: true
 
   # Rates used for the modelled infrastructure buckets above.
   gcs_and_logging_overhead_per_image_usd: 0.000015
@@ -146,7 +147,10 @@ billing:
   embeddings_and_vision:
     enabled: true
     default_per_facing_usd: 0.000025
-    per_approach_per_facing_usd: {}          # e.g. {class_agnostic_visual_embedding: 0.000025}
+    per_approach_per_facing_usd:
+      two_stage_physical_crop_per_facing: 0.000125
+      class_agnostic_visual_embedding: 0.000125
+      cloud_vision_visual_embedding: 0.000125
     per_task_per_facing_usd: {}              # e.g. {matching: 0.00001}
 
   # Vertex AI Provisioned Throughput (GSU — Generative AI Scale Units).
@@ -174,8 +178,20 @@ billing:
     memory_gib_per_second_usd: 0.00000250    # Official Cloud Run Tier-1 GiB-second rate
     per_million_requests_usd: 0.40           # Official Cloud Run per-million requests rate
 
-# Token Pricing Table (USD per 1 Million Tokens — used as cache/fallback alongside live Cloud Billing Catalog API)
+# Token Pricing Table (USD per 1 Million Tokens — Gemini 3 series only; Gemini 2.5 is never used)
 pricing_per_million_tokens:
+  gemini-3-flash-preview:
+    input: 0.30
+    thinking: 0.30
+    output: 2.50
+  gemini-3.1-pro-preview:
+    input: 1.25
+    thinking: 1.25
+    output: 10.00
+  gemini-3.0-flash:
+    input: 0.30
+    thinking: 0.30
+    output: 2.50
   gemini-3.8-flash:
     input: 0.30
     thinking: 0.30
@@ -188,18 +204,6 @@ pricing_per_million_tokens:
     input: 0.10
     thinking: 0.10
     output: 0.40
-  gemini-2.5-flash:
-    input: 0.30
-    thinking: 0.30
-    output: 2.50
-  gemini-2.5-flash-lite:
-    input: 0.10
-    thinking: 0.10
-    output: 0.40
-  gemini-2.5-pro:
-    input: 1.25
-    thinking: 1.25
-    output: 10.00
   gemma-3-27b-it:
     input: 0.08
     thinking: 0.00
@@ -265,14 +269,15 @@ ground_truth:
     occluded_field: "occluded"
     # How to read the four numbers in `bbox_field`. Options:
     #   ymin_xmin_ymax_xmax_1000  Gemini convention, normalized to 0-1000 (default)
-    #   xmin_ymin_xmax_ymax_px    Absolute pixels
-    #   xmin_ymin_xmax_ymax_norm  Normalized to 0-1
     #   coco_xywh_px              COCO: [x, y, width, height] in absolute pixels
+    #   xyxy_px                   [xmin, ymin, xmax, ymax] in absolute pixels
+    #   xyxy_norm                 [xmin, ymin, xmax, ymax] normalized to 0-1
+    #   yxyx_norm                 [ymin, xmin, ymax, xmax] normalized to 0-1
     #   yolo_xywh_norm            YOLO: [x_center, y_center, width, height] normalized to 0-1
     bbox_format: "ymin_xmin_ymax_xmax_1000"
     image_width_field: "image_width"
     image_height_field: "image_height"
-    default_image_width: null    # Required for pixel/COCO/YOLO formats if the file omits per-image dims
+    default_image_width: null    # Required for pixel/COCO formats if the file omits per-image dims
     default_image_height: null
 
 # =============================================================================
@@ -285,11 +290,11 @@ evaluation:
   iou_threshold: 0.50            # A prediction is a true positive at or above this IoU
   pairing_strategy: "iou_greedy" # Global best-IoU-first greedy matching; order independent
   require_iou_for_pairing: true  # Pair on geometry ONLY, so localization and naming score independently
-  brand_matcher: "strict"        # "strict" | "alias" | "normalized"
-  product_matcher: "strict"      # "strict" | "token_overlap"
+  brand_matcher: "strict"        # "strict" | "fuzzy"
+  product_matcher: "strict"      # "strict" | "token_overlap" | "fuzzy_demo"
   product_token_overlap_threshold: 0.80   # Only used when product_matcher is "token_overlap"
-  brand_aliases: {}              # Curated, explicit table. e.g. {"ponds": "Pond's"}
-  product_stopwords: []          # e.g. ["pack", "ml", "g"]
+  brand_aliases: {}              # Optional brand-rename map (empty by default; apostrophe/accent normalization is automatic)
+  product_stopwords: []          # Optional stopwords for token_overlap matcher
 
 # OpenTelemetry Logging & Tracing Configuration (Exports locally + GCP Cloud Logging + GCS)
 telemetry:

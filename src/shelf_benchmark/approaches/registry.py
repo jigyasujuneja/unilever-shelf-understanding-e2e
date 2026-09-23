@@ -37,6 +37,8 @@ TOLERANT_PLUGINS_ENV = "SHELF_BENCH_TOLERANT_PLUGINS"
 BUILTIN_VLM_CLASSIFICATION_APPROACHES = frozenset(
     {
         "single_pass_full_shelf",
+        "open_vocab_brand_plus_catalog_resolver",
+        "configurable_multi_attribute_vlm",
         "two_stage_bbox_guided_nms",
         "two_stage_physical_crop_per_facing",
     }

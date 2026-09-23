@@ -15,7 +15,8 @@ import csv
 import io
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 from shelf_benchmark.auth import create_bigquery_client
 from shelf_benchmark.config import AssociationConfig, AssociationSchemaMapping, BucketConfig
@@ -23,31 +24,88 @@ from shelf_benchmark.data.storage import StorageManager
 from shelf_benchmark.models import ShelfAssociationRecord
 
 
-class BaseAssociationProvider(ABC):
-    """Abstract interface for loading Shelf <-> Catalog <-> Planogram associations."""
+def _extract_nested(row: Dict[str, Any], field_spec: str, *fallbacks: str) -> Any:
+    """Extract a field from a flat or nested dict (supports dot-paths like 'metadata.store_id' and fallback aliases)."""
+    for candidate in (field_spec, *fallbacks):
+        if not candidate:
+            continue
+        if candidate in row and row[candidate] is not None and row[candidate] != "":
+            return row[candidate]
+        if "." in candidate:
+            cur: Any = row
+            for part in candidate.split("."):
+                if isinstance(cur, dict) and part in cur:
+                    cur = cur[part]
+                else:
+                    cur = None
+                    break
+            if cur is not None and cur != "":
+                return cur
+    return None
 
-    def __init__(self, schema_mapping: AssociationSchemaMapping):
+
+class BaseAssociationProvider(ABC):
+    """Abstract interface for loading Shelf <-> Catalog <-> Planogram associations across any table/file schema."""
+
+    def __init__(
+        self,
+        schema_mapping: AssociationSchemaMapping,
+        default_shelf_bucket: Optional[str] = None,
+    ):
         self.mapping = schema_mapping
+        self.default_shelf_bucket = default_shelf_bucket
 
     def map_raw_row(self, row: Dict[str, Any], index: int = 1) -> ShelfAssociationRecord:
-        """Map an arbitrary row dictionary into a canonical ShelfAssociationRecord."""
+        """Map an arbitrary row dictionary (BigQuery, CSV, JSON, AutoML manifest) into a canonical ShelfAssociationRecord."""
         m = self.mapping
-        assoc_id = str(row.get(m.association_id_field) or row.get("id") or f"assoc-{index:04d}")
-        shelf_uri = str(
-            row.get(m.shelf_image_uri_field)
-            or row.get("image_uri")
-            or row.get("shelf_uri")
-            or ""
+        assoc_id = str(
+            _extract_nested(row, m.association_id_field, "association_id", "id", "record_id", "session_id")
+            or f"assoc-{index:04d}"
         )
+        raw_uri = str(
+            _extract_nested(
+                row,
+                m.shelf_image_uri_field,
+                "shelf_image_uri",
+                "image_uri",
+                "gcs_uri",
+                "image_gcs_uri",
+                "file_uri",
+                "photo_url",
+                "image_path",
+                "blob_name",
+                "file_name",
+            )
+            or ""
+        ).strip()
+
+        local_path = _extract_nested(row, "local_shelf_image_path", "local_path")
+        if (
+            raw_uri
+            and not raw_uri.startswith(("gs://", "http://", "https://", "/"))
+            and self.default_shelf_bucket
+            and not (local_path or Path(raw_uri).exists())
+        ):
+            shelf_uri = f"{self.default_shelf_bucket.rstrip('/')}/{raw_uri.lstrip('/')}"
+        else:
+            shelf_uri = raw_uri
+
+        store_id = _extract_nested(row, m.store_id_field, "store_id", "store_code", "outlet_id", "metadata.store_id")
+        catalog_uri = _extract_nested(row, m.catalog_uri_field, "catalog_uri", "catalog_gcs_uri")
+        planogram_uri = _extract_nested(row, m.planogram_uri_field, "planogram_uri", "planogram_gcs_uri")
+        gt_id = _extract_nested(row, m.ground_truth_id_field, "ground_truth_id", "image_id") or (
+            shelf_uri.split("/")[-1] if shelf_uri else f"img-{index:04d}"
+        )
+
         return ShelfAssociationRecord(
             association_id=assoc_id,
             shelf_image_uri=shelf_uri,
-            local_shelf_image_path=row.get("local_shelf_image_path"),
-            store_id=row.get(m.store_id_field),
-            aisle_category=row.get("aisle_category"),
-            catalog_uri=row.get(m.catalog_uri_field),
-            planogram_uri=row.get(m.planogram_uri_field),
-            ground_truth_id=row.get(m.ground_truth_id_field) or shelf_uri.split("/")[-1],
+            local_shelf_image_path=str(local_path) if local_path else None,
+            store_id=str(store_id) if store_id is not None else None,
+            aisle_category=_extract_nested(row, "aisle_category", "category", "department"),
+            catalog_uri=str(catalog_uri) if catalog_uri else None,
+            planogram_uri=str(planogram_uri) if planogram_uri else None,
+            ground_truth_id=str(gt_id),
             metadata={
                 k: v
                 for k, v in row.items()
@@ -69,10 +127,16 @@ class BaseAssociationProvider(ABC):
 
 
 class JSONAssociationProvider(BaseAssociationProvider):
-    """Loads associations from a JSON array or JSONL file (local or `gs://`)."""
+    """Loads associations from a JSON array, `{records/images: [...]}` object, or JSONL file (local or `gs://`)."""
 
-    def __init__(self, source_uri: str, storage_manager: StorageManager, schema_mapping: AssociationSchemaMapping):
-        super().__init__(schema_mapping)
+    def __init__(
+        self,
+        source_uri: str,
+        storage_manager: StorageManager,
+        schema_mapping: AssociationSchemaMapping,
+        default_shelf_bucket: Optional[str] = None,
+    ):
+        super().__init__(schema_mapping, default_shelf_bucket=default_shelf_bucket)
         self.source_uri = source_uri
         self.storage = storage_manager
 
@@ -82,6 +146,15 @@ class JSONAssociationProvider(BaseAssociationProvider):
             return []
         if text.startswith("["):
             rows = json.loads(text)
+        elif text.startswith("{") and "\n" not in text:
+            parsed = json.loads(text)
+            rows = (
+                parsed.get("records")
+                or parsed.get("associations")
+                or parsed.get("images")
+                or parsed.get("items")
+                or ([parsed] if isinstance(parsed, dict) else [])
+            )
         else:
             rows = [json.loads(line) for line in text.splitlines() if line.strip()]
         return [self.map_raw_row(r, i + 1) for i, r in enumerate(rows)]
@@ -90,8 +163,14 @@ class JSONAssociationProvider(BaseAssociationProvider):
 class CSVAssociationProvider(BaseAssociationProvider):
     """Loads associations from a CSV file (local or `gs://`)."""
 
-    def __init__(self, source_uri: str, storage_manager: StorageManager, schema_mapping: AssociationSchemaMapping):
-        super().__init__(schema_mapping)
+    def __init__(
+        self,
+        source_uri: str,
+        storage_manager: StorageManager,
+        schema_mapping: AssociationSchemaMapping,
+        default_shelf_bucket: Optional[str] = None,
+    ):
+        super().__init__(schema_mapping, default_shelf_bucket=default_shelf_bucket)
         self.source_uri = source_uri
         self.storage = storage_manager
 
@@ -104,8 +183,14 @@ class CSVAssociationProvider(BaseAssociationProvider):
 class BigQueryAssociationProvider(BaseAssociationProvider):
     """Loads associations from a BigQuery table or SQL query (`project.dataset.table` or `SELECT ...`)."""
 
-    def __init__(self, project_id: str, table_or_query: str, schema_mapping: AssociationSchemaMapping):
-        super().__init__(schema_mapping)
+    def __init__(
+        self,
+        project_id: str,
+        table_or_query: str,
+        schema_mapping: AssociationSchemaMapping,
+        default_shelf_bucket: Optional[str] = None,
+    ):
+        super().__init__(schema_mapping, default_shelf_bucket=default_shelf_bucket)
         self.project_id = project_id
         self.table_or_query = table_or_query
 
@@ -124,7 +209,7 @@ class BucketDiscoveryAssociationProvider(BaseAssociationProvider):
     """Fallback provider when no association table exists yet: discovers images in `shelf_images_bucket`."""
 
     def __init__(self, bucket_config: BucketConfig, storage_manager: StorageManager, schema_mapping: AssociationSchemaMapping):
-        super().__init__(schema_mapping)
+        super().__init__(schema_mapping, default_shelf_bucket=bucket_config.shelf_images_bucket)
         self.buckets = bucket_config
         self.storage = storage_manager
 
@@ -173,10 +258,26 @@ def create_association_provider(
 ) -> BaseAssociationProvider:
     """Factory to build the configured association provider."""
     ptype = assoc_config.provider_type.lower()
+    default_bucket = bucket_config.shelf_images_bucket
     if ptype in ("json", "jsonl") and assoc_config.source_uri:
-        return JSONAssociationProvider(assoc_config.source_uri, storage_manager, assoc_config.schema_mapping)
+        return JSONAssociationProvider(
+            assoc_config.source_uri,
+            storage_manager,
+            assoc_config.schema_mapping,
+            default_shelf_bucket=default_bucket,
+        )
     if ptype == "csv" and assoc_config.source_uri:
-        return CSVAssociationProvider(assoc_config.source_uri, storage_manager, assoc_config.schema_mapping)
+        return CSVAssociationProvider(
+            assoc_config.source_uri,
+            storage_manager,
+            assoc_config.schema_mapping,
+            default_shelf_bucket=default_bucket,
+        )
     if ptype in ("bigquery", "bq") and assoc_config.source_uri:
-        return BigQueryAssociationProvider(project_id, assoc_config.source_uri, assoc_config.schema_mapping)
+        return BigQueryAssociationProvider(
+            project_id,
+            assoc_config.source_uri,
+            assoc_config.schema_mapping,
+            default_shelf_bucket=default_bucket,
+        )
     return BucketDiscoveryAssociationProvider(bucket_config, storage_manager, assoc_config.schema_mapping)

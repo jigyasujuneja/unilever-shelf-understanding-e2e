@@ -24,11 +24,12 @@ from shelf_benchmark.telemetry import OpenTelemetryBenchmarkLogger
 class BenchmarkRunner:
     """High-level runner for the Shelf Understanding Benchmark Suite."""
 
-    def __init__(self, config: Optional[BenchmarkConfig] = None):
+    def __init__(self, config: Optional[BenchmarkConfig] = None, genai_client: Optional[object] = None):
         self.config = config or BenchmarkConfig()
         self.storage = StorageManager(
             project_id=self.config.gcp.project_id,
             bucket_config=self.config.buckets,
+            offline=self.config.offline.enabled,
         )
         self.telemetry = OpenTelemetryBenchmarkLogger(
             config=self.config.telemetry,
@@ -47,14 +48,35 @@ class BenchmarkRunner:
             storage_manager=self.storage,
             project_id=self.config.gcp.project_id,
         )
-        # `from_config` (rather than hand-passing a subset of fields) so that reporting settings
-        # such as isolate_runs and write_predictions_file cannot be silently dropped.
         self.report_generator = BenchmarkReportGenerator.from_config(self.config)
 
-        self.detection_task = ProductDetectionTask(self.config, self.storage, self.telemetry)
-        self.classification_task = ProductClassificationTask(self.config, self.storage, self.telemetry)
-        self.matching_task = ProductMatchingTask(self.config, self.storage, self.telemetry)
-        self.fine_tuning_task = GeminiFineTuningTask(self.config, self.storage, self.telemetry)
+        if genai_client is None and self.config.offline.enabled:
+            from shelf_benchmark.sdk import UniversalGenAIClientAdapter, UniversalModelSpec
+            from shelf_benchmark.testing import offline_universal_payload_handler
+
+            genai_client = UniversalGenAIClientAdapter(
+                spec=UniversalModelSpec(
+                    model_id="offline-runner-model",
+                    provider_family="custom_callable",
+                    custom_handler=offline_universal_payload_handler,
+                ),
+                default_project=self.config.gcp.project_id,
+                default_location=self.config.gcp.location,
+            )
+        self._genai_client = genai_client
+
+        self.detection_task = ProductDetectionTask(
+            self.config, self.storage, self.telemetry, genai_client=self._genai_client  # type: ignore[arg-type]
+        )
+        self.classification_task = ProductClassificationTask(
+            self.config, self.storage, self.telemetry, genai_client=self._genai_client  # type: ignore[arg-type]
+        )
+        self.matching_task = ProductMatchingTask(
+            self.config, self.storage, self.telemetry, genai_client=self._genai_client  # type: ignore[arg-type]
+        )
+        self.fine_tuning_task = GeminiFineTuningTask(
+            self.config, self.storage, self.telemetry, genai_client=self._genai_client  # type: ignore[arg-type]
+        )
 
     def resolve_records(
         self,
@@ -79,23 +101,34 @@ class BenchmarkRunner:
                     ground_truth_id=Path(shelf_image_uri).name,
                 )
             ]
-        return self.association_provider.load_associations()
+        records = self.association_provider.load_associations()
+        if self.config.offline.enabled:
+            from shelf_benchmark.testing import OFFLINE_IMAGE_URI
+
+            for rec in records:
+                if rec.shelf_image_uri.startswith("gs://"):
+                    if rec.local_shelf_image_path and Path(rec.local_shelf_image_path).exists():
+                        rec.shelf_image_uri = str(Path(rec.local_shelf_image_path).resolve())
+                    else:
+                        rec.shelf_image_uri = OFFLINE_IMAGE_URI
+        return records
 
     def run_benchmark(
         self,
         tasks: Sequence[str] = ("detection", "classification", "matching", "fine_tuning"),
         models: Optional[Sequence[str]] = None,
-        classification_approaches: Sequence[str] = (
-            "single_pass_full_shelf",
-            "two_stage_bbox_guided_nms",
-            "two_stage_physical_crop_per_facing",
-        ),
+        classification_approaches: Optional[Sequence[str]] = None,
         shelf_image_uri: Optional[str] = None,
         upload_to_gcs: bool = False,
         submit_live_tuning_job: bool = False,
     ) -> Dict[str, object]:
         """Run the specified tasks and bounding-box separation approaches across all target models and inputs."""
         active_models = list(models) if models else list(self.config.models)
+        active_approaches = (
+            list(classification_approaches)
+            if classification_approaches is not None
+            else list(self.config.approaches)
+        )
         records = self.resolve_records(shelf_image_uri=shelf_image_uri, upload_to_gcs=upload_to_gcs)
         batch_id = uuid.uuid4().hex[:6]
 
@@ -136,8 +169,9 @@ class BenchmarkRunner:
                             storage=self.storage,
                             telemetry=self.telemetry,
                             reports_dir=Path(self.config.reporting.output_dir),
+                            genai_client=self._genai_client,
                         )
-                        for approach in classification_approaches:
+                        for approach in active_approaches:
                             run_id = f"{batch_id}-cls-{approach[:9]}-{model_name.split('-')[-1]}"
                             print(
                                 f"[BenchmarkRunner] task='classification' approach='{approach}' model='{model_name}' ..."
@@ -199,6 +233,8 @@ class BenchmarkRunner:
         return {
             "results": results,
             "report_paths": report_paths,
+            "artifacts": report_paths,
+            "reports": report_paths,
             "otel_log_path": str(self.telemetry.log_path),
         }
 

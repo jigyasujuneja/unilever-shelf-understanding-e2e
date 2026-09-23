@@ -41,6 +41,9 @@ __all__ = [
     "ReplayGenAIClient",
     "offline_config",
     "make_offline_sdk",
+    "benchmark_harness",
+    "run_offline_approach",
+    "offline_universal_payload_handler",
     "sample_shelf_payload",
     "sample_ground_truth",
     "sample_predictions",
@@ -250,18 +253,18 @@ def sample_ground_truth(image_key: str = OFFLINE_IMAGE_URI) -> ImageGroundTruth:
         source_key=image_key,
         gt_version="offline-fixture-v1",
         total_main_shelf_facings=3,
-        expected_brands=["Pond's", "Himalaya", "Lakme"],
+        expected_brands=["Brand_A", "Brand_B", "Brand_C"],
         items=[
             GroundTruthProductItem(
-                item_id=1, brand="Pond's", product_name="Pond's Bright Beauty Face Wash",
+                item_id=1, brand="Brand_A", product_name="Brand_A Radiance Daily Cleanser",
                 sku_id="SKU-001", bbox_2d=[100, 100, 300, 200], shelf_row="top",
             ),
             GroundTruthProductItem(
-                item_id=2, brand="Himalaya", product_name="Himalaya Neem Face Wash",
+                item_id=2, brand="Brand_B", product_name="Brand_B Herbal Purifying Cleanser",
                 sku_id="SKU-002", bbox_2d=[100, 220, 300, 320], shelf_row="top",
             ),
             GroundTruthProductItem(
-                item_id=3, brand="Lakme", product_name="Lakme Blush and Glow Face Wash",
+                item_id=3, brand="Brand_C", product_name="Brand_C Vitamin Gel Cleanser",
                 sku_id="SKU-003", bbox_2d=[400, 100, 600, 200], shelf_row="middle",
             ),
         ],
@@ -279,11 +282,11 @@ def perfect_prediction_payload() -> Dict[str, Any]:
     """
     return {
         "total_classified_products": 3,
-        "distinct_brands_found": ["Pond's", "Himalaya", "Lakme"],
+        "distinct_brands_found": ["Brand_A", "Brand_B", "Brand_C"],
         "classified_products": [
             {
-                "product_index": 1, "brand": "Pond's",
-                "product_name": "Pond's Bright Beauty Face Wash",
+                "product_index": 1, "brand": "Brand_A",
+                "product_name": "Brand_A Radiance Daily Cleanser",
                 "category": "Skin Cleansing", "subcategory": "Face Wash",
                 "variant": "Bright Beauty", "packaging_type": "tube", "pack_type": "Single",
                 "is_hul_brand": True,
@@ -291,8 +294,8 @@ def perfect_prediction_payload() -> Dict[str, Any]:
                 "shelf_row": "top", "position_on_shelf": 1, "confidence": 0.95,
             },
             {
-                "product_index": 2, "brand": "Himalaya",
-                "product_name": "Himalaya Neem Face Wash",
+                "product_index": 2, "brand": "Brand_B",
+                "product_name": "Brand_B Herbal Purifying Cleanser",
                 "category": "Skin Cleansing", "subcategory": "Face Wash",
                 "variant": "Purifying Neem", "packaging_type": "tube", "pack_type": "Single",
                 "is_hul_brand": False,
@@ -300,8 +303,8 @@ def perfect_prediction_payload() -> Dict[str, Any]:
                 "shelf_row": "top", "position_on_shelf": 2, "confidence": 0.93,
             },
             {
-                "product_index": 3, "brand": "Lakme",
-                "product_name": "Lakme Blush and Glow Face Wash",
+                "product_index": 3, "brand": "Brand_C",
+                "product_name": "Brand_C Vitamin Gel Cleanser",
                 "category": "Skin Cleansing", "subcategory": "Face Wash",
                 "variant": "Blush and Glow", "packaging_type": "tube", "pack_type": "Single",
                 "is_hul_brand": True,
@@ -322,6 +325,191 @@ def sample_predictions() -> List[Dict[str, Any]]:
     return perfect_prediction_payload()["classified_products"]
 
 
+def offline_universal_payload_handler(
+    prompt: str, image_uri: str, response_schema: Any = None
+) -> Dict[str, Any]:
+    """Universal multi-stage offline handler that serves detection, class-agnostic detection, matching, or classification payloads."""
+    schema_name = getattr(response_schema, "__name__", "")
+    if schema_name == "ProductDetectionOutput":
+        return {
+            "total_detected_products": 3,
+            "detected_products": [
+                {
+                    "product_index": 1,
+                    "bbox_2d": [100, 100, 300, 200],
+                    "shelf_row": "top",
+                    "position_on_shelf": 1,
+                    "is_front_facing": True,
+                    "preliminary_brand_hint": "Brand_A",
+                    "visual_description": "Brand_A Radiance Daily Cleanser",
+                    "confidence": 0.95,
+                },
+                {
+                    "product_index": 2,
+                    "bbox_2d": [100, 220, 300, 320],
+                    "shelf_row": "top",
+                    "position_on_shelf": 2,
+                    "is_front_facing": True,
+                    "preliminary_brand_hint": "Brand_B",
+                    "visual_description": "Brand_B Herbal Purifying Cleanser",
+                    "confidence": 0.93,
+                },
+                {
+                    "product_index": 3,
+                    "bbox_2d": [400, 100, 600, 200],
+                    "shelf_row": "middle",
+                    "position_on_shelf": 1,
+                    "is_front_facing": True,
+                    "preliminary_brand_hint": "Brand_C",
+                    "visual_description": "Brand_C Vitamin Gel Cleanser",
+                    "confidence": 0.91,
+                },
+            ],
+        }
+    if schema_name == "ClassAgnosticDetectionResponse":
+        return {
+            "products": [
+                {"product_index": 1, "class_label": "product", "bbox_2d": [100, 100, 300, 200], "shelf_row": "top", "position_on_shelf": 1, "is_front_facing": True, "confidence": 0.95},
+                {"product_index": 2, "class_label": "product", "bbox_2d": [100, 220, 300, 320], "shelf_row": "top", "position_on_shelf": 2, "is_front_facing": True, "confidence": 0.93},
+                {"product_index": 3, "class_label": "product", "bbox_2d": [400, 100, 600, 200], "shelf_row": "middle", "position_on_shelf": 1, "is_front_facing": True, "confidence": 0.91},
+            ]
+        }
+    if schema_name == "ProductMatchingOutput":
+        return {
+            "total_matched_products": 3,
+            "matched_products": [
+                {
+                    "product_index": 1,
+                    "bbox_2d": [100, 100, 300, 200],
+                    "shelf_row": "top",
+                    "position_on_shelf": 1,
+                    "category": "Skin Cleansing",
+                    "subcategory": "Face Wash",
+                    "brand": "Brand_A",
+                    "is_hul_brand": True,
+                    "product_name": "Brand_A Radiance Daily Cleanser",
+                    "variant": "Bright Beauty",
+                    "packaging_type": "tube",
+                    "pack_type": "Single",
+                    "size": "100g",
+                    "lexical_search_keywords": ["Brand_A", "Bright Beauty", "Face Wash"],
+                    "dense_embedding_text": "Brand: Brand_A | Product: Brand_A Radiance Daily Cleanser | Size: 100g",
+                    "matched_sku_id": "SKU-001",
+                    "match_confidence": 0.95,
+                    "planogram_compliant": True,
+                },
+                {
+                    "product_index": 2,
+                    "bbox_2d": [100, 220, 300, 320],
+                    "shelf_row": "top",
+                    "position_on_shelf": 2,
+                    "category": "Skin Cleansing",
+                    "subcategory": "Face Wash",
+                    "brand": "Brand_B",
+                    "is_hul_brand": False,
+                    "product_name": "Brand_B Herbal Purifying Cleanser",
+                    "variant": "Purifying Neem",
+                    "packaging_type": "tube",
+                    "pack_type": "Single",
+                    "size": "100g",
+                    "lexical_search_keywords": ["Brand_B", "Neem", "Face Wash"],
+                    "dense_embedding_text": "Brand: Brand_B | Product: Brand_B Herbal Purifying Cleanser | Size: 100g",
+                    "matched_sku_id": "SKU-002",
+                    "match_confidence": 0.93,
+                    "planogram_compliant": True,
+                },
+                {
+                    "product_index": 3,
+                    "bbox_2d": [400, 100, 600, 200],
+                    "shelf_row": "middle",
+                    "position_on_shelf": 1,
+                    "category": "Skin Cleansing",
+                    "subcategory": "Face Wash",
+                    "brand": "Brand_C",
+                    "is_hul_brand": True,
+                    "product_name": "Brand_C Vitamin Gel Cleanser",
+                    "variant": "Blush and Glow",
+                    "packaging_type": "tube",
+                    "pack_type": "Single",
+                    "size": "100g",
+                    "lexical_search_keywords": ["Brand_C", "Blush and Glow", "Face Wash"],
+                    "dense_embedding_text": "Brand: Brand_C | Product: Brand_C Vitamin Gel Cleanser | Size: 100g",
+                    "matched_sku_id": "SKU-003",
+                    "match_confidence": 0.91,
+                    "planogram_compliant": True,
+                },
+            ],
+        }
+    return perfect_prediction_payload()
+
+
+def benchmark_harness(
+    tmp_dir: str | Path,
+    *,
+    model_id: str = "offline-demo-model",
+    payload: Optional[Dict[str, Any]] = None,
+    handler: Optional[Any] = None,
+    with_ground_truth: bool = False,
+    **config_overrides: Any,
+):
+    """One-call offline test harness that returns a pre-configured `ShelfBenchmarkSDK` with a stub model registered.
+
+    Example:
+        sdk = benchmark_harness(tmp_path, with_ground_truth=True)
+        summary = sdk.run_suite(approaches=["single_pass_full_shelf"], tasks=["classification"])
+    """
+    from shelf_benchmark.config import ModelPricing
+
+    sdk = make_offline_sdk(tmp_dir, **config_overrides)
+    effective_handler = handler or (
+        (lambda prompt, uri, schema: payload)
+        if payload is not None
+        else offline_universal_payload_handler
+    )
+    sdk.register_model(
+        model_id,
+        custom_handler=effective_handler,
+        pricing=ModelPricing(input=0.30, thinking=0.30, output=2.50),
+    )
+    sdk.swap_models([model_id])
+    if with_ground_truth:
+        gt_file = write_sample_ground_truth_file(Path(tmp_dir) / "sample_gt.json")
+        sdk.connect_ground_truth(
+            provider_type="json",
+            source_uri=str(gt_file),
+            gt_version="offline-fixture-v1",
+        )
+    return sdk
+
+
+def run_offline_approach(
+    tmp_dir: str | Path,
+    approach_id: str = "single_pass_full_shelf",
+    *,
+    model_id: str = "offline-demo-model",
+    payload: Optional[Dict[str, Any]] = None,
+    handler: Optional[Any] = None,
+    ground_truth: Optional[ImageGroundTruth] = None,
+    with_ground_truth: bool = False,
+):
+    """Run a single approach offline in one function call and return its `TaskExecutionResult`."""
+    sdk = benchmark_harness(
+        tmp_dir,
+        model_id=model_id,
+        payload=payload,
+        handler=handler,
+        with_ground_truth=with_ground_truth,
+    )
+    summary = sdk.run_suite(
+        models=[model_id],
+        tasks=["classification"],
+        approaches=[approach_id],
+        shelf_image_uri=OFFLINE_IMAGE_URI,
+        ground_truth=ground_truth,
+    )
+    return summary["results"][0]
+
+
 def write_sample_ground_truth_file(path: str | Path, image_key: Optional[str] = None) -> Path:
     """Write the fixture ground truth to `path` in the suite-native JSON schema.
 
@@ -330,26 +518,30 @@ def write_sample_ground_truth_file(path: str | Path, image_key: Optional[str] = 
     scores. Use it to sanity-check your pipeline before the real annotations land.
     """
     gt = sample_ground_truth(image_key or OFFLINE_IMAGE_URI)
+    image_entry = {
+        "image_id": gt.image_id,
+        "gt_version": gt.gt_version,
+        "total_main_shelf_facings": gt.total_main_shelf_facings,
+        "expected_brands": list(gt.expected_brands),
+        "items": [
+            {
+                "item_id": it.item_id,
+                "brand": it.brand,
+                "product_name": it.product_name,
+                "sku_id": it.sku_id,
+                "bbox_2d": list(it.bbox_2d),
+                "shelf_row": it.shelf_row,
+                "back_row": it.back_row,
+                "occluded": it.occluded,
+            }
+            for it in gt.items
+        ],
+    }
     payload = {
-        gt.image_id: {
-            "image_id": gt.image_id,
-            "gt_version": gt.gt_version,
-            "total_main_shelf_facings": gt.total_main_shelf_facings,
-            "expected_brands": list(gt.expected_brands),
-            "items": [
-                {
-                    "item_id": it.item_id,
-                    "brand": it.brand,
-                    "product_name": it.product_name,
-                    "sku_id": it.sku_id,
-                    "bbox_2d": list(it.bbox_2d),
-                    "shelf_row": it.shelf_row,
-                    "back_row": it.back_row,
-                    "occluded": it.occluded,
-                }
-                for it in gt.items
-            ],
-        }
+        "gt_version": gt.gt_version,
+        "bbox_format": "ymin_xmin_ymax_xmax_1000",
+        "images": {gt.image_id: image_entry},
+        gt.image_id: image_entry,
     }
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)

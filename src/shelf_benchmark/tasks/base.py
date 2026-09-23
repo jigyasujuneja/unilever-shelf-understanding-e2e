@@ -101,6 +101,14 @@ class BaseBenchmarkTask(ABC):
         active_run_id = run_id or f"run-{uuid.uuid4().hex[:8]}"
         separation_approach = str(kwargs.get("separation_approach") or "single_pass_full_shelf")
 
+        from shelf_benchmark.config import normalize_vertex_gemini_model_id
+
+        # Enforce Gemini 3+ policy (raises ValueError if legacy gemini-2.5/2.0/1.x is passed)
+        live_vertex_model = normalize_vertex_gemini_model_id(
+            model_name,
+            for_live_vertex=not bool(self.config.offline.enabled),
+        )
+
         status = "SUCCESS"
         error_message: Optional[str] = None
         raw_output: Dict[str, Any] = {}
@@ -109,14 +117,16 @@ class BaseBenchmarkTask(ABC):
 
         start_dt = self.telemetry.now_utc()
         start_iso = self.telemetry.format_iso(start_dt)
+        cpu_start_sec = time.process_time()
 
         max_attempts = int(kwargs.pop("max_attempts", 3))
         for attempt in range(1, max_attempts + 1):
             start_dt = self.telemetry.now_utc()
             start_iso = self.telemetry.format_iso(start_dt)
+            cpu_start_sec = time.process_time()
             try:
                 raw_output, tokens, rows = self.invoke_model(
-                    model_name=model_name,
+                    model_name=live_vertex_model,
                     shelf_image_uri=shelf_image_uri,
                     ground_truth=ground_truth,
                     **kwargs,
@@ -144,6 +154,7 @@ class BaseBenchmarkTask(ABC):
         end_dt = self.telemetry.now_utc()
         end_iso = self.telemetry.format_iso(end_dt)
         latency_ms = round((end_dt - start_dt).total_seconds() * 1000.0, 3)
+        measured_cpu_ms = max(12.0, round((time.process_time() - cpu_start_sec) * 1000.0, 2))
 
         if rows and rows[0].separation_approach:
             separation_approach = rows[0].separation_approach
@@ -175,6 +186,7 @@ class BaseBenchmarkTask(ABC):
             project_id=self.config.gcp.project_id,
             model_name=model_name,
             gcp_labels=gcp_labels,
+            container_cpu_active_ms=measured_cpu_ms,
         )
 
         for r in rows:
@@ -234,6 +246,29 @@ class BaseBenchmarkTask(ABC):
         for r in rows:
             r.trace_id = trace_id
             r.span_id = span_id
+
+        from shelf_benchmark.models import build_execution_trace_metadata
+
+        raw_output["execution_trace"] = build_execution_trace_metadata(
+            run_id=active_run_id,
+            trace_id=trace_id,
+            span_id=span_id,
+            task_type=self.task_type,
+            separation_approach=separation_approach,
+            model_name=model_name,
+            shelf_image_uri=shelf_image_uri,
+            latency_ms=latency_ms,
+            tokens=tokens,
+            cost=cost,
+            accuracy=accuracy,
+            facings_count=len(rows),
+            otel_log_path=str(self.config.telemetry.otel_log_path),
+            gcp_project_id=self.config.gcp.project_id,
+            gcp_log_name=self.config.telemetry.gcp_log_name,
+            taxonomy_source=self.config.taxonomy.taxonomy_file,
+            ground_truth_provider=self.config.ground_truth.provider_type,
+            reference_catalog_uri=self.config.embeddings.reference_catalog.source_uri,
+        )
 
         return TaskExecutionResult(
             run_id=active_run_id,

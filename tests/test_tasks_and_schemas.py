@@ -53,7 +53,7 @@ def test_facing_depth_deduplication_and_size_rules():
     large_bucket = derive_size_bucket_from_bbox([530, 386, 795, 440], all_boxes, "tube", "")
     assert "Small" in small_bucket
     assert "Large" in large_bucket
-    assert check_is_hul_brand("Pond's", model_predicted=True) is True
+    assert check_is_hul_brand("Brand_A", model_predicted=True) is True
     assert check_is_hul_brand("CompetitorBrand", model_predicted=False) is False
 
 
@@ -125,7 +125,7 @@ def test_separated_tasks_and_7_dimension_hul_schema(tmp_path: Path):
     cls_client = FakeGenAIClient(
         {
             "total_classified_products": 1,
-            "distinct_brands_found": ["Pond's"],
+            "distinct_brands_found": ["Brand_A"],
             "classified_products": [
                 {
                     "product_index": 1,
@@ -134,13 +134,13 @@ def test_separated_tasks_and_7_dimension_hul_schema(tmp_path: Path):
                     "position_on_shelf": 1,
                     "category": "Skin Care",
                     "subcategory": "Face Wash",
-                    "brand": "Pond's",
+                    "brand": "Brand_A",
                     "is_hul_brand": True,
                     "variant": "Bright Miracle Detox Activated Charcoal",
                     "packaging_type": "tube",
                     "pack_type": "Single",
                     "size": "100g",
-                    "product_name": "Pond's Bright Miracle Detox Facewash",
+                    "product_name": "Brand_A Bright Miracle Detox Facewash",
                     "confidence": 0.99,
                 }
             ],
@@ -156,7 +156,7 @@ def test_separated_tasks_and_7_dimension_hul_schema(tmp_path: Path):
     item = cls_res.row_level_items[0]
     assert item.predicted_category == "Skin Care"
     assert item.predicted_subcategory == "Face Wash"
-    assert item.predicted_brand == "Pond's"
+    assert item.predicted_brand == "Brand_A"
     assert item.is_hul_brand is True
     assert item.predicted_packaging == "tube"
     assert item.predicted_pack_type == "Single"

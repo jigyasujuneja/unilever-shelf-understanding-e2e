@@ -12,9 +12,9 @@ That file describes four annotated units on one shelf image: three front-row fac
 
 The predictions below are deliberately imperfect so the scores are worth reading:
 
-  facing 1  Dove      box exactly right, labels exactly right
-  facing 2  Pond's    box shifted right by 10/1000 of the image width, labels right
-  facing 3  Vaseline  box exactly right, brand wrong ("Nivea")
+  facing 1  Brand_A      box exactly right, labels exactly right
+  facing 2  Brand_A    box shifted right by 10/1000 of the image width, labels right
+  facing 3  Vaseline  box exactly right, brand wrong ("Brand_D")
 
 Expected result: detection precision, recall and F1 all 1.0 (three predictions, three matches),
 while brand accuracy is 2/3. That separation is the point of the pairing algorithm: boxes are
@@ -54,8 +54,8 @@ def run_engineer_demo_approach(
     raw_candidates = [
         {
             "bbox_2d": [125, 83, 625, 250],
-            "brand": "Dove",
-            "product_name": "Dove Deeply Nourishing Body Wash",
+            "brand": "Brand_A",
+            "product_name": "Brand_A Deeply Nourishing Body Wash",
             "category": "Personal Care",
             "subcategory": "Skin Cleansing",
             "variant": "Deeply Nourishing",
@@ -72,8 +72,8 @@ def run_engineer_demo_approach(
         {
             # Same product, box 10 units to the right. IoU 0.887, so still a match at 0.50.
             "bbox_2d": [125, 393, 625, 560],
-            "brand": "Pond's",
-            "product_name": "Pond's Bright Beauty Face Cream",
+            "brand": "Brand_A",
+            "product_name": "Brand_A Bright Beauty Face Cream",
             "category": "Personal Care",
             "subcategory": "Skin Care",
             "variant": "Bright Beauty",
@@ -87,8 +87,8 @@ def run_engineer_demo_approach(
         {
             # Box perfect, brand wrong. Counts as a detection true positive and a brand error.
             "bbox_2d": [125, 683, 625, 850],
-            "brand": "Nivea",
-            "product_name": "Nivea Body Lotion",
+            "brand": "Brand_D",
+            "product_name": "Brand_D Body Lotion",
             "category": "Personal Care",
             "subcategory": "Skin Care",
             "variant": "Intensive Care",

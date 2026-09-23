@@ -152,7 +152,7 @@ def test_coco_bbox_conversion(tmp_path):
     coco = {
         "images": [{"id": 1, "file_name": "shelf_a.png", "width": 1000, "height": 500}],
         "annotations": [{"id": 1, "image_id": 1, "category_id": 1, "bbox": [200, 100, 100, 50]}],
-        "categories": [{"id": 1, "name": "Pond's Bright Beauty"}],
+        "categories": [{"id": 1, "name": "Brand_A Bright Beauty"}],
     }
     path = tmp_path / "coco.json"
     path.write_text(json.dumps(coco), encoding="utf-8")

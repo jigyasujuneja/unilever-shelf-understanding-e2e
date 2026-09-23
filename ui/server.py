@@ -211,6 +211,69 @@ def load_dashboard_payload() -> Dict[str, Any]:
         for p in GLOBAL_APPROACH_REGISTRY.list_all()
     ]
 
+    from shelf_benchmark.models import (
+        AccuracyMetrics,
+        CostMetrics,
+        TokenUsageMetrics,
+        build_execution_trace_metadata,
+    )
+
+    summary_records_enriched = []
+    for s in summary_data.get("summary", []):
+        s_copy = dict(s)
+        if "execution_trace" not in s_copy:
+            tok = TokenUsageMetrics(
+                input_tokens=int(s.get("input_tokens", 0) or 0),
+                thinking_tokens=int(s.get("thinking_tokens", 0) or 0),
+                output_tokens=int(s.get("output_tokens", 0) or 0),
+                total_tokens=int(s.get("total_tokens", 0) or 0),
+            )
+            cst = CostMetrics(
+                vertex_ai_payg_tokens_usd=float(s.get("vertex_ai_payg_tokens_usd", 0.0) or 0.0),
+                vertex_ai_provisioned_throughput_usd=float(s.get("vertex_ai_provisioned_throughput_usd", 0.0) or 0.0),
+                vertex_ai_embeddings_and_vision_usd=float(s.get("vertex_ai_embeddings_and_vision_usd", 0.0) or 0.0),
+                cloud_run_compute_usd=float(s.get("cloud_run_compute_usd", 0.0) or 0.0),
+                gcs_and_observability_usd=float(s.get("gcs_and_observability_usd", 0.0) or 0.0),
+                cost_per_shelf_image_usd=float(s.get("cost_per_shelf_image_usd", 0.0) or 0.0),
+                cost_per_product_usd=float(s.get("cost_per_product_usd", 0.0) or 0.0),
+                billing_source=str(s.get("billing_source", "yaml_rate_table")),
+            )
+            acc = AccuracyMetrics(
+                ground_truth_available=bool(s.get("ground_truth_available", False)),
+                accuracy_status=str(s.get("accuracy_status", "PLACEHOLDER_AWAITING_GROUND_TRUTH")),
+                gt_version=str(s.get("gt_version", "unversioned")),
+                iou_threshold=float(s.get("iou_threshold", 0.50) or 0.50),
+                detection_precision=s.get("detection_precision"),
+                detection_recall=s.get("detection_recall"),
+                detection_f1=s.get("detection_f1"),
+                mean_iou_matched=s.get("mean_iou_matched"),
+                brand_classification_accuracy=s.get("brand_classification_accuracy"),
+                product_classification_accuracy=s.get("product_classification_accuracy"),
+                count_accuracy=s.get("count_accuracy"),
+                depth_duplicates_filtered=int(s.get("depth_duplicates_filtered", 0) or 0),
+            )
+            s_copy["execution_trace"] = build_execution_trace_metadata(
+                run_id=str(s.get("run_id", "")),
+                trace_id=str(s.get("trace_id", "")),
+                span_id=str(s.get("span_id", "")),
+                task_type=str(s.get("task_type", "classification")),
+                separation_approach=str(s.get("separation_approach", "single_pass_full_shelf")),
+                model_name=str(s.get("model_name", "gemini-3.8-flash")),
+                shelf_image_uri=str(s.get("shelf_image_uri", "gs://unilever-shelf-understanding-shelf-images/shelf-image.png")),
+                latency_ms=float(s.get("latency_ms", 0.0) or 0.0),
+                tokens=tok,
+                cost=cst,
+                accuracy=acc,
+                facings_count=int(s.get("front_facings_count", 0) or 0),
+                otel_log_path=str(cfg.telemetry.otel_log_path),
+                gcp_project_id=cfg.gcp.project_id,
+                gcp_log_name=cfg.telemetry.gcp_log_name,
+                taxonomy_source=cfg.taxonomy.taxonomy_file,
+                ground_truth_provider=cfg.ground_truth.provider_type,
+                reference_catalog_uri=cfg.embeddings.reference_catalog.source_uri,
+            )
+        summary_records_enriched.append(s_copy)
+
     return {
         "project_info": {
             "gcp_project_id": cfg.gcp.project_id,
@@ -226,6 +289,8 @@ def load_dashboard_payload() -> Dict[str, Any]:
             "models": cfg.models,
             "classification_approaches": classification_approaches,
             "registered_approaches": registered_plugins,
+            "otel_log_path": cfg.telemetry.otel_log_path,
+            "cloud_run_service": os.environ.get("K_SERVICE") or "local-workstation",
         },
         "taxonomy_reference": {
             "config_source": cfg.taxonomy.taxonomy_file,
@@ -240,7 +305,7 @@ def load_dashboard_payload() -> Dict[str, Any]:
         "pricing_table": {
             k: v.model_dump() for k, v in cfg.pricing_per_million_tokens.items()
         },
-        "summary": summary_data.get("summary", []),
+        "summary": summary_records_enriched,
         "rows": rows_data,
         "depth_demos": depth_demos,
         "crops_manifest": crops_manifest,
@@ -370,74 +435,207 @@ def execute_live_hybrid_search(
     }
 
 
+def collect_gcp_runtime_proof() -> Dict[str, Any]:
+    """Read live, un-mocked GCP Cloud Run runtime metadata, cgroup CPU/RAM limits, and physical GPU status."""
+    import subprocess
+    import urllib.request
+
+    k_service = os.environ.get("K_SERVICE")
+    k_revision = os.environ.get("K_REVISION")
+    k_config = os.environ.get("K_CONFIGURATION")
+    instance_id = None
+    region = None
+    if k_service:
+        for attr, path in [("instance_id", "id"), ("region", "region")]:
+            try:
+                req = urllib.request.Request(
+                    f"http://metadata.google.internal/computeMetadata/v1/instance/{path}",
+                    headers={"Metadata-Flavor": "Google"},
+                )
+                with urllib.request.urlopen(req, timeout=1.0) as r:
+                    val = r.read().decode("utf-8").strip()
+                    if attr == "instance_id":
+                        instance_id = val
+                    else:
+                        region = val.split("/")[-1]
+            except Exception:
+                pass
+
+    cpu_quota_vcpu: Optional[float] = None
+    try:
+        if Path("/sys/fs/cgroup/cpu.max").exists():
+            cpu_max = Path("/sys/fs/cgroup/cpu.max").read_text(encoding="utf-8").strip().split()
+            if len(cpu_max) == 2 and cpu_max[0] != "max":
+                cpu_quota_vcpu = round(float(cpu_max[0]) / float(cpu_max[1]), 2)
+        if cpu_quota_vcpu is None and Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").exists():
+            q = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read_text(encoding="utf-8").strip())
+            p = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read_text(encoding="utf-8").strip())
+            if q > 0 and p > 0:
+                cpu_quota_vcpu = round(q / p, 2)
+        if cpu_quota_vcpu is None and os.environ.get("CLOUD_RUN_VCPU"):
+            cpu_quota_vcpu = float(os.environ["CLOUD_RUN_VCPU"])
+        if cpu_quota_vcpu is None and os.cpu_count():
+            cpu_quota_vcpu = float(os.cpu_count())
+    except Exception:
+        pass
+
+    mem_limit_gib: Optional[float] = None
+    try:
+        if Path("/sys/fs/cgroup/memory.max").exists():
+            mem_max = Path("/sys/fs/cgroup/memory.max").read_text(encoding="utf-8").strip()
+            if mem_max.isdigit():
+                mem_limit_gib = round(int(mem_max) / (1024 ** 3), 2)
+        if mem_limit_gib is None and Path("/sys/fs/cgroup/memory/memory.limit_in_bytes").exists():
+            m = int(Path("/sys/fs/cgroup/memory/memory.limit_in_bytes").read_text(encoding="utf-8").strip())
+            if 0 < m < (1024 ** 4):
+                mem_limit_gib = round(m / (1024 ** 3), 2)
+        if mem_limit_gib is None and os.environ.get("CLOUD_RUN_MEMORY_GIB"):
+            mem_limit_gib = float(os.environ["CLOUD_RUN_MEMORY_GIB"])
+    except Exception:
+        pass
+
+    physical_gpu = "NONE (CPU Container)"
+    try:
+        res_gpu = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=1.5, check=False)
+        if res_gpu.returncode == 0 and res_gpu.stdout.strip():
+            physical_gpu = res_gpu.stdout.strip().splitlines()[0]
+    except Exception:
+        pass
+
+    return {
+        "running_on_cloud_run": bool(k_service),
+        "k_service": k_service or "local-process",
+        "k_revision": k_revision or "local-unversioned",
+        "k_configuration": k_config or "local",
+        "gcp_metadata_instance_id": instance_id,
+        "gcp_metadata_region": region,
+        "cgroup_cpu_limit_vcpu": cpu_quota_vcpu,
+        "cgroup_memory_limit_gib": mem_limit_gib,
+        "physical_gpu_attached": physical_gpu,
+    }
+
+
 def execute_live_benchmark_task(
     task_type: str,
     model_name: str,
     separation_approach: str = "single_pass_full_shelf",
+    mode: str = "live",
+    connect_sample_gt: bool = False,
+    brand_mode: str = "open_vocabulary_generative",
+    attribute_call_mode: str = "single_call",
+    accelerator: str = "none",
+    vcpu_count: Optional[float] = None,
+    memory_gib: Optional[float] = None,
+    concurrency: Optional[int] = None,
+    shelf_image_uri: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Directly invokes the unmodified `shelf_benchmark` task classes or `GLOBAL_APPROACH_REGISTRY` plugins against Vertex AI."""
-    from shelf_benchmark.approaches import CommonLayerContext, GLOBAL_APPROACH_REGISTRY
+    """Invokes the `shelf_benchmark` task classes or `GLOBAL_APPROACH_REGISTRY` plugins.
 
+    Supports both `mode="live"` (Vertex AI Gemini 3) and `mode="offline"`,
+    plus `connect_sample_gt=True`, `brand_mode`, `attribute_call_mode`, `vcpu_count`, `memory_gib`, and `accelerator`.
+    """
+    from shelf_benchmark.approaches import CommonLayerContext, GLOBAL_APPROACH_REGISTRY
+    from shelf_benchmark.approaches.registry import BUILTIN_VLM_CLASSIFICATION_APPROACHES
+    from shelf_benchmark.config import normalize_vertex_gemini_model_id
+    from shelf_benchmark.testing import sample_ground_truth
+
+    model_name = normalize_vertex_gemini_model_id(model_name, for_live_vertex=(str(mode).lower().strip() != "offline"))
     cfg = BenchmarkConfig.from_yaml(CONFIG_PATH)
+    cfg.billing.include_infrastructure_costs = True
+    if brand_mode:
+        cfg.taxonomy.brand_extraction_mode = str(brand_mode)
+    if attribute_call_mode == "grouped_calls":
+        cfg.taxonomy.attribute_call_groups = [
+            ["category", "subcategory", "brand", "product_name", "variant"],
+            ["packaging_type", "pack_type", "size"],
+        ]
+    if vcpu_count is not None:
+        cfg.billing.cloud_run.vcpu_count = float(vcpu_count)
+    elif os.environ.get("CLOUD_RUN_VCPU"):
+        cfg.billing.cloud_run.vcpu_count = float(os.environ["CLOUD_RUN_VCPU"])
+    if memory_gib is not None:
+        cfg.billing.cloud_run.memory_gib = float(memory_gib)
+    elif os.environ.get("CLOUD_RUN_MEMORY_GIB"):
+        cfg.billing.cloud_run.memory_gib = float(os.environ["CLOUD_RUN_MEMORY_GIB"])
+    if concurrency is not None:
+        cfg.billing.cloud_run.concurrency = int(concurrency)
+    if accelerator and accelerator != "none":
+        cfg.billing.cloud_run.accelerator_type = str(accelerator)
+        cfg.billing.cloud_run.accelerator_count = 1
+
+    is_offline = str(mode).lower().strip() == "offline"
+    if is_offline:
+        cfg.offline.enabled = True
+        cfg.telemetry.export_to_gcp_cloud_logging = False
+        cfg.telemetry.sync_otel_logs_to_gcs = False
+        cfg.reporting.sync_reports_to_gcs = False
+        cfg.billing.use_live_cloud_billing_catalog_api = False
+
     runner = BenchmarkRunner(config=cfg)
     records = runner.resolve_records()
     record = records[0]
+    if shelf_image_uri:
+        record.shelf_image_uri = str(shelf_image_uri)
+    gt_record = sample_ground_truth(record.shelf_image_uri) if connect_sample_gt else None
 
     if task_type == "detection":
         res: TaskExecutionResult = runner.detection_task.execute(
             model_name=model_name,
             shelf_image_uri=record.shelf_image_uri,
-            run_id=f"live-det-{model_name}",
+            run_id=f"{mode}-det-{model_name}",
             store_id=record.store_id,
-            ground_truth=None,
+            ground_truth=gt_record,
         )
     elif task_type == "classification":
-        plugin = GLOBAL_APPROACH_REGISTRY.get(separation_approach)
+        plugin = (
+            None
+            if separation_approach in BUILTIN_VLM_CLASSIFICATION_APPROACHES
+            else GLOBAL_APPROACH_REGISTRY.get(separation_approach)
+        )
         if plugin is not None:
             ctx = CommonLayerContext(
                 config=cfg,
                 storage=runner.storage,
                 telemetry=runner.telemetry,
                 reports_dir=REPORTS_DIR,
+                genai_client=runner._genai_client,
             )
             res = plugin.execute(
                 ctx=ctx,
                 model_name=model_name,
                 record=record,
-                gt_record=None,
+                gt_record=gt_record,
             )
         else:
             res = runner.classification_task.execute(
                 model_name=model_name,
                 shelf_image_uri=record.shelf_image_uri,
-                run_id=f"live-cls-{model_name}",
+                run_id=f"{mode}-cls-{model_name}",
                 store_id=record.store_id,
-                ground_truth=None,
+                ground_truth=gt_record,
                 separation_approach=separation_approach,
             )
     elif task_type == "matching":
         res = runner.matching_task.execute(
             model_name=model_name,
             shelf_image_uri=record.shelf_image_uri,
-            run_id=f"live-mat-{model_name}",
+            run_id=f"{mode}-mat-{model_name}",
             store_id=record.store_id,
-            ground_truth=None,
+            ground_truth=gt_record,
         )
     else:
-        raise ValueError(f"Unsupported live task_type: {task_type}")
+        raise ValueError(f"Unsupported task_type: {task_type}")
 
     dashboard = load_dashboard_payload()
-    crops_key = (
-        f"visual_embed_{model_name}"
-        if separation_approach == "class_agnostic_visual_embedding"
-        else model_name
-    )
+    crops_key = f"{model_name}_{separation_approach}".replace("/", "_")
     crops_info = dashboard.get("crops_manifest", {}).get(
         crops_key,
         dashboard.get("crops_manifest", {}).get(model_name, {}),
     )
     depth_demo = dashboard.get("depth_demos", {}).get(model_name, {})
 
+    gcp_proof = collect_gcp_runtime_proof()
+    res.execution_trace["gcp_runtime_proof"] = gcp_proof
     summary_record = {
         "run_id": res.run_id,
         "trace_id": res.trace_id,
@@ -447,6 +645,7 @@ def execute_live_benchmark_task(
         "model_name": res.model_name,
         "shelf_image_uri": res.shelf_image_uri,
         "status": res.status,
+        "execution_mode": "offline_local_fixture" if is_offline else "live_vertex_ai",
         "start_time": res.start_time,
         "end_time": res.end_time,
         "latency_ms": round(res.latency_ms, 2),
@@ -466,9 +665,6 @@ def execute_live_benchmark_task(
         "gcs_and_observability_usd": res.cost.gcs_and_observability_usd,
         "cost_per_shelf_image_usd": res.cost.cost_per_shelf_image_usd,
         "cost_per_product_usd": res.cost.cost_per_product_usd,
-        # Only meaningful when the run actually served on reserved GSUs. Reporting
-        # `0 + modelled infrastructure` here made on-demand runs look like they had a
-        # provisioned-throughput cost, so it is left null instead.
         "all_in_pt_gsu_total_usd": (
             round(
                 res.cost.vertex_ai_provisioned_throughput_usd
@@ -481,10 +677,10 @@ def execute_live_benchmark_task(
             else None
         ),
         "cloud_run_worker_service": os.environ.get("K_SERVICE") or "local (not Cloud Run)",
+        "gcp_runtime_proof": gcp_proof,
         "billing_source": res.cost.billing_source,
         "rates_from_live_catalog": res.cost.rates_from_live_catalog,
         "includes_modelled_infrastructure": res.cost.includes_modelled_infrastructure,
-        # Accuracy values are null (not zero) whenever ground truth was unavailable.
         "ground_truth_available": res.accuracy.ground_truth_available,
         "accuracy_status": res.accuracy.accuracy_status,
         "gt_version": res.accuracy.gt_version,
@@ -506,6 +702,7 @@ def execute_live_benchmark_task(
         "product_classification_accuracy": res.accuracy.product_classification_accuracy,
         "sku_matching_accuracy": res.accuracy.sku_matching_accuracy,
         "planogram_compliance_rate": res.accuracy.planogram_compliance_rate,
+        "execution_trace": res.execution_trace,
     }
 
     return {
@@ -518,17 +715,122 @@ def execute_live_benchmark_task(
         "separation_approach": res.separation_approach,
         "model_name": res.model_name,
         "status": res.status,
+        "execution_mode": summary_record["execution_mode"],
         "latency_ms": round(res.latency_ms, 2),
         "tokens": res.tokens.model_dump(),
         "cost": res.cost.model_dump(),
         "accuracy": res.accuracy.model_dump(),
+        "execution_trace": res.execution_trace,
         "front_facings_count": len(res.row_level_items),
         "depth_duplicates_filtered": res.accuracy.depth_duplicates_filtered,
+        "gcp_runtime_proof": gcp_proof,
         "summary_record": summary_record,
         "rows": [item.model_dump() for item in res.row_level_items],
+        "row_level_items": [item.model_dump() for item in res.row_level_items],
         "items_preview": [item.model_dump() for item in res.row_level_items],
         "crops_info": crops_info,
         "depth_demo": depth_demo,
+        "_task_execution_result_obj": res,
+    }
+
+
+def execute_cloud_run_benchmark_suite(body: Dict[str, Any]) -> Dict[str, Any]:
+    """100% Cloud-Run-Native Full Suite Orchestrator (`POST /api/run-suite`).
+
+    Executes inside the Cloud Run container on GCP:
+    1. Downloads images & ground truth directly from GCS inside Cloud Run.
+    2. Runs all requested approaches using the EXACT `model_name` requested by the user (zero substitution).
+    3. Computes accuracy, live Cloud Billing Catalog rates, and granular container CPU/RAM/GPU costs inside Cloud Run.
+    4. Emits OpenTelemetry traces & structured logs (`resource.type="cloud_run_revision"`) directly to GCP Cloud Logging.
+    5. Generates all benchmark reports (`leaderboard.csv`, `benchmark_report.md`, `predictions.json`, `diagnostic_trace_report.json`)
+       inside the Cloud Run container and syncs them to GCS, returning the complete suite bundle to the thin CLI client.
+    """
+    import tempfile
+    from shelf_benchmark.approaches.registry import BUILTIN_VLM_CLASSIFICATION_APPROACHES, GLOBAL_APPROACH_REGISTRY
+    from shelf_benchmark.config import normalize_vertex_gemini_model_id
+    from shelf_benchmark.reporting.generator import BenchmarkReportGenerator
+
+    model_name = normalize_vertex_gemini_model_id(body.get("model_name") or "gemini-3-flash-preview", for_live_vertex=True)
+    raw_approaches = body.get("approaches") or ["all"]
+    if isinstance(raw_approaches, str):
+        raw_approaches = [x.strip() for x in raw_approaches.split(",") if x.strip()]
+
+    GLOBAL_APPROACH_REGISTRY.ensure_discovered()
+    if "all" in raw_approaches:
+        approaches = sorted(set(GLOBAL_APPROACH_REGISTRY.list_ids()) | set(BUILTIN_VLM_CLASSIFICATION_APPROACHES))
+    else:
+        approaches = []
+        for item in raw_approaches:
+            for part in str(item).split(","):
+                if part.strip():
+                    approaches.append(part.strip())
+
+    shelf_image_uri = body.get("shelf_image_uri") or "gs://unilever-shelf-understanding-shelf-images/shelf-image.png"
+    connect_sample_gt = bool(body.get("connect_sample_gt", False))
+    vcpu_count = float(body.get("vcpu_count") or os.environ.get("CLOUD_RUN_VCPU") or 2.0)
+    memory_gib = float(body.get("memory_gib") or os.environ.get("CLOUD_RUN_MEMORY_GIB") or 4.0)
+    accelerator = str(body.get("accelerator") or os.environ.get("CLOUD_RUN_ACCELERATOR") or "none")
+    concurrency = int(body.get("concurrency") or 1)
+
+    suite_out_dir = Path(tempfile.mkdtemp(prefix="cloudrun-suite-reports-"))
+    cfg = BenchmarkConfig.from_yaml(CONFIG_PATH)
+    cfg.billing.include_infrastructure_costs = True
+    cfg.billing.cloud_run.vcpu_count = vcpu_count
+    cfg.billing.cloud_run.memory_gib = memory_gib
+    cfg.billing.cloud_run.concurrency = concurrency
+    cfg.billing.cloud_run.accelerator_type = accelerator
+    cfg.billing.cloud_run.accelerator_count = 1 if accelerator != "none" else 0
+    cfg.reporting.output_dir = str(suite_out_dir)
+    cfg.reporting.sync_reports_to_gcs = True
+    cfg.telemetry.export_to_gcp_cloud_logging = True
+    cfg.telemetry.otel_log_path = str(suite_out_dir / "otel_logs.jsonl")
+
+    collected_objs = []
+    serialized_runs = []
+    for app_id in approaches:
+        run_dict = execute_live_benchmark_task(
+            task_type="classification",
+            model_name=model_name,
+            separation_approach=app_id,
+            mode="live",
+            connect_sample_gt=connect_sample_gt,
+            accelerator=accelerator,
+            vcpu_count=vcpu_count,
+            memory_gib=memory_gib,
+            concurrency=concurrency,
+            shelf_image_uri=shelf_image_uri,
+        )
+        res_obj = run_dict.pop("_task_execution_result_obj")
+        collected_objs.append(res_obj)
+        serialized_runs.append(run_dict)
+
+    # Generate all canonical reports INSIDE the Cloud Run container
+    report_gen = BenchmarkReportGenerator.from_config(cfg)
+    artifact_paths = report_gen.generate_all_reports(collected_objs)
+
+    # Read generated report contents inside Cloud Run so the thin CLI can save them locally without re-computing anything
+    report_files_content: Dict[str, str] = {}
+    for k, p_str in artifact_paths.items():
+        if k == "output_dir":
+            continue
+        p = Path(p_str)
+        if p.exists() and p.is_file():
+            report_files_content[p.name] = p.read_text(encoding="utf-8")
+
+    gcp_proof = collect_gcp_runtime_proof()
+    return {
+        "orchestrated_ inside_cloud_run": True,
+        "gcp_runtime_proof": gcp_proof,
+        "model_name": model_name,
+        "approaches_executed": approaches,
+        "hardware_config": {
+            "vcpu_count": vcpu_count,
+            "memory_gib": memory_gib,
+            "concurrency": concurrency,
+            "accelerator": accelerator,
+        },
+        "runs": serialized_runs,
+        "report_files_content": report_files_content,
     }
 
 
@@ -609,7 +911,7 @@ class BenchmarkUIRequestHandler(BaseHTTPRequestHandler):
             try:
                 query = body.get(
                     "query",
-                    "Pond's Bright Beauty Spot-less Glow Face Wash Tube Single",
+                    "Brand_A Radiance Daily Cleanser Tube Single",
                 )
                 model_name = body.get("model_name", "gemini-3.8-flash")
                 sparse_w = float(body.get("sparse_weight", 0.35))
@@ -625,20 +927,48 @@ class BenchmarkUIRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, status=500)
             return
 
+        if route == "/api/run-suite":
+            try:
+                result = execute_cloud_run_benchmark_suite(body)
+                self._send_json(result)
+            except Exception as exc:
+                import traceback
+                self._send_json({"error": str(exc), "traceback": traceback.format_exc()}, status=500)
+            return
+
         if route == "/api/run-live":
             try:
-                task_type = body.get("task_type") or body.get("task") or "detection"
-                model_name = body.get("model_name") or body.get("model") or "gemini-3.8-flash"
+                task_type = body.get("task_type") or body.get("task") or "classification"
+                model_name = body.get("model_name") or body.get("model") or "gemini-3-flash-preview"
                 separation_approach = (
                     body.get("separation_approach")
                     or body.get("approach")
                     or "single_pass_full_shelf"
                 )
+                mode = str(body.get("mode", "live"))
+                connect_sample_gt = bool(body.get("connect_sample_gt", False))
+                brand_mode = str(body.get("brand_mode", "open_vocabulary_generative"))
+                attribute_call_mode = str(body.get("attribute_call_mode", "single_call"))
+                accelerator = str(body.get("accelerator", "none"))
+                vcpu_count = body.get("vcpu_count")
+                memory_gib = body.get("memory_gib")
+                concurrency = body.get("concurrency")
+                shelf_image_uri = body.get("shelf_image_uri")
                 result = execute_live_benchmark_task(
                     task_type=task_type,
                     model_name=model_name,
                     separation_approach=separation_approach,
+                    mode=mode,
+                    connect_sample_gt=connect_sample_gt,
+                    brand_mode=brand_mode,
+                    attribute_call_mode=attribute_call_mode,
+                    accelerator=accelerator,
+                    vcpu_count=float(vcpu_count) if vcpu_count is not None else None,
+                    memory_gib=float(memory_gib) if memory_gib is not None else None,
+                    concurrency=int(concurrency) if concurrency is not None else None,
+                    shelf_image_uri=shelf_image_uri,
                 )
+                result.pop("_task_execution_result_obj", None)
                 self._send_json(result)
             except Exception as exc:
                 self._send_json({"error": str(exc)}, status=500)

@@ -53,7 +53,7 @@ def custom_gemma_vllm_adapter(
     """
     return {
         "total_classified_products": 2,
-        "distinct_brands_found": ["Pepsodent", "Pond's"],
+        "distinct_brands_found": ["Brand_A", "Brand_A"],
         "classified_products": [
             {
                 "product_index": 1,
@@ -62,13 +62,13 @@ def custom_gemma_vllm_adapter(
                 "position_on_shelf": 1,
                 "category": "Oral Care",
                 "subcategory": "Toothpaste",
-                "brand": "Pepsodent",
+                "brand": "Brand_A",
                 "is_hul_brand": True,
                 "variant": "Germi Check",
                 "packaging_type": "box",
                 "pack_type": "Single",
                 "size": "150g",
-                "product_name": "Pepsodent Germi Check Toothpaste",
+                "product_name": "Brand_A Germi Check Toothpaste",
                 "confidence": 0.96,
             },
             {
@@ -78,13 +78,13 @@ def custom_gemma_vllm_adapter(
                 "position_on_shelf": 2,
                 "category": "Skin Care",
                 "subcategory": "Face Wash",
-                "brand": "Pond's",
+                "brand": "Brand_A",
                 "is_hul_brand": True,
                 "variant": "Bright Beauty Spot-less Glow",
                 "packaging_type": "tube",
                 "pack_type": "Single",
                 "size": "100g",
-                "product_name": "Pond's Bright Beauty Face Wash",
+                "product_name": "Brand_A Radiance Daily Cleanser",
                 "confidence": 0.95,
             },
         ],

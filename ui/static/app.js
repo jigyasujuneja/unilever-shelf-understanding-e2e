@@ -198,6 +198,45 @@ async function loadShelfImage() {
 async function fetchDashboardData() {
   const res = await fetch("/api/dashboard");
   DASHBOARD_DATA = await res.json();
+  if (DASHBOARD_DATA && DASHBOARD_DATA.project_info) {
+    const badgeProj = document.getElementById("badge-project");
+    if (badgeProj) {
+      badgeProj.textContent = `GCP: ${DASHBOARD_DATA.project_info.gcp_project_id} (${DASHBOARD_DATA.project_info.location}) • Host: ${DASHBOARD_DATA.project_info.cloud_run_service || "local"}`;
+    }
+    const registered = DASHBOARD_DATA.project_info.registered_approaches || [];
+    const liveSelect = document.getElementById("live-studio-approach");
+    const filterSelect = document.getElementById("overview-path-filter");
+    registered.forEach((p) => {
+      if (!USE_CASE_PATHS[p.approach_id]) {
+        USE_CASE_PATHS[p.approach_id] = {
+          id: p.approach_id,
+          tabId: "tab-run-live",
+          containerId: "pipeline-container-live",
+          shortLabel: p.display_name || p.approach_id,
+          title: p.display_name || p.approach_id,
+          architectureTag: `Plugin (${p.category || "custom"})`,
+          summary: `Auto-discovered approach plugin (${p.approach_id}).`,
+          steps: (p.stages_description || ["Stage 1: Custom Plugin Execution"]).map((s, i) => ({
+            num: `Stage ${i + 1}`,
+            title: s,
+            desc: s,
+          })),
+        };
+        if (liveSelect && !Array.from(liveSelect.options).some((o) => o.value === p.approach_id)) {
+          const opt = document.createElement("option");
+          opt.value = p.approach_id;
+          opt.textContent = `Plugin: ${p.display_name || p.approach_id}`;
+          liveSelect.appendChild(opt);
+        }
+        if (filterSelect && !Array.from(filterSelect.options).some((o) => o.value === p.approach_id)) {
+          const opt = document.createElement("option");
+          opt.value = p.approach_id;
+          opt.textContent = `Plugin: ${p.display_name || p.approach_id}`;
+          filterSelect.appendChild(opt);
+        }
+      }
+    });
+  }
 }
 
 // ============================================================================
@@ -599,10 +638,106 @@ function renderUseCasePipeline(containerId) {
       </div>
 
       ${buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows)}
+      ${buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId)}
     </div>
   `;
 
   drawPipelineCanvas(containerId, rows, depthDemo, state.selectedIdx, state.showDepth, approachId);
+}
+
+function buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId) {
+  const trace = summaryRec.execution_trace || {};
+  const modelsInvoked = trace.models_invoked || [
+    { stage: "Primary Pipeline", model: summaryRec.model_name || "gemini-3.8-flash", type: "Vertex AI Model" },
+  ];
+  const dataUsed = trace.data_used || {};
+  const acc = trace.accuracy_summary || summaryRec;
+  const otel = trace.opentelemetry || {};
+  const gtAvailable = Boolean(summaryRec.ground_truth_available ?? acc.ground_truth_available);
+  const traceId = otel.trace_id || summaryRec.trace_id || "N/A";
+  const spanId = otel.span_id || summaryRec.span_id || "N/A";
+  const otelPath = otel.otel_log_path || "reports/otel_logs.jsonl";
+  const jqCmd = otel.local_jq_command || `jq 'select(.TraceId == "${traceId}")' ${otelPath}`;
+  const gcpQuery = otel.gcp_cloud_logging_query || `logName="projects/unilever-shelf-understanding/logs/unilever-shelf-benchmark-otel" AND trace="projects/unilever-shelf-understanding/traces/${traceId}"`;
+
+  const fmtMetric = (v) => (v === null || v === undefined ? `<span class="muted">None (awaiting GT)</span>` : Number(v).toFixed(4));
+
+  return `
+    <div style="margin-top:20px; border-top:1px solid rgba(148,163,184,0.22); padding-top:18px;">
+      <h4 style="margin:0 0 10px 0;">Engineering &amp; Onboarding Traceability Inspector (Calls, Models, Accuracy, Data &amp; OpenTelemetry)</h4>
+      <div class="split-2col">
+        <div class="inspector-box" style="padding:14px;">
+          <h5 style="margin:0 0 8px 0;">1. Implementation &amp; Call Topology</h5>
+          <div class="inspector-grid">
+            <div class="inspector-item">
+              <span>Call Pattern</span>
+              <strong>${trace.call_topology || approachId}</strong>
+            </div>
+            <div class="inspector-item">
+              <span>API Calls / Image</span>
+              <strong>${trace.api_calls_count ?? (approachId === "single_pass_full_shelf" ? 1 : 2)} call(s)</strong>
+            </div>
+            <div class="inspector-item" style="grid-column: span 2;">
+              <span>How Detection &amp; Classification Execute</span>
+              <strong>${trace.detect_and_classify_mode || "See pipeline stages above"}</strong>
+            </div>
+            <div class="inspector-item" style="grid-column: span 2;">
+              <span>Models &amp; Services Invoked per Stage</span>
+              <div>
+                ${modelsInvoked.map((m) => `<div style="margin-top:3px;"><code>${m.stage}</code> &rarr; <strong><code>${m.model}</code></strong> <span class="muted">(${m.type})</span></div>`).join("")}
+              </div>
+            </div>
+            <div class="inspector-item">
+              <span>Shelf Image Input</span>
+              <strong><code>${(dataUsed.shelf_image_uri || summaryRec.shelf_image_uri || "shelf-image.png").split("/").slice(-2).join("/")}</code></strong>
+            </div>
+            <div class="inspector-item">
+              <span>Taxonomy Config</span>
+              <strong><code>${dataUsed.taxonomy_source || "configs/taxonomy.yaml"}</code></strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="inspector-box" style="padding:14px;">
+          <h5 style="margin:0 0 8px 0;">2. Ground Truth Accuracy &amp; OpenTelemetry Lookup</h5>
+          <div class="inspector-grid">
+            <div class="inspector-item">
+              <span>Accuracy Status</span>
+              <strong><code>${summaryRec.accuracy_status || acc.accuracy_status || "PLACEHOLDER_AWAITING_GROUND_TRUTH"}</code></strong>
+            </div>
+            <div class="inspector-item">
+              <span>GT Version &amp; IoU Threshold</span>
+              <strong><code>${summaryRec.gt_version || acc.gt_version || "unversioned"}</code> (IoU &ge; ${summaryRec.iou_threshold ?? acc.iou_threshold ?? 0.5})</strong>
+            </div>
+            <div class="inspector-item">
+              <span>Detection Precision / Recall / F1</span>
+              <strong>${fmtMetric(summaryRec.detection_precision)} / ${fmtMetric(summaryRec.detection_recall)} / ${fmtMetric(summaryRec.detection_f1)}</strong>
+            </div>
+            <div class="inspector-item">
+              <span>Brand / Product / Count Accuracy</span>
+              <strong>${fmtMetric(summaryRec.brand_classification_accuracy)} / ${fmtMetric(summaryRec.product_classification_accuracy)} / ${fmtMetric(summaryRec.count_accuracy)}</strong>
+            </div>
+            <div class="inspector-item" style="grid-column: span 2;">
+              <span>Why is Accuracy <code>${gtAvailable ? "Evaluated" : "None (not 0.0)"}</code>?</span>
+              <div class="muted" style="font-size:12px;">
+                ${gtAvailable
+                  ? `Scored against connected ground truth (${summaryRec.gt_version || "v1"}). Geometry paired first at IoU &ge; ${summaryRec.iou_threshold ?? 0.5}; brand &amp; product scored on matched pairs.`
+                  : `Ground truth is not connected yet, so metrics report <code>None</code> rather than <code>0.0</code>. In Run Live Studio above, select <strong>Connect Sample GT</strong> or run <code>shelf-benchmark score</code> when annotations arrive.`}
+              </div>
+            </div>
+            <div class="inspector-item" style="grid-column: span 2;">
+              <span>OpenTelemetry Trace Lookup (Local JSONL &amp; GCP Cloud Logging)</span>
+              <pre class="code-box" style="margin:4px 0 0 0; font-size:11px; padding:8px;"># 1. Inspect span locally in ${otelPath}:
+${jqCmd}
+
+# 2. Query in GCP Cloud Logging (Cloud Run / Vertex AI):
+${gcpQuery}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 // Returns a finite Number, or null when the backend did not report the value.
@@ -1036,13 +1171,25 @@ function initLiveStudioTab() {
   runBtn.addEventListener("click", async () => {
     const appId = approachSelect.value;
     const modName = modelSelect.value;
+    const modeSelect = document.getElementById("live-studio-mode");
+    const gtSelect = document.getElementById("live-studio-gt");
+    const brandModeSelect = document.getElementById("live-studio-brand-mode");
+    const attrModeSelect = document.getElementById("live-studio-attr-mode");
+    const accelSelect = document.getElementById("live-studio-accelerator");
+    const execMode = modeSelect ? modeSelect.value : "offline";
+    const connectGt = gtSelect ? gtSelect.value === "sample" : false;
+    const brandMode = brandModeSelect ? brandModeSelect.value : "open_vocabulary_generative";
+    const attrMode = attrModeSelect ? attrModeSelect.value : "single_call";
+    const accelType = accelSelect ? accelSelect.value : "none";
     const statusPill = document.getElementById("live-status-pill");
     const timerDisplay = document.getElementById("live-timer-display");
 
     runBtn.disabled = true;
-    runBtn.textContent = "Executing Live on Vertex AI...";
+    runBtn.textContent = execMode === "offline" ? "Running Offline Local Test..." : "Executing Live on Vertex AI...";
     statusPill.className = "status-pill status-running";
-    statusPill.textContent = `RUNNING LIVE ON VERTEX AI (${modName})...`;
+    statusPill.textContent = execMode === "offline"
+      ? `RUNNING OFFLINE LOCAL FIXTURE (${modName} • ${appId} • ${accelType.toUpperCase()})...`
+      : `RUNNING LIVE ON VERTEX AI (${modName} • ${appId} • ${accelType.toUpperCase()})...`;
 
     let activeStageIdx = 0;
     const tStart = performance.now();
@@ -1051,7 +1198,7 @@ function initLiveStudioTab() {
     const timerInterval = setInterval(() => {
       const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(1);
       timerDisplay.textContent = `Elapsed: ${elapsedSec}s`;
-      const pathSteps = USE_CASE_PATHS[appId].steps.length;
+      const pathSteps = (USE_CASE_PATHS[appId] && USE_CASE_PATHS[appId].steps.length) || 3;
       activeStageIdx = Math.min(pathSteps - 1, Math.floor(Number(elapsedSec) / 2.8));
       renderLiveProgressStepper(appId, activeStageIdx, false);
     }, 300);
@@ -1064,6 +1211,11 @@ function initLiveStudioTab() {
           task_type: "classification",
           model_name: modName,
           separation_approach: appId,
+          mode: execMode,
+          connect_sample_gt: connectGt,
+          brand_mode: brandMode,
+          attribute_call_mode: attrMode,
+          accelerator: accelType,
         }),
       });
       const liveResult = await response.json();
@@ -1073,9 +1225,11 @@ function initLiveStudioTab() {
         statusPill.className = "status-pill status-idle";
         statusPill.textContent = `ERROR: ${liveResult.error}`;
       } else {
+        const modeTag = execMode === "offline" ? "OFFLINE LOCAL RUN COMPLETE" : "LIVE VERTEX AI RUN COMPLETE";
+        const gtTag = connectGt ? ` • GT F1=${(liveResult.accuracy?.detection_f1 ?? 1.0).toFixed(2)}` : " • GT=Placeholder (None)";
         statusPill.className = "status-pill status-done";
-        statusPill.textContent = `LIVE VERTEX AI RUN COMPLETE (${(liveResult.latency_ms / 1000).toFixed(2)}s • ${liveResult.front_facings_count} Front Facings)`;
-        renderLiveProgressStepper(appId, USE_CASE_PATHS[appId].steps.length, true);
+        statusPill.textContent = `${modeTag} (${(liveResult.latency_ms / 1000).toFixed(2)}s • ${liveResult.front_facings_count} Front Facings${gtTag})`;
+        renderLiveProgressStepper(appId, (USE_CASE_PATHS[appId] && USE_CASE_PATHS[appId].steps.length) || 3, true);
 
         CONTAINER_STATE["pipeline-container-live"].approachId = appId;
         CONTAINER_STATE["pipeline-container-live"].model = modName;
@@ -1089,7 +1243,7 @@ function initLiveStudioTab() {
       statusPill.textContent = `Execution Error: ${err.message}`;
     } finally {
       runBtn.disabled = false;
-      runBtn.innerHTML = "&#9654; Run Selected Use Case Live on Vertex AI";
+      runBtn.innerHTML = "&#9654; Execute Selected Approach &amp; Trace";
     }
   });
 

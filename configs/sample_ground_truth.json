@@ -7,12 +7,12 @@
       "image_width": 600,
       "image_height": 400,
       "total_main_shelf_facings": 3,
-      "expected_brands": ["Dove", "Pond's", "Vaseline"],
+      "expected_brands": ["Brand_A", "Brand_A", "Vaseline"],
       "items": [
         {
           "item_id": 1,
-          "brand": "Dove",
-          "product_name": "Dove Deeply Nourishing Body Wash",
+          "brand": "Brand_A",
+          "product_name": "Brand_A Deeply Nourishing Body Wash",
           "sku_id": "UL-DV-BW-500",
           "category": "Personal Care",
           "subcategory": "Skin Cleansing",
@@ -27,8 +27,8 @@
         },
         {
           "item_id": 2,
-          "brand": "Pond's",
-          "product_name": "Pond's Bright Beauty Face Cream",
+          "brand": "Brand_A",
+          "product_name": "Brand_A Bright Beauty Face Cream",
           "sku_id": "UL-PD-FC-050",
           "category": "Personal Care",
           "subcategory": "Skin Care",
@@ -59,8 +59,8 @@
         },
         {
           "item_id": 4,
-          "brand": "Dove",
-          "product_name": "Dove Deeply Nourishing Body Wash",
+          "brand": "Brand_A",
+          "product_name": "Brand_A Deeply Nourishing Body Wash",
           "sku_id": "UL-DV-BW-500",
           "category": "Personal Care",
           "subcategory": "Skin Cleansing",

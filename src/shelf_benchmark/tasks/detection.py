@@ -77,14 +77,19 @@ class ProductDetectionTask(BaseBenchmarkTask):
         validated = ProductDetectionOutput.model_validate(parsed_dict)
 
         raw_items = [it.model_dump() for it in validated.detected_products]
-        dedup_items, depth_filtered_count = deduplicate_depth_stacked_facings(raw_items)
+        dedup_items, depth_filtered_count = deduplicate_depth_stacked_facings(
+            raw_items,
+            x_overlap_threshold=self.config.depth_deduplication.x_overlap_threshold,
+        )
         all_boxes = [it.get("bbox_2d", [0, 0, 0, 0]) for it in dedup_items]
 
         rows: List[RowLevelReportItem] = []
         for idx, item in enumerate(dedup_items, start=1):
             box = item.get("bbox_2d") or [0, 0, 0, 0]
             brand_hint = item.get("preliminary_brand_hint") or ""
-            rule_size = derive_size_bucket_from_bbox(box, all_boxes, "tube", "")
+            rule_size = derive_size_bucket_from_bbox(
+                box, all_boxes, "tube", "", taxonomy=self.config.taxonomy
+            )
             rows.append(
                 RowLevelReportItem(
                     run_id="",
@@ -107,7 +112,7 @@ class ProductDetectionTask(BaseBenchmarkTask):
                     predicted_category="Detected Facing",
                     predicted_subcategory="Shelf Facing",
                     predicted_brand=brand_hint,
-                    is_hul_brand=check_is_hul_brand(brand_hint),
+                    is_hul_brand=check_is_hul_brand(brand_hint, taxonomy=self.config.taxonomy),
                     predicted_variant=item.get("visual_description", ""),
                     predicted_packaging="tube",
                     predicted_pack_type="Single",

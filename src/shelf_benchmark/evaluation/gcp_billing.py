@@ -303,17 +303,13 @@ class GCPBillingAndCostEngine:
         billing_cfg: Optional[GCPBillingConfig] = None,
         gcp_labels: Optional[Dict[str, str]] = None,
         billing_source: str = BILLING_SOURCE_YAML,
+        container_cpu_active_ms: Optional[float] = None,
     ) -> CostMetrics:
-        """Compute separated GCP costs across token, GSU, embedding, Cloud Run, and GCS buckets.
-
-        `include_infrastructure_costs` gates the modelled Cloud Run / GCS / Cloud Logging buckets.
-        It defaults to off because those are simulations of what a serving deployment *would* cost,
-        and folding them into a laptop benchmark run both inflates the totals and compresses the
-        measured differences between models into noise.
-        """
+        """Compute separated GCP costs across token, GSU, embedding, granular Cloud Run compute/accelerator sub-buckets, and GCS/Logging."""
         b_cfg = billing_cfg or GCPBillingConfig()
         include_infra_overhead = b_cfg.include_infrastructure_costs
-        latency_sec = max(0.05, float(latency_ms or 2500.0) / 1000.0)
+        eff_latency_ms = max(50.0, float(latency_ms or 2500.0))
+        latency_sec = eff_latency_ms / 1000.0
 
         eff_traffic = str(getattr(tokens, "traffic_type", "") or traffic_type or "ON_DEMAND").upper()
         if b_cfg.provisioned_throughput.enabled:
@@ -335,61 +331,90 @@ class GCPBillingAndCostEngine:
         slot_hourly_usd = hourly_total_gsu_usd / slots
         pt_gsu_usd = slot_hourly_usd * (latency_sec / 3600.0)
 
-        # 2. Vertex AI embeddings / Cloud Vision. This is a genuine per-facing API charge incurred
-        #    by the approach itself, so it is NOT gated on include_infrastructure_costs. The caller
-        #    supplies the amount from `billing.embeddings_and_vision`; a zero here means the
-        #    approach performed no embedding calls, which must not be silently back-filled.
+        # 2. Vertex AI embeddings / Cloud Vision per-facing API charge
         eff_products = max(1, int(product_count))
         embed_vision_usd = max(0.0, float(extra_embedding_or_vision_cost_usd or 0.0))
 
-        # 3. Cloud Run compute (modelled, not measured).
-        if include_infra_overhead and b_cfg.cloud_run.enabled:
-            cr = b_cfg.cloud_run
-            vcpu_rate = float(getattr(cr, "vcpu_per_second_usd", None) or getattr(cr, "vcpu_second_rate_usd", 0.000024))
-            mem_rate = float(getattr(cr, "memory_gib_per_second_usd", None) or getattr(cr, "gib_second_rate_usd", 0.0000025))
-            vcpu_cost = float(cr.vcpu_count) * vcpu_rate * latency_sec
-            mem_cost = float(cr.memory_gib) * mem_rate * latency_sec
-            req_cost = float(cr.per_million_requests_usd) / 1_000_000.0
-            cloud_run_usd = vcpu_cost + mem_cost + req_cost
+        # 3. Granular Cloud Run / Accelerator compute (vCPU + RAM + NVIDIA L4 GPU / Cloud TPU v5e/v6e + Request Fee).
+        cr = b_cfg.cloud_run
+        concurrency = max(1, int(getattr(cr, "concurrency", 1) or 1))
+        billable_sec_per_req = latency_sec / float(concurrency)
+        vcpu_rate = float(getattr(cr, "vcpu_per_second_usd", None) or getattr(cr, "vcpu_second_rate_usd", 0.000024))
+        mem_rate = float(getattr(cr, "memory_gib_per_second_usd", None) or getattr(cr, "gib_second_rate_usd", 0.0000025))
+        accel_per_sec = cr.accelerator_per_second_usd() if hasattr(cr, "accelerator_per_second_usd") else 0.0
+
+        vcpu_cost = float(cr.vcpu_count) * vcpu_rate * billable_sec_per_req
+        mem_cost = float(cr.memory_gib) * mem_rate * billable_sec_per_req
+        accel_cost = accel_per_sec * billable_sec_per_req
+        req_cost = float(cr.per_million_requests_usd) / 1_000_000.0
+        raw_compute_usd = vcpu_cost + mem_cost + accel_cost + req_cost
+
+        if (include_infra_overhead or accel_per_sec > 0.0) and b_cfg.cloud_run.enabled:
+            cloud_run_usd = raw_compute_usd
         else:
             cloud_run_usd = 0.0
 
-        # 4. GCS Class A/B operations + Cloud Logging ingestion (modelled, not measured).
-        if include_infra_overhead:
-            gcs_ops_usd = (1.0 * (b_cfg.gcs_class_b_per_thousand_ops_usd / 1000.0)) + (
-                2.0 * (b_cfg.gcs_class_a_per_thousand_ops_usd / 1000.0)
-            )
-            logging_usd = (
-                float(b_cfg.estimated_log_bytes_per_run) / (1024.0 ** 3)
-            ) * b_cfg.cloud_logging_per_gib_usd
-            gcs_and_obs_usd = gcs_ops_usd + logging_usd
+        # Active Container Compute vs External API-Wait Cost Attribution
+        if container_cpu_active_ms is not None and container_cpu_active_ms > 0.0:
+            active_ms = min(eff_latency_ms, float(container_cpu_active_ms))
         else:
-            gcs_and_obs_usd = 0.0
+            # Estimate baseline local PIL decode/crop/NMS container time when not explicitly passed
+            active_ms = min(eff_latency_ms * 0.15, 65.0 + (14.0 * eff_products))
+        api_wait_ms = max(0.0, eff_latency_ms - active_ms)
+        active_ratio = active_ms / eff_latency_ms if eff_latency_ms > 0 else 0.0
+        compute_active_usd = raw_compute_usd * active_ratio
+        compute_wait_tax_usd = raw_compute_usd * max(0.0, 1.0 - active_ratio)
 
-        # 5. Active inference cost depends on how Vertex served the request. Provisioned throughput
-        #    is a model-serving cost, not infrastructure overhead, so it is reported whenever the
-        #    traffic was actually served that way.
+        hw_profile = cr.hardware_summary() if hasattr(cr, "hardware_summary") else f"{cr.vcpu_count} vCPU / {cr.memory_gib} GiB RAM"
+
+        # 4. GCS Class A/B operations + Cloud Logging ingestion
+        gcs_ops_usd = (1.0 * (b_cfg.gcs_class_b_per_thousand_ops_usd / 1000.0)) + (
+            2.0 * (b_cfg.gcs_class_a_per_thousand_ops_usd / 1000.0)
+        )
+        logging_usd = (
+            float(b_cfg.estimated_log_bytes_per_run) / (1024.0 ** 3)
+        ) * b_cfg.cloud_logging_per_gib_usd
+        raw_gcs_obs_usd = gcs_ops_usd + logging_usd
+        gcs_and_obs_usd = raw_gcs_obs_usd if include_infra_overhead else 0.0
+
+        # 5. Total shelf cost & Pareto cost-latency metrics
         is_provisioned = eff_traffic == "PROVISIONED_THROUGHPUT"
         reported_pt_usd = pt_gsu_usd if is_provisioned else 0.0
         active_llm_usd = reported_pt_usd if is_provisioned else payg_tokens_usd
-        total_shelf_usd = active_llm_usd + embed_vision_usd + cloud_run_usd + gcs_and_obs_usd
+        folded_compute_usd = cloud_run_usd if (include_infra_overhead or accel_per_sec > 0.0) else 0.0
+        total_shelf_usd = active_llm_usd + embed_vision_usd + folded_compute_usd + gcs_and_obs_usd
         per_product_usd = total_shelf_usd / eff_products
+        per_1k_usd = (active_llm_usd + embed_vision_usd + cloud_run_usd + raw_gcs_obs_usd) * 1000.0
+        compute_share_pct = (raw_compute_usd / (active_llm_usd + embed_vision_usd + cloud_run_usd + raw_gcs_obs_usd) * 100.0) if (active_llm_usd + embed_vision_usd + cloud_run_usd) > 0 else 0.0
+        pareto_idx = per_1k_usd * latency_sec
 
         return CostMetrics(
             billing_source=billing_source,
             rates_from_live_catalog=(billing_source == BILLING_SOURCE_LIVE_CATALOG),
             includes_modelled_infrastructure=include_infra_overhead,
             traffic_type=eff_traffic,
+            hardware_profile=hw_profile,
             input_cost_usd=round(input_cost, 8),
             thinking_cost_usd=round(thinking_cost, 8),
             output_cost_usd=round(output_cost, 8),
             vertex_ai_payg_tokens_usd=round(payg_tokens_usd, 8),
             vertex_ai_provisioned_throughput_usd=round(reported_pt_usd, 8),
             vertex_ai_embeddings_and_vision_usd=round(embed_vision_usd, 8),
+            cloud_run_vcpu_usd=round(vcpu_cost, 8),
+            cloud_run_memory_usd=round(mem_cost, 8),
+            cloud_run_accelerator_usd=round(accel_cost, 8),
+            cloud_run_request_fee_usd=round(req_cost, 8),
             cloud_run_compute_usd=round(cloud_run_usd, 8),
+            container_cpu_active_ms=round(active_ms, 2),
+            external_api_wait_ms=round(api_wait_ms, 2),
+            compute_active_processing_usd=round(compute_active_usd, 8),
+            compute_api_wait_idle_tax_usd=round(compute_wait_tax_usd, 8),
+            compute_share_of_total_cost_pct=round(compute_share_pct, 3),
             gcs_and_observability_usd=round(gcs_and_obs_usd, 8),
             cost_per_shelf_image_usd=round(total_shelf_usd, 8),
             cost_per_product_usd=round(per_product_usd, 8),
+            cost_per_1k_images_usd=round(per_1k_usd, 4),
+            cost_latency_pareto_index=round(pareto_idx, 4),
             product_count=product_count,
             gcp_billing_labels=gcp_labels or {},
         )

@@ -66,3 +66,35 @@ size_buckets:
 # and attribute HUL vs. Non-HUL via VLM knowledge or the connected Catalog / Ground Truth table).
 hul_brands: []
 non_hul_brands: []
+
+# Configurable N-Attribute Extraction (>8 attributes):
+# Add any number of additional product or shelf attributes below. They are automatically added to
+# the VLM prompt, extracted into `extra_attributes`, and scored in `per_attribute_accuracy` /
+# `macro_attribute_accuracy` when present in your ground-truth dataset.
+# Example:
+#   custom_attributes:
+#     price_tag_visible:
+#       description: "Whether a retail price tag is visible directly below the product facing"
+#       value_type: "boolean"
+#       allowed_values: ["true", "false"]
+#     promo_callout:
+#       description: "Any promotional badge or discount text printed on the package"
+#       value_type: "string"
+#     facing_orientation:
+#       description: "Orientation of the product facing on the shelf"
+#       value_type: "string"
+#       allowed_values: ["front_straight", "tilted", "sideways", "upside_down"]
+#     shelf_talker_present:
+#       description: "Whether a promotional shelf talker or wobbler is attached near this slot"
+#       value_type: "boolean"
+custom_attributes: {}
+
+# Optional VLM Call Grouping for `configurable_multi_attribute_vlm`:
+# - Leave empty `[]` (or provide 1 list) to predict ALL attributes (8 core + N custom) in a SINGLE VLM call.
+# - Provide 2+ attribute lists to split extraction across multiple targeted VLM calls by attribute type
+#   (e.g., Group 1 = OCR/identity attributes, Group 2 = physical packaging & merchandising attributes).
+# Example:
+#   attribute_call_groups:
+#     - ["category", "subcategory", "brand", "product_name", "variant"]
+#     - ["packaging_type", "pack_type", "size", "price_tag_visible", "promo_callout", "facing_orientation"]
+attribute_call_groups: []

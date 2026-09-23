@@ -27,36 +27,23 @@ from shelf_benchmark.models import (
     RowLevelReportItem,
 )
 
-# Legacy, category-specific keyword groups retained ONLY for `product_matcher="fuzzy_demo"`.
-# These were tuned against a single face-wash shelf and will over-report accuracy on any other
-# assortment. Never enable them for numbers that leave the team.
-_DEMO_KEY_MARKER_GROUPS: Tuple[Tuple[str, ...], ...] = (
-    ("detox", "charcoal", "black"),
-    ("bright beauty", "spot less", "pink"),
-    ("bright c", "vitamin c", "lemon", "yellow"),
-    ("bright glow", "insta glow", "multivitamin"),
-    ("strawberry", "red"),
-    ("kiwi", "cucumber", "green", "apple", "fruit"),
-    ("pure", "gentle", "orange", "amber", "glycerin"),
-    ("oil clear", "green", "lemon flower"),
-    ("fresh renewal", "blue", "berry"),
-)
-
-_GENERIC_PRODUCT_TOKENS = {"face", "wash", "facewash", "gel", "cream", "pack"}
-
-
 def normalize_text(text: Optional[str]) -> str:
-    """Normalize a brand/product string for comparison (strips accents, punctuation and case)."""
+    """Normalize a brand/product string for comparison (strips accents, apostrophes, punctuation and case).
+
+    Collapses possessive/contraction apostrophes first (`"Brand_A"` -> `"ponds"`, `"Brand_F"` -> `"loreal"`)
+    so punctuation variants match across any brand portfolio without hardcoded alias lists.
+    """
     if not text:
         return ""
     nfkd = unicodedata.normalize("NFKD", text)
     ascii_str = "".join(c for c in nfkd if not unicodedata.combining(c))
-    cleaned = re.sub(r"[^a-z0-9\s]", " ", ascii_str.lower())
+    no_apostrophes = re.sub(r"['’`]", "", ascii_str.lower())
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", no_apostrophes)
     return " ".join(cleaned.split())
 
 
 def canonical_brand(brand: Optional[str], aliases: Optional[Dict[str, str]] = None) -> str:
-    """Normalize a brand and fold it onto its canonical form via the configured alias table."""
+    """Normalize a brand and fold it onto its canonical form via the optional configured alias table."""
     norm = normalize_text(brand)
     if not norm:
         return ""
@@ -73,9 +60,10 @@ def brands_match(
 ) -> bool:
     """Compare two brand strings under the configured matcher.
 
-    `strict` (default): normalized equality after alias folding, so `Pond's` == `ponds` and
-    `Fair & Lovely` == `Glow & Lovely`, while `Lux` != `Deluxe`.
-    `fuzzy`: additionally accepts substring containment (legacy behaviour; over-reports).
+    `strict` (default): normalized equality (including apostrophe/accent normalization) plus
+    optional `brand_aliases` folding, so `"Brand_A"` == `"Brand_A"` and `"Brand_F"` == `"Brand_F"`,
+    while `"Lux"` != `"Deluxe"`.
+    `fuzzy`: additionally accepts substring containment.
     """
     cfg = config or EvaluationConfig()
     p = canonical_brand(pred_brand, cfg.brand_aliases)
@@ -107,7 +95,7 @@ def products_match(
     if cfg.product_matcher == "strict":
         return False
 
-    stopwords: Set[str] = {normalize_text(s) for s in cfg.product_stopwords} | _GENERIC_PRODUCT_TOKENS
+    stopwords: Set[str] = {normalize_text(s) for s in cfg.product_stopwords if s}
     gt_tokens = {t for t in norm_gt.split() if len(t) > 2 and t not in stopwords}
     pred_tokens = set(combined_pred.split())
 
@@ -118,9 +106,6 @@ def products_match(
         return overlap >= cfg.product_token_overlap_threshold
 
     if cfg.product_matcher == "fuzzy_demo":
-        for group in _DEMO_KEY_MARKER_GROUPS:
-            if any(tok in norm_gt for tok in group) and any(tok in combined_pred for tok in group):
-                return True
         if not gt_tokens:
             return False
         return len(gt_tokens & pred_tokens) / len(gt_tokens) >= 0.5
@@ -315,6 +300,47 @@ def evaluate_task_accuracy(
             planogram_total += 1
             planogram_hits += int(row.planogram_compliant)
 
+    # Compute per-attribute accuracy across core + unlimited extra_attributes (>8 attributes)
+    attr_totals: Dict[str, int] = {}
+    attr_hits: Dict[str, int] = {}
+
+    def _record_attr(name: str, is_hit: bool) -> None:
+        attr_totals[name] = attr_totals.get(name, 0) + 1
+        if is_hit:
+            attr_hits[name] = attr_hits.get(name, 0) + 1
+
+    for r, g, _ in pairings:
+        if g is None:
+            continue
+        if g.brand:
+            _record_attr("brand", bool(r.brand_correct))
+        if g.product_name:
+            _record_attr("product_name", bool(r.product_correct))
+        core_pairs = [
+            ("category", r.predicted_category, g.category),
+            ("subcategory", r.predicted_subcategory, g.subcategory),
+            ("variant", r.predicted_variant, g.variant),
+            ("packaging_type", r.predicted_packaging, g.packaging_type),
+            ("pack_type", r.predicted_pack_type, g.pack_type),
+            ("size", r.predicted_size, g.size),
+        ]
+        for attr_name, p_val, g_val in core_pairs:
+            if g_val is not None and str(g_val).strip() != "":
+                _record_attr(attr_name, normalize_text(str(p_val or "")) == normalize_text(str(g_val)))
+        for attr_name, g_val in (g.extra_attributes or {}).items():
+            if g_val is not None and str(g_val).strip() != "":
+                p_val = (r.extra_attributes or {}).get(attr_name)
+                _record_attr(attr_name, normalize_text(str(p_val or "")) == normalize_text(str(g_val)))
+
+    per_attr_acc: Dict[str, float] = {
+        k: round(attr_hits.get(k, 0) / tot, 4)
+        for k, tot in attr_totals.items()
+        if tot > 0
+    }
+    macro_attr_acc: Optional[float] = (
+        round(sum(per_attr_acc.values()) / len(per_attr_acc), 4) if per_attr_acc else None
+    )
+
     # Brand-set recall: did the run find every distinct brand present on the shelf?
     expected_brands = [b for b in ground_truth.expected_brands if b]
     predicted_brands = [r.predicted_brand for r in rows if r.predicted_brand]
@@ -351,9 +377,6 @@ def evaluate_task_accuracy(
         product_matcher=cfg.product_matcher,
         ground_truth_count=gt_count,
         predicted_count=pred_count,
-        # TP/FP/FN are derived from IoU, so without geometry they would all report as
-        # "zero true positives", which is a measurement rather than the absence of one.
-        # They travel with the detection ratios above and are suppressed together.
         matched_pairs=matched_pairs if geometry_available else None,
         true_positives=true_positives if geometry_available else None,
         false_positives=false_positives if geometry_available else None,
@@ -369,4 +392,6 @@ def evaluate_task_accuracy(
         product_classification_accuracy=_round(prod_acc),
         sku_matching_accuracy=_round(sku_acc),
         planogram_compliance_rate=_round(plano_rate),
+        per_attribute_accuracy=per_attr_acc,
+        macro_attribute_accuracy=macro_attr_acc,
     )

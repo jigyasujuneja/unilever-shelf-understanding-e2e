@@ -64,10 +64,15 @@ class ProductMatchingTask(BaseBenchmarkTask):
         """Call Vertex AI `gemini-embedding-001` to generate 3072-D dense vectors for hybrid search."""
         if not texts:
             return None
+        if self.config.offline.enabled or (
+            self._genai_client is not None
+            and not hasattr(getattr(self._genai_client, "models", None), "embed_content")
+        ):
+            return int(self.config.embeddings.text_embedding_dimensions)
         try:
             emb_client = self.get_client(location="us-central1")
             resp = emb_client.models.embed_content(
-                model="gemini-embedding-001",
+                model=self.config.embeddings.text_embedding_model,
                 contents=texts[:20],
             )
             if resp.embeddings and resp.embeddings[0].values:
@@ -95,7 +100,7 @@ class ProductMatchingTask(BaseBenchmarkTask):
         if planogram_data is None and planogram_uri:
             planogram_data = self.storage.read_json(planogram_uri)
 
-        prompt_parts = [HYBRID_MATCHING_PROMPT]
+        prompt_parts = [build_hybrid_matching_prompt(self.config.taxonomy)]
 
         if catalog_data:
             prompt_parts.append(
@@ -132,7 +137,10 @@ class ProductMatchingTask(BaseBenchmarkTask):
         validated = ProductMatchingOutput.model_validate(parsed_dict)
 
         raw_items = [it.model_dump() for it in validated.matched_products]
-        dedup_items, depth_filtered = deduplicate_depth_stacked_facings(raw_items)
+        dedup_items, depth_filtered = deduplicate_depth_stacked_facings(
+            raw_items,
+            x_overlap_threshold=self.config.depth_deduplication.x_overlap_threshold,
+        )
         all_boxes = [it.get("bbox_2d", [0, 0, 0, 0]) for it in dedup_items]
 
         dense_texts = [
@@ -146,7 +154,9 @@ class ProductMatchingTask(BaseBenchmarkTask):
             box = item.get("bbox_2d") or [0, 0, 0, 0]
             pkg = item.get("packaging_type") or "tube"
             model_size = item.get("size") or ""
-            rule_size = derive_size_bucket_from_bbox(box, all_boxes, pkg, model_size)
+            rule_size = derive_size_bucket_from_bbox(
+                box, all_boxes, pkg, model_size, taxonomy=self.config.taxonomy
+            )
             brand_val = item.get("brand") or ""
             keywords_str = ", ".join(item.get("lexical_search_keywords") or [])
 
@@ -156,7 +166,7 @@ class ProductMatchingTask(BaseBenchmarkTask):
                     trace_id="",
                     span_id="",
                     task_type=self.task_type,
-                    separation_approach="hybrid_search_facing_nms",
+                    separation_approach=str(kwargs.get("separation_approach") or "hybrid_search_facing_nms"),
                     model_name=model_name,
                     shelf_image_uri=shelf_image_uri,
                     start_time="",
@@ -172,7 +182,7 @@ class ProductMatchingTask(BaseBenchmarkTask):
                     predicted_category=item.get("category", "Skin Care"),
                     predicted_subcategory=item.get("subcategory", "Face Wash"),
                     predicted_brand=brand_val,
-                    is_hul_brand=check_is_hul_brand(brand_val),
+                    is_hul_brand=check_is_hul_brand(brand_val, taxonomy=self.config.taxonomy),
                     predicted_variant=item.get("variant", ""),
                     predicted_packaging=pkg,
                     predicted_pack_type=item.get("pack_type", "Single"),

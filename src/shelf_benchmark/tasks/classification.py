@@ -18,6 +18,7 @@ Supports benchmarking multiple Bounding-Box Separation Approaches against each o
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from google.genai import types
@@ -37,11 +38,15 @@ from shelf_benchmark.tasks.facing_utils import (
     crop_detected_facings,
     deduplicate_depth_stacked_facings,
     derive_size_bucket_from_bbox,
+    resolve_brand_against_catalog,
 )
 
 
-def build_classification_prompt(taxonomy: Optional[TaxonomyConfig] = None) -> str:
-    """Dynamically builds the 7-Dimension classification prompt from centralized `TaxonomyConfig`."""
+def build_classification_prompt(
+    taxonomy: Optional[TaxonomyConfig] = None,
+    attribute_subset: Optional[List[str]] = None,
+) -> str:
+    """Dynamically builds the N-Dimension classification prompt (8 core + unlimited custom_attributes) from `TaxonomyConfig`."""
     tax = taxonomy or TaxonomyConfig.from_yaml_or_defaults()
     cats_str = ", ".join(f"`{c}`" for c in tax.categories)
     subcats_str = ", ".join(f"`{s}`" for s in tax.subcategories[:10])
@@ -49,35 +54,72 @@ def build_classification_prompt(taxonomy: Optional[TaxonomyConfig] = None) -> st
     pack_str = " or ".join(f'`"{pt}"`' for pt in tax.pack_types)
     sizes_str = ", ".join(f"`{sb}`" for sb in tax.size_bucket_labels)
 
-    brand_instruction = (
-        f"Brand name read from the package (matching configured portfolio brands {', '.join(tax.hul_brands[:12])} when applicable) and set `is_hul_brand` (`true`/`false`)."
-        if tax.hul_brands
-        else "Brand name read directly from the packaging (open-vocabulary; no predefined brand list required) and set `is_hul_brand` (`true` if Hindustan Unilever / Unilever brand, `false` otherwise)."
+    total_catalog_brands = len(tax.hul_brands or []) + len(tax.non_hul_brands or [])
+    if (
+        tax.brand_extraction_mode == "closed_set_taxonomy"
+        and 0 < total_catalog_brands <= tax.max_prompt_brands
+    ):
+        all_b = list(tax.hul_brands or []) + list(tax.non_hul_brands or [])
+        brand_instruction = (
+            f"Brand name classified from configured taxonomy brands ({', '.join(all_b)}) and set `is_hul_brand` (`true`/`false`)."
+        )
+    else:
+        brand_instruction = (
+            "Determine and generate the exact brand name directly from the visible package logo and typography "
+            "(open-vocabulary generative extraction; no predefined brand list required, scaling to 2,000+ brands) "
+            "and set `is_hul_brand` (`true`/`false`)."
+        )
+
+    extra_lines: List[str] = []
+    idx_num = 8
+    for attr_name, spec in (tax.custom_attributes or {}).items():
+        if attribute_subset is not None and attr_name not in attribute_subset:
+            continue
+        allowed_str = (
+            f" (allowed values: {', '.join(f'`{v}`' for v in spec.allowed_values)})"
+            if spec.allowed_values
+            else ""
+        )
+        extra_lines.append(
+            f"{idx_num}. `extra_attributes.{attr_name}` ({spec.value_type}): {spec.description}{allowed_str}"
+        )
+        idx_num += 1
+
+    extra_block = (
+        "\nAdditional Configured Attributes (populate inside `extra_attributes` dict on each product):\n"
+        + "\n".join(extra_lines)
+        if extra_lines
+        else ""
+    )
+    subset_note = (
+        f"\nTARGET ATTRIBUTE GROUP FOR THIS PASS: Focus on accurately extracting {attribute_subset}."
+        if attribute_subset
+        else ""
     )
 
-    return f"""You are an expert retail shelf product classification model using the configurable 7-Dimension Retail Taxonomy.
+    return f"""You are an expert retail shelf product classification model using the configurable N-Dimension Retail Taxonomy.
 Visually inspect this shelf image and classify EVERY distinct FRONT-FACING product slot on the main middle shelf (ordered strictly from left to right).
 
 CRITICAL FACING RULE:
 - Do NOT count products stacked in depth (behind the front-most product in the same facing column) as separate items!
 - Only classify the FRONT-MOST visible unit in each horizontal facing slot (`1 facing slot = 1 product entry`).
 
-For EVERY front-facing product slot on the main middle shelf, extract all 7 Taxonomy Dimensions:
+For EVERY front-facing product slot on the main middle shelf, extract all configured Taxonomy Dimensions:
 1. `category`: Choose from configured categories ({cats_str}).
 2. `subcategory`: Choose or infer subcategory (e.g., {subcats_str}).
 3. `brand`: {brand_instruction}
 4. `variant`: Specific variant / active ingredient / product line read zero-shot from the packaging.
 5. `packaging_type`: Choose from configured packaging types ({pkg_str}).
 6. `pack_type`: {pack_str}.
-7. `size`: Visible size cue or configured size bucket ({sizes_str}).
-Also provide `bbox_2d` (`[ymin, xmin, ymax, xmax]` 0..1000), `product_name`, and `confidence` (0.0 to 1.0)."""
+7. `size`: Visible size cue or configured size bucket ({sizes_str}).{extra_block}{subset_note}
+Also provide `bbox_2d` (`[ymin, xmin, ymax, xmax]` 0..1000), `product_name`, `extra_attributes`, and `confidence` (0.0 to 1.0)."""
 
 
 CLASSIFICATION_PROMPT = build_classification_prompt()
 
 
 class ProductClassificationTask(BaseBenchmarkTask):
-    """7-Dimension HUL Product Classification task supporting multiple Bounding-Box Separation approaches."""
+    """N-Dimension Product Classification task supporting single-step, two-stage, and configurable multi-attribute VLM approaches."""
 
     task_type = "classification"
 
@@ -118,68 +160,121 @@ class ProductClassificationTask(BaseBenchmarkTask):
             stage1_tokens = extract_token_usage(det_resp)
             det_parsed = ProductDetectionOutput.model_validate(json.loads(det_resp.text or "{}"))
             raw_det = [d.model_dump() for d in det_parsed.detected_products]
-            detected_boxes, depth_filtered = deduplicate_depth_stacked_facings(raw_det)
-
-        contents_list: List[Any] = [image_part]
-        prompt = kwargs.get("prompt") or CLASSIFICATION_PROMPT
-
-        if separation_approach == "two_stage_bbox_guided_nms" and detected_boxes:
-            compact_boxes = [
-                {"facing_index": i + 1, "bbox_2d": b.get("bbox_2d"), "hint": b.get("preliminary_brand_hint")}
-                for i, b in enumerate(detected_boxes)
-            ]
-            prompt += (
-                f"\n\nSTAGE 1 DETECTED & DEPTH-DEDUPLICATED {len(compact_boxes)} FRONT FACINGS:\n"
-                + json.dumps(compact_boxes)
-                + "\nClassify each of these exact front-facing bounding boxes in order from 1 to "
-                + str(len(compact_boxes))
-                + " into the 7 HUL Taxonomy dimensions."
-            )
-        elif separation_approach == "two_stage_physical_crop_per_facing" and detected_boxes:
-            crop_paths, montage_bytes = crop_detected_facings(
-                storage=self.storage,
-                shelf_image_uri=shelf_image_uri,
-                detected_items=detected_boxes,
-                model_tag=f"{model_name}_{separation_approach}",
-            )
-            montage_part = types.Part.from_bytes(data=montage_bytes, mime_type="image/png")
-            contents_list.append(montage_part)
-            compact_boxes = [
-                {"facing_index": i + 1, "bbox_2d": b.get("bbox_2d")}
-                for i, b in enumerate(detected_boxes)
-            ]
-            prompt += (
-                f"\n\nSTAGE 1 PHYSICALLY CROPPED {len(compact_boxes)} FRONT FACINGS (see second image showing high-resolution numbered crops #1 through #{len(compact_boxes)} alongside their shelf bounding boxes):\n"
-                + json.dumps(compact_boxes)
-                + "\nUse the zoomed-in numbered crops (#1..#"
-                + str(len(compact_boxes))
-                + ") to read fine-print packaging text and classify each facing into all 7 HUL Taxonomy dimensions."
+            detected_boxes, depth_filtered = deduplicate_depth_stacked_facings(
+                raw_det,
+                x_overlap_threshold=self.config.depth_deduplication.x_overlap_threshold,
             )
 
-        contents_list.append(prompt)
-
-        response = client.models.generate_content(
-            model=model_name,
-            contents=contents_list,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=ProductClassificationOutput,
-                temperature=0.1,
-            ),
-        )
-
-        stage2_tokens = extract_token_usage(response)
-        total_tokens = self._sum_tokens(stage1_tokens, stage2_tokens)
-
-        raw_text = response.text or "{}"
-        parsed_dict = json.loads(raw_text)
-        validated = ProductClassificationOutput.model_validate(parsed_dict)
-
-        raw_cls_items = [it.model_dump() for it in validated.classified_products]
-        if separation_approach == "single_pass_full_shelf":
-            dedup_cls_items, depth_filtered = deduplicate_depth_stacked_facings(raw_cls_items)
+        call_groups = list(self.config.taxonomy.attribute_call_groups or [])
+        if separation_approach == "configurable_multi_attribute_vlm" and len(call_groups) >= 2:
+            # Multi-call grouped attribute extraction: run 1 VLM call per attribute group and merge per facing
+            merged_items: List[Dict[str, Any]] = []
+            total_tokens = stage1_tokens
+            for g_idx, group_attrs in enumerate(call_groups, start=1):
+                group_prompt = build_classification_prompt(
+                    self.config.taxonomy, attribute_subset=list(group_attrs)
+                )
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=[image_part, group_prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=ProductClassificationOutput,
+                        temperature=0.1,
+                    ),
+                )
+                total_tokens = self._sum_tokens(total_tokens, extract_token_usage(resp))
+                parsed = ProductClassificationOutput.model_validate(json.loads(resp.text or "{}"))
+                group_items = [it.model_dump() for it in parsed.classified_products]
+                if g_idx == 1:
+                    merged_items = group_items
+                else:
+                    for idx_item, g_item in enumerate(group_items):
+                        if idx_item < len(merged_items):
+                            target = merged_items[idx_item]
+                            for attr_key in group_attrs:
+                                if attr_key in target and g_item.get(attr_key):
+                                    target[attr_key] = g_item[attr_key]
+                                elif g_item.get("extra_attributes", {}).get(attr_key) is not None:
+                                    target.setdefault("extra_attributes", {})[attr_key] = g_item["extra_attributes"][attr_key]
+            dedup_cls_items, depth_filtered = deduplicate_depth_stacked_facings(
+                merged_items,
+                x_overlap_threshold=self.config.depth_deduplication.x_overlap_threshold,
+            )
+            validated = ProductClassificationOutput(
+                total_classified_products=len(dedup_cls_items),
+                distinct_brands_found=sorted({str(it.get("brand", "")) for it in dedup_cls_items if it.get("brand")}),
+                classified_products=[],
+            )
         else:
-            dedup_cls_items = raw_cls_items
+            contents_list: List[Any] = [image_part]
+            prompt = kwargs.get("prompt") or build_classification_prompt(self.config.taxonomy)
+
+            if separation_approach == "two_stage_bbox_guided_nms" and detected_boxes:
+                compact_boxes = [
+                    {"facing_index": i + 1, "bbox_2d": b.get("bbox_2d"), "hint": b.get("preliminary_brand_hint")}
+                    for i, b in enumerate(detected_boxes)
+                ]
+                prompt += (
+                    f"\n\nSTAGE 1 DETECTED & DEPTH-DEDUPLICATED {len(compact_boxes)} FRONT FACINGS:\n"
+                    + json.dumps(compact_boxes)
+                    + "\nClassify each of these exact front-facing bounding boxes in order from 1 to "
+                    + str(len(compact_boxes))
+                    + " into all configured Taxonomy dimensions."
+                )
+            elif separation_approach == "two_stage_physical_crop_per_facing" and detected_boxes:
+                crop_paths, montage_bytes = crop_detected_facings(
+                    storage=self.storage,
+                    shelf_image_uri=shelf_image_uri,
+                    detected_items=detected_boxes,
+                    output_crop_dir=Path(self.config.reporting.output_dir) / "crops",
+                    model_tag=f"{model_name}_{separation_approach}",
+                )
+                montage_part = types.Part.from_bytes(data=montage_bytes, mime_type="image/png")
+                contents_list.append(montage_part)
+                compact_boxes = [
+                    {"facing_index": i + 1, "bbox_2d": b.get("bbox_2d")}
+                    for i, b in enumerate(detected_boxes)
+                ]
+                prompt += (
+                    f"\n\nSTAGE 1 PHYSICALLY CROPPED {len(compact_boxes)} FRONT FACINGS (see second image showing high-resolution numbered crops #1 through #{len(compact_boxes)} alongside their shelf bounding boxes):\n"
+                    + json.dumps(compact_boxes)
+                    + "\nUse the zoomed-in numbered crops (#1..#"
+                    + str(len(compact_boxes))
+                    + ") to read fine-print packaging text and classify each facing into all configured Taxonomy dimensions."
+                )
+
+            contents_list.append(prompt)
+
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents_list,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=ProductClassificationOutput,
+                    temperature=0.1,
+                ),
+            )
+
+            stage2_tokens = extract_token_usage(response)
+            total_tokens = self._sum_tokens(stage1_tokens, stage2_tokens)
+
+            raw_text = response.text or "{}"
+            parsed_dict = json.loads(raw_text)
+            validated = ProductClassificationOutput.model_validate(parsed_dict)
+
+            raw_cls_items = [it.model_dump() for it in validated.classified_products]
+            if separation_approach in (
+                "single_pass_full_shelf",
+                "open_vocab_brand_plus_catalog_resolver",
+                "configurable_multi_attribute_vlm",
+            ):
+                dedup_cls_items, depth_filtered = deduplicate_depth_stacked_facings(
+                    raw_cls_items,
+                    x_overlap_threshold=self.config.depth_deduplication.x_overlap_threshold,
+                )
+            else:
+                dedup_cls_items = raw_cls_items
 
         all_boxes = [it.get("bbox_2d", [0, 0, 0, 0]) for it in dedup_cls_items]
 
@@ -193,13 +288,16 @@ class ProductClassificationTask(BaseBenchmarkTask):
             rule_size = derive_size_bucket_from_bbox(
                 box, all_boxes, pkg, model_size, taxonomy=self.config.taxonomy
             )
-            brand_val = item.get("brand") or ""
+            brand_val = resolve_brand_against_catalog(
+                item.get("brand") or "", taxonomy=self.config.taxonomy
+            )
             hul_flag = check_is_hul_brand(
                 brand_val,
                 taxonomy=self.config.taxonomy,
                 model_predicted=item.get("is_hul_brand"),
             )
             crop_path = crop_paths[idx - 1] if idx - 1 < len(crop_paths) else None
+            extra_attrs = dict(item.get("extra_attributes") or {})
 
             rows.append(
                 RowLevelReportItem(
@@ -232,6 +330,7 @@ class ProductClassificationTask(BaseBenchmarkTask):
                     rule_derived_size_bucket=rule_size,
                     predicted_product_name=item.get("product_name") or f"{brand_val} {item.get('variant', '')}".strip(),
                     confidence=float(item.get("confidence", 0.95)),
+                    extra_attributes=extra_attrs,
                 )
             )
 
