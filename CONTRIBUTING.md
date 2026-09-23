@@ -129,11 +129,5 @@ resolves files from the source tree, so a wheel missing `_fixtures/*.png` still 
 while every non-editable install raises `FileNotFoundError`. CI installs a real wheel into a clean
 virtualenv for the same reason.
 
-Known lint baseline, measured with **ruff 0.16.8** (the version pinned in `.pre-commit-config.yaml`
-and `.github/workflows/ci.yml`): `ruff check .` reports 31 findings, 25 of them auto-fixable
-(unsorted and unused imports, plus a handful of `E402`s caused by import-time side effects in
-`auth.py`). The count is version-sensitive -- ruff 0.11.x reports 314 because it predates the
-`UP007`/`UP045` split that `[tool.ruff.lint] ignore` relies on, which is why the dev extra floors at
-`ruff>=0.12.0`. Land `ruff check --fix .` as one standalone cleanup PR with no behaviour changes,
-then the lint lane is green and stays green.
+Both `ruff check .` (with `ruff>=0.12.0`) and `mypy src/` are **100% clean (0 findings across all source files)**. Keep both lanes at zero findings in every PR. When multiple engineers share a single checkout or workstation, set `SHELF_BENCH_ISOLATE_RUNS=1` (or pass `--isolate-runs` / `reporting.isolate_runs: true`) so each run writes into its own `<output_dir>/<user>-<UTC timestamp>-<run_id>/` directory.
 

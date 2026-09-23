@@ -331,6 +331,9 @@ class PipelineExecutor:
         raw_output.setdefault("total_classified_products", len(rows))
         raw_output["depth_duplicates_filtered"] = int(depth_filtered)
         raw_output["token_usage_reported"] = tokens_reported
+        effective_api_calls: Optional[int] = None
+        if approach_id == "configurable_multi_attribute_vlm":
+            effective_api_calls = max(1, len(self.config.taxonomy.attribute_call_groups or []))
         raw_output["execution_trace"] = build_execution_trace_metadata(
             run_id=run_id,
             trace_id=trace_id,
@@ -351,6 +354,7 @@ class PipelineExecutor:
             ground_truth_provider=self.config.ground_truth.provider_type,
             reference_catalog_uri=self.config.embeddings.reference_catalog.source_uri,
             custom_stages=invocation.stages_description,
+            api_calls_count=effective_api_calls,
         )
 
         return TaskExecutionResult(

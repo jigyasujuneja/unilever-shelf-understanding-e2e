@@ -89,15 +89,20 @@ class _NormalizedModelResponse:
     def __init__(
         self,
         text: str,
-        input_tokens: int = 250,
+        input_tokens: int = 0,
         thinking_tokens: int = 0,
-        output_tokens: int = 180,
+        output_tokens: int = 0,
+        usage_reported: bool = True,
     ):
         self.text = text
-        self.usage_metadata = _NormalizedUsageMetadata(
-            input_tokens=input_tokens,
-            thinking_tokens=thinking_tokens,
-            output_tokens=output_tokens,
+        self.usage_metadata = (
+            _NormalizedUsageMetadata(
+                input_tokens=input_tokens,
+                thinking_tokens=thinking_tokens,
+                output_tokens=output_tokens,
+            )
+            if usage_reported
+            else None
         )
 
 
@@ -143,21 +148,45 @@ class UniversalGenAIClientAdapter:
                     image_uri = getattr(item.file_data, "file_uri", "") or ""
             schema = getattr(config, "response_schema", None) if config else None
             raw_out = self.spec.custom_handler(prompt_text.strip(), image_uri, schema)
+            estimate_from_chars = bool(
+                self.spec.extra_config.get("estimate_tokens_from_char_length", False)
+            )
             if isinstance(raw_out, dict):
-                usage = raw_out.pop("_token_usage", {})
-                text_payload = json.dumps(raw_out)
+                payload_copy = dict(raw_out)
+                usage = payload_copy.pop("_token_usage", None)
+                text_payload = json.dumps(payload_copy)
+                if isinstance(usage, dict):
+                    return _NormalizedModelResponse(
+                        text=text_payload,
+                        input_tokens=int(usage.get("input_tokens", 0) or 0),
+                        thinking_tokens=int(usage.get("thinking_tokens", 0) or 0),
+                        output_tokens=int(usage.get("output_tokens", 0) or 0),
+                        usage_reported=True,
+                    )
+                if estimate_from_chars:
+                    return _NormalizedModelResponse(
+                        text=text_payload,
+                        input_tokens=max(120, len(prompt_text) // 4),
+                        thinking_tokens=0,
+                        output_tokens=max(80, len(text_payload) // 4),
+                        usage_reported=True,
+                    )
                 return _NormalizedModelResponse(
                     text=text_payload,
-                    input_tokens=int(usage.get("input_tokens", max(120, len(prompt_text) // 4))),
-                    thinking_tokens=int(usage.get("thinking_tokens", 0)),
-                    output_tokens=int(usage.get("output_tokens", max(80, len(text_payload) // 4))),
+                    usage_reported=False,
                 )
             text_str = str(raw_out)
+            if estimate_from_chars:
+                return _NormalizedModelResponse(
+                    text=text_str,
+                    input_tokens=max(120, len(prompt_text) // 4),
+                    thinking_tokens=0,
+                    output_tokens=max(80, len(text_str) // 4),
+                    usage_reported=True,
+                )
             return _NormalizedModelResponse(
                 text=text_str,
-                input_tokens=max(120, len(prompt_text) // 4),
-                thinking_tokens=0,
-                output_tokens=max(80, len(text_str) // 4),
+                usage_reported=False,
             )
 
         # 2. Gemma models on Vertex AI (which may not support strict `response_schema` JSON mode in all versions)
@@ -197,6 +226,7 @@ def register_approach_function(
     display_name: str,
     category: Literal["vlm_multimodal", "two_stage_vlm", "classic_cv_metric_learning"] = "two_stage_vlm",
     stages_description: Optional[List[str]] = None,
+    task_type: Literal["detection", "classification", "matching"] = "classification",
 ) -> Callable[[Callable[..., List[Dict[str, Any]]]], BaseShelfApproachPlugin]:
     """Decorator to turn a simple Python function `(ctx, model_name, shelf_image_uri) -> List[dict]` into a full Benchmark Approach Plugin with automatic OTel logging, depth deduplication, size rules, and cost calculation."""
 
@@ -204,11 +234,14 @@ def register_approach_function(
         _approach_id = approach_id
         _display_name = display_name
         _category = category
+        _task_type = task_type
         _stages = stages_description or [
             f"Stage 1: Custom Function Pipeline ({approach_id})"
         ]
 
         class FunctionApproachPlugin(BaseShelfApproachPlugin):
+            task_type = _task_type
+
             @property
             def approach_id(self) -> str:
                 return _approach_id
@@ -233,19 +266,17 @@ def register_approach_function(
                 gt_record: Optional[ImageGroundTruth] = None,
                 prior_detection: Optional[TaskExecutionResult] = None,
             ) -> TaskExecutionResult:
-                start_dt = ctx.telemetry.now_utc()
-                raw_outputs = func(ctx, model_name, record.shelf_image_uri)
-                end_dt = ctx.telemetry.now_utc()
-                return ctx.finalize(
+                return ctx.execute_with_pipeline(
                     approach_id=approach_id,
                     model_name=model_name,
                     record=record,
-                    raw_outputs=raw_outputs,
-                    start_dt=start_dt,
-                    end_dt=end_dt,
+                    invoke_fn=lambda live_model: func(ctx, live_model, record.shelf_image_uri),
                     gt_record=gt_record,
+                    task_type=_task_type,
                     run_id=f"custom-{approach_id}-{model_name}",
                     stages_description=_stages,
+                    retry_policy=self.retry_policy,
+                    prior_detection=prior_detection,
                 )
 
         plugin_instance = FunctionApproachPlugin()
@@ -325,7 +356,7 @@ class ShelfBenchmarkSDK:
             self._model_specs[alias] = UniversalModelSpec(
                 model_id=ep_cfg.model_id or alias,
                 display_name=alias,
-                provider_family=ep_cfg.provider_family,  # type: ignore[arg-type]
+                provider_family=ep_cfg.provider_family,
                 endpoint_uri=ep_cfg.endpoint_uri,
                 api_version=ep_cfg.api_version,
                 location=ep_cfg.location,
@@ -509,7 +540,7 @@ class ShelfBenchmarkSDK:
     def _get_client_for_model(self, model_name: str) -> Optional[Any]:
         spec = self._model_specs.get(model_name)
         if spec is None:
-            if self.config.offline.enabled:
+            if self.config.offline.enabled and model_name.startswith("offline-"):
                 from shelf_benchmark.testing import offline_universal_payload_handler
 
                 spec = UniversalModelSpec(
@@ -591,7 +622,7 @@ class ShelfBenchmarkSDK:
             model_id=display_name,
             display_name=display_name,
             provider_family="vertex_tuned_endpoint",
-            endpoint_uri=job_details.get("job_name") or base_model,
+            endpoint_uri=str(job_details.get("job_name") or base_model),
         )
         return {
             "benchmark_result": res,
@@ -609,8 +640,16 @@ class ShelfBenchmarkSDK:
         shelf_image_uris: Optional[Sequence[str]] = None,
         ground_truth: Optional[ImageGroundTruth] = None,
         ground_truth_id: Optional[str] = None,
+        prior_detection: Optional[TaskExecutionResult] = None,
+        reuse_prior_detection: bool = False,
+        detector_approach: Optional[str] = None,
+        max_workers: int = 1,
     ) -> Dict[str, Any]:
         """Run the benchmark suite across the requested models, tasks, approaches, and shelf images with full OpenTelemetry logging and Ground Truth evaluation."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from shelf_benchmark.scoring import write_predictions_file
+
         selected_models = list(models) if models is not None else list(self.config.models)
         selected_tasks = list(tasks) if tasks is not None else list(self.config.tasks)
         selected_approaches = list(approaches) if approaches is not None else list(self.config.approaches)
@@ -647,9 +686,8 @@ class ShelfBenchmarkSDK:
                 )
             ]
 
-        results: List[TaskExecutionResult] = []
-
-        for record in target_records:
+        def _run_for_record(record: ShelfAssociationRecord) -> List[TaskExecutionResult]:
+            rec_results: List[TaskExecutionResult] = []
             current_uri = record.shelf_image_uri
             gt_record = ground_truth or self.gt_provider.get_ground_truth(
                 shelf_image_uri=current_uri,
@@ -665,28 +703,65 @@ class ShelfBenchmarkSDK:
                     reports_dir=Path(self.config.reporting.output_dir),
                     genai_client=custom_client,
                 )
+                active_prior_det = prior_detection
 
-                if "detection" in selected_tasks:
+                if detector_approach:
+                    det_plugin = GLOBAL_APPROACH_REGISTRY.require(detector_approach)
+                    active_prior_det = det_plugin.execute(
+                        ctx=ctx,
+                        model_name=model_name,
+                        record=record,
+                        gt_record=gt_record,
+                    )
+                    if "detection" in selected_tasks:
+                        rec_results.append(active_prior_det)
+
+                if "detection" in selected_tasks and not detector_approach:
+                    det_plugins_in_approaches = [
+                        app_id
+                        for app_id in selected_approaches
+                        if GLOBAL_APPROACH_REGISTRY.get(app_id) is not None
+                        and getattr(GLOBAL_APPROACH_REGISTRY.get(app_id), "task_type", "classification")
+                        == "detection"
+                    ]
                     det_task = ProductDetectionTask(
                         self.config, self.storage, self.telemetry, genai_client=custom_client
                     )
-                    results.append(
-                        det_task.execute(
-                            model_name=model_name,
-                            shelf_image_uri=current_uri,
-                            ground_truth=gt_record,
-                        )
+                    base_det_res = det_task.execute(
+                        model_name=model_name,
+                        shelf_image_uri=current_uri,
+                        ground_truth=gt_record,
                     )
+                    rec_results.append(base_det_res)
+                    if reuse_prior_detection and active_prior_det is None:
+                        active_prior_det = base_det_res
+                    for det_app_id in det_plugins_in_approaches:
+                        det_plugin = GLOBAL_APPROACH_REGISTRY.require(det_app_id)
+                        custom_det_res = det_plugin.execute(
+                            ctx=ctx,
+                            model_name=model_name,
+                            record=record,
+                            gt_record=gt_record,
+                        )
+                        rec_results.append(custom_det_res)
+                        if reuse_prior_detection:
+                            active_prior_det = custom_det_res
 
                 if "classification" in selected_tasks:
                     for app_id in selected_approaches:
                         plugin = GLOBAL_APPROACH_REGISTRY.require(app_id)
-                        results.append(
+                        if (
+                            getattr(plugin, "task_type", "classification") == "detection"
+                            and "detection" in selected_tasks
+                        ):
+                            continue
+                        rec_results.append(
                             plugin.execute(
                                 ctx=ctx,
                                 model_name=model_name,
                                 record=record,
                                 gt_record=gt_record,
+                                prior_detection=active_prior_det,
                             )
                         )
 
@@ -694,7 +769,7 @@ class ShelfBenchmarkSDK:
                     mat_task = ProductMatchingTask(
                         self.config, self.storage, self.telemetry, genai_client=custom_client
                     )
-                    results.append(
+                    rec_results.append(
                         mat_task.execute(
                             model_name=model_name,
                             shelf_image_uri=current_uri,
@@ -706,13 +781,29 @@ class ShelfBenchmarkSDK:
                     ft_task = GeminiFineTuningTask(
                         self.config, self.storage, self.telemetry, genai_client=custom_client
                     )
-                    results.append(
+                    rec_results.append(
                         ft_task.execute(
                             model_name=model_name,
                             shelf_image_uri=current_uri,
                             ground_truth=gt_record,
                         )
                     )
+            return rec_results
+
+        results: List[TaskExecutionResult] = []
+        pred_checkpoint_path = Path(self.config.reporting.output_dir) / "predictions.json"
+
+        if max_workers > 1 and len(target_records) > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for rec_batch in pool.map(_run_for_record, target_records):
+                    results.extend(rec_batch)
+                    if self.config.reporting.write_predictions_file:
+                        write_predictions_file(results, pred_checkpoint_path, config=self.config)
+        else:
+            for record in target_records:
+                results.extend(_run_for_record(record))
+                if len(target_records) > 1 and self.config.reporting.write_predictions_file:
+                    write_predictions_file(results, pred_checkpoint_path, config=self.config)
 
         artifact_paths = self.report_generator.generate_all_reports(results)
         return {

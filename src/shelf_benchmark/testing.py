@@ -312,6 +312,7 @@ def perfect_prediction_payload() -> Dict[str, Any]:
                 "shelf_row": "middle", "position_on_shelf": 1, "confidence": 0.91,
             },
         ],
+        "_token_usage": {"input_tokens": 350, "thinking_tokens": 25, "output_tokens": 160},
     }
 
 
@@ -365,6 +366,7 @@ def offline_universal_payload_handler(
                     "confidence": 0.91,
                 },
             ],
+            "_token_usage": {"input_tokens": 320, "thinking_tokens": 20, "output_tokens": 140},
         }
     if schema_name == "ClassAgnosticDetectionResponse":
         return {
@@ -372,7 +374,8 @@ def offline_universal_payload_handler(
                 {"product_index": 1, "class_label": "product", "bbox_2d": [100, 100, 300, 200], "shelf_row": "top", "position_on_shelf": 1, "is_front_facing": True, "confidence": 0.95},
                 {"product_index": 2, "class_label": "product", "bbox_2d": [100, 220, 300, 320], "shelf_row": "top", "position_on_shelf": 2, "is_front_facing": True, "confidence": 0.93},
                 {"product_index": 3, "class_label": "product", "bbox_2d": [400, 100, 600, 200], "shelf_row": "middle", "position_on_shelf": 1, "is_front_facing": True, "confidence": 0.91},
-            ]
+            ],
+            "_token_usage": {"input_tokens": 280, "thinking_tokens": 15, "output_tokens": 110},
         }
     if schema_name == "ProductMatchingOutput":
         return {
@@ -439,6 +442,7 @@ def offline_universal_payload_handler(
                     "planogram_compliant": True,
                 },
             ],
+            "_token_usage": {"input_tokens": 380, "thinking_tokens": 30, "output_tokens": 190},
         }
     return perfect_prediction_payload()
 

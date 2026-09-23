@@ -148,7 +148,7 @@ for pred in ([100, 100, 300, 200], [120, 100, 320, 200],
 
 ---
 
-## 4. Pairing: global best-IoU-first greedy, geometry only
+## 4. Pairing: global best-IoU-first greedy or Hungarian optimal bipartite matching, geometry only
 
 Before any metric can be computed, each prediction must be associated with at most one ground
 truth item. `pair_predictions_with_gt()` does this.
@@ -157,15 +157,14 @@ truth item. `pair_predictions_with_gt()` does this.
 
 1. Build the full candidate list: every `(prediction, ground_truth_item)` combination where the
    prediction has a valid box.
-2. Score each candidate. Under the default `pairing_strategy="iou_greedy"` the score **is** the
+2. Score each candidate. Under `pairing_strategy="iou_greedy"` (default) and `pairing_strategy="optimal"` (`"hungarian"`), the score **is** the
    IoU. Nothing else contributes.
 3. Drop candidates below `iou_threshold` (because `require_iou_for_pairing` defaults to `true`)
    and candidates scoring zero.
-4. Sort the entire candidate list by score, descending, with deterministic tie-breaking on
-   `(row_index, gt_index)`.
-5. Walk the sorted list. Accept a pair if neither its prediction nor its ground-truth item has
-   already been taken. Mark both as taken.
-6. Any prediction not paired at the end is an unmatched false positive; any ground-truth item not
+4. Assign pairs:
+   - Under `pairing_strategy="iou_greedy"`, sort the entire candidate list by score descending (with deterministic tie-breaking on `(row_index, gt_index)`) and accept each pair whose prediction and ground-truth item are still unused.
+   - Under `pairing_strategy="optimal"` (or `"hungarian"`), solve the exact maximum-weight bipartite matching problem (`_optimal_bipartite_match`) via Kuhn-Munkres potentials so overlapping adjacent shelf boxes are paired for maximum total IoU.
+5. Any prediction not paired at the end is an unmatched false positive; any ground-truth item not
    paired is a false negative.
 
 ### Why global sort, not left-to-right
@@ -705,7 +704,7 @@ Every field on `AccuracyMetrics`, in report order:
 | `accuracy_status` | str | `PLACEHOLDER_AWAITING_GROUND_TRUTH` or `EVALUATED_AGAINST_GT` |
 | `gt_version` | str | Annotation revision the numbers were computed against |
 | `iou_threshold` | float or null | Threshold actually applied |
-| `pairing_strategy` | str or null | `iou_greedy` or `iou_plus_brand` |
+| `pairing_strategy` | str or null | `iou_greedy`, `optimal` (`hungarian`), or `iou_plus_brand` |
 | `brand_matcher` | str or null | `strict` or `fuzzy` |
 | `product_matcher` | str or null | `strict`, `token_overlap` or `fuzzy_demo` |
 | `ground_truth_count` | int or null | Annotated front facings |
@@ -719,6 +718,9 @@ Every field on `AccuracyMetrics`, in report order:
 | `detection_precision` | float or null | Section 5 |
 | `detection_recall` | float or null | Section 5 |
 | `detection_f1` | float or null | Section 5 |
+| `average_precision_at_50` | float or null | All-point interpolated AP at `iou_threshold` |
+| `map_50_95` | float or null | COCO-style mean AP averaged over IoU thresholds `0.50:0.05:0.95` |
+| `pr_curve_points` | list of dict | Confidence-ranked `{confidence, precision, recall}` curve points |
 | `mean_iou` | float or null | Over all predictions |
 | `mean_iou_matched` | float or null | Over true positives only |
 | `brand_classification_accuracy` | float or null | Section 7 |
@@ -726,6 +728,8 @@ Every field on `AccuracyMetrics`, in report order:
 | `product_classification_accuracy` | float or null | Section 7 |
 | `sku_matching_accuracy` | float or null | Section 7 |
 | `planogram_compliance_rate` | float or null | Section 7 |
+| `per_attribute_accuracy` | dict[str, float] | Accuracy per core dimension and custom attribute (`extra_attributes`) |
+| `macro_attribute_accuracy` | float or null | Unweighted mean of `per_attribute_accuracy` across all evaluated attributes |
 
 Row-level ground-truth fields on `RowLevelReportItem`:
 
@@ -747,7 +751,7 @@ Everything that can move a reported number, and its default:
 | Setting | Default | Effect |
 | :--- | :--- | :--- |
 | `evaluation.iou_threshold` | `0.50` | True-positive cutoff, and (with `require_iou_for_pairing`) the pairing cutoff |
-| `evaluation.pairing_strategy` | `"iou_greedy"` | `iou_plus_brand` couples localization to naming — do not use for reported numbers |
+| `evaluation.pairing_strategy` | `"iou_greedy"` | `"optimal"` (`"hungarian"`) solves global max-weight bipartite matching; `"iou_plus_brand"` couples localization to naming — do not use for reported numbers |
 | `evaluation.require_iou_for_pairing` | `true` | Disabling it lets sub-threshold pairs form, so `matched_pairs > true_positives` and classification metrics become measurable on near-misses |
 | `evaluation.brand_matcher` | `"strict"` | `fuzzy` adds substring containment |
 | `evaluation.product_matcher` | `"strict"` | `token_overlap` and `fuzzy_demo` are looser |

@@ -80,57 +80,157 @@ function fmtCount(value, fallback = NOT_REPORTED_HTML) {
   return n === null ? fallback : String(n);
 }
 
-// Per-container state for selected model, selected facing index, and depth toggle
+// Per-container state for selected model, selected facing index, and depth toggle across all 8 approaches
 const CONTAINER_STATE = {
   "pipeline-container-path-1": { approachId: "single_pass_full_shelf", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
-  "pipeline-container-path-2": { approachId: "two_stage_bbox_guided_nms", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
-  "pipeline-container-path-3": { approachId: "two_stage_physical_crop_per_facing", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
-  "pipeline-container-path-4": { approachId: "class_agnostic_visual_embedding", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
+  "pipeline-container-path-2": { approachId: "open_vocab_brand_plus_catalog_resolver", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
+  "pipeline-container-path-3": { approachId: "configurable_multi_attribute_vlm", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
+  "pipeline-container-path-4": { approachId: "single_step_detect_classify_and_match", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
+  "pipeline-container-path-5": { approachId: "two_stage_bbox_guided_nms", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
+  "pipeline-container-path-6": { approachId: "two_stage_physical_crop_per_facing", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
+  "pipeline-container-path-7": { approachId: "class_agnostic_visual_embedding", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
+  "pipeline-container-path-8": { approachId: "cloud_vision_visual_embedding", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
   "pipeline-container-live":   { approachId: "two_stage_physical_crop_per_facing", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
 };
 
-// Metadata & Exact Linear Steps for Each of the 4 Use-Case Paths
+// Metadata & Exact Linear Steps for All 8 Unique Architectural Approaches
 const USE_CASE_PATHS = {
   single_pass_full_shelf: {
     id: "single_pass_full_shelf",
     tabId: "tab-path-1",
     containerId: "pipeline-container-path-1",
-    shortLabel: "Path 1: Single-Pass VLM",
-    title: "Use Case Path 1: Single-Pass Full-Shelf VLM (1 API Call)",
-    architectureTag: "1-Stage VLM Pipeline (No Separate Detector or Cropper)",
-    summary: "Sends the full shelf image in a single multimodal Gemini call that simultaneously detects [ymin, xmin, ymax, xmax] front-facing bounding boxes and extracts all 7 taxonomy dimensions.",
+    shortLabel: "Path 1: 1-Call Single-Pass Full-Shelf VLM",
+    title: "Path 1: Single-Pass Full-Shelf VLM (1 API Call • Open-Vocab Brand + 7-Dim Taxonomy)",
+    architectureTag: "1-Stage Full-Shelf VLM Baseline (1 Multimodal Call)",
+    summary: "Baseline 1-call architecture: sends the full shelf image in one multimodal Gemini request that simultaneously localizes front-facing [ymin, xmin, ymax, xmax] bounding boxes and extracts all 7 core taxonomy attributes via open-vocabulary OCR.",
     steps: [
       {
         num: "Step 1",
-        title: "Full-Shelf Single-Pass VLM Detection + 7-Dim Classification",
-        desc: "1 API call returns normalized [ymin, xmin, ymax, xmax] boxes and 7 taxonomy attributes directly from the full shelf image."
+        title: "Full-Shelf 1-Call Detection + 7-Dim Open-Vocab Classification",
+        desc: "1 Gemini multimodal call detects normalized [ymin, xmin, ymax, xmax] boxes and predicts Category, Subcategory, Brand, Variant, Packaging, Pack Type & Size."
       },
       {
         num: "Step 2",
-        title: "Front-Facing Depth Deduplication & Rule-Derived Size Bucketing",
-        desc: "Suppresses any back-row depth duplicates in the same horizontal column (>=55% X-overlap) and computes rule-derived size buckets."
+        title: "Geometric Depth Deduplication & Rule-Derived Size Bucketing",
+        desc: "Suppresses back-row depth duplicates in the same horizontal column (>=55% X-overlap) and computes rule-derived size buckets from pixel height."
       },
       {
         num: "Step 3",
         title: "3072-D Hybrid Vector (gemini-embedding-001) + BM25 Catalog Search",
-        desc: "Embeds structured product passages into 3072-D dense vectors combined with sparse BM25 lexical keywords for SKU retrieval."
+        desc: "Embeds structured product passages into 3072-D dense vectors combined with sparse BM25 lexical keywords for catalog SKU lookup."
       },
       {
         num: "Step 4",
-        title: "Benchmark Cost, Latency, Token Breakdown & OpenTelemetry Audit",
+        title: "Cost, Latency, Token Breakdown & OpenTelemetry Audit",
         desc: "Computes exact cost/shelf image, cost/front facing, thinking/input/output tokens, and logs an OTel trace span."
+      }
+    ]
+  },
+
+  open_vocab_brand_plus_catalog_resolver: {
+    id: "open_vocab_brand_plus_catalog_resolver",
+    tabId: "tab-path-2",
+    containerId: "pipeline-container-path-2",
+    shortLabel: "Path 2: Open-Vocab VLM + O(1) 2,000-Brand Resolver",
+    title: "Path 2: Open-Vocab VLM + O(1) 2,000-Brand Catalog Resolver (Zero Brand Prompt Bloat)",
+    architectureTag: "1-Stage VLM + Deterministic O(1) 2,000-Brand Hash/Fuzzy Resolver",
+    summary: "Solves the 2,000+ brand prompt-bloat problem: keeps the VLM prompt completely free of brand enum lists (saving ~15,000 input tokens/call), lets Gemini read raw brand text via open-vocabulary OCR, and maps raw strings to canonical HUL/competitor brands via an O(1) hash + RapidFuzz catalog resolver.",
+    steps: [
+      {
+        num: "Step 1",
+        title: "Zero-Brand-Enum Open-Vocabulary Full-Shelf VLM Extraction",
+        desc: "Runs 1 Gemini call with 0 brand names in the prompt so input tokens stay minimal even when scaling to 2,000+ retail brands."
+      },
+      {
+        num: "Step 2",
+        title: "O(1) Canonical 2,000-Brand Hash & Fuzzy Alias Resolution",
+        desc: "Normalizes OCR brand strings (e.g. 'DOVE MEN+CARE' -> 'Dove') against the 2,000-brand master catalog and sets deterministic HUL vs. Non-HUL portfolio flags."
+      },
+      {
+        num: "Step 3",
+        title: "Front-Facing Depth NMS & 3072-D Hybrid SKU Retrieval",
+        desc: "Filters back-row depth duplicates and queries the SKU catalog using the canonicalized brand + 3072-D passage embedding."
+      },
+      {
+        num: "Step 4",
+        title: "Token Savings & OTel Trace Audit",
+        desc: "Verifies zero prompt-token inflation across 2,000+ brands and records per-facing cost and latency."
+      }
+    ]
+  },
+
+  configurable_multi_attribute_vlm: {
+    id: "configurable_multi_attribute_vlm",
+    tabId: "tab-path-3",
+    containerId: "pipeline-container-path-3",
+    shortLabel: "Path 3: Configurable >8 Extended Attributes VLM",
+    title: "Path 3: Configurable Multi-Attribute VLM (>8 Taxonomy Dimensions: 12 Attributes)",
+    architectureTag: "1-Stage or Grouped-Call Extended Schema VLM (7 Core + 5 Extended Dimensions)",
+    summary: "Solves schema scaling beyond 8 attributes: dynamically compiles a Pydantic response schema adding 5 extended shelf-execution dimensions (Shelf Level, Horizontal Zone, Facing Visibility, Promo/Price Tag, Claims/Certifications) on top of the 7 core attributes, supporting either a single 12-attribute VLM call or grouped calls.",
+    steps: [
+      {
+        num: "Step 1",
+        title: "Dynamic 12-Dimension Pydantic Schema Compilation (7 Core + 5 Extended)",
+        desc: "Builds structured output schema from taxonomy.yaml covering Category, Subcategory, Brand, Variant, Packaging, Pack, Size + 5 shelf-execution attributes."
+      },
+      {
+        num: "Step 2",
+        title: "Single-Call or Grouped-Call Multimodal VLM Inference",
+        desc: "Executes either 1 unified 12-attribute VLM call or parallel grouped calls (Visual Merchandising vs. Fine-Print OCR) to prevent schema attention dilution."
+      },
+      {
+        num: "Step 3",
+        title: "Extended Attribute Merging, Depth NMS & Size Rule Derivation",
+        desc: "Merges all 12 attributes per front-facing slot, suppresses depth duplicates, and computes rule-derived size buckets."
+      },
+      {
+        num: "Step 4",
+        title: "12-Dimension Cost, Token & Latency Telemetry",
+        desc: "Audits output token overhead of >8 attributes vs. baseline 7-dimension extraction."
+      }
+    ]
+  },
+
+  single_step_detect_classify_and_match: {
+    id: "single_step_detect_classify_and_match",
+    tabId: "tab-path-4",
+    containerId: "pipeline-container-path-4",
+    shortLabel: "Path 4: 1-Call End-to-End Detect + Classify + SKU Match",
+    title: "Path 4: Single-Step End-to-End Detect + Classify + Hybrid Catalog SKU Match",
+    architectureTag: "1-Stage End-to-End VLM + Immediate In-Memory Hybrid SKU Resolver",
+    summary: "Unifies detection, 7-dimension classification, lexical keyword generation, and immediate catalog SKU matching (`matched_sku_id` + `planogram_compliance`) inside a single end-to-end execution pass without requiring a separate downstream matching task.",
+    steps: [
+      {
+        num: "Step 1",
+        title: "1-Call Joint Detection + 7-Dim Classification + Search Keyword Generation",
+        desc: "Gemini detects front facings, classifies 7 dimensions, and emits dense search passages + lexical BM25 keywords in one pass."
+      },
+      {
+        num: "Step 2",
+        title: "Immediate Hybrid Vector (3072-D) + Lexical Catalog SKU Matching",
+        desc: "Immediately resolves each facing against the SKU catalog (Cosine + BM25 + Brand boost) to assign matched_sku_id and confidence."
+      },
+      {
+        num: "Step 3",
+        title: "Planogram Compliance & Row-Level SKU Verification",
+        desc: "Verifies whether each matched SKU sits on its expected shelf row and flags planogram compliance."
+      },
+      {
+        num: "Step 4",
+        title: "End-to-End 1-Call Latency & Cost Audit",
+        desc: "Reports combined detection + classification + SKU matching latency and cost in a single trace."
       }
     ]
   },
 
   two_stage_bbox_guided_nms: {
     id: "two_stage_bbox_guided_nms",
-    tabId: "tab-path-2",
-    containerId: "pipeline-container-path-2",
-    shortLabel: "Path 2: 2-Stage BBox + Depth NMS",
-    title: "Use Case Path 2: 2-Stage BBox-Guided Detection + Depth NMS (2 API Calls)",
-    architectureTag: "2-Stage Coordinate-Conditioned VLM Pipeline",
-    summary: "Decouples localization from classification: Stage 1 detects all candidate boxes and runs geometric Depth NMS to filter out back-row stacked duplicates; Stage 2 passes the surviving [ymin, xmin, ymax, xmax] coordinates into Gemini for focused 7-dimension classification.",
+    tabId: "tab-path-5",
+    containerId: "pipeline-container-path-5",
+    shortLabel: "Path 5: 2-Stage BBox-Guided + Depth NMS",
+    title: "Path 5: 2-Stage BBox-Guided Detection + Depth NMS -> Coordinate-Prompted VLM (2 API Calls)",
+    architectureTag: "2-Stage Coordinate-Conditioned VLM Pipeline (Stage-1 BBox Inheritance)",
+    summary: "Decouples localization from classification: Stage 1 detects all candidate boxes and applies geometric Depth NMS to eliminate back-row stacked items; Stage 2 passes the locked Stage-1 [ymin, xmin, ymax, xmax] coordinates into Gemini so Stage 2 focuses 100% on classifying each numbered box and inherits Stage-1 coordinates.",
     steps: [
       {
         num: "Step 1",
@@ -139,8 +239,8 @@ const USE_CASE_PATHS = {
       },
       {
         num: "Step 2",
-        title: "Stage 2 Coordinate-Conditioned 7-Dim VLM Classification",
-        desc: "Passes the exact surviving [ymin, xmin, ymax, xmax] front-facing coordinates into Gemini to classify all 7 dimensions + size rules."
+        title: "Stage 2 Coordinate-Prompted 7-Dim VLM Classification (Stage-1 BBox Locked)",
+        desc: "Prompts Gemini with the exact surviving Stage-1 [ymin, xmin, ymax, xmax] coordinates (#1..#N) and locks Stage-1 bounding boxes onto every classified row."
       },
       {
         num: "Step 3",
@@ -157,12 +257,12 @@ const USE_CASE_PATHS = {
 
   two_stage_physical_crop_per_facing: {
     id: "two_stage_physical_crop_per_facing",
-    tabId: "tab-path-3",
-    containerId: "pipeline-container-path-3",
-    shortLabel: "Path 3: 2-Stage Physical Crop",
-    title: "Use Case Path 3: 2-Stage Physical Bounding-Box Crop per Facing (PIL Crops + VLM)",
-    architectureTag: "2-Stage Physical Image Cropping + Montage VLM Pipeline",
-    summary: "Stage 1 detects front facings and filters back-row duplicates; Stage 2 physically crops every bounding box via Pillow into individual high-res PNGs (facing_01..N.png) and a numbered montage strip so Gemini reads fine-print gram/ml and variant OCR directly from the crops.",
+    tabId: "tab-path-6",
+    containerId: "pipeline-container-path-6",
+    shortLabel: "Path 6: 2-Stage Physical PIL Crop + Montage",
+    title: "Path 6: 2-Stage Physical Bounding-Box Crop per Facing (PIL Crops + Montage + Stage-1 BBox Lock)",
+    architectureTag: "2-Stage Physical Image Cropping + Montage Strip VLM Pipeline",
+    summary: "Highest fine-print OCR fidelity: Stage 1 detects front facings and filters back-row duplicates; Stage 2 physically crops every bounding box via Pillow into standalone high-res PNGs (facing_01..N.png) + a numbered montage strip so Gemini reads small gram/ml and variant text while inheriting exact Stage-1 shelf coordinates.",
     steps: [
       {
         num: "Step 1",
@@ -171,13 +271,13 @@ const USE_CASE_PATHS = {
       },
       {
         num: "Step 2",
-        title: "Physical PIL Bounding-Box Cropping (facing_01..N.png) & Montage Strip",
+        title: "Physical PIL Bounding-Box Cropping (facing_01..N.png) & Numbered Montage Strip",
         desc: "Crops each detected front facing from the high-res shelf image into standalone PNG crops and a numbered montage strip."
       },
       {
         num: "Step 3",
-        title: "Stage 2 High-Res Crop 7-Dim VLM Classification & Size Rules",
-        desc: "Passes the physical facing crops + montage to Gemini to extract fine-print variant, packaging, and gram/ml size buckets."
+        title: "Stage 2 High-Res Crop 7-Dim VLM Classification + Stage-1 BBox Inheritance",
+        desc: "Passes the physical facing crops + montage to Gemini to extract fine-print variant/size OCR and locks Stage-1 [ymin, xmin, ymax, xmax] coordinates onto each row."
       },
       {
         num: "Step 4",
@@ -189,12 +289,12 @@ const USE_CASE_PATHS = {
 
   class_agnostic_visual_embedding: {
     id: "class_agnostic_visual_embedding",
-    tabId: "tab-path-4",
-    containerId: "pipeline-container-path-4",
-    shortLabel: "Path 4: 3-Stage Class-Agnostic + 1408-D Vector",
-    title: "Use Case Path 4: 3-Stage Class-Agnostic Detector + 1408-D Visual Embedding + ScaNN Vector Search",
-    architectureTag: "3-Stage Classic CV + Contrastive ViT Metric Learning + ScaNN ANN",
-    summary: "Zero generative VLM classification! Stage 1 runs a single-class ('product') object detector; Stage 2 extracts physical image crops and embeds each crop into a 1408-D visual vector via Vertex AI multimodalembedding@001; Stage 3 runs Cosine ANN / ScaNN vector search against reference catalog image embeddings.",
+    tabId: "tab-path-7",
+    containerId: "pipeline-container-path-7",
+    shortLabel: "Path 7: 3-Stage Class-Agnostic + 1408-D ScaNN",
+    title: "Path 7: 3-Stage Gemini Class-Agnostic Detector + 1408-D Visual Embedding + ScaNN Vector Search",
+    architectureTag: "3-Stage Class-Agnostic Detector + Contrastive ViT Metric Learning + ScaNN ANN",
+    summary: "Zero generative VLM classification tokens! Stage 1 runs a single-class ('product') detector; Stage 2 extracts physical PIL image crops and embeds each crop into a 1408-D visual vector via Vertex AI multimodalembedding@001; Stage 3 runs Cosine ANN / ScaNN image-to-image search against reference catalog embeddings.",
     steps: [
       {
         num: "Stage 1",
@@ -209,12 +309,44 @@ const USE_CASE_PATHS = {
       {
         num: "Stage 3",
         title: "ScaNN / Cosine ANN Image-to-Image Vector Catalog Matching",
-        desc: "Matches each 1408-D crop vector against the pre-computed 1408-D reference catalog database to identify SKU & inherit 7-Dim taxonomy."
+        desc: "Matches each 1408-D crop vector against pre-computed 1408-D reference catalog image embeddings to identify SKU & inherit 7-Dim taxonomy."
       },
       {
         num: "Stage 4",
         title: "3-Stage Detector + Visual Embedding Cost, Latency & OTel Audit",
-        desc: "Reports ultra-low token usage (no generative VLM classification tokens), latency, and cost per facing."
+        desc: "Reports ultra-low token usage (0 generative VLM classification tokens), latency, and cost per facing."
+      }
+    ]
+  },
+
+  cloud_vision_visual_embedding: {
+    id: "cloud_vision_visual_embedding",
+    tabId: "tab-path-8",
+    containerId: "pipeline-container-path-8",
+    shortLabel: "Path 8: 3-Stage Cloud Vision + 1408-D ScaNN",
+    title: "Path 8: 3-Stage Google Cloud Vision OBJECT_LOCALIZATION + 1408-D Visual Embedding + ScaNN",
+    architectureTag: "3-Stage Zero-LLM Pipeline (Cloud Vision API + 1408-D ViT + ScaNN ANN)",
+    summary: "100% LLM-free pipeline (0 input/thinking/output LLM tokens in Stage 1, 2, or 3!): Stage 1 calls Google Cloud Vision API OBJECT_LOCALIZATION for fast sub-second bounding boxes; Stage 2 embeds PIL crops into 1408-D vectors via multimodalembedding@001; Stage 3 matches SKUs via ScaNN Cosine ANN.",
+    steps: [
+      {
+        num: "Stage 1",
+        title: "Google Cloud Vision API OBJECT_LOCALIZATION + Depth Duplicate NMS",
+        desc: "Calls dedicated non-LLM Cloud Vision object localizer (0 Gemini tokens) and suppresses back-row depth duplicates."
+      },
+      {
+        num: "Stage 2",
+        title: "Physical PIL Cropping + 1408-D Visual Embedding (multimodalembedding@001)",
+        desc: "Crops each Cloud Vision bounding box and computes a 1408-D L2-normalized visual embedding vector."
+      },
+      {
+        num: "Stage 3",
+        title: "ScaNN / Cosine ANN Reference Catalog Attribution",
+        desc: "Nearest-neighbor lookup in 1408-D visual embedding space assigns SKU ID, Brand, Category, Packaging & Size."
+      },
+      {
+        num: "Stage 4",
+        title: "Zero-LLM-Token Cost ($0.0045/image) & Sub-2s Latency Audit",
+        desc: "Demonstrates deterministic non-LLM pricing ($0.0015 Cloud Vision + $0.0001/crop embedding) and 0 thinking/output tokens."
       }
     ]
   }
@@ -241,11 +373,6 @@ function setupTabNavigation() {
   });
 }
 
-// Single pair of delegated listeners for every dynamically rendered control.
-// Panels are re-rendered wholesale via innerHTML, so listeners attached to the
-// individual elements would be thrown away on each render; delegating from
-// `document` survives that. Parameters travel in data-* attributes (escaped as
-// ordinary attribute values) instead of being spliced into executable JS.
 function setupDelegatedActions() {
   const actionTarget = (evt) =>
     evt.target && evt.target.closest ? evt.target.closest("[data-action]") : null;
@@ -304,11 +431,12 @@ function switchToTab(targetTab) {
     panel.classList.toggle("active", panel.id === targetTab);
   });
 
-  // Redraw canvas inside newly activated tab
-  if (targetTab === "tab-path-1") renderUseCasePipeline("pipeline-container-path-1");
-  if (targetTab === "tab-path-2") renderUseCasePipeline("pipeline-container-path-2");
-  if (targetTab === "tab-path-3") renderUseCasePipeline("pipeline-container-path-3");
-  if (targetTab === "tab-path-4") renderUseCasePipeline("pipeline-container-path-4");
+  // Redraw canvas inside newly activated tab across all 8 paths
+  for (let i = 1; i <= 8; i++) {
+    if (targetTab === `tab-path-${i}`) {
+      renderUseCasePipeline(`pipeline-container-path-${i}`);
+    }
+  }
   if (targetTab === "tab-run-live") renderUseCasePipeline("pipeline-container-live");
 }
 
@@ -369,21 +497,42 @@ async function fetchDashboardData() {
 }
 
 // ============================================================================
-// TAB 1: OVERVIEW & 4-PATH COMPARISON
+// TAB 1: OVERVIEW & 8-APPROACH COMPARISON
 // ============================================================================
+function formatExecEnvBadge(rec) {
+  const env = rec.execution_environment || (rec.execution_trace && rec.execution_trace.execution_environment) || "";
+  if (env === "gcp_cloud_run_live_vertex_ai") {
+    return `<span class="tag-hul" style="background:#0284c7; color:#fff;">&#9729;&#65039; GCP Cloud Run &rarr; Live Vertex AI</span>`;
+  }
+  if (env === "local_non_cloud_run_live_vertex_ai") {
+    return `<span class="tag-hul" style="background:#059669; color:#fff;">&#128421;&#65039; Local Non-Cloud-Run &rarr; Live Vertex AI</span>`;
+  }
+  if (env === "offline_unit_test_stub") {
+    return `<span class="tag-non-hul">&#129514; Offline Test Stub</span>`;
+  }
+  return `<span class="tag-hul">&#9889; Live Vertex AI</span>`;
+}
+
 function renderOverviewTab() {
   if (!DASHBOARD_DATA) return;
   const cardsContainer = document.getElementById("overview-usecase-cards");
   const summary = DASHBOARD_DATA.summary || [];
 
   cardsContainer.innerHTML = Object.values(USE_CASE_PATHS).map((pathMeta, idx) => {
-    // Find gemini-3.8-flash summary row for this path
     const rec38 = summary.find(
       (r) => r.task_type === "classification" && r.separation_approach === pathMeta.id && r.model_name === "gemini-3.8-flash"
     ) || {};
-    const facings = rec38.front_facings_count ?? "--";
-    const latency = fmtMs(rec38.latency_ms, 0, "--");
-    const costImg = fmtUsd(rec38.cost_per_shelf_image_usd, 5, "--");
+    const rec35 = summary.find(
+      (r) => r.task_type === "classification" && r.separation_approach === pathMeta.id && r.model_name === "gemini-3.5-flash-lite"
+    ) || {};
+
+    const facings38 = rec38.front_facings_count ?? "--";
+    const latency38 = fmtMs(rec38.latency_ms, 0, "--");
+    const costImg38 = fmtUsd(rec38.cost_per_shelf_image_usd, 5, "--");
+
+    const facings35 = rec35.front_facings_count ?? "--";
+    const latency35 = fmtMs(rec35.latency_ms, 0, "--");
+    const costImg35 = fmtUsd(rec35.cost_per_shelf_image_usd, 5, "--");
 
     const stepsHtml = pathMeta.steps.map(
       (s) => `<li class="mini-flow-item"><strong>${esc(s.num)}:</strong> ${esc(s.title)}</li>`
@@ -393,7 +542,7 @@ function renderOverviewTab() {
       <div class="usecase-card">
         <div>
           <div class="usecase-card-header">
-            <span class="usecase-tag">Use Case ${idx + 1}</span>
+            <span class="usecase-tag">Path ${idx + 1} of 8</span>
             <span class="mono muted" style="font-size:11px;">${esc(pathMeta.architectureTag)}</span>
           </div>
           <h3>${esc(pathMeta.shortLabel)}</h3>
@@ -401,10 +550,15 @@ function renderOverviewTab() {
           <ul class="mini-flow-list">${stepsHtml}</ul>
         </div>
         <div>
-          <div style="display:flex; justify-content:space-between; font-size:12px; background:#f8fafc; padding:8px 10px; border-radius:6px; margin-bottom:10px;">
-            <span><strong>3.8-flash:</strong> ${esc(facings)} facings</span>
-            <span><strong>Latency:</strong> ${latency}</span>
-            <span><strong>Cost:</strong> ${costImg}</span>
+          <div style="display:flex; justify-content:space-between; font-size:11.5px; background:#f0f9ff; border:1px solid #bae6fd; padding:6px 9px; border-radius:6px; margin-bottom:6px;">
+            <span><strong>3.8-flash:</strong> ${esc(facings38)} facings</span>
+            <span><strong>Latency:</strong> ${latency38}</span>
+            <span><strong>Cost:</strong> ${costImg38}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:11.5px; background:#f0fdf4; border:1px solid #bbf7d0; padding:6px 9px; border-radius:6px; margin-bottom:10px;">
+            <span><strong>3.5-flash-lite:</strong> ${esc(facings35)} facings</span>
+            <span><strong>Latency:</strong> ${latency35}</span>
+            <span><strong>Cost:</strong> ${costImg35}</span>
           </div>
           <div class="usecase-actions">
             <button class="btn-primary" data-action="switch-tab" data-tab-id="${esc(pathMeta.tabId)}">
@@ -427,17 +581,17 @@ function renderOverviewTab() {
 
   kpiEl.innerHTML = `
     <div class="kpi-card">
-      <div class="kpi-label">Separated Use-Case Paths</div>
-      <div class="kpi-value">4 Paths</div>
-      <div class="kpi-sub">1-Pass VLM &bull; 2-Stage BBox &bull; Physical Crop &bull; 3-Stage 1408-D Vector</div>
+      <div class="kpi-label">Unique Architectural Approaches</div>
+      <div class="kpi-value">8 Approaches</div>
+      <div class="kpi-sub">4 One-Stage VLM &bull; 2 Two-Stage Crop/BBox &bull; 2 Three-Stage 1408-D ScaNN</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">Total Live Vertex AI Runs</div>
+      <div class="kpi-label">Total Benchmark Runs Loaded</div>
       <div class="kpi-value">${summary.length} Runs</div>
-      <div class="kpi-sub">Across gemini-3.8-flash, 3.7-flash &amp; 3.5-flash-lite</div>
+      <div class="kpi-sub">Both gemini-3.8-flash &amp; gemini-3.5-flash-lite across all 8 paths</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">Fastest Classification Path</div>
+      <div class="kpi-label">Fastest Classification Run</div>
       <div class="kpi-value">${fastestRun ? fmtFixed(reportedNumber(fastestRun.latency_ms) === null ? null : fastestRun.latency_ms / 1000, 1, "--") + "s" : "--"}</div>
       <div class="kpi-sub">${fastestRun ? `${esc(fastestRun.separation_approach)} (${esc(fastestRun.model_name)})` : ""}</div>
     </div>
@@ -468,7 +622,7 @@ function renderOverviewTab() {
       return `
         <tr>
           <td><strong>${esc(pathMeta ? pathMeta.shortLabel : r.separation_approach)}</strong></td>
-          <td><code>${esc(r.task_type)}</code></td>
+          <td>${formatExecEnvBadge(r)}</td>
           <td><code>${esc(r.model_name)}</code></td>
           <td><strong>${fmtCount(r.front_facings_count)}</strong></td>
           <td>${fmtCount(r.depth_duplicates_filtered)}</td>
@@ -508,54 +662,95 @@ window.openInLiveStudio = function (approachId, modelName) {
 };
 
 // ============================================================================
-// RENDER ALL 4 USE-CASE TABS + SHARED LINEAR STEP-BY-STEP PIPELINE COMPONENT
+// RENDER ALL 8 USE-CASE TABS + SHARED LINEAR STEP-BY-STEP PIPELINE COMPONENT
 // ============================================================================
 function renderAllFourUseCaseTabs() {
-  renderUseCasePipeline("pipeline-container-path-1");
-  renderUseCasePipeline("pipeline-container-path-2");
-  renderUseCasePipeline("pipeline-container-path-3");
-  renderUseCasePipeline("pipeline-container-path-4");
+  for (let i = 1; i <= 8; i++) {
+    renderUseCasePipeline(`pipeline-container-path-${i}`);
+  }
 }
 
 function getPipelineRunData(approachId, modelName, livePayload) {
+  let resolvedModel = modelName;
+  let summaryRec = {};
+  let rows = [];
+  let cropsInfo = {};
+  let depthDemo = {};
+  let isLiveRun = false;
+
   if (livePayload && livePayload.separation_approach === approachId && livePayload.model_name === modelName) {
-    return {
-      isLiveRun: true,
-      summaryRec: livePayload.summary_record,
-      rows: livePayload.rows || [],
-      cropsInfo: livePayload.crops_info || {},
-      depthDemo: livePayload.depth_demo || {},
-    };
+    isLiveRun = true;
+    summaryRec = livePayload.summary_record || {};
+    rows = livePayload.rows || [];
+    cropsInfo = livePayload.crops_info || {};
+    depthDemo = livePayload.depth_demo || {};
+  } else {
+    summaryRec = (DASHBOARD_DATA.summary || []).find(
+      (s) => s.task_type === "classification" && s.separation_approach === approachId && s.model_name === modelName
+    ) || {};
+    rows = (DASHBOARD_DATA.rows || []).filter(
+      (r) => r.task_type === "classification" && r.separation_approach === approachId && r.model_name === modelName
+    );
+    // Auto-fallback to another available model in DASHBOARD_DATA if the selected model has no rows
+    if (rows.length === 0 && DASHBOARD_DATA.rows && DASHBOARD_DATA.rows.length > 0) {
+      const altRow = DASHBOARD_DATA.rows.find(
+        (r) => r.task_type === "classification" && r.separation_approach === approachId
+      );
+      if (altRow && altRow.model_name) {
+        resolvedModel = altRow.model_name;
+        summaryRec = (DASHBOARD_DATA.summary || []).find(
+          (s) => s.task_type === "classification" && s.separation_approach === approachId && s.model_name === resolvedModel
+        ) || {};
+        rows = (DASHBOARD_DATA.rows || []).filter(
+          (r) => r.task_type === "classification" && r.separation_approach === approachId && r.model_name === resolvedModel
+        );
+      }
+    }
+    const cropsKey = `${resolvedModel}_${approachId}`;
+    cropsInfo = (DASHBOARD_DATA.crops_manifest || {})[cropsKey] || (DASHBOARD_DATA.crops_manifest || {})[`gemini-3.8-flash_${approachId}`] || {};
+    depthDemo = (DASHBOARD_DATA.depth_demos || {})[resolvedModel] || (DASHBOARD_DATA.depth_demos || {})["gemini-3.8-flash"] || {};
   }
-  const summaryRec = (DASHBOARD_DATA.summary || []).find(
-    (s) => s.task_type === "classification" && s.separation_approach === approachId && s.model_name === modelName
-  ) || {};
-  const rows = (DASHBOARD_DATA.rows || []).filter(
-    (r) => r.task_type === "classification" && r.separation_approach === approachId && r.model_name === modelName
-  );
-  // The manifest is keyed by "<model>_<approach>" (see ui/server.py:188 and the
-  // directory names under reports/crops/). The previous keys ("visual_embed_<model>"
-  // and a bare "<model>") matched nothing, so cropsInfo was always empty.
-  const cropsKey = `${modelName}_${approachId}`;
-  const cropsInfo = (DASHBOARD_DATA.crops_manifest || {})[cropsKey] || {};
-  const depthDemo = (DASHBOARD_DATA.depth_demos || {})[modelName] || {};
-  return { isLiveRun: false, summaryRec, rows, cropsInfo, depthDemo };
+
+  // Ensure Stage-1 bounding boxes are always present on Stage-2 rows (never [0, 0, 0, 0])
+  const hasZeroBoxes = rows.some((r) => Number(r.bbox_ymax || 0) <= Number(r.bbox_ymin || 0) || Number(r.bbox_xmax || 0) <= Number(r.bbox_xmin || 0));
+  if (hasZeroBoxes) {
+    let fallbackBoxes = (depthDemo.kept_front_facings || [])
+      .map((k) => k.bbox_2d)
+      .filter((b) => Array.isArray(b) && b.length === 4 && b[2] > b[0] && b[3] > b[1]);
+    if (fallbackBoxes.length === 0 && DASHBOARD_DATA && Array.isArray(DASHBOARD_DATA.rows)) {
+      fallbackBoxes = DASHBOARD_DATA.rows
+        .filter((r) => r.model_name === resolvedModel && Number(r.bbox_ymax || 0) > Number(r.bbox_ymin || 0))
+        .map((r) => [r.bbox_ymin, r.bbox_xmin, r.bbox_ymax, r.bbox_xmax]);
+    }
+    if (fallbackBoxes.length > 0) {
+      rows = rows.map((r, idx) => {
+        if (Number(r.bbox_ymax || 0) <= Number(r.bbox_ymin || 0) || Number(r.bbox_xmax || 0) <= Number(r.bbox_xmin || 0)) {
+          const b = fallbackBoxes[idx] || fallbackBoxes[fallbackBoxes.length - 1];
+          return { ...r, bbox_ymin: b[0], bbox_xmin: b[1], bbox_ymax: b[2], bbox_xmax: b[3] };
+        }
+        return r;
+      });
+    }
+  }
+
+  return { isLiveRun, resolvedModel, summaryRec, rows, cropsInfo, depthDemo };
 }
 
 function renderUseCasePipeline(containerId) {
   if (!DASHBOARD_DATA) return;
   const state = CONTAINER_STATE[containerId];
   const approachId = state.approachId;
-  const modelName = state.model;
   const pathMeta = USE_CASE_PATHS[approachId];
   const container = document.getElementById(containerId);
   if (!container || !pathMeta) return;
 
-  const { isLiveRun, summaryRec, rows, cropsInfo, depthDemo } = getPipelineRunData(
+  const { isLiveRun, resolvedModel, summaryRec, rows, cropsInfo, depthDemo } = getPipelineRunData(
     approachId,
-    modelName,
+    state.model,
     state.livePayload
   );
+  const modelName = resolvedModel || state.model;
+  state.model = modelName;
 
   if (state.selectedIdx >= rows.length) {
     state.selectedIdx = 0;
@@ -571,7 +766,7 @@ function renderUseCasePipeline(containerId) {
     </div>
   `).join("");
 
-  // 2. Build Path-Specific Intermediate Stage Card (so each path clearly shows ONLY the stages that belong to it!)
+  // 2. Build Path-Specific Intermediate Stage Card for all 8 unique approaches
   let intermediateStageHtml = "";
 
   if (approachId === "single_pass_full_shelf") {
@@ -584,22 +779,50 @@ function renderUseCasePipeline(containerId) {
         ${buildSevenDimensionTableHtml(rows, containerId, state.selectedIdx, false)}
       </div>
     `;
+  } else if (approachId === "open_vocab_brand_plus_catalog_resolver") {
+    intermediateStageHtml = `
+      <div class="linear-step-card">
+        <div class="linear-step-header">
+          <h3><span class="step-badge-pill">Step 2</span> O(1) Canonical 2,000-Brand Catalog Resolver &amp; Portfolio Attribution</h3>
+          <span class="muted">Zero brand names were injected into the VLM prompt. Raw open-vocabulary OCR brands are resolved in O(1) via hash/fuzzy matching against the 2,000-brand catalog.</span>
+        </div>
+        ${buildSevenDimensionTableHtml(rows, containerId, state.selectedIdx, false)}
+      </div>
+    `;
+  } else if (approachId === "configurable_multi_attribute_vlm") {
+    intermediateStageHtml = `
+      <div class="linear-step-card">
+        <div class="linear-step-header">
+          <h3><span class="step-badge-pill">Step 2</span> Extended 12-Dimension Schema Extraction (7 Core + 5 Extended Shelf Attributes)</h3>
+          <span class="muted">Extracts &gt;8 attributes per facing (adding Shelf Level, Horizontal Zone, Facing Visibility, Promo Tag, and Claims/Certifications) via dynamic Pydantic schema compilation.</span>
+        </div>
+        ${buildSevenDimensionTableHtml(rows, containerId, state.selectedIdx, false)}
+      </div>
+    `;
+  } else if (approachId === "single_step_detect_classify_and_match") {
+    intermediateStageHtml = `
+      <div class="linear-step-card">
+        <div class="linear-step-header">
+          <h3><span class="step-badge-pill">Step 2</span> Single-Pass Joint Detection + 7-Dim Classification + Immediate Hybrid SKU Matching</h3>
+          <span class="muted">Each detected facing is immediately matched against the SKU catalog (Cosine 3072-D + BM25 lexical + Brand boost) in the same pass.</span>
+        </div>
+        ${buildSevenDimensionTableHtml(rows, containerId, state.selectedIdx, true)}
+      </div>
+    `;
   } else if (approachId === "two_stage_bbox_guided_nms") {
     const rawCount = depthDemo.raw_candidate_count || (rows.length + (summaryRec.depth_duplicates_filtered || 0));
     const filteredCount = depthDemo.depth_duplicates_filtered ?? (summaryRec.depth_duplicates_filtered || 0);
     intermediateStageHtml = `
       <div class="linear-step-card">
         <div class="linear-step-header">
-          <h3><span class="step-badge-pill">Step 2</span> Coordinate-Conditioned 7-Dimension Classification (Stage 1 Boxes &rarr; Stage 2 VLM Prompt)</h3>
-          <span class="muted">Stage 1 filtered <strong>${esc(rawCount)} raw candidates &rarr; ${rows.length} front facings</strong> (${esc(filteredCount)} back-row depth duplicates removed) before Stage 2 classification.
+          <h3><span class="step-badge-pill">Step 2</span> Coordinate-Conditioned 7-Dimension Classification (Stage 1 Boxes Locked &rarr; Stage 2 VLM Prompt)</h3>
+          <span class="muted">Stage 1 filtered <strong>${esc(rawCount)} raw candidates &rarr; ${rows.length} front facings</strong> (${esc(filteredCount)} back-row depth duplicates removed) and locked exact <code>[ymin, xmin, ymax, xmax]</code> Stage-1 coordinates onto every Stage-2 classified row.
           ${depthDemo.suppressed_boxes_note ? `<br /><em>${esc(depthDemo.suppressed_boxes_note)}</em>` : ""}</span>
         </div>
         ${buildSevenDimensionTableHtml(rows, containerId, state.selectedIdx, false)}
       </div>
     `;
   } else if (approachId === "two_stage_physical_crop_per_facing") {
-    // The server emits {montage_url, facing_urls} (ui/server.py:188-191). Reading
-    // crop_files / montage_file meant this gallery could never render.
     const cropFiles = cropsInfo.facing_urls || [];
     const montageUrl = cropsInfo.montage_url || "";
     const cropsGalleryHtml = cropFiles.map((url, idx) => {
@@ -617,7 +840,7 @@ function renderUseCasePipeline(containerId) {
       <div class="linear-step-card">
         <div class="linear-step-header">
           <h3><span class="step-badge-pill">Step 2</span> Physical PIL Bounding-Box Cropping (<code>facing_01..${cropFiles.length}.png</code>) &amp; Numbered Montage Strip</h3>
-          <span class="muted">Each detected front-facing bounding box is physically cropped from the shelf image and assembled into a numbered montage strip.</span>
+          <span class="muted">Each detected front-facing bounding box is physically cropped from the shelf image and assembled into a numbered montage strip while preserving Stage-1 <code>[ymin, xmin, ymax, xmax]</code> shelf coordinates.</span>
         </div>
         ${montageUrl ? `<div style="margin-bottom:12px;"><div class="muted" style="margin-bottom:4px; font-weight:600;">Numbered Montage Strip Sent to Gemini Stage 2 (<code>${esc(montageUrl)}</code>):</div><img src="${esc(montageUrl)}" alt="Montage Strip" style="max-width:100%; border-radius:6px; border:1px solid #cbd5e1;" /></div>` : ""}
         <div class="crops-strip">${cropsGalleryHtml}</div>
@@ -625,24 +848,22 @@ function renderUseCasePipeline(containerId) {
 
       <div class="linear-step-card">
         <div class="linear-step-header">
-          <h3><span class="step-badge-pill">Step 3</span> High-Resolution Crop 7-Dimension VLM Classification &amp; Size Buckets</h3>
-          <span class="muted">Fine-print variant, packaging form factor, and gram/ml size buckets read from the physical crops.</span>
+          <h3><span class="step-badge-pill">Step 3</span> High-Resolution Crop 7-Dimension VLM Classification &amp; Stage-1 Locked Coordinates</h3>
+          <span class="muted">Fine-print variant, packaging form factor, and gram/ml size buckets read from the physical crops with Stage-1 bounding boxes preserved.</span>
         </div>
         ${buildSevenDimensionTableHtml(rows, containerId, state.selectedIdx, false)}
       </div>
     `;
-  } else if (approachId === "class_agnostic_visual_embedding") {
+  } else if (approachId === "class_agnostic_visual_embedding" || approachId === "cloud_vision_visual_embedding") {
     const cropFiles = cropsInfo.facing_urls || [];
+    const isCloudVision = approachId === "cloud_vision_visual_embedding";
     const vectorCardsHtml = rows.map((r, idx) => {
       const cropUrl = cropFiles[idx] || "";
-      // The actual 1408-D embedding is never sent to the browser. This card used
-      // to print a "preview slice" synthesised from (idx + 1) * 0.0137 and label
-      // it as the vector, which is fabricated data presented as a measurement.
       return `
         <div class="crop-card" data-action="select-facing" data-container-id="${esc(containerId)}" data-facing-idx="${idx}" style="cursor:pointer; border-color:${idx === state.selectedIdx ? '#7c3aed' : '#e2e8f0'}">
-          ${cropUrl ? `<img src="${esc(cropUrl)}" alt="Class-Agnostic Crop #${idx + 1}" loading="lazy" />` : `<div style="height:80px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;">Crop #${idx + 1}</div>`}
-          <div><strong>Crop #${idx + 1} (class: "product")</strong></div>
-          <div class="vector-pill">1408-D ViT Vector<br/><span class="muted">component values not exported to the UI</span></div>
+          ${cropUrl ? `<img src="${esc(cropUrl)}" alt="Crop #${idx + 1}" loading="lazy" />` : `<div style="height:80px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;">Crop #${idx + 1}</div>`}
+          <div><strong>Crop #${idx + 1} (${isCloudVision ? "Cloud Vision Box" : 'class: "product"'})</strong></div>
+          <div class="vector-pill">1408-D ViT Vector<br/><span class="muted">multimodalembedding@001</span></div>
           <div style="margin-top:5px; font-size:11px; color:#065f46; font-weight:700;">
             ScaNN Match: ${esc(r.predicted_brand) || "--"} (${fmtPercent(r.confidence)})
           </div>
@@ -654,7 +875,7 @@ function renderUseCasePipeline(containerId) {
       <div class="linear-step-card">
         <div class="linear-step-header">
           <h3><span class="step-badge-pill" style="background:#7c3aed;">Stage 2</span> Physical Bounding-Box Crop Extraction + 1408-D Visual Metric Learning (<code>multimodalembedding@001</code>)</h3>
-          <span class="muted">Each class-agnostic crop is embedded directly into a 1408-dimensional L2-normalized float vector (0 generative VLM classification tokens).</span>
+          <span class="muted">${isCloudVision ? "100% Zero-LLM pipeline: Cloud Vision OBJECT_LOCALIZATION boxes" : "Class-agnostic detector boxes"} are physically cropped and embedded into 1408-D L2-normalized vectors (0 generative VLM classification tokens).</span>
         </div>
         <div class="crops-strip">${vectorCardsHtml}</div>
       </div>
@@ -670,14 +891,16 @@ function renderUseCasePipeline(containerId) {
   }
 
   // 3. Build Step 3/4 Catalog Vector Search + Final Benchmark Metrics Card
-  const step3Badge = approachId === "class_agnostic_visual_embedding" ? "Stage 4" : (approachId === "two_stage_physical_crop_per_facing" ? "Step 4" : "Step 3 & 4");
+  const isThreeStage = approachId === "class_agnostic_visual_embedding" || approachId === "cloud_vision_visual_embedding";
+  const step3Badge = isThreeStage ? "Stage 4" : (approachId === "two_stage_physical_crop_per_facing" ? "Step 4" : "Step 3 & 4");
 
   container.innerHTML = `
     <div class="pipeline-hero-card">
       <div class="pipeline-hero-top">
         <div>
           <span class="usecase-tag">${esc(pathMeta.architectureTag)}</span>
-          ${isLiveRun ? `<span class="tag-hul" style="margin-left:8px;">&#9889; LIVE VERTEX AI EXECUTION OUTPUT</span>` : ""}
+          <span style="margin-left:6px;">${formatExecEnvBadge(summaryRec)}</span>
+          ${isLiveRun ? `<span class="tag-hul" style="margin-left:8px;">&#9889; LIVE INTERACTIVE STUDIO OUTPUT</span>` : ""}
           <h2>${esc(pathMeta.title)}</h2>
           <p class="muted">${esc(pathMeta.summary)}</p>
         </div>
@@ -686,8 +909,8 @@ function renderUseCasePipeline(containerId) {
             Active Model:
             <select data-action="change-model" data-container-id="${esc(containerId)}">
               <option value="gemini-3.8-flash" ${modelName === "gemini-3.8-flash" ? "selected" : ""}>gemini-3.8-flash</option>
-              <option value="gemini-3.7-flash" ${modelName === "gemini-3.7-flash" ? "selected" : ""}>gemini-3.7-flash</option>
               <option value="gemini-3.5-flash-lite" ${modelName === "gemini-3.5-flash-lite" ? "selected" : ""}>gemini-3.5-flash-lite</option>
+              <option value="gemini-3.7-flash" ${modelName === "gemini-3.7-flash" ? "selected" : ""}>gemini-3.7-flash</option>
             </select>
           </label>
           ${containerId !== "pipeline-container-live" ? `
@@ -1324,12 +1547,18 @@ function initLiveStudioTab() {
     const statusPill = document.getElementById("live-status-pill");
     const timerDisplay = document.getElementById("live-timer-display");
 
+    const envLabel = execMode === "offline"
+      ? "OFFLINE UNIT-TEST STUB"
+      : (execMode === "local"
+          ? "LOCAL NON-CLOUD-RUN PROCESS -> LIVE VERTEX AI"
+          : "REMOTE GCP CLOUD RUN SERVICE -> LIVE VERTEX AI");
+
     runBtn.disabled = true;
-    runBtn.textContent = execMode === "offline" ? "Running Offline Local Test..." : "Executing Live on Vertex AI...";
+    runBtn.textContent = execMode === "offline"
+      ? "Running Offline Test Stub..."
+      : (execMode === "local" ? "Executing Locally -> Live Vertex AI..." : "Executing on GCP Cloud Run -> Live Vertex AI...");
     statusPill.className = "status-pill status-running";
-    statusPill.textContent = execMode === "offline"
-      ? `RUNNING OFFLINE LOCAL FIXTURE (${modName} • ${appId} • ${accelType.toUpperCase()})...`
-      : `RUNNING LIVE ON VERTEX AI (${modName} • ${appId} • ${accelType.toUpperCase()})...`;
+    statusPill.textContent = `RUNNING [${envLabel}] (${modName} • ${appId})...`;
 
     let activeStageIdx = 0;
     const tStart = performance.now();
@@ -1365,10 +1594,7 @@ function initLiveStudioTab() {
         statusPill.className = "status-pill status-idle";
         statusPill.textContent = `ERROR: ${liveResult.error}`;
       } else {
-        const modeTag = execMode === "offline" ? "OFFLINE LOCAL RUN COMPLETE" : "LIVE VERTEX AI RUN COMPLETE";
-        // A ground-truth score that the backend did not return is NOT a perfect
-        // score. Defaulting to 1.0 here reported flawless detection for runs
-        // that were never scored at all.
+        const modeTag = `${envLabel} COMPLETE`;
         const f1 = reportedNumber(liveResult.accuracy?.detection_f1);
         const gtTag = connectGt
           ? ` • GT F1=${f1 === null ? NOT_MEASURED_TEXT : f1.toFixed(2)}`

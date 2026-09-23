@@ -35,11 +35,14 @@ LEADERBOARD_AVERAGED_METRICS: Sequence[str] = (
     "detection_precision",
     "detection_recall",
     "detection_f1",
+    "average_precision_at_50",
+    "map_50_95",
     "mean_iou_matched",
     "count_accuracy",
     "brand_classification_accuracy",
     "brand_set_recall",
     "product_classification_accuracy",
+    "macro_attribute_accuracy",
     "sku_matching_accuracy",
     "planogram_compliance_rate",
 )
@@ -157,11 +160,18 @@ def build_summary_records(results: Sequence[TaskExecutionResult]) -> List[Dict[s
                 "detection_precision": acc.detection_precision,
                 "detection_recall": acc.detection_recall,
                 "detection_f1": acc.detection_f1,
+                "average_precision_at_50": acc.average_precision_at_50,
+                "map_50_95": acc.map_50_95,
                 "brand_classification_accuracy": acc.brand_classification_accuracy,
                 "brand_set_recall": acc.brand_set_recall,
                 "product_classification_accuracy": acc.product_classification_accuracy,
+                "macro_attribute_accuracy": acc.macro_attribute_accuracy,
                 "sku_matching_accuracy": acc.sku_matching_accuracy,
                 "planogram_compliance_rate": acc.planogram_compliance_rate,
+                "execution_environment": (r.execution_trace or {}).get(
+                    "execution_environment", "local_non_cloud_run_live_vertex_ai"
+                ),
+                "execution_trace": r.execution_trace or {},
                 "error_message": r.error_message,
             }
         )

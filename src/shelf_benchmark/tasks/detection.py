@@ -27,17 +27,17 @@ from shelf_benchmark.tasks.facing_utils import (
 )
 
 DETECTION_PROMPT = """You are an expert retail computer vision system for shelf facing detection.
-Analyze this shelf image and detect every distinct FRONT-FACING product slot on the main middle shelf (ordered strictly from left to right).
+Analyze this shelf image and detect every distinct FRONT-FACING product slot across all visible shelf rows (top, middle, bottom; ordered top-to-bottom and strictly from left to right within each row).
 
 CRITICAL FACING RULE:
 - Do NOT count multiple products stocked in depth (one behind another) in the same facing column as separate detections!
 - We ONLY care about the FRONT-MOST visible product unit in each horizontal facing slot (`1 horizontal facing slot = 1 bounding box`).
 - Ignore partial tops or caps of back-row products peeking out from behind a front-row product.
 
-For each distinct front-facing product slot on the main middle shelf:
-1. `product_index`: 1-based facing slot index ordered strictly from left to right.
+For each distinct front-facing product slot on the shelf:
+1. `product_index`: 1-based facing slot index ordered top-to-bottom, left-to-right.
 2. `bbox_2d`: Normalized 2D coordinates `[ymin, xmin, ymax, xmax]` (0 to 1000) tightly enclosing ONLY the front-most unit in that facing.
-3. `shelf_row`: `"middle"` and `position_on_shelf`: 1-based horizontal facing slot index.
+3. `shelf_row`: Shelf row identifier (`"top"`, `"middle"`, or `"bottom"`) and `position_on_shelf`: 1-based horizontal facing slot index on that row.
 4. `is_front_facing`: `true` (must be front-most unit).
 5. `visual_description`: Packaging form factor, color, and visible graphic cues.
 6. `preliminary_brand_hint`: Visible brand text read directly from packaging if legible, else `"Unknown"`.

@@ -563,7 +563,7 @@ def create_ground_truth_provider(
             )
         return NullGroundTruthProvider()
 
-    common = {
+    common: Dict[str, Any] = {
         "schema_mapping": gt_config.schema_mapping,
         "gt_version": gt_config.gt_version,
         "exclude_back_row_items": gt_config.exclude_back_row_items,

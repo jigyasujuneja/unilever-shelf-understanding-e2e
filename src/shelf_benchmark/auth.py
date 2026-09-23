@@ -16,8 +16,9 @@ os.environ["GOOGLE_API_USE_CLIENT_CERTIFICATE"] = "false"
 
 import google.auth
 import google.auth.transport.requests
+import google.cloud.storage as storage
 from google import genai
-from google.cloud import bigquery, storage
+from google.cloud import bigquery
 from google.oauth2 import credentials
 
 

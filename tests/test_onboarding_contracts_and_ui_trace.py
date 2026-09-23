@@ -436,3 +436,248 @@ def test_two_thousand_brands_scale_without_prompt_bloat():
 
     assert check_is_hul_brand("CatalogBrand_0742", tax) is True
     assert check_is_hul_brand("CatalogBrand_1850", tax) is False
+
+
+def test_onboarding_audit_fixes_contract(tmp_path: Path):
+    """Pin audit fixes: plugin token bookkeeping keys, ctx.compute_cost, multi-shelf vertical depth NMS, and sample_ground_truth.json placeholder alignment."""
+    from shelf_benchmark.approaches.class_agnostic_visual_embedding.stage3_vector_search_matcher import (
+        clear_catalog_cache,
+    )
+    from shelf_benchmark.geometry import deduplicate_depth_stacked_facings
+    from shelf_benchmark.models import TokenUsageMetrics
+
+    # 1. Multi-shelf vertical check in Depth NMS: upper shelf item (y=100..300) and lower shelf item
+    #    (y=400..600) in the exact same X column (x=100..200) must BOTH survive even if both omit shelf_row.
+    multi_row_boxes = [
+        {"bbox_2d": [100, 100, 300, 200], "shelf_row": "middle", "brand": "TopShelfBrand"},
+        {"bbox_2d": [400, 100, 600, 200], "shelf_row": "middle", "brand": "MiddleShelfBrand"},
+        {"bbox_2d": [360, 102, 460, 198], "shelf_row": "middle", "brand": "BackRowBehindMiddle"},
+    ]
+    kept, filtered = deduplicate_depth_stacked_facings(multi_row_boxes)
+    assert len(kept) == 2
+    assert filtered == 1
+    assert {b["brand"] for b in kept} == {"TopShelfBrand", "MiddleShelfBrand"}
+
+    # 2. Plugin bookkeeping keys (_input_tokens, _thinking_tokens, _output_tokens) and ctx.compute_cost()
+    class TokenBookkeepingPlugin(SimpleShelfApproachPlugin):
+        @property
+        def approach_id(self) -> str:
+            return "token_bookkeeping_plugin"
+
+        @property
+        def display_name(self) -> str:
+            return "Token Bookkeeping Plugin"
+
+        @property
+        def category(self) -> str:
+            return "two_stage_vlm"
+
+        @property
+        def stages_description(self) -> List[str]:
+            return ["Stage 1: Test"]
+
+        def detect_and_classify(
+            self,
+            ctx: CommonLayerContext,
+            model_name: str,
+            record: ShelfAssociationRecord,
+        ) -> List[Dict[str, Any]]:
+            cost_check = ctx.compute_cost(
+                TokenUsageMetrics(input_tokens=100, thinking_tokens=20, output_tokens=50, total_tokens=170),
+                model_name=model_name,
+                product_count=1,
+            )
+            assert cost_check.cost_per_shelf_image_usd > 0
+            return [
+                {
+                    "bbox_2d": [100, 100, 300, 200],
+                    "brand": "Brand_A",
+                    "product_name": "Brand_A Radiance Daily Cleanser",
+                    "_input_tokens": 220,
+                    "_thinking_tokens": 30,
+                    "_output_tokens": 85,
+                    "_depth_filtered": 1,
+                }
+            ]
+
+    GLOBAL_APPROACH_REGISTRY.register(TokenBookkeepingPlugin())
+    res = run_offline_approach(tmp_path, "token_bookkeeping_plugin", with_ground_truth=True)
+    assert res.tokens.input_tokens == 220
+    assert res.tokens.thinking_tokens == 30
+    assert res.tokens.output_tokens == 85
+    assert res.tokens.total_tokens == 335
+    assert res.cost.vertex_ai_payg_tokens_usd > 0
+    assert res.accuracy.depth_duplicates_filtered == 1
+
+    # 3. Offline reference catalog support in class_agnostic_visual_embedding
+    clear_catalog_cache()
+    sdk = benchmark_harness(tmp_path / "cat_offline", with_ground_truth=True)
+    sdk.config.embeddings.reference_catalog.source_uri = "configs/demo_visual_prototypes.json"
+    cat_summary = sdk.run_suite(
+        tasks=["classification"],
+        approaches=["class_agnostic_visual_embedding"],
+        shelf_image_uri=OFFLINE_IMAGE_URI,
+    )
+    assert cat_summary["results"][0].status == "SUCCESS"
+    assert cat_summary["results"][0].raw_output["catalog_status"] == "MATCHED"
+
+    # 4. configs/sample_ground_truth.json carries _placeholder_alert and aligns with perfect_prediction_payload()
+    sample_gt_raw = json.loads(Path("configs/sample_ground_truth.json").read_text(encoding="utf-8"))
+    assert "_placeholder_alert" in sample_gt_raw
+    sdk_gt = benchmark_harness(tmp_path / "sample_gt_align", with_ground_truth=False)
+    sdk_gt.connect_ground_truth(
+        provider_type="json",
+        source_uri="configs/sample_ground_truth.json",
+    )
+    gt_summary = sdk_gt.run_suite(
+        tasks=["classification"],
+        approaches=["single_pass_full_shelf"],
+        shelf_image_uri=OFFLINE_IMAGE_URI,
+    )
+    assert gt_summary["results"][0].accuracy.detection_f1 == pytest.approx(1.0)
+    assert gt_summary["results"][0].accuracy.brand_classification_accuracy == pytest.approx(1.0)
+
+
+def test_pure_detection_plugin_and_decoupled_stage1_stage2_pairing(tmp_path: Path):
+    """Verify pure bounding-box detector plugins are not penalized on classification attributes and can feed `prior_detection` into Stage-2 classifiers."""
+    from shelf_benchmark import register_approach_function
+
+    @register_approach_function(
+        approach_id="unit_test_pure_box_detector",
+        display_name="Unit Test Pure BBox Detector",
+        task_type="detection",
+    )
+    def run_pure_detector(ctx: CommonLayerContext, model_name: str, shelf_image_uri: str):
+        raw_boxes = [
+            {"bbox_2d": [100, 100, 300, 200], "confidence": 0.95, "_input_tokens": 110, "_output_tokens": 40},
+            {"bbox_2d": [100, 220, 300, 320], "confidence": 0.93},
+            {"bbox_2d": [400, 100, 600, 200], "confidence": 0.91},
+        ]
+        kept, filtered = ctx.deduplicate_depth_stacked_facings(raw_boxes)
+        if kept:
+            kept[0]["_depth_filtered"] = filtered
+        return kept
+
+    # 1. Pure detector plugin runs with task_type='detection' and has None (not 0.0) for unpredicted attributes
+    det_res = run_offline_approach(tmp_path / "det_only", "unit_test_pure_box_detector", with_ground_truth=True)
+    assert det_res.task_type == "detection"
+    assert det_res.accuracy.detection_f1 == pytest.approx(1.0)
+    assert det_res.accuracy.per_attribute_accuracy == {}
+    assert det_res.accuracy.macro_attribute_accuracy is None
+    assert det_res.accuracy.brand_classification_accuracy is None
+    assert det_res.accuracy.product_classification_accuracy is None
+    assert det_res.row_level_items[0].shelf_row == "top"
+    assert det_res.row_level_items[2].shelf_row == "middle"
+
+    # 2. Pair Stage-1 custom detector (`detector_approach`) with Stage-2 classifier (`two_stage_bbox_guided_nms`)
+    sdk = benchmark_harness(tmp_path / "decoupled_pair", with_ground_truth=True)
+    paired_summary = sdk.run_suite(
+        tasks=["detection", "classification"],
+        detector_approach="unit_test_pure_box_detector",
+        approaches=["two_stage_bbox_guided_nms"],
+        shelf_image_uri=OFFLINE_IMAGE_URI,
+    )
+    assert len(paired_summary["results"]) == 2
+    s1_res, s2_res = paired_summary["results"]
+    assert s1_res.separation_approach == "unit_test_pure_box_detector"
+    assert s2_res.separation_approach == "two_stage_bbox_guided_nms"
+    assert s2_res.accuracy.detection_f1 == pytest.approx(1.0)
+    # Stage 2 folds Stage 1's tokens (110+40=150) into its own Stage-2 classification tokens (350+25+160=535 -> 685)
+    assert s2_res.tokens.total_tokens == s1_res.tokens.total_tokens + 535
+
+
+def test_plugin_retry_policy_graceful_error_and_unreported_callable_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Verify plugins run through PipelineExecutor.run() (retries + ERROR status parity), custom_callable does not fabricate tokens when omitted, depth-NMS handles mislabeled row strings, and SHELF_BENCH_ISOLATE_RUNS works."""
+    from shelf_benchmark import UniversalModelSpec
+    from shelf_benchmark.geometry import deduplicate_depth_stacked_facings
+    from shelf_benchmark.pipeline import RetryPolicy
+    from shelf_benchmark.reporting.generator import BenchmarkReportGenerator
+
+    # 1. Plugin retry policy succeeds on 2nd attempt
+    attempts = {"count": 0}
+
+    class FlakyRetryPlugin(SimpleShelfApproachPlugin):
+        retry_policy = RetryPolicy(max_attempts=2, backoff_base_seconds=0.0)
+
+        @property
+        def approach_id(self) -> str:
+            return "unit_test_flaky_retry_plugin"
+
+        @property
+        def display_name(self) -> str:
+            return "Flaky Retry Plugin"
+
+        @property
+        def category(self) -> str:
+            return "two_stage_vlm"
+
+        @property
+        def stages_description(self) -> List[str]:
+            return ["Stage 1: Retryable call"]
+
+        def detect_and_classify(
+            self, ctx: CommonLayerContext, model_name: str, record: ShelfAssociationRecord
+        ) -> List[Dict[str, Any]]:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError("transient network glitch")
+            return [{"bbox_2d": [100, 100, 300, 200], "confidence": 0.95}]
+
+    GLOBAL_APPROACH_REGISTRY.register(FlakyRetryPlugin())
+    retry_res = run_offline_approach(tmp_path / "retry_ok", "unit_test_flaky_retry_plugin", with_ground_truth=True)
+    assert retry_res.status == "SUCCESS"
+    assert retry_res.task_type == "detection"
+    assert attempts["count"] == 2
+
+    # 2. Custom callable that omits `_token_usage` reports 0 tokens and `token_usage_reported=False`
+    sdk = benchmark_harness(tmp_path / "unreported_tok", with_ground_truth=False)
+    sdk.register_model(
+        UniversalModelSpec(
+            model_id="external-no-token-model",
+            provider_family="custom_callable",
+            custom_handler=lambda prompt, uri, schema: {
+                "total_classified_products": 1,
+                "distinct_brands_found": ["Brand_A"],
+                "classified_products": [
+                    {
+                        "product_index": 1,
+                        "bbox_2d": [100, 100, 300, 200],
+                        "brand": "Brand_A",
+                        "product_name": "Brand_A Radiance Daily Cleanser",
+                        "confidence": 0.92,
+                    }
+                ],
+            },
+        )
+    )
+    unrep_summary = sdk.run_suite(
+        models=["external-no-token-model"],
+        tasks=["classification"],
+        approaches=["single_pass_full_shelf"],
+        shelf_image_uri=OFFLINE_IMAGE_URI,
+        shelf_image_uris=[OFFLINE_IMAGE_URI, OFFLINE_IMAGE_URI],
+        max_workers=2,
+    )
+    assert len(unrep_summary["results"]) == 2
+    assert unrep_summary["results"][0].tokens.total_tokens == 0
+    assert unrep_summary["results"][0].raw_output["token_usage_reported"] is False
+
+    # 3. 1D Depth-NMS suppresses back-row unit even when VLM mislabels its shelf_row as 'top' behind a 'middle' front unit
+    kept, removed = deduplicate_depth_stacked_facings(
+        [
+            {"bbox_2d": [320, 100, 520, 200], "shelf_row": "middle", "brand": "FrontUnit"},
+            {"bbox_2d": [300, 105, 480, 195], "shelf_row": "top", "brand": "BackUnitMislabeledRow"},
+            {"bbox_2d": [50, 100, 220, 200], "shelf_row": "top", "brand": "GenuineUpperShelfUnit"},
+        ]
+    )
+    assert removed == 1
+    assert [it["brand"] for it in kept] == ["GenuineUpperShelfUnit", "FrontUnit"]
+
+    # 4. SHELF_BENCH_ISOLATE_RUNS=1 enables run isolation via environment variable
+    monkeypatch.setenv("SHELF_BENCH_ISOLATE_RUNS", "1")
+    gen = BenchmarkReportGenerator.from_config(BenchmarkConfig())
+    assert gen.isolate_runs is True
+
+

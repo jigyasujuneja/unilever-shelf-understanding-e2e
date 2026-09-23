@@ -163,7 +163,7 @@ def run_stage1_class_agnostic_detection(
                 ys = [int(round(float(v.get("y", 0.0)) * 1000)) for v in verts]
                 ymin, ymax = max(0, min(ys)), min(1000, max(ys))
                 xmin, xmax = max(0, min(xs)), min(1000, max(xs))
-                shelf_row = "bottom" if ymax > 840 else "middle"
+                shelf_row = "top" if ymax <= 360 else ("bottom" if ymax > 840 else "middle")
                 raw_candidates.append(
                     {
                         "product_index": idx,
@@ -186,7 +186,7 @@ def run_stage1_class_agnostic_detection(
         }
         img_b64 = base64.b64encode(image_bytes).decode("utf-8")
         resp = requests.post(
-            vertex_endpoint_url,
+            str(vertex_endpoint_url),
             headers=headers,
             json={"instances": [{"image_bytes": {"b64": img_b64}}]},
             timeout=30,
@@ -210,7 +210,7 @@ def run_stage1_class_agnostic_detection(
                     "product_index": idx,
                     "class_label": "product",
                     "bbox_2d": [ymin, xmin, ymax, xmax],
-                    "shelf_row": "bottom" if ymax > 840 else "middle",
+                    "shelf_row": "top" if ymax <= 360 else ("bottom" if ymax > 840 else "middle"),
                     "position_on_shelf": idx,
                     "is_front_facing": True,
                     "confidence": round(float(sc), 3),

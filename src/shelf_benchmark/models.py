@@ -443,6 +443,7 @@ def build_execution_trace_metadata(
     ground_truth_provider: str = "none",
     reference_catalog_uri: Optional[str] = None,
     custom_stages: Optional[List[str]] = None,
+    api_calls_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build a comprehensive, human- and UI-readable trace explanation for any benchmark execution."""
     approach_blueprints: Dict[str, Dict[str, Any]] = {
@@ -473,7 +474,7 @@ def build_execution_trace_metadata(
         },
         "configurable_multi_attribute_vlm": {
             "call_topology": "Configurable N-Attribute VLM (Single Call or Grouped Multi-Call by Attribute Type)",
-            "api_calls_count": 1,
+            "api_calls_count": api_calls_count or 1,
             "detect_and_classify_mode": "Configurable N-Attribute Extraction (predicts >8 attributes in 1 VLM call or split across taxonomy.attribute_call_groups)",
             "models_invoked": [
                 {"stage": "Stage 1..G (Configurable Attribute Groups)", "model": model_name, "type": "Vertex AI Multimodal VLM"},

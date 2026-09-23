@@ -68,18 +68,64 @@ class BenchmarkRunner:
                 default_location=self.config.gcp.location,
             )
         self._genai_client = genai_client
+        self._model_specs = {}
+        from shelf_benchmark.sdk import UniversalModelSpec
+
+        for alias, ep_cfg in self.config.model_endpoints.items():
+            self._model_specs[alias] = UniversalModelSpec(
+                model_id=ep_cfg.model_id or alias,
+                display_name=alias,
+                provider_family=ep_cfg.provider_family,
+                endpoint_uri=ep_cfg.endpoint_uri,
+                api_version=ep_cfg.api_version,
+                location=ep_cfg.location,
+            )
 
         self.detection_task = ProductDetectionTask(
-            self.config, self.storage, self.telemetry, genai_client=self._genai_client  # type: ignore[arg-type]
+            self.config, self.storage, self.telemetry, genai_client=self._genai_client
         )
         self.classification_task = ProductClassificationTask(
-            self.config, self.storage, self.telemetry, genai_client=self._genai_client  # type: ignore[arg-type]
+            self.config, self.storage, self.telemetry, genai_client=self._genai_client
         )
         self.matching_task = ProductMatchingTask(
-            self.config, self.storage, self.telemetry, genai_client=self._genai_client  # type: ignore[arg-type]
+            self.config, self.storage, self.telemetry, genai_client=self._genai_client
         )
         self.fine_tuning_task = GeminiFineTuningTask(
-            self.config, self.storage, self.telemetry, genai_client=self._genai_client  # type: ignore[arg-type]
+            self.config, self.storage, self.telemetry, genai_client=self._genai_client
+        )
+
+    def _get_client_for_model(self, model_name: str) -> Optional[object]:
+        """Return the injected client or a UniversalGenAIClientAdapter when model_name maps to model_endpoints/GEAP/Gemma/Tuned Endpoint."""
+        if self._genai_client is not None:
+            return self._genai_client
+        from shelf_benchmark.sdk import UniversalGenAIClientAdapter, UniversalModelSpec
+
+        spec = self._model_specs.get(model_name)
+        if spec is None:
+            lower = model_name.lower()
+            if model_name.startswith("projects/") and "/endpoints/" in model_name:
+                spec = UniversalModelSpec(
+                    model_id=model_name,
+                    provider_family="vertex_tuned_endpoint",
+                    endpoint_uri=model_name,
+                )
+            elif "gemma" in lower:
+                spec = UniversalModelSpec(
+                    model_id=model_name,
+                    provider_family="vertex_gemma",
+                )
+            elif any(tag in lower for tag in ("geap", "exp", "preview")):
+                spec = UniversalModelSpec(
+                    model_id=model_name,
+                    provider_family="vertex_geap",
+                    api_version="v1beta1",
+                )
+            else:
+                return None
+        return UniversalGenAIClientAdapter(
+            spec=spec,
+            default_project=self.config.gcp.project_id,
+            default_location=self.config.gcp.location,
         )
 
     def resolve_records(
@@ -125,8 +171,20 @@ class BenchmarkRunner:
         shelf_image_uri: Optional[str] = None,
         upload_to_gcs: bool = False,
         submit_live_tuning_job: bool = False,
+        prior_detection: Optional[TaskExecutionResult] = None,
+        reuse_prior_detection: bool = False,
+        detector_approach: Optional[str] = None,
+        max_workers: int = 1,
     ) -> Dict[str, object]:
         """Run the specified tasks and bounding-box separation approaches across all target models and inputs."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from shelf_benchmark.approaches import (
+            GLOBAL_APPROACH_REGISTRY,
+            CommonLayerContext,
+        )
+        from shelf_benchmark.scoring import write_predictions_file
+
         active_models = list(models) if models else list(self.config.models)
         active_approaches = (
             list(classification_approaches)
@@ -135,19 +193,52 @@ class BenchmarkRunner:
         )
         records = self.resolve_records(shelf_image_uri=shelf_image_uri, upload_to_gcs=upload_to_gcs)
         batch_id = uuid.uuid4().hex[:6]
+        normalized_tasks = [t.lower().strip() for t in tasks]
 
-        results: List[TaskExecutionResult] = []
-
-        for rec in records:
+        def _run_for_record(rec: ShelfAssociationRecord) -> List[TaskExecutionResult]:
+            rec_results: List[TaskExecutionResult] = []
             gt = self.gt_provider.get_ground_truth(rec.shelf_image_uri, rec.ground_truth_id)
             for model_name in active_models:
+                model_client = self._get_client_for_model(model_name)
+                det_task = ProductDetectionTask(
+                    self.config, self.storage, self.telemetry, genai_client=model_client
+                )
+                mat_task = ProductMatchingTask(
+                    self.config, self.storage, self.telemetry, genai_client=model_client
+                )
+                ft_task = GeminiFineTuningTask(
+                    self.config, self.storage, self.telemetry, genai_client=model_client
+                )
+                ctx = CommonLayerContext(
+                    config=self.config,
+                    storage=self.storage,
+                    telemetry=self.telemetry,
+                    reports_dir=Path(self.config.reporting.output_dir),
+                    genai_client=model_client,
+                )
+                active_prior_det = prior_detection
+
+                if detector_approach:
+                    det_plugin = GLOBAL_APPROACH_REGISTRY.require(detector_approach)
+                    active_prior_det = det_plugin.execute(
+                        ctx=ctx,
+                        model_name=model_name,
+                        record=rec,
+                        gt_record=gt,
+                    )
+                    if "detection" in normalized_tasks:
+                        self._log_progress(active_prior_det)
+                        rec_results.append(active_prior_det)
+
                 for task_name in tasks:
                     t_norm = task_name.lower().strip()
 
                     if t_norm == "detection":
+                        if detector_approach:
+                            continue
                         run_id = f"{batch_id}-det-{model_name.split('-')[-1]}"
                         logger.info(f"[BenchmarkRunner] task='detection' model='{model_name}' ...")
-                        res = self.detection_task.execute(
+                        res = det_task.execute(
                             model_name=model_name,
                             shelf_image_uri=rec.shelf_image_uri,
                             run_id=run_id,
@@ -155,42 +246,55 @@ class BenchmarkRunner:
                             ground_truth=gt,
                         )
                         self._log_progress(res)
-                        results.append(res)
+                        rec_results.append(res)
+                        if reuse_prior_detection and active_prior_det is None:
+                            active_prior_det = res
+
+                        for approach in active_approaches:
+                            maybe_plugin = GLOBAL_APPROACH_REGISTRY.get(approach)
+                            if (
+                                maybe_plugin is not None
+                                and getattr(maybe_plugin, "task_type", "classification") == "detection"
+                            ):
+                                det_plugin_res = maybe_plugin.execute(
+                                    ctx=ctx,
+                                    model_name=model_name,
+                                    record=rec,
+                                    gt_record=gt,
+                                )
+                                self._log_progress(det_plugin_res)
+                                rec_results.append(det_plugin_res)
+                                if reuse_prior_detection:
+                                    active_prior_det = det_plugin_res
 
                     elif t_norm == "classification":
-                        from shelf_benchmark.approaches import (
-                            GLOBAL_APPROACH_REGISTRY,
-                            CommonLayerContext,
-                        )
-
-                        ctx = CommonLayerContext(
-                            config=self.config,
-                            storage=self.storage,
-                            telemetry=self.telemetry,
-                            reports_dir=Path(self.config.reporting.output_dir),
-                            genai_client=self._genai_client,
-                        )
                         for approach in active_approaches:
+                            plugin = GLOBAL_APPROACH_REGISTRY.require(approach)
+                            if (
+                                getattr(plugin, "task_type", "classification") == "detection"
+                                and "detection" in normalized_tasks
+                            ):
+                                continue
                             run_id = build_run_id(
                                 batch_id, "cls", approach, model_name.split("-")[-1]
                             )
                             logger.info(
                                 f"[BenchmarkRunner] task='classification' approach='{approach}' model='{model_name}' ..."
                             )
-                            plugin = GLOBAL_APPROACH_REGISTRY.require(approach)
                             res = plugin.execute(
                                 ctx=ctx,
                                 model_name=model_name,
                                 record=rec,
                                 gt_record=gt,
+                                prior_detection=active_prior_det,
                             )
                             self._log_progress(res)
-                            results.append(res)
+                            rec_results.append(res)
 
                     elif t_norm == "matching":
                         run_id = f"{batch_id}-mat-{model_name.split('-')[-1]}"
                         logger.info(f"[BenchmarkRunner] task='matching' model='{model_name}' ...")
-                        res = self.matching_task.execute(
+                        res = mat_task.execute(
                             model_name=model_name,
                             shelf_image_uri=rec.shelf_image_uri,
                             run_id=run_id,
@@ -200,12 +304,12 @@ class BenchmarkRunner:
                             planogram_uri=rec.planogram_uri,
                         )
                         self._log_progress(res)
-                        results.append(res)
+                        rec_results.append(res)
 
                     elif t_norm in ("fine_tuning", "tuning"):
                         run_id = f"{batch_id}-sft-{model_name.split('-')[-1]}"
                         logger.info(f"[BenchmarkRunner] task='fine_tuning' model='{model_name}' ...")
-                        res = self.fine_tuning_task.execute(
+                        res = ft_task.execute(
                             model_name=model_name,
                             shelf_image_uri=rec.shelf_image_uri,
                             run_id=run_id,
@@ -214,10 +318,26 @@ class BenchmarkRunner:
                             submit_live_tuning_job=submit_live_tuning_job,
                         )
                         self._log_progress(res)
-                        results.append(res)
+                        rec_results.append(res)
 
                     else:
                         raise ValueError(f"Unknown benchmark task: {task_name}")
+            return rec_results
+
+        results: List[TaskExecutionResult] = []
+        pred_checkpoint_path = Path(self.config.reporting.output_dir) / "predictions.json"
+
+        if max_workers > 1 and len(records) > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for rec_batch in pool.map(_run_for_record, records):
+                    results.extend(rec_batch)
+                    if self.config.reporting.write_predictions_file:
+                        write_predictions_file(results, pred_checkpoint_path, config=self.config)
+        else:
+            for rec in records:
+                results.extend(_run_for_record(rec))
+                if len(records) > 1 and self.config.reporting.write_predictions_file:
+                    write_predictions_file(results, pred_checkpoint_path, config=self.config)
 
         self.telemetry.flush()
         report_paths = self.report_generator.generate_all_reports(results)

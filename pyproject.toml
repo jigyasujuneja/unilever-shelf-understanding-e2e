@@ -110,6 +110,7 @@ known-first-party = ["shelf_benchmark"]
 # time by flipping one flag at a time once the current lane is green.
 python_version = "3.10"
 files = ["src/shelf_benchmark", "ui"]
+explicit_package_bases = true
 ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = false

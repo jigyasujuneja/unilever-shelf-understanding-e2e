@@ -96,9 +96,16 @@ class BenchmarkReportGenerator:
         Accepts any object exposing `reporting`, `gcp`, and `buckets` sections so this module
         does not need to import the config module (and cannot create an import cycle).
         """
+        import os
+
         reporting = getattr(config, "reporting", None)
         gcp = getattr(config, "gcp", None)
         buckets = getattr(config, "buckets", None)
+        env_isolate = os.environ.get("SHELF_BENCH_ISOLATE_RUNS", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
         return cls(
             output_dir=getattr(reporting, "output_dir", "reports"),
             project_id=getattr(gcp, "project_id", "unilever-shelf-understanding"),
@@ -107,7 +114,7 @@ class BenchmarkReportGenerator:
             ),
             sync_to_gcs=bool(getattr(reporting, "sync_reports_to_gcs", True)),
             gcs_reports_prefix=getattr(reporting, "gcs_reports_prefix", "reports"),
-            isolate_runs=bool(getattr(reporting, "isolate_runs", False)),
+            isolate_runs=bool(getattr(reporting, "isolate_runs", False)) or env_isolate,
             write_predictions_file=bool(getattr(reporting, "write_predictions_file", False)),
         )
 
@@ -148,7 +155,7 @@ class BenchmarkReportGenerator:
             return {}
         gcs_uris: Dict[str, str] = {}
         try:
-            from google.cloud import storage
+            import google.cloud.storage as storage
 
             from shelf_benchmark.auth import get_gcp_credentials
 

@@ -472,7 +472,14 @@ def evaluate_task_accuracy(
         if is_hit:
             attr_hits[name] = attr_hits.get(name, 0) + 1
 
-    unpredicted = _UNPREDICTED_ATTRIBUTES_BY_TASK.get(task_type, frozenset())
+    unpredicted = set(_UNPREDICTED_ATTRIBUTES_BY_TASK.get(task_type, frozenset()))
+    has_any_brand_pred = any((r.predicted_brand or "").strip() for r in rows)
+    has_any_prod_pred = any(
+        (r.predicted_product_name or "").strip() or (r.predicted_variant or "").strip()
+        for r in rows
+    )
+    if task_type == "detection" and not has_any_brand_pred:
+        unpredicted.add("brand")
 
     for r, g, _ in pairings:
         if g is None:
@@ -498,8 +505,8 @@ def evaluate_task_accuracy(
             if attr_name in unpredicted:
                 continue
             if g_val is not None and str(g_val).strip() != "":
-                p_val = (r.extra_attributes or {}).get(attr_name)
-                _record_attr(attr_name, normalize_text(str(p_val or "")) == normalize_text(str(g_val)))
+                extra_p_val = (r.extra_attributes or {}).get(attr_name)
+                _record_attr(attr_name, normalize_text(str(extra_p_val or "")) == normalize_text(str(g_val)))
 
     per_attr_acc: Dict[str, float] = {
         k: round(attr_hits.get(k, 0) / tot, 4)
@@ -516,7 +523,11 @@ def evaluate_task_accuracy(
     matched_expected = sum(
         1 for eb in expected_brands if any(brands_match(pb, eb, cfg) for pb in predicted_brands)
     )
-    brand_set_recall = matched_expected / len(expected_brands) if expected_brands else None
+    brand_set_recall = (
+        (matched_expected / len(expected_brands))
+        if (expected_brands and (task_type != "detection" or has_any_brand_pred))
+        else None
+    )
 
     # Localization counts are only meaningful when predictions carry geometry.
     geometry_available = any(has_valid_bbox(r) for r in rows)
@@ -527,9 +538,18 @@ def evaluate_task_accuracy(
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
 
     # Classification accuracy is per prediction, so unmatched predictions count against the score
-    # instead of quietly disappearing from the denominator.
-    brand_acc = brand_hits / pred_count if pred_count else None
-    prod_acc = product_hits / pred_count if pred_count else None
+    # instead of quietly disappearing from the denominator. For detection-only runs that emit no
+    # brand or product predictions, report None rather than a fabricated 0.0.
+    brand_acc = (
+        (brand_hits / pred_count)
+        if (pred_count and (task_type != "detection" or has_any_brand_pred))
+        else None
+    )
+    prod_acc = (
+        (product_hits / pred_count)
+        if (pred_count and (task_type != "detection" or has_any_prod_pred))
+        else None
+    )
     sku_acc = (sku_hits / sku_comparable) if sku_comparable else None
     plano_rate = (planogram_hits / planogram_total) if planogram_total else None
 

@@ -102,7 +102,7 @@ def main() -> None:
 
     creds, _ = google.auth.default(quota_project_id=cfg.gcp.project_id)
     creds.refresh(google.auth.transport.requests.Request())
-    id_token = creds.id_token
+    id_token = getattr(creds, "id_token", None)
 
     print("=" * 100)
     print(f"INVOKING HEADLESS CLOUD RUN WORKER: {CLOUD_RUN_WORKER_URL}")

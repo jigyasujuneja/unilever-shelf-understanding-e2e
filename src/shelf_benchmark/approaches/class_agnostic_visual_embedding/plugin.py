@@ -80,17 +80,25 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
         pil_img.save(buf, format="PNG")
         image_bytes = buf.getvalue()
 
-        # STAGE 1: Class-Agnostic ('product') Object Detection + Depth NMS
-        t_s1 = time.perf_counter()
-        kept_facings, depth_filtered, s1_tokens, s1_extra_cost = (
-            run_stage1_class_agnostic_detection(
-                ctx=ctx,
-                image_bytes=image_bytes,
-                model_name=model_name,
-                detector_backend=self._detector_backend,
+        # STAGE 1: Class-Agnostic ('product') Object Detection + Depth NMS (or reuse prior_detection)
+        prior_boxes = ctx.get_prior_detected_boxes(prior_detection) if prior_detection else None
+        if prior_detection is not None and prior_boxes:
+            kept_facings = prior_boxes
+            depth_filtered = int(prior_detection.accuracy.depth_duplicates_filtered or 0)
+            s1_tokens = prior_detection.tokens
+            s1_extra_cost = float(prior_detection.cost.vertex_ai_embeddings_and_vision_usd or 0.0)
+            stage1_latency_ms = round(float(prior_detection.latency_ms or 0.0), 2)
+        else:
+            t_s1 = time.perf_counter()
+            kept_facings, depth_filtered, s1_tokens, s1_extra_cost = (
+                run_stage1_class_agnostic_detection(
+                    ctx=ctx,
+                    image_bytes=image_bytes,
+                    model_name=model_name,
+                    detector_backend=self._detector_backend,
+                )
             )
-        )
-        stage1_latency_ms = round((time.perf_counter() - t_s1) * 1000.0, 2)
+            stage1_latency_ms = round((time.perf_counter() - t_s1) * 1000.0, 2)
 
         # STAGE 2: Physical Crop Extraction + 1408-D Visual Metric Learning (`multimodalembedding@001`)
         t_s2 = time.perf_counter()

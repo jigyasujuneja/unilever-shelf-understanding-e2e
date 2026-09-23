@@ -42,7 +42,7 @@ The suite-native format. Everything else is adapted onto this.
 | Key | Required | Type | Meaning |
 | :--- | :--- | :--- | :--- |
 | `gt_version` | recommended | string | Revision label for this annotation set. Overrides the configured `gt_version`. |
-| `bbox_format` | recommended | string | One of the five values in section 4. Checked against the config; a disagreement is a hard error. |
+| `bbox_format` | recommended | string | One of the six values in section 4. Checked against the config; a disagreement is a hard error. |
 | `image_width` / `image_height` | conditional | int | Fallback pixel dimensions, required only for pixel bbox formats when an entry omits its own. |
 | `images` | required | object | Map of image key to image entry. May be omitted, in which case the root object itself is treated as the map. |
 
@@ -63,7 +63,7 @@ The suite-native format. Everything else is adapted onto this.
 | `item_id` | recommended | int | Stable identifier within the image. Defaults to the 1-based position in `items`. |
 | `brand` | **required** | string | Brand exactly as printed on the pack. Scored by `brand_classification_accuracy`. |
 | `product_name` | **required** | string | Full product display name. Scored by `product_classification_accuracy`. |
-| `bbox_2d` | **required** | array of 4 numbers | Bounding box in the declared `bbox_format`. |
+| `bbox_2d` | **required** | array of 4 numbers | Bounding box in the declared `bbox_format` (or 4 separate columns / polygon `vertices`). |
 | `sku_id` | recommended | string | Canonical SKU or EAN. Scored by `sku_matching_accuracy` when the prediction also has one. |
 | `shelf_row` | recommended | string | `top`, `middle`, `bottom`, or a bay label. Defaults to `middle`. |
 | `back_row` | recommended | bool | `true` for a unit stacked behind a front facing. Excluded from scoring by default. |
@@ -74,6 +74,7 @@ The suite-native format. Everything else is adapted onto this.
 | `packaging_type` | optional | string | Taxonomy dimension 5, e.g. `tube`, `bottle`, `sachet`. |
 | `pack_type` | optional | string | Taxonomy dimension 6, `Single` or `Multiple`. |
 | `size` | optional | string | Taxonomy dimension 7, the printed net weight or volume. |
+| `extra_attributes` | optional | object | Custom attributes (`>8` attributes) scored in `per_attribute_accuracy`. |
 
 Booleans may be delivered as real JSON booleans or as any of the strings
 `true`, `1`, `yes`, `y`, `t` (case-insensitive). Anything else, including absence, means `false`.
@@ -186,7 +187,7 @@ JSONGroundTruthProvider: 1 image(s), 3 item(s), 1 back-row item(s) excluded, gt_
 Every knob mentioned in this document is also present, commented, in
 [`configs/default_config.yaml`](../configs/default_config.yaml) under `ground_truth:` and
 `evaluation:`, which is the discoverable list: provider type, source URI, `gt_version`, `strict`,
-`exclude_back_row_items`, the full `schema_mapping`, and all five `bbox_format` values.
+`exclude_back_row_items`, the full `schema_mapping`, and all six `bbox_format` values.
 
 ### Generating a starter file
 
@@ -243,7 +244,7 @@ Declare it in `ground_truth.schema_mapping.bbox_format`, on the CLI with `--bbox
 `bbox_format` in the JSON file itself; if the file and the config disagree the load fails rather
 than picking one.
 
-### All five supported values
+### All six supported values
 
 `convert_bbox(raw, fmt, image_width, image_height)` implements every conversion.
 
@@ -254,6 +255,7 @@ than picking one.
 | `xyxy_px` | `[x1, y1, x2, y2]` | absolute pixels | **yes** | `ymin = y1/H*1000`, `xmin = x1/W*1000`, `ymax = y2/H*1000`, `xmax = x2/W*1000` |
 | `xyxy_norm` | `[x1, y1, x2, y2]` | fractions of 0-1 | no | `ymin = y1*1000`, `xmin = x1*1000`, `ymax = y2*1000`, `xmax = x2*1000` |
 | `yxyx_norm` | `[y1, x1, y2, x2]` | fractions of 0-1 | no | multiply all four by 1000 |
+| `yolo_xywh_norm` | `[x_center, y_center, width, height]` | fractions of 0-1 | no | `ymin = (yc - h/2)*1000`, `xmin = (xc - w/2)*1000`, `ymax = (yc + h/2)*1000`, `xmax = (xc + w/2)*1000` |
 
 Results are rounded to integers and clamped to `[0, 1000]`.
 
@@ -405,6 +407,8 @@ touching any code or transforming the vendor's file.
 | `product_name_field` | `product_name` | Product name |
 | `sku_id_field` | `sku_id` | SKU / EAN |
 | `bbox_field` | `bbox_2d` | Bounding box (falls back to `bbox` if the mapped name is absent) |
+| `bbox_ymin_field` / `bbox_xmin_field` / `bbox_ymax_field` / `bbox_xmax_field` | `None` | 4 separate coordinate columns (for CSV / BigQuery tables without a JSON array column) |
+| `vertices_field` | `None` | Polygon `[{x, y}, ...]` or `[[x, y], ...]` vertices (automatically converted to tight enclosing `[ymin, xmin, ymax, xmax]`) |
 | `shelf_row_field` | `shelf_row` | Shelf row |
 | `back_row_field` | `back_row` | Back-row flag |
 | `occluded_field` | `occluded` | Occlusion flag |
@@ -418,7 +422,7 @@ touching any code or transforming the vendor's file.
 | `image_height_field` | `image_height` | Per-image pixel height |
 | `default_image_width` | `None` | Fallback pixel width |
 | `default_image_height` | `None` | Fallback pixel height |
-| `bbox_format` | `ymin_xmin_ymax_xmax_1000` | Section 4 |
+| `bbox_format` | `ymin_xmin_ymax_xmax_1000` | Section 4 (6 supported formats) |
 
 ### Concrete example
 

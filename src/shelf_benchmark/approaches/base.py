@@ -31,9 +31,11 @@ from shelf_benchmark.models import (
     TokenUsageMetrics,
 )
 from shelf_benchmark.pipeline import (
+    NO_RETRY,
     InvocationContext,
     PipelineExecutor,
     RawInvocation,
+    RetryPolicy,
 )
 from shelf_benchmark.size_rules import derive_size_bucket_from_bbox
 from shelf_benchmark.telemetry import OpenTelemetryBenchmarkLogger
@@ -48,6 +50,12 @@ _STANDARD_FACING_KEYS = frozenset({
     "confidence", "is_hul_brand", "extra_attributes",
 })
 
+_CLASSIFICATION_ATTR_KEYS = frozenset({
+    "brand", "product_name", "category", "subcategory",
+    "variant", "packaging_type", "pack_type", "size", "matched_sku_id",
+    "extra_attributes",
+})
+
 
 @dataclass
 class CommonLayerContext:
@@ -58,6 +66,7 @@ class CommonLayerContext:
     telemetry: OpenTelemetryBenchmarkLogger
     reports_dir: Path
     genai_client: Optional[Any] = None
+    prior_detection: Optional[TaskExecutionResult] = None
     _executor_cache: Optional[PipelineExecutor] = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -70,6 +79,35 @@ class CommonLayerContext:
                 config=self.config, telemetry=self.telemetry
             )
         return self._executor_cache
+
+    def get_prior_detected_boxes(
+        self, prior_detection: Optional[TaskExecutionResult] = None
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Extract front-facing bounding-box dicts from a prior Stage-1 detection result (`prior_detection`).
+
+        Allows any 2-stage classification plugin to consume boxes produced by any standalone
+        Stage-1 detector without re-running detection inference.
+        """
+        det = prior_detection or self.prior_detection
+        if det is None:
+            return None
+        raw_boxes = (det.raw_output or {}).get("detected_products")
+        if isinstance(raw_boxes, list) and raw_boxes:
+            return [dict(b) for b in raw_boxes if isinstance(b, dict)]
+        if det.row_level_items:
+            return [
+                {
+                    "product_index": r.product_index,
+                    "bbox_2d": [r.bbox_ymin, r.bbox_xmin, r.bbox_ymax, r.bbox_xmax],
+                    "shelf_row": r.shelf_row or "middle",
+                    "position_on_shelf": r.position_on_shelf,
+                    "is_front_facing": True,
+                    "preliminary_brand_hint": r.predicted_brand or "",
+                    "confidence": r.confidence,
+                }
+                for r in det.row_level_items
+            ]
+        return None
 
     def get_client(self, location: Optional[str] = None) -> Any:
         """Return the injected GenAI client/adapter (for offline fakes, GEAP, Gemma, Tuned Endpoints) or a Vertex AI client."""
@@ -174,6 +212,44 @@ class CommonLayerContext:
         """Extract input/thinking/output/cached token counts from a model response."""
         return extract_token_usage(response)
 
+    def compute_cost(
+        self,
+        tokens: TokenUsageMetrics,
+        model_name: str,
+        product_count: int,
+        extra_api_cost_usd: float = 0.0,
+        latency_ms: float = 0.0,
+        run_id: Optional[str] = None,
+        approach_id: str = "custom_approach",
+        task_type: str = "classification",
+    ) -> Any:
+        """Compute separated 5-bucket GCP cost metrics using the run's configured billing rules."""
+        from shelf_benchmark.evaluation.cost import compute_cost_metrics
+        from shelf_benchmark.evaluation.gcp_billing import GCPBillingAndCostEngine
+
+        pricing = self.config.get_pricing(model_name)
+        engine = GCPBillingAndCostEngine(
+            project_id=self.config.gcp.project_id,
+            billing_cfg=self.config.billing,
+        )
+        gcp_labels = engine.build_gcp_billing_labels(
+            run_id=run_id or f"run-{approach_id}-{model_name}",
+            approach_id=approach_id,
+            task_type=task_type,
+            model_name=model_name,
+        )
+        return compute_cost_metrics(
+            tokens=tokens,
+            pricing=pricing,
+            product_count=product_count,
+            latency_ms=latency_ms,
+            extra_embedding_or_vision_cost_usd=extra_api_cost_usd,
+            billing_cfg=self.config.billing,
+            project_id=self.config.gcp.project_id,
+            model_name=model_name,
+            gcp_labels=gcp_labels,
+        )
+
     def evaluate_accuracy(
         self,
         task_type: str,
@@ -256,6 +332,176 @@ class CommonLayerContext:
             )
         return rows
 
+    @staticmethod
+    def infer_effective_task_type(
+        raw_outputs: Optional[List[Dict[str, Any]]],
+        declared_task_type: str = "classification",
+    ) -> str:
+        """Return `'detection'` if a plugin explicitly declared `task_type='detection'` or returned only bounding-box geometry with zero classification attributes."""
+        if declared_task_type != "classification" or not raw_outputs:
+            return declared_task_type
+        has_any_bbox = any(bool(it.get("bbox_2d")) for it in raw_outputs if isinstance(it, dict))
+        if not has_any_bbox:
+            return declared_task_type
+        for it in raw_outputs:
+            if not isinstance(it, dict):
+                continue
+            for k, v in it.items():
+                if k in _CLASSIFICATION_ATTR_KEYS and v not in (None, "", {}, []):
+                    return declared_task_type
+                if (
+                    not str(k).startswith("_")
+                    and k not in _STANDARD_FACING_KEYS
+                    and v not in (None, "", {}, [])
+                ):
+                    return declared_task_type
+        return "detection"
+
+    def _build_raw_invocation(
+        self,
+        *,
+        raw_outputs: Optional[List[Dict[str, Any]]] = None,
+        rows: Optional[List[RowLevelReportItem]] = None,
+        task_type: str = "classification",
+        tokens: Optional[TokenUsageMetrics] = None,
+        extra_api_cost_usd: Optional[float] = None,
+        depth_duplicates_filtered: Optional[int] = None,
+        stages_description: Optional[List[str]] = None,
+        raw_output_extra: Optional[Dict[str, Any]] = None,
+        span_attributes: Optional[Dict[str, Any]] = None,
+        prior_detection: Optional[TaskExecutionResult] = None,
+    ) -> RawInvocation:
+        if (raw_outputs is None) == (rows is None):
+            raise ValueError(
+                "finalize() takes exactly one of `raw_outputs=` or `rows=`; "
+                f"got raw_outputs={'set' if raw_outputs is not None else 'None'}, "
+                f"rows={'set' if rows is not None else 'None'}."
+            )
+        if rows is None:
+            assert raw_outputs is not None
+            rows = self.rows_from_facing_dicts(raw_outputs, task_type=task_type)
+        if depth_duplicates_filtered is None and raw_outputs:
+            depth_duplicates_filtered = sum(
+                int(it.get("_depth_filtered", 0) or 0) for it in raw_outputs
+            )
+        if depth_duplicates_filtered is None and prior_detection is not None:
+            depth_duplicates_filtered = int(
+                prior_detection.accuracy.depth_duplicates_filtered or 0
+            )
+        if tokens is None and raw_outputs:
+            in_tok = sum(int(it.get("_input_tokens", 0) or 0) for it in raw_outputs)
+            think_tok = sum(int(it.get("_thinking_tokens", 0) or 0) for it in raw_outputs)
+            out_tok = sum(int(it.get("_output_tokens", 0) or 0) for it in raw_outputs)
+            cached_tok = sum(int(it.get("_cached_tokens", 0) or 0) for it in raw_outputs)
+            if in_tok > 0 or think_tok > 0 or out_tok > 0:
+                tokens = TokenUsageMetrics(
+                    input_tokens=in_tok,
+                    thinking_tokens=think_tok,
+                    output_tokens=out_tok,
+                    total_tokens=in_tok + think_tok + out_tok,
+                    cached_tokens=cached_tok,
+                )
+        if prior_detection is not None and prior_detection.tokens.total_tokens > 0:
+            p_tok = prior_detection.tokens
+            if tokens is None:
+                tokens = p_tok.model_copy(deep=True)
+            else:
+                tokens = TokenUsageMetrics(
+                    input_tokens=tokens.input_tokens + p_tok.input_tokens,
+                    thinking_tokens=tokens.thinking_tokens + p_tok.thinking_tokens,
+                    output_tokens=tokens.output_tokens + p_tok.output_tokens,
+                    total_tokens=tokens.total_tokens + p_tok.total_tokens,
+                    cached_tokens=tokens.cached_tokens + p_tok.cached_tokens,
+                )
+        if (
+            extra_api_cost_usd is None
+            and raw_outputs
+            and any("_extra_api_cost_usd" in it for it in raw_outputs)
+        ):
+            extra_api_cost_usd = round(
+                sum(float(it.get("_extra_api_cost_usd", 0.0) or 0.0) for it in raw_outputs), 8
+            )
+
+        return RawInvocation(
+            rows=rows,
+            tokens=tokens,
+            raw_output=dict(raw_output_extra or {}),
+            extra_api_cost_usd=extra_api_cost_usd,
+            depth_duplicates_filtered=depth_duplicates_filtered,
+            stages_description=stages_description,
+            span_attributes=dict(span_attributes or {}),
+        )
+
+    def execute_with_pipeline(
+        self,
+        *,
+        approach_id: str,
+        model_name: str,
+        record: ShelfAssociationRecord,
+        invoke_fn: Any,
+        gt_record: Optional[ImageGroundTruth] = None,
+        task_type: str = "classification",
+        run_id: Optional[str] = None,
+        stages_description: Optional[List[str]] = None,
+        retry_policy: Optional[RetryPolicy] = None,
+        prior_detection: Optional[TaskExecutionResult] = None,
+    ) -> TaskExecutionResult:
+        """Execute a plugin callable through `PipelineExecutor.run()` for retry, CPU-time, and error parity with built-in tasks."""
+        prev_prior = self.prior_detection
+        self.prior_detection = prior_detection
+        effective_policy = retry_policy or (
+            NO_RETRY if self.config.offline.enabled else RetryPolicy(max_attempts=3)
+        )
+        resolved_task_type_holder = [task_type]
+
+        def _wrapped(live_model: str) -> RawInvocation:
+            raw_outputs = invoke_fn(live_model)
+            effective_task = self.infer_effective_task_type(raw_outputs, task_type)
+            resolved_task_type_holder[0] = effective_task
+            return self._build_raw_invocation(
+                raw_outputs=raw_outputs,
+                task_type=effective_task,
+                stages_description=stages_description,
+                prior_detection=prior_detection,
+            )
+
+        try:
+            res = self._executor.run(
+                _wrapped,
+                ctx=InvocationContext(
+                    task_type=resolved_task_type_holder[0],
+                    approach_id=approach_id,
+                    model_name=model_name,
+                    shelf_image_uri=record.shelf_image_uri,
+                    run_id=run_id or f"run-{approach_id}-{model_name}",
+                    store_id=record.store_id,
+                    ground_truth=gt_record,
+                ),
+                retry_policy=effective_policy,
+            )
+            if resolved_task_type_holder[0] != res.task_type:
+                from shelf_benchmark.evaluation.metrics import evaluate_task_accuracy
+
+                res.task_type = resolved_task_type_holder[0]
+                for r in res.row_level_items:
+                    r.task_type = resolved_task_type_holder[0]
+                res.accuracy = evaluate_task_accuracy(
+                    task_type=resolved_task_type_holder[0],
+                    rows=res.row_level_items,
+                    ground_truth=gt_record,
+                    config=self.config.evaluation,
+                )
+                res.accuracy.depth_duplicates_filtered = int(
+                    res.raw_output.get("depth_duplicates_filtered", 0) or 0
+                )
+                if "execution_trace" in res.raw_output and isinstance(
+                    res.raw_output["execution_trace"], dict
+                ):
+                    res.raw_output["execution_trace"]["task_type"] = resolved_task_type_holder[0]
+            return res
+        finally:
+            self.prior_detection = prev_prior
+
     def finalize(
         self,
         *,
@@ -277,42 +523,18 @@ class CommonLayerContext:
         span_attributes: Optional[Dict[str, Any]] = None,
         cpu_active_ms: Optional[float] = None,
     ) -> TaskExecutionResult:
-        """Turn raw facing prediction dicts into a fully scored, OTel-logged `TaskExecutionResult`.
-
-        This is now a thin adapter over `shelf_benchmark.pipeline.PipelineExecutor`, which the
-        built-in tasks also use, so a plugin and a built-in task fed identical predictions produce
-        identical cost, token and accuracy figures. They previously did not: see the `pipeline`
-        module docstring.
-
-        `extra_api_cost_usd=None` means "derive embeddings/vision cost from the run's billing
-        config", which is what the built-in tasks have always done. It used to default to `0.0`
-        here, so a plugin's crops were free and a task's were not.
-
-        Pass **either** `raw_outputs=` (a list of per-facing dicts, mapped by
-        `rows_from_facing_dicts`) **or** `rows=` (rows you built yourself, for approaches that
-        populate columns the dict mapping does not cover, such as the embedding fields). Passing
-        neither or both is a programming error and raises.
-        """
-        if (raw_outputs is None) == (rows is None):
-            raise ValueError(
-                "finalize() takes exactly one of `raw_outputs=` or `rows=`; "
-                f"got raw_outputs={'set' if raw_outputs is not None else 'None'}, "
-                f"rows={'set' if rows is not None else 'None'}."
-            )
-        if rows is None:
-            assert raw_outputs is not None  # narrowed by the check above
-            rows = self.rows_from_facing_dicts(raw_outputs, task_type=task_type)
-        if depth_duplicates_filtered is None and raw_outputs:
-            depth_duplicates_filtered = int(raw_outputs[0].get("_depth_filtered", 0) or 0)
-
-        invocation = RawInvocation(
+        """Turn raw facing prediction dicts into a fully scored, OTel-logged `TaskExecutionResult`."""
+        invocation = self._build_raw_invocation(
+            raw_outputs=raw_outputs,
             rows=rows,
+            task_type=task_type,
             tokens=tokens,
-            raw_output=dict(raw_output_extra or {}),
             extra_api_cost_usd=extra_api_cost_usd,
             depth_duplicates_filtered=depth_duplicates_filtered,
             stages_description=stages_description,
-            span_attributes=dict(span_attributes or {}),
+            raw_output_extra=raw_output_extra,
+            span_attributes=span_attributes,
+            prior_detection=self.prior_detection,
         )
         return self._executor.finalize(
             invocation,
@@ -337,6 +559,12 @@ class BaseShelfApproachPlugin(ABC):
     #: Set to True for illustrative approaches that must never appear in a decision-making
     #: comparison (e.g. pipelines whose labels come from a hardcoded prototype list).
     is_demo_only: bool = False
+
+    #: Primary benchmark task type ('classification', 'detection', or 'matching').
+    task_type: str = "classification"
+
+    #: Optional custom retry policy (defaults to RetryPolicy(max_attempts=3) in live mode and NO_RETRY offline).
+    retry_policy: Optional[RetryPolicy] = None
 
     @property
     @abstractmethod
@@ -374,8 +602,9 @@ class SimpleShelfApproachPlugin(BaseShelfApproachPlugin):
     """Streamlined ~15-line base class for approach plugins.
 
     Subclasses only implement `detect_and_classify(ctx, model_name, record) -> List[Dict[str, Any]]`
-    and `ctx.finalize(...)` automatically computes size buckets, HUL brand attribution, 5-bucket
-    GCP cost, ground-truth accuracy, OpenTelemetry spans, and UI execution traces.
+    and `ctx.execute_with_pipeline(...)` automatically measures process CPU time, applies retry
+    policy, computes size buckets, HUL brand attribution, 5-bucket GCP cost, ground-truth accuracy,
+    OpenTelemetry spans, and UI execution traces.
     """
 
     @abstractmethod
@@ -395,16 +624,14 @@ class SimpleShelfApproachPlugin(BaseShelfApproachPlugin):
         gt_record: Optional[ImageGroundTruth] = None,
         prior_detection: Optional[TaskExecutionResult] = None,
     ) -> TaskExecutionResult:
-        start_dt = ctx.telemetry.now_utc()
-        raw_outputs = self.detect_and_classify(ctx, model_name, record)
-        end_dt = ctx.telemetry.now_utc()
-        return ctx.finalize(
+        return ctx.execute_with_pipeline(
             approach_id=self.approach_id,
             model_name=model_name,
             record=record,
-            raw_outputs=raw_outputs,
-            start_dt=start_dt,
-            end_dt=end_dt,
+            invoke_fn=lambda live_model: self.detect_and_classify(ctx, live_model, record),
             gt_record=gt_record,
+            task_type=self.task_type,
             stages_description=self.stages_description,
+            retry_policy=self.retry_policy,
+            prior_detection=prior_detection,
         )

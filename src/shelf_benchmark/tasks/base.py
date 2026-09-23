@@ -13,8 +13,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
-from google import genai
-
 from shelf_benchmark.auth import create_genai_client
 from shelf_benchmark.config import BenchmarkConfig
 from shelf_benchmark.data.storage import StorageManager
@@ -66,7 +64,7 @@ class BaseBenchmarkTask(ABC):
         config: BenchmarkConfig,
         storage_manager: StorageManager,
         telemetry_logger: OpenTelemetryBenchmarkLogger,
-        genai_client: Optional[genai.Client] = None,
+        genai_client: Optional[Any] = None,
     ):
         self.config = config
         self.storage = storage_manager
@@ -74,7 +72,7 @@ class BaseBenchmarkTask(ABC):
         self._genai_client = genai_client
         self._executor = PipelineExecutor(config=config, telemetry=telemetry_logger)
 
-    def get_client(self, location: Optional[str] = None) -> genai.Client:
+    def get_client(self, location: Optional[str] = None) -> Any:
         if self._genai_client is not None and location is None:
             return self._genai_client
         return create_genai_client(

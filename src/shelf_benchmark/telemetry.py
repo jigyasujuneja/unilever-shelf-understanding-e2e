@@ -203,7 +203,7 @@ class OpenTelemetryBenchmarkLogger:
         if not getattr(self.config, "sync_otel_logs_to_gcs", True):
             return None
         try:
-            from google.cloud import storage
+            import google.cloud.storage as storage
 
             if self._cached_storage_client is None:
                 creds = self._get_credentials()
@@ -414,9 +414,11 @@ class OpenTelemetryBenchmarkLogger:
             gcp_labels=cost.gcp_billing_labels,
         )
         gcs_otel_uri = self.target_gcs_uri()
-        if cloud_log_name:
-            otel_record["Attributes"]["gcp.cloud_logging.log_name"] = cloud_log_name
-        if gcs_otel_uri:
-            otel_record["Attributes"]["gcp.gcs.otel_log_uri"] = gcs_otel_uri
+        rec_attrs = otel_record.get("Attributes")
+        if isinstance(rec_attrs, dict):
+            if cloud_log_name:
+                rec_attrs["gcp.cloud_logging.log_name"] = cloud_log_name
+            if gcs_otel_uri:
+                rec_attrs["gcp.gcs.otel_log_uri"] = gcs_otel_uri
 
         return trace_id_hex, span_id_hex, otel_record

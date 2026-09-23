@@ -1,6 +1,6 @@
 # Engineer onboarding guide
 
-From zero context to a benchmarked approach of your own. Five steps, about half an hour.
+From zero context to a benchmarked approach of your own. Seven steps (`Step 0` to `Step 6`), about half an hour.
 
 Five engineers work in this repository in parallel. Nothing below requires editing a shared file,
 so you should never need to resolve a merge conflict to run an experiment.
@@ -30,7 +30,7 @@ Given shelf photographs of any resolution (from a single quickstart image locall
 ## Step 1: Verify Your Environment & Run the All-in-One Playground (2 Minutes)
 
 ```bash
-# 1. Run the offline test suite (53 tests in ~2.5s)
+# 1. Run the offline test suite (86 tests in ~15s)
 .venv/bin/pytest -q
 
 # 2. List all 8 registered test approaches
@@ -39,7 +39,14 @@ Given shelf photographs of any resolution (from a single quickstart image locall
 # 3. Run the All-in-One Engineer Playground (custom approach + 2,000-brand resolver + 12 attributes + TPU profile + diagnostics)
 .venv/bin/python code_samples/11_complete_engineer_approach_playground.py
 
-# 4. Run & compare all 8 approaches on live Cloud Run (writes local reports + diagnostic_trace_report.md)
+# 4a. Run & compare all 8 approaches LOCALLY on your machine with LIVE calls to Vertex AI / Agent Platform
+.venv/bin/shelf-benchmark cloud-run \
+  --local \
+  --approaches all \
+  --model gemini-3.8-flash \
+  --image shelf-image.png
+
+# 4b. Or orchestrate all 8 approaches remotely on the deployed GCP Cloud Run service
 .venv/bin/shelf-benchmark cloud-run \
   --approaches all \
   --model gemini-3.8-flash \
@@ -71,10 +78,9 @@ Given shelf photographs of any resolution (from a single quickstart image locall
 
 ---
 
-## Step 2: the offline test lane
+## Step 2: Local Mode (Live Vertex AI / Agent Platform Calls) vs. Offline Unit-Test Stubs
 
-Use it for everything except the runs whose point is the live model. It is deterministic, free,
-and needs no credentials, which matters when five people are iterating at once.
+The suite distinguishes between **Local Storage Mode** (running locally on your laptop with local images and local `reports/`, while **still making real live calls to Vertex AI / Agent Platform**) and **Offline Unit-Test Stub Mode** (deterministic canned responses for CI and unit tests):
 
 ```python
 from shelf_benchmark import UniversalModelSpec
@@ -82,7 +88,22 @@ from shelf_benchmark.testing import (
     OFFLINE_IMAGE_URI, make_offline_sdk, perfect_prediction_payload,
 )
 
-sdk = make_offline_sdk("/tmp/my-experiment")   # every GCP switch off, artifacts under tmp_dir
+# Local Storage Mode: disables GCS sync, Cloud Logging, and Billing Catalog API so all
+# files stay under /tmp/my-experiment.
+sdk = make_offline_sdk("/tmp/my-experiment")
+
+# Option A — LIVE CALL TO VERTEX AI / AGENT PLATFORM from your local machine:
+# Passing any real Vertex AI / Agent Platform model ID (e.g., "gemini-3.8-flash")
+# builds a real Vertex AI client and issues a live model call against your local image:
+# live_summary = sdk.run_suite(
+#     models=["gemini-3.8-flash"],
+#     tasks=["classification"],
+#     approaches=["single_pass_full_shelf"],
+#     shelf_image_uri="shelf-image.png",
+# )
+
+# Option B — OFFLINE UNIT-TEST STUB (Zero API calls, instant CI execution):
+# Register an `offline-*` model ID or a `custom_callable` stand-in:
 sdk.register_model(UniversalModelSpec(
     model_id="offline-demo-model",
     display_name="offline-demo-model",
@@ -101,8 +122,9 @@ What `shelf_benchmark.testing` gives you:
 
 | Name | Use |
 | :--- | :--- |
-| `make_offline_sdk(tmp_dir, **overrides)` | An SDK with offline config: no Cloud Logging, no GCS sync, no live billing catalog, artifacts under `tmp_dir`. |
-| `offline_config(tmp_dir, **overrides)` | The same config, if you want to edit it before building the SDK. |
+| `make_offline_sdk(tmp_dir, **overrides)` | An SDK with local-only I/O (no Cloud Logging, no GCS sync, no live billing catalog, artifacts under `tmp_dir`). Passing a real model ID (`gemini-3.8-flash`) still calls live Vertex AI / Agent Platform; passing `offline-demo-model` or a `custom_callable` runs 100% stubbed. |
+| `benchmark_harness(tmp_dir, ...)` | Convenience wrapper around `make_offline_sdk` that pre-registers `offline-demo-model` with `offline_universal_payload_handler` for 1-line unit tests. |
+| `offline_config(tmp_dir, **overrides)` | The same local-I/O config, if you want to edit it before building the SDK. |
 | `OFFLINE_IMAGE_URI`, `fixture_image_path()` | The bundled 600x400 fixture shelf image. |
 | `sample_ground_truth()`, `write_sample_ground_truth_file(path)` | Three annotated facings with known-correct answers. |
 | `perfect_prediction_payload()` | A prediction that scores 1.0 against that ground truth. |
@@ -110,11 +132,9 @@ What `shelf_benchmark.testing` gives you:
 | `FakeGenAIClient(payload)` | One canned response for every call. For tests that construct a task directly with `genai_client=`. |
 | `ReplayGenAIClient(responses)`, `.from_file(path)` | A recorded sequence, replayed in order. For multi-stage approaches, and for turning one real run into a regression test. |
 
-> [!WARNING]
-> Offline mode gates Cloud Storage, not model calls. If you pass a real model id such as
-> `gemini-3.8-flash` to `run_suite`, the suite builds a real Vertex AI client and issues a
-> billable request even with `offline.enabled = True`. Register a `custom_callable` stand-in as
-> above. Assigning `sdk.client` to a fake does **not** intercept `run_suite`.
+> [!TIP]
+> **Why `make_offline_sdk` still supports live Vertex AI / Agent Platform calls:**
+> `offline.enabled = True` gates **storage and observability side-effects** (Cloud Storage buckets, Cloud Logging, and Cloud Billing SKU lookups) so you can iterate locally with local files (`shelf-image.png` or `OFFLINE_IMAGE_URI`) without touching shared GCP buckets. When you pass a real model ID such as `gemini-3.8-flash` to `sdk.run_suite(models=["gemini-3.8-flash"], ...)` (or run `shelf-benchmark cloud-run --local`), the suite still connects to live Vertex AI / Agent Platform. When you want zero network calls in unit tests, pass `models=["offline-demo-model"]` or use `benchmark_harness()` / `run_offline_approach()`.
 
 `tests/test_golden_scoring.py` and `tests/test_ground_truth_workflow.py` are short, they pass, and
 they are the best templates to copy.
@@ -185,6 +205,7 @@ cannot disagree about what a facing is. Signatures as of `src/shelf_benchmark/ap
 | Helper | Signature | Returns |
 | :--- | :--- | :--- |
 | Active GenAI Client | `get_client(location=None)` | Injected fake/UniversalModelSpec client or Vertex AI client |
+| Prior Stage-1 Boxes | `get_prior_detected_boxes(prior_detection=None)` | `List[Dict[str, Any]]` of front-facing boxes from a chained Stage-1 detector |
 | Depth dedup | `deduplicate_depth_stacked_facings(items, x_overlap_threshold=None)` | `(front_facings, filtered_count)`; threshold defaults to `depth_deduplication.x_overlap_threshold` |
 | Size bucket | `derive_size_bucket_from_bbox(bbox_2d, all_bboxes_on_shelf, packaging_type="tube", model_size_hint="")` | bucket label from the configured taxonomy |
 | HUL check | `check_is_hul_brand(brand_name, model_predicted=None)` | `bool` |
@@ -193,9 +214,39 @@ cannot disagree about what a facing is. Signatures as of `src/shelf_benchmark/ap
 | Cost | `compute_cost(tokens, model_name, product_count, extra_api_cost_usd=0.0, latency_ms=0.0, run_id=None, approach_id="custom_approach", task_type="classification")` | `CostMetrics` |
 | Scoring | `evaluate_accuracy(task_type, rows, gt_record, depth_duplicates_filtered=0)` | `AccuracyMetrics` |
 | Cropping | `crop_facing_images(shelf_image_uri, facings, model_tag, local_fallback=None)` | `(crops, montage_bytes, montage_path)` |
+| Execute w/ Pipeline | `execute_with_pipeline(approach_id, model_name, record, invoke_fn, ...)` | `TaskExecutionResult` (with automatic retries, CPU time, cost, accuracy, OTel, and trace) |
 | Finalize result | `finalize(approach_id, model_name, record, raw_outputs, start_dt, end_dt, gt_record=None, ...)` | `TaskExecutionResult` (rows + cost + accuracy + OTel + execution_trace) |
 
-Dataclass fields on `ctx`: `config`, `storage`, `telemetry`, `reports_dir`, `genai_client`.
+Dataclass fields on `ctx`: `config`, `storage`, `telemetry`, `reports_dir`, `genai_client`, `prior_detection`.
+
+### Standalone Object Detection Plugins & Chaining Stage-1 → Stage-2
+
+If you are benchmarking a **pure Object Detection approach** (which predicts only `[ymin, xmin, ymax, xmax]` boxes and `confidence`, with no brand/attribute labels), set `task_type="detection"` (or simply return dicts containing only `bbox_2d` — `ctx.infer_effective_task_type` automatically infers `"detection"` so your detector is scored purely on IoU / Precision / Recall / F1 / `AP@50` / `mAP@50:95` without being penalized on unpredicted brand or taxonomy attributes):
+
+```python
+@register_approach_function(
+    approach_id="my_stage1_detector",
+    display_name="My Custom Stage-1 Detector",
+    task_type="detection",
+)
+def run_my_stage1_detector(ctx: CommonLayerContext, model_name: str, shelf_image_uri: str):
+    raw_boxes = [{"bbox_2d": [100, 100, 300, 200], "confidence": 0.96}]
+    front_facings, filtered = ctx.deduplicate_depth_stacked_facings(raw_boxes)
+    if front_facings:
+        front_facings[0]["_depth_filtered"] = filtered
+    return front_facings
+```
+
+You can also **chain any Stage-1 detector into any Stage-2 classifier** without re-running detection:
+
+```python
+summary = sdk.run_suite(
+    tasks=["detection", "classification"],
+    detector_approach="my_stage1_detector",
+    reuse_prior_detection=True,
+    approaches=["two_stage_bbox_guided_nms", "two_stage_physical_crop_per_facing"],
+)
+```
 
 ### Running and testing your approach in 3 lines (Offline or CLI)
 
@@ -229,12 +280,15 @@ When the approach is worth keeping, create `src/shelf_benchmark/approaches/<your
    # Open http://127.0.0.1:8080 -> "Run Live Studio" tab
    ```
    In **Run Live Studio**, your new plugin automatically appears in the Approach dropdown. Choose:
-   - **Execution Environment**: `Offline Local Test (Instant • Zero GCP Required)` or `Live Vertex AI / Cloud Run Execution`
+   - **Execution Environment**:
+     - `Local Machine + Live Vertex AI / Agent Platform Calls` *(default: runs locally with local files while making live calls to Vertex AI / Agent Platform)*
+     - `Live Vertex AI + GCP Cloud Run & Cloud Logging` *(full GCP cloud storage & logging integration)*
+     - `Offline Unit-Test Stub (Canned Responses • Zero API Calls)` *(instant synthetic test harness)*
    - **Ground Truth Scoring**: `Placeholder Mode (Accuracy = None)` or `Connect Sample GT (Score Precision / Recall / F1 / IoU)`
    - Inspect the **Engineering & Onboarding Traceability Inspector** at the bottom of any run to see:
      1. **Call Pattern & Implementation**: 1 call vs 2 calls vs 3 stages, and which models/APIs (`gemini-3.8-flash`, `multimodalembedding@001`, `gemini-embedding-001`) were invoked per stage.
      2. **Separated 5-Bucket GCP Cost & Tokens**: Vertex AI PAYG tokens, Embeddings/Vision API, Provisioned Throughput GSU, Cloud Run compute, GCS/Observability, and `billing_source`.
-     3. **Accuracy, Recall & Ground Truth Status**: Precision/Recall/F1, Mean IoU, Brand/Product/Count Accuracy, and why unmeasured metrics are `None` (never `0.0`).
+     3. **Accuracy, Recall & Ground Truth Status**: Precision/Recall/F1, `AP@50`, `mAP@50:95`, Mean IoU, Brand/Product/Count Accuracy, and why unmeasured metrics are `None` (never `0.0`).
      4. **OpenTelemetry Trace Lookup**: Exact `TraceId`, `SpanId`, copyable `jq` command for `reports/otel_logs.jsonl`, and copyable GCP Cloud Logging query (`logName=... AND trace=...`).
 
 ---
@@ -280,7 +334,7 @@ sdk.connect_ground_truth(
     provider_type="json",          # "json" | "jsonl" | "csv" | "coco" | "bigquery" | "none"
     source_uri="gs://unilever-shelf-understanding-shelf-images/gt/ground_truth.json",
     gt_version="v1",
-    bbox_format="ymin_xmin_ymax_xmax_1000",
+    bbox_format="ymin_xmin_ymax_xmax_1000",  # or "coco_xywh_px" | "xyxy_px" | "xyxy_norm" | "yxyx_norm" | "yolo_xywh_norm"
     strict=True,
     schema_mapping={               # only needed when the vendor uses other field names
         "image_key_field": "image_id",
@@ -301,7 +355,9 @@ A mistyped mapping key raises immediately rather than being ignored.
 
 Edit the `ground_truth:` block in
 [`configs/default_config.yaml`](configs/default_config.yaml), which documents every field inline,
-including all five `bbox_format` options. Every CLI, UI and SDK run then scores automatically.
+including all six `bbox_format` options (`ymin_xmin_ymax_xmax_1000`, `coco_xywh_px`, `xyxy_px`,
+`xyxy_norm`, `yxyx_norm`, and `yolo_xywh_norm`), 4-column bounding-box fields, and polygon `vertices`.
+Every CLI, UI and SDK run then scores automatically.
 
 ### Verify before you believe
 
@@ -330,11 +386,13 @@ End-to-end walkthrough: [`code_samples/10_run_now_score_later_ground_truth.py`](
 
 | Metric | Meaning |
 | :--- | :--- |
-| `detection_precision`, `detection_recall`, `detection_f1` | Localization, at the threshold reported separately as `iou_threshold` (default `0.50`). |
+| `detection_precision`, `detection_recall`, `detection_f1` | Localization at the threshold reported separately as `iou_threshold` (default `0.50`), using `pairing_strategy` (`"iou_greedy"` or `"optimal"` / `"hungarian"`). |
+| `average_precision_at_50`, `map_50_95`, `pr_curve_points` | All-point interpolated `AP@50`, COCO `mAP@[.50:.05:.95]`, and confidence-ranked PR curve points. |
 | `mean_iou`, `mean_iou_matched` | Average IoU over all predictions, and over matched pairs only. |
 | `count_accuracy` | Facing count after depth deduplication versus annotated count. |
 | `brand_classification_accuracy`, `brand_set_recall` | Per-facing brand accuracy, and shelf-level brand recall. |
 | `product_classification_accuracy`, `sku_matching_accuracy` | Product name and canonical SKU accuracy. |
+| `per_attribute_accuracy`, `macro_attribute_accuracy` | Per-attribute accuracy across all 8 core dimensions + any `custom_attributes` (`>8` attributes), and their unweighted macro average. |
 | Row-level columns | `gt_item_id`, `gt_brand`, `gt_product_name`, `gt_sku_id`, `iou_with_gt`, `iou_threshold`, `brand_correct`, `product_correct`, `sku_correct`, `gt_version`, `gt_status`. |
 
 > [!NOTE]

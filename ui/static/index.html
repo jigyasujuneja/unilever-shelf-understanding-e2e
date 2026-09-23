@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Unilever Shelf Understanding — 4-Path Step-by-Step Benchmark Studio</title>
+  <title>Unilever Shelf Understanding — 8-Approach Step-by-Step Benchmark Studio</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -11,39 +11,55 @@
     <div class="topbar-brand">
       <div class="brand-logo">U</div>
       <div>
-        <h1>Unilever Shelf Understanding — Use-Case Pipeline &amp; Benchmark Studio</h1>
+        <h1>Unilever Shelf Understanding — 8-Approach Pipeline &amp; Benchmark Studio</h1>
         <p class="subtitle">
-          4 Separated Architectural Paths &bull; Linear Step-by-Step Visual Flow per Use Case &bull; Live Vertex AI Execution Studio
+          All 8 Unique Architectural Approaches &bull; Step-by-Step Visual Flow &bull; Local Non-Cloud-Run &amp; Remote GCP Cloud Run Live Vertex AI Studio
         </p>
       </div>
     </div>
     <div class="topbar-badges">
       <span class="badge badge-gcp" id="badge-project">GCP: unilever-shelf-understanding</span>
-      <span class="badge badge-tax">Taxonomy: packaged _resources/taxonomy.yaml</span>
-      <span class="badge badge-gt">Ground Truth: Placeholder (Ready to Swap)</span>
+      <span class="badge badge-tax">Models: gemini-3.8-flash &amp; gemini-3.5-flash-lite</span>
+      <span class="badge badge-gt">Env: Local Process &amp; Cloud Run</span>
     </div>
   </header>
 
   <nav class="main-nav" aria-label="Use Case Navigation">
     <button class="nav-btn active" data-tab="tab-overview">
-      <span class="nav-step">All 4 Paths</span>
+      <span class="nav-step">All 8 Approaches</span>
       Overview &amp; Compare
     </button>
     <button class="nav-btn" data-tab="tab-path-1">
-      <span class="nav-step">Use Case 1</span>
-      Path 1: Single-Pass VLM
+      <span class="nav-step">Path 1 (1-Stage)</span>
+      Single-Pass Full-Shelf VLM
     </button>
     <button class="nav-btn" data-tab="tab-path-2">
-      <span class="nav-step">Use Case 2</span>
-      Path 2: 2-Stage BBox + Depth NMS
+      <span class="nav-step">Path 2 (2k Brands)</span>
+      Open-Vocab + Catalog Resolver
     </button>
     <button class="nav-btn" data-tab="tab-path-3">
-      <span class="nav-step">Use Case 3</span>
-      Path 3: 2-Stage Physical Crop
+      <span class="nav-step">Path 3 (&gt;8 Attrs)</span>
+      Configurable Multi-Attr VLM
     </button>
     <button class="nav-btn" data-tab="tab-path-4">
-      <span class="nav-step">Use Case 4</span>
-      Path 4: 3-Stage Class-Agnostic + 1408-D Vector
+      <span class="nav-step">Path 4 (1-Call E2E)</span>
+      Detect + Classify + SKU Match
+    </button>
+    <button class="nav-btn" data-tab="tab-path-5">
+      <span class="nav-step">Path 5 (2-Stage BBox)</span>
+      2-Stage BBox + Depth NMS
+    </button>
+    <button class="nav-btn" data-tab="tab-path-6">
+      <span class="nav-step">Path 6 (2-Stage Crop)</span>
+      2-Stage PIL Crop + Montage
+    </button>
+    <button class="nav-btn" data-tab="tab-path-7">
+      <span class="nav-step">Path 7 (3-Stage ViT)</span>
+      Class-Agnostic + 1408-D ScaNN
+    </button>
+    <button class="nav-btn" data-tab="tab-path-8">
+      <span class="nav-step">Path 8 (Cloud Vision)</span>
+      Cloud Vision + 1408-D ScaNN
     </button>
     <button class="nav-btn nav-btn-live" data-tab="tab-run-live">
       <span class="nav-step nav-step-live">&#9889; Live API</span>
@@ -56,13 +72,13 @@
   </nav>
 
   <main class="container">
-    <!-- TAB 1: OVERVIEW & 4-PATH SIDE-BY-SIDE COMPARISON -->
+    <!-- TAB 1: OVERVIEW & 8-APPROACH SIDE-BY-SIDE COMPARISON -->
     <section id="tab-overview" class="tab-panel active">
       <div class="section-header">
         <div>
-          <h2>Executive Comparison of All 4 Architectural Use-Case Paths</h2>
+          <h2>Executive Comparison of All 8 Unique Architectural Approaches (`gemini-3.8-flash` &amp; `gemini-3.5-flash-lite`)</h2>
           <p>
-            Each path solves front-facing detection, depth deduplication, 7-dimension taxonomy extraction, and catalog vector matching with a distinct sequence of stages. Click any Use-Case card below to inspect its full linear step-by-step flow, or jump to <strong>Run Live Studio</strong> to execute any path in real time.
+            All 8 registered approaches solve distinct production bottlenecks: <strong>Paths 1&ndash;4</strong> are 1-Stage VLM variations (Baseline 7-Dim, 2,000-Brand O(1) Catalog Resolver, &gt;8 Extended Attributes, and 1-Call End-to-End SKU Matching); <strong>Paths 5&ndash;6</strong> are 2-Stage decoupled detector + classifier pipelines (Coordinate-Prompted BBox NMS vs. Physical PIL Image Cropping + Montage Strip with Stage-1 Bounding Box Inheritance); and <strong>Paths 7&ndash;8</strong> are 3-Stage zero-VLM-classification visual metric learning pipelines (Gemini Class-Agnostic Detector vs. Google Cloud Vision <code>OBJECT_LOCALIZATION</code> + 1408-D <code>multimodalembedding@001</code> + ScaNN Cosine ANN).
           </p>
         </div>
       </div>
@@ -76,25 +92,29 @@
       <div class="card">
         <div class="card-header-flex">
           <div>
-            <h3>Complete Benchmark Matrix Across All 4 Paths &amp; 3 Gemini Models (21 Live Runs)</h3>
-            <p class="muted">Compare latency, token breakdown, cost per shelf image, cost per front facing, and depth duplicate suppression.</p>
+            <h3>Complete Benchmark Matrix Across All 8 Approaches &amp; Gemini Models</h3>
+            <p class="muted">Compare execution environment (Local Non-Cloud-Run Process vs. GCP Cloud Run), latency, token breakdown, cost per shelf image, and front-facing detections.</p>
           </div>
           <div class="filter-controls">
-            <label>Filter Path:
+            <label>Filter Approach:
               <select id="overview-path-filter">
-                <option value="ALL">All 4 Classification Paths + Standalone Tasks</option>
-                <option value="single_pass_full_shelf">Path 1: Single-Pass Full-Shelf VLM</option>
-                <option value="two_stage_bbox_guided_nms">Path 2: 2-Stage BBox-Guided + Depth NMS</option>
-                <option value="two_stage_physical_crop_per_facing">Path 3: 2-Stage Physical Crop per Facing</option>
-                <option value="class_agnostic_visual_embedding">Path 4: 3-Stage Class-Agnostic + 1408-D Vector</option>
+                <option value="ALL">All 8 Unique Approaches</option>
+                <option value="single_pass_full_shelf">Path 1: single_pass_full_shelf (1-Call Full-Shelf VLM)</option>
+                <option value="open_vocab_brand_plus_catalog_resolver">Path 2: open_vocab_brand_plus_catalog_resolver (2,000-Brand O(1) Resolver)</option>
+                <option value="configurable_multi_attribute_vlm">Path 3: configurable_multi_attribute_vlm (&gt;8 Extended Attributes VLM)</option>
+                <option value="single_step_detect_classify_and_match">Path 4: single_step_detect_classify_and_match (1-Call Detect+Classify+Match)</option>
+                <option value="two_stage_bbox_guided_nms">Path 5: two_stage_bbox_guided_nms (2-Stage BBox + Depth NMS)</option>
+                <option value="two_stage_physical_crop_per_facing">Path 6: two_stage_physical_crop_per_facing (2-Stage PIL Crop + Montage)</option>
+                <option value="class_agnostic_visual_embedding">Path 7: class_agnostic_visual_embedding (3-Stage Class-Agnostic + 1408-D ScaNN)</option>
+                <option value="cloud_vision_visual_embedding">Path 8: cloud_vision_visual_embedding (3-Stage Cloud Vision + 1408-D ScaNN)</option>
               </select>
             </label>
             <label>Filter Model:
               <select id="overview-model-filter">
-                <option value="ALL">All Models (3.8-flash, 3.7-flash, 3.5-flash-lite)</option>
+                <option value="ALL">All Models (gemini-3.8-flash &amp; gemini-3.5-flash-lite)</option>
                 <option value="gemini-3.8-flash">gemini-3.8-flash</option>
-                <option value="gemini-3.7-flash">gemini-3.7-flash</option>
                 <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+                <option value="gemini-3.7-flash">gemini-3.7-flash</option>
               </select>
             </label>
           </div>
@@ -103,8 +123,8 @@
           <table class="data-table" id="overview-summary-table">
             <thead>
               <tr>
-                <th>Use Case / Approach</th>
-                <th>Task</th>
+                <th>Approach (Path 1..8)</th>
+                <th>Execution Env</th>
                 <th>Model</th>
                 <th>Front Facings</th>
                 <th>Depth Filtered</th>
@@ -123,34 +143,40 @@
       </div>
     </section>
 
-    <!-- TAB 2: PATH 1 (SINGLE-PASS FULL-SHELF VLM) -->
+    <!-- DEDICATED STEP-BY-STEP TABS FOR ALL 8 UNIQUE APPROACHES -->
     <section id="tab-path-1" class="tab-panel">
       <div id="pipeline-container-path-1"></div>
     </section>
-
-    <!-- TAB 3: PATH 2 (2-STAGE BBOX-GUIDED + DEPTH NMS) -->
     <section id="tab-path-2" class="tab-panel">
       <div id="pipeline-container-path-2"></div>
     </section>
-
-    <!-- TAB 4: PATH 3 (2-STAGE PHYSICAL CROP PER FACING) -->
     <section id="tab-path-3" class="tab-panel">
       <div id="pipeline-container-path-3"></div>
     </section>
-
-    <!-- TAB 5: PATH 4 (3-STAGE CLASS-AGNOSTIC DETECTOR + 1408-D VISUAL EMBEDDING + SCANN) -->
     <section id="tab-path-4" class="tab-panel">
       <div id="pipeline-container-path-4"></div>
     </section>
+    <section id="tab-path-5" class="tab-panel">
+      <div id="pipeline-container-path-5"></div>
+    </section>
+    <section id="tab-path-6" class="tab-panel">
+      <div id="pipeline-container-path-6"></div>
+    </section>
+    <section id="tab-path-7" class="tab-panel">
+      <div id="pipeline-container-path-7"></div>
+    </section>
+    <section id="tab-path-8" class="tab-panel">
+      <div id="pipeline-container-path-8"></div>
+    </section>
 
-    <!-- TAB 6: RUN LIVE STUDIO (OUTPUTS FULL VISUAL STEP-BY-STEP UI LIVE) -->
+    <!-- TAB: RUN LIVE STUDIO (OUTPUTS FULL VISUAL STEP-BY-STEP UI LIVE) -->
     <section id="tab-run-live" class="tab-panel">
       <div class="card live-control-card">
         <div class="card-header-flex">
           <div>
-            <h2>&#9889; Run Live Benchmark Studio — Real-Time Step-by-Step Execution</h2>
+            <h2>&#9889; Run Live Benchmark Studio — Local Non-Cloud-Run vs. Remote GCP Cloud Run</h2>
             <p class="muted">
-              Select any of the 4 Use-Case Paths and any Vertex AI Gemini model below. Clicking <strong>Run Live on Vertex AI</strong> executes the actual backend pipeline against <code>gs://unilever-shelf-understanding-shelf-images/shelf-image.png</code> and renders the full interactive Step-by-Step visual pipeline below.
+              Select any of the 8 Approaches, choose <code>gemini-3.8-flash</code> or <code>gemini-3.5-flash-lite</code>, and choose whether to execute in your <strong>Local Non-Cloud-Run Python Process (&rarr; Live Vertex AI API)</strong> or on the <strong>Remote GCP Cloud Run Service (&rarr; Live Vertex AI API)</strong>.
             </p>
           </div>
         </div>
@@ -159,14 +185,14 @@
           <label class="control-block">
             <span>1. Choose Approach Plugin (All 8 Registered):</span>
             <select id="live-studio-approach">
-              <option value="single_pass_full_shelf">single_pass_full_shelf (1 Call: Open-Vocab LLM Brand + N-Dim)</option>
-              <option value="open_vocab_brand_plus_catalog_resolver">open_vocab_brand_plus_catalog_resolver (Open-Vocab + O(1) 2,000-Brand Resolver)</option>
-              <option value="configurable_multi_attribute_vlm">configurable_multi_attribute_vlm (>8 Attributes: 1-Call or Grouped Calls)</option>
-              <option value="single_step_detect_classify_and_match">single_step_detect_classify_and_match (1 Call: Detect + Classify + SKU Match)</option>
-              <option value="two_stage_bbox_guided_nms">two_stage_bbox_guided_nms (2-Stage: Detect + BBox-Guided Classify)</option>
-              <option value="two_stage_physical_crop_per_facing" selected>two_stage_physical_crop_per_facing (2-Stage: Detect + PIL Crops + Classify)</option>
-              <option value="class_agnostic_visual_embedding">class_agnostic_visual_embedding (3-Stage: CV + 1408-D Embed + ScaNN)</option>
-              <option value="cloud_vision_visual_embedding">cloud_vision_visual_embedding (3-Stage: Cloud Vision + 1408-D Embed + ScaNN)</option>
+              <option value="single_pass_full_shelf">Path 1: single_pass_full_shelf (1 Call: Open-Vocab Brand + 7-Dim)</option>
+              <option value="open_vocab_brand_plus_catalog_resolver">Path 2: open_vocab_brand_plus_catalog_resolver (Open-Vocab + O(1) 2,000-Brand Resolver)</option>
+              <option value="configurable_multi_attribute_vlm">Path 3: configurable_multi_attribute_vlm (&gt;8 Attributes: 1-Call or Grouped Calls)</option>
+              <option value="single_step_detect_classify_and_match">Path 4: single_step_detect_classify_and_match (1 Call: Detect + Classify + SKU Match)</option>
+              <option value="two_stage_bbox_guided_nms">Path 5: two_stage_bbox_guided_nms (2-Stage: Detect + BBox-Guided Classify)</option>
+              <option value="two_stage_physical_crop_per_facing" selected>Path 6: two_stage_physical_crop_per_facing (2-Stage: Detect + PIL Crops + Classify)</option>
+              <option value="class_agnostic_visual_embedding">Path 7: class_agnostic_visual_embedding (3-Stage: Gemini Agnostic + 1408-D + ScaNN)</option>
+              <option value="cloud_vision_visual_embedding">Path 8: cloud_vision_visual_embedding (3-Stage: Cloud Vision + 1408-D + ScaNN)</option>
             </select>
           </label>
 
@@ -174,17 +200,18 @@
             <span>2. Choose Model:</span>
             <select id="live-studio-model">
               <option value="gemini-3.8-flash" selected>gemini-3.8-flash</option>
-              <option value="gemini-3.7-flash">gemini-3.7-flash</option>
               <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+              <option value="gemini-3.7-flash">gemini-3.7-flash</option>
               <option value="gemma-3-27b-it">gemma-3-27b-it</option>
             </select>
           </label>
 
           <label class="control-block">
-            <span>3. Execution Environment:</span>
+            <span>3. Execution Environment (Local vs. Cloud Run):</span>
             <select id="live-studio-mode">
-              <option value="offline" selected>Offline Local Test (Instant &bull; Zero GCP Cost)</option>
-              <option value="live">Live Vertex AI / Cloud Run Execution</option>
+              <option value="local" selected>&#128421;&#65039; Local Non-Cloud-Run Process &rarr; Live Vertex AI API (--local)</option>
+              <option value="cloud_run">&#9729;&#65039; Remote GCP Cloud Run Service &rarr; Live Vertex AI API</option>
+              <option value="offline">&#129514; Offline Unit-Test Stub (Canned Responses &bull; Zero API Calls)</option>
             </select>
           </label>
 

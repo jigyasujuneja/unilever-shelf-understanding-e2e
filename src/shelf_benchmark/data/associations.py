@@ -357,16 +357,17 @@ def create_association_provider(
             f"{default_bucket!r} instead."
         )
 
+    src_uri = str(assoc_config.source_uri or "")
     if ptype in ("json", "jsonl"):
         return JSONAssociationProvider(
-            assoc_config.source_uri,
+            src_uri,
             storage_manager,
             assoc_config.schema_mapping,
             default_shelf_bucket=default_bucket,
         )
     if ptype == "csv":
         return CSVAssociationProvider(
-            assoc_config.source_uri,
+            src_uri,
             storage_manager,
             assoc_config.schema_mapping,
             default_shelf_bucket=default_bucket,
@@ -374,7 +375,7 @@ def create_association_provider(
     if ptype in ("bigquery", "bq"):
         return BigQueryAssociationProvider(
             project_id,
-            assoc_config.source_uri,
+            src_uri,
             assoc_config.schema_mapping,
             default_shelf_bucket=default_bucket,
         )

@@ -98,13 +98,13 @@ def build_classification_prompt(
     )
 
     return f"""You are an expert retail shelf product classification model using the configurable N-Dimension Retail Taxonomy.
-Visually inspect this shelf image and classify EVERY distinct FRONT-FACING product slot on the main middle shelf (ordered strictly from left to right).
+Visually inspect this shelf image and classify EVERY distinct FRONT-FACING product slot across all visible shelf rows (top, middle, bottom; ordered top-to-bottom and strictly from left to right within each row).
 
 CRITICAL FACING RULE:
 - Do NOT count products stacked in depth (behind the front-most product in the same facing column) as separate items!
 - Only classify the FRONT-MOST visible unit in each horizontal facing slot (`1 facing slot = 1 product entry`).
 
-For EVERY front-facing product slot on the main middle shelf, extract all configured Taxonomy Dimensions:
+For EVERY front-facing product slot on the shelf, extract all configured Taxonomy Dimensions:
 1. `category`: Choose from configured categories ({cats_str}).
 2. `subcategory`: Choose or infer subcategory (e.g., {subcats_str}).
 3. `brand`: {brand_instruction}
@@ -112,7 +112,7 @@ For EVERY front-facing product slot on the main middle shelf, extract all config
 5. `packaging_type`: Choose from configured packaging types ({pkg_str}).
 6. `pack_type`: {pack_str}.
 7. `size`: Visible size cue or configured size bucket ({sizes_str}).{extra_block}{subset_note}
-Also provide `bbox_2d` (`[ymin, xmin, ymax, xmax]` 0..1000), `product_name`, `extra_attributes`, and `confidence` (0.0 to 1.0)."""
+Also provide `bbox_2d` (`[ymin, xmin, ymax, xmax]` 0..1000), `shelf_row` (`"top"`, `"middle"`, or `"bottom"`), `product_name`, `extra_attributes`, and `confidence` (0.0 to 1.0)."""
 
 
 
@@ -141,11 +141,18 @@ class ProductClassificationTask(BaseBenchmarkTask):
         detected_boxes: Optional[List[Dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> Tuple[Dict[str, Any], TokenUsageMetrics, List[RowLevelReportItem]]:
+        from shelf_benchmark.evaluation.metrics import compute_iou
+
         client = self.get_client()
         image_part = self.storage.to_genai_part(shelf_image_uri)
-        stage1_tokens = TokenUsageMetrics()
+        prior_stage1_tokens = kwargs.get("prior_stage1_tokens")
+        stage1_tokens = (
+            prior_stage1_tokens
+            if isinstance(prior_stage1_tokens, TokenUsageMetrics)
+            else TokenUsageMetrics()
+        )
         crop_paths: List[str] = []
-        depth_filtered = 0
+        depth_filtered = int(kwargs.get("prior_depth_filtered", 0) or 0)
 
         # Stage 1 for two-stage separation approaches: run explicit Front-Facing Detection + Depth-NMS first
         if separation_approach in ("two_stage_bbox_guided_nms", "two_stage_physical_crop_per_facing") and not detected_boxes:
@@ -168,7 +175,7 @@ class ProductClassificationTask(BaseBenchmarkTask):
 
         call_groups = list(self.config.taxonomy.attribute_call_groups or [])
         if separation_approach == "configurable_multi_attribute_vlm" and len(call_groups) >= 2:
-            # Multi-call grouped attribute extraction: run 1 VLM call per attribute group and merge per facing
+            # Multi-call grouped attribute extraction: run 1 VLM call per attribute group and merge per facing by IoU
             merged_items: List[Dict[str, Any]] = []
             total_tokens = stage1_tokens
             for g_idx, group_attrs in enumerate(call_groups, start=1):
@@ -190,9 +197,28 @@ class ProductClassificationTask(BaseBenchmarkTask):
                 if g_idx == 1:
                     merged_items = group_items
                 else:
+                    used_targets: set[int] = set()
                     for idx_item, g_item in enumerate(group_items):
-                        if idx_item < len(merged_items):
-                            target = merged_items[idx_item]
+                        g_box = g_item.get("bbox_2d") or [0, 0, 0, 0]
+                        best_t_idx: Optional[int] = None
+                        best_iou = 0.0
+                        for t_idx, cand_target in enumerate(merged_items):
+                            if t_idx in used_targets:
+                                continue
+                            t_box = cand_target.get("bbox_2d") or [0, 0, 0, 0]
+                            iou_val = compute_iou(g_box, t_box)
+                            if iou_val > best_iou:
+                                best_iou = iou_val
+                                best_t_idx = t_idx
+                        if (
+                            (best_t_idx is None or best_iou < 0.30)
+                            and idx_item < len(merged_items)
+                            and idx_item not in used_targets
+                        ):
+                            best_t_idx = idx_item
+                        if best_t_idx is not None:
+                            used_targets.add(best_t_idx)
+                            target = merged_items[best_t_idx]
                             for attr_key in group_attrs:
                                 if attr_key in target and g_item.get(attr_key):
                                     target[attr_key] = g_item[attr_key]
@@ -277,6 +303,29 @@ class ProductClassificationTask(BaseBenchmarkTask):
             else:
                 dedup_cls_items = raw_cls_items
 
+        # First resolve Stage-1 locked bounding boxes for 2-stage pipelines whenever Stage 2
+        # omits `bbox_2d` or returns `[0, 0, 0, 0]` (e.g., when classifying cropped facing strips).
+        for idx, item in enumerate(dedup_cls_items, start=1):
+            facing_no = item.get("product_index")
+            slot_idx = (
+                (int(facing_no) - 1)
+                if isinstance(facing_no, int) and 1 <= int(facing_no) <= len(detected_boxes or [])
+                else (idx - 1)
+            )
+            box = item.get("bbox_2d") or [0, 0, 0, 0]
+            has_valid_box = (
+                isinstance(box, list)
+                and len(box) >= 4
+                and int(box[2]) > int(box[0])
+                and int(box[3]) > int(box[1])
+            )
+            if not has_valid_box and detected_boxes and 0 <= slot_idx < len(detected_boxes):
+                stage1_box = detected_boxes[slot_idx].get("bbox_2d")
+                if isinstance(stage1_box, list) and len(stage1_box) >= 4:
+                    item["bbox_2d"] = list(stage1_box[:4])
+                if not item.get("shelf_row") and detected_boxes[slot_idx].get("shelf_row"):
+                    item["shelf_row"] = detected_boxes[slot_idx]["shelf_row"]
+
         all_boxes = [it.get("bbox_2d", [0, 0, 0, 0]) for it in dedup_cls_items]
 
         rows: List[RowLevelReportItem] = []
@@ -297,12 +346,6 @@ class ProductClassificationTask(BaseBenchmarkTask):
                 taxonomy=self.config.taxonomy,
                 model_predicted=item.get("is_hul_brand"),
             )
-            # Align the crop by the facing number the prompt actually numbered (#1..#N), not by
-            # position in the response list. The crops are produced in `detected_boxes` order
-            # (which `crop_detected_facings` re-sorts), while these rows iterate the model's
-            # response order, and `two_stage_physical_crop_per_facing` does not dedup -- so
-            # `crop_paths[idx - 1]` attached the wrong crop image to a row whenever the model
-            # reordered or dropped a facing.
             facing_no = item.get("product_index")
             crop_slot = (int(facing_no) - 1) if isinstance(facing_no, int) and facing_no > 0 else (idx - 1)
             crop_path = crop_paths[crop_slot] if 0 <= crop_slot < len(crop_paths) else None

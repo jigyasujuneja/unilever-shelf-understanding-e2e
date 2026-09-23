@@ -1,9 +1,9 @@
 # Code Samples & Engineer Onboarding Cookbook
 
-Ten self-contained, runnable Python scripts that walk through every workflow in the Shelf Understanding Benchmark Suite.
+Eleven self-contained, runnable Python scripts that walk through every workflow in the Shelf Understanding Benchmark Suite.
 
-- **Local Quickstart vs Multi-Image GCP Buckets**: Six samples run **100% offline with zero GCP credentials** against the bundled quickstart fixture (`shelf_sample_01.png`). In staging and production, point `sdk.connect_dataset(...)` at multi-image GCS buckets (`gs://...`) or BigQuery tables of any image resolution.
-- **Ground-Truth Scope (Ingestion Only)**: This benchmark suite does **not** author or produce ground-truth annotations. It ingests existing ground-truth datasets provided externally (`sdk.connect_ground_truth(...)`). Before ground truth is connected, accuracy metrics report `None` with `accuracy_status="PLACEHOLDER_AWAITING_GROUND_TRUTH"`.
+- **Local Live Vertex AI / Agent Platform vs. Offline Unit-Test Stubs**: Seven samples run **100% offline with zero GCP credentials** against the bundled quickstart fixture (`shelf_sample_01.png`) when using `benchmark_harness()` or `offline-demo-model`, and seamlessly switch to **live Vertex AI / Agent Platform calls** locally when `--live` or a real model ID (`gemini-3.8-flash`) is passed to `make_offline_sdk()` or `ShelfBenchmarkSDK()`. In staging and production, point `sdk.connect_dataset` at multi-image GCS buckets or BigQuery tables of any image resolution.
+- **Ground-Truth Scope (Ingestion Only)**: This benchmark suite does **not** author or produce ground-truth annotations. It ingests existing ground-truth datasets provided externally (`sdk.connect_ground_truth`). Before ground truth is connected, accuracy metrics report `None` with `accuracy_status="PLACEHOLDER_AWAITING_GROUND_TRUTH"`.
 
 ---
 
@@ -27,17 +27,18 @@ Ten self-contained, runnable Python scripts that walk through every workflow in 
 
 ## 2. Built-in Approaches (Single-Step, Multi-Attribute & Multi-Stage)
 
-All 7 registered approaches can be listed via `.venv/bin/shelf-benchmark list-approaches` and tested offline or live:
+All 8 registered approaches can be listed via `.venv/bin/shelf-benchmark list-approaches` and tested offline or live:
 
 | Approach ID | Call Topology | What It Does |
 | :--- | :--- | :--- |
 | `single_pass_full_shelf` | **1 API Call (Single-Step Detect + Classify)** | Detects all front-row facings (`bbox_2d`) and extracts all configured attributes (8 core + any `custom_attributes`) in a single structured VLM call, followed by deterministic 1D-NMS depth deduplication. |
+| `open_vocab_brand_plus_catalog_resolver` | **1 VLM Call + $O(1)$ Brand Resolver** | Open-vocabulary LLM brand generation followed by $O(1)$ canonical brand resolution (`resolve_brand_against_catalog`) against a 2,000+ brand catalog. |
 | `configurable_multi_attribute_vlm` | **1 Call or Grouped Multi-Call VLM (>8 Attributes)** | Predicts arbitrarily many attributes (`taxonomy.custom_attributes`): runs in **1 VLM call** when `attribute_call_groups` is empty/1-group, or executes **1 targeted VLM call per attribute group** when `attribute_call_groups` splits attributes by type (e.g. OCR identity vs physical/promo attributes). |
 | `single_step_detect_classify_and_match` | **1 API Call (Single-Step Detect + Classify + Match)** | Performs full-shelf facing detection, N-dimension classification, and hybrid SKU catalog matching (`matched_sku_id`, lexical + dense descriptors) in a single VLM pass. |
 | `two_stage_bbox_guided_nms` | **2 API Calls (2-Stage VLM)** | Stage 1 detects bounding boxes and filters back-row duplicates via 1D-NMS; Stage 2 classifies only the surviving front-row coordinates. |
 | `two_stage_physical_crop_per_facing` | **2 Stages (Detect + Crop + Classify)** | Stage 1 detects boxes; physically crops each facing (`crop_detected_facings`); Stage 2 classifies high-resolution crops. |
-| `class_agnostic_visual_embedding` | **3 Stages (Detect + Embed + Match)** | Class-agnostic detection -> crops -> `multimodalembedding@001` cosine similarity against reference catalog -> Gemini tie-breaker. |
-| `cloud_vision_visual_embedding` | **3 Stages (Cloud Vision + Embed + Match)** | Cloud Vision `OBJECT_LOCALIZATION` -> `multimodalembedding@001` catalog search -> Gemini verification. |
+| `class_agnostic_visual_embedding` | **3 Stages (Detect + Embed + Match)** | Class-agnostic detection -> crops -> `multimodalembedding@001` cosine similarity against reference catalog. |
+| `cloud_vision_visual_embedding` | **3 Stages (Cloud Vision + Embed + Match)** | Cloud Vision `OBJECT_LOCALIZATION` -> `multimodalembedding@001` catalog search. |
 
 ---
 

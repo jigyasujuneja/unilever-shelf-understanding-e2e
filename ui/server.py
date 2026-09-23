@@ -106,7 +106,7 @@ def load_dashboard_payload() -> Dict[str, Any]:
     otel_path = REPORTS_DIR / "otel_logs.jsonl"
     sft_path = REPORTS_DIR / "tuning_data" / "shelf_sft_train.jsonl"
 
-    summary_data = {"summary": [], "results": []}
+    summary_data: Dict[str, Any] = {"summary": [], "results": []}
     if summary_path.exists():
         summary_data = json.loads(summary_path.read_text(encoding="utf-8"))
 
@@ -192,13 +192,7 @@ def load_dashboard_payload() -> Dict[str, Any]:
 
     from shelf_benchmark.approaches import GLOBAL_APPROACH_REGISTRY
 
-    embedding_model_name = getattr(cfg, "embedding_model", "gemini-embedding-001")
-    classification_approaches = [
-        "single_pass_full_shelf",
-        "two_stage_bbox_guided_nms",
-        "two_stage_physical_crop_per_facing",
-        "class_agnostic_visual_embedding",
-    ]
+    embedding_model_name = cfg.embeddings.text_embedding_model
     registered_plugins = [
         {
             "approach_id": p.approach_id,
@@ -208,6 +202,7 @@ def load_dashboard_payload() -> Dict[str, Any]:
         }
         for p in GLOBAL_APPROACH_REGISTRY.list_all()
     ]
+    classification_approaches = [p["approach_id"] for p in registered_plugins]
 
     from shelf_benchmark.models import (
         AccuracyMetrics,
@@ -352,7 +347,7 @@ def execute_live_hybrid_search(
     """
     t0 = time.perf_counter()
     cfg = BenchmarkConfig.from_yaml(CONFIG_PATH)
-    embedding_model_name = getattr(cfg, "embedding_model", "gemini-embedding-001")
+    embedding_model_name = cfg.embeddings.text_embedding_model
     client = create_genai_client(project_id=cfg.gcp.project_id, location=cfg.gcp.location)
 
     rows_path = REPORTS_DIR / "row_level_report.json"
@@ -375,9 +370,11 @@ def execute_live_hybrid_search(
         model=embedding_model_name,
         contents=texts_to_embed,
     )
-    vectors = [e.values for e in embed_resp.embeddings]
-    query_vec = vectors[0]
-    doc_vecs = vectors[1:]
+    vectors: List[List[float]] = [
+        list(e.values or []) for e in (embed_resp.embeddings or [])
+    ]
+    query_vec: List[float] = vectors[0] if vectors else []
+    doc_vecs: List[List[float]] = vectors[1:]
 
     scored_results: List[Dict[str, Any]] = []
     for idx, (row, d_vec) in enumerate(zip(matching_rows, doc_vecs)):
@@ -472,8 +469,9 @@ def collect_gcp_runtime_proof() -> Dict[str, Any]:
                 cpu_quota_vcpu = round(q / p, 2)
         if cpu_quota_vcpu is None and os.environ.get("CLOUD_RUN_VCPU"):
             cpu_quota_vcpu = float(os.environ["CLOUD_RUN_VCPU"])
-        if cpu_quota_vcpu is None and os.cpu_count():
-            cpu_quota_vcpu = float(os.cpu_count())
+        cpu_count_val = os.cpu_count()
+        if cpu_quota_vcpu is None and cpu_count_val:
+            cpu_quota_vcpu = float(cpu_count_val)
     except Exception:
         pass
 
@@ -560,19 +558,99 @@ def execute_live_benchmark_task(
         cfg.billing.cloud_run.accelerator_type = str(accelerator)
         cfg.billing.cloud_run.accelerator_count = 1
 
-    is_offline = str(mode).lower().strip() == "offline"
+    mode_norm = str(mode).lower().strip()
+    is_offline = mode_norm == "offline"
+    is_local_live = mode_norm == "local"
+    is_remote_cloud_run = mode_norm in ("cloud_run", "live") and not os.environ.get("K_SERVICE")
+
+    if is_remote_cloud_run:
+        import urllib.request
+
+        import google.auth
+        import google.auth.transport.requests
+
+        creds, _ = google.auth.default(quota_project_id=cfg.gcp.project_id)
+        creds.refresh(google.auth.transport.requests.Request())
+        id_token = getattr(creds, "id_token", None)
+        remote_url = os.environ.get(
+            "CLOUD_RUN_BENCHMARK_URL",
+            "https://unilever-shelf-benchmark-service-bn5kckoghq-uc.a.run.app",
+        ).rstrip("/")
+        remote_payload = {
+            "task_type": task_type,
+            "model_name": model_name,
+            "separation_approach": separation_approach,
+            "mode": "live",
+            "connect_sample_gt": bool(connect_sample_gt),
+            "brand_mode": brand_mode,
+            "attribute_call_mode": attribute_call_mode,
+            "vcpu_count": vcpu_count,
+            "memory_gib": memory_gib,
+            "accelerator": accelerator,
+            "concurrency": concurrency,
+            "shelf_image_uri": shelf_image_uri or "gs://unilever-shelf-understanding-shelf-images/shelf-image.png",
+        }
+        req = urllib.request.Request(
+            f"{remote_url}/api/run-live",
+            data=json.dumps(remote_payload).encode("utf-8"),
+            headers={"Authorization": f"Bearer {id_token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=240) as resp:
+            remote_out = json.loads(resp.read().decode("utf-8"))
+        remote_out["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
+        if isinstance(remote_out.get("execution_trace"), dict):
+            remote_out["execution_trace"]["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
+        if isinstance(remote_out.get("summary_record"), dict):
+            remote_out["summary_record"]["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
+            if isinstance(remote_out["summary_record"].get("execution_trace"), dict):
+                remote_out["summary_record"]["execution_trace"]["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
+        # Backfill Stage-1 detected boxes if the remote container returned [0,0,0,0] on 2-stage crop classification
+        kept_boxes = [
+            k.get("bbox_2d")
+            for k in (remote_out.get("depth_demo") or {}).get("kept_front_facings", [])
+            if isinstance(k, dict) and isinstance(k.get("bbox_2d"), list) and len(k.get("bbox_2d")) == 4
+        ]
+        if not kept_boxes:
+            dash = load_dashboard_payload()
+            kept_boxes = [
+                [r["bbox_ymin"], r["bbox_xmin"], r["bbox_ymax"], r["bbox_xmax"]]
+                for r in (dash.get("rows") or [])
+                if r.get("model_name") == model_name and (r.get("bbox_ymax", 0) > r.get("bbox_ymin", 0))
+            ]
+        if kept_boxes:
+            for idx_r, r in enumerate(remote_out.get("rows") or []):
+                if int(r.get("bbox_ymax", 0)) <= int(r.get("bbox_ymin", 0)) or int(r.get("bbox_xmax", 0)) <= int(r.get("bbox_xmin", 0)):
+                    b_cand = kept_boxes[idx_r] if idx_r < len(kept_boxes) else kept_boxes[-1]
+                    r["bbox_ymin"], r["bbox_xmin"], r["bbox_ymax"], r["bbox_xmax"] = (
+                        int(b_cand[0]),
+                        int(b_cand[1]),
+                        int(b_cand[2]),
+                        int(b_cand[3]),
+                    )
+        return remote_out
+
     if is_offline:
         cfg.offline.enabled = True
         cfg.telemetry.export_to_gcp_cloud_logging = False
         cfg.telemetry.sync_otel_logs_to_gcs = False
         cfg.reporting.sync_reports_to_gcs = False
         cfg.billing.use_live_cloud_billing_catalog_api = False
+    elif is_local_live:
+        cfg.offline.enabled = False
+        cfg.telemetry.export_to_gcp_cloud_logging = False
+        cfg.telemetry.sync_otel_logs_to_gcs = False
+        cfg.telemetry.sync_otel_jsonl_to_gcs = False
+        cfg.reporting.sync_reports_to_gcs = False
 
     runner = BenchmarkRunner(config=cfg)
     records = runner.resolve_records()
     record = records[0]
     if shelf_image_uri:
         record.shelf_image_uri = str(shelf_image_uri)
+    if is_local_live and record.shelf_image_uri.startswith("gs://") and (REPO_ROOT / "shelf-image.png").exists():
+        record.shelf_image_uri = str(REPO_ROOT / "shelf-image.png")
+        record.local_shelf_image_path = str(REPO_ROOT / "shelf-image.png")
     gt_record = sample_ground_truth(record.shelf_image_uri) if connect_sample_gt else None
 
     if task_type == "detection":
@@ -618,13 +696,35 @@ def execute_live_benchmark_task(
     depth_demo = dashboard.get("depth_demos", {}).get(model_name, {})
 
     gcp_proof = collect_gcp_runtime_proof()
+    exec_env = (
+        "offline_unit_test_stub"
+        if is_offline
+        else (
+            "gcp_cloud_run_live_vertex_ai"
+            if os.environ.get("K_SERVICE")
+            else "local_non_cloud_run_live_vertex_ai"
+        )
+    )
     res.execution_trace["gcp_runtime_proof"] = gcp_proof
+    res.execution_trace["execution_environment"] = exec_env
+    placeholder_gt_alert = (
+        "SYNTHETIC PLACEHOLDER GT ACTIVE: Scoring is using the 3-item synthetic fixture from "
+        "`shelf_benchmark.testing.sample_ground_truth()` (Brand_A, Brand_B, Brand_C) because real "
+        "ground-truth annotations do not exist yet."
+        if connect_sample_gt
+        else None
+    )
+    if placeholder_gt_alert:
+        res.execution_trace.setdefault("accuracy_summary", {})["placeholder_gt_alert"] = (
+            placeholder_gt_alert
+        )
     from shelf_benchmark.reporting.aggregation import build_summary_records
 
     summary_record = {
         **build_summary_records([res])[0],
         "latency_ms": round(res.latency_ms, 2),
         "execution_mode": "offline_local_fixture" if is_offline else "live_vertex_ai",
+        "execution_environment": exec_env,
         "all_in_pt_gsu_total_usd": (
             round(
                 res.cost.vertex_ai_provisioned_throughput_usd
@@ -651,6 +751,7 @@ def execute_live_benchmark_task(
         "model_name": res.model_name,
         "status": res.status,
         "execution_mode": summary_record["execution_mode"],
+        "execution_environment": exec_env,
         "latency_ms": round(res.latency_ms, 2),
         "tokens": res.tokens.model_dump(),
         "cost": res.cost.model_dump(),

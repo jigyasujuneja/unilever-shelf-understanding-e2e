@@ -100,7 +100,7 @@ def _get_catalog_vectors(
 ) -> Tuple[List[Dict[str, Any]], List[List[float]]]:
     """Loads and embeds the reference catalog, memoized per catalog URI."""
     cat_cfg = ctx.config.embeddings.reference_catalog
-    cache_key = cat_cfg.source_uri or ""
+    cache_key = f"{cat_cfg.source_uri or ''}::offline={bool(ctx.config.offline.enabled)}"
     if cache_key in _CATALOG_VECTOR_CACHE:
         return _CATALOG_VECTOR_CACHE[cache_key]
 
@@ -109,11 +109,19 @@ def _get_catalog_vectors(
         _CATALOG_VECTOR_CACHE[cache_key] = ([], [])
         return [], []
 
-    vectors = embed_visual_text_prototypes(
-        prototype_texts=[str(e["prompt"]) for e in entries],
-        project_id=ctx.config.gcp.project_id,
-        location="us-central1",
-    )
+    if ctx.config.offline.enabled:
+        vectors = [
+            list(e["embedding"])
+            if isinstance(e.get("embedding"), list) and len(e["embedding"]) == 1408
+            else ([1.0] + [0.0] * 1407)
+            for e in entries
+        ]
+    else:
+        vectors = embed_visual_text_prototypes(
+            prototype_texts=[str(e["prompt"]) for e in entries],
+            project_id=ctx.config.gcp.project_id,
+            location="us-central1",
+        )
     if not vectors or len(vectors) != len(entries):
         raise ReferenceCatalogError(
             f"Embedded {len(vectors) if vectors else 0} reference vectors for {len(entries)} "
@@ -231,7 +239,7 @@ def run_stage3_vector_search_matching(
         rule_size = ctx.derive_size_bucket_from_bbox(
             bbox_2d=bbox,
             all_bboxes_on_shelf=all_bboxes,
-            packaging_type=packaging or None,
+            packaging_type=packaging or "tube",
         )
 
         matched_facings.append(

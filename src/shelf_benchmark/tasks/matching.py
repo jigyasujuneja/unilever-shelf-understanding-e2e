@@ -36,7 +36,7 @@ def build_hybrid_matching_prompt(taxonomy: Optional[TaxonomyConfig] = None) -> s
     pack_str = " or ".join(f'`"{pt}"`' for pt in tax.pack_types)
 
     return f"""You are an expert retail Product Matching & Hybrid Search query generator using the configurable 7-Dimension Retail Taxonomy.
-Analyze the main middle shelf of this shelf image (from left to right) and for EVERY distinct FRONT-FACING product slot (do NOT count products stacked in depth behind the front unit in the same facing slot), generate the structured signals needed for Hybrid Search (combining Dense Vector Search + Sparse Lexical/BM25 Metadata Filtering):
+Analyze all visible shelf rows of this shelf image (top, middle, bottom; ordered top-to-bottom and left-to-right) and for EVERY distinct FRONT-FACING product slot (do NOT count products stacked in depth behind the front unit in the same facing slot), generate the structured signals needed for Hybrid Search (combining Dense Vector Search + Sparse Lexical/BM25 Metadata Filtering):
 
 1. `product_index`: 1-based front-facing slot index from left to right.
 2. `bbox_2d`: Normalized `[ymin, xmin, ymax, xmax]` (0 to 1000).

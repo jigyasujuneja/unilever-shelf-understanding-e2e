@@ -105,10 +105,11 @@ class MyCustomShelfApproach(SimpleShelfApproachPlugin):
         return kept
 ```
 
-`SimpleShelfApproachPlugin` delegates to `ctx.finalize(...)` automatically to compute rule-derived size buckets, HUL brand attribution, 5-bucket GCP costs, ground-truth accuracy, OpenTelemetry spans (`reports/otel_logs.jsonl`), and UI execution traces.
+`SimpleShelfApproachPlugin` delegates to `ctx.execute_with_pipeline()` automatically to apply retry policies, measure process CPU time, compute rule-derived size buckets, HUL brand attribution, 5-bucket GCP costs, ground-truth accuracy, OpenTelemetry spans (`reports/otel_logs.jsonl`), and UI execution traces. Set `task_type = "detection"` on your class (or return only `bbox_2d` coordinates) to benchmark a pure object-detection approach without classification attribute penalties.
 
 ### Shared `ctx: CommonLayerContext` Helpers
 - `ctx.get_client()`: Returns the active GenAI client (honours offline test fakes, GEAP, Gemma, and Tuned Endpoints).
+- `ctx.get_prior_detected_boxes()`: Returns front-facing bounding boxes from a chained Stage-1 detector (`prior_detection`).
 - `ctx.load_shelf_image(record)`: Loads the shelf image as a PIL `Image`.
 - `ctx.deduplicate_depth_stacked_facings(items, x_overlap_threshold=None)`: Suppresses back-row stacked units using `config.depth_deduplication.x_overlap_threshold`.
 - `ctx.crop_facing_images(shelf_image_uri, facings, model_tag, local_fallback=None)`: Crops each facing to `facing_XX.png` + `montage_all_facings.png`.

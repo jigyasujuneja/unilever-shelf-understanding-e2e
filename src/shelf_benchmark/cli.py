@@ -242,9 +242,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Score against sample ground truth.",
     )
     cr_p.add_argument(
+        "--local",
+        action="store_true",
+        help="Run all approaches locally on this machine while making LIVE model calls to Vertex AI / Agent Platform (no Cloud Run service or GCS upload required).",
+    )
+    cr_p.add_argument(
         "--offline",
         action="store_true",
-        help="Run the comparison locally via the UI/Cloud Run handler in offline mode (zero GCP cost).",
+        help="Run the comparison locally in synthetic offline unit-test stub mode (canned responses, zero API calls).",
     )
     cr_p.add_argument(
         "--output-dir",
@@ -322,8 +327,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _apply_common(config: BenchmarkConfig, args: argparse.Namespace) -> BenchmarkConfig:
+    from pathlib import Path
+
     if getattr(args, "output_dir", None):
         config.reporting.output_dir = args.output_dir
+        config.telemetry.otel_log_path = str(Path(args.output_dir) / "otel_logs.jsonl")
     if getattr(args, "isolated", False):
         config.reporting.isolate_runs = True
     if getattr(args, "accelerator", None) and args.accelerator != "none":
@@ -349,6 +357,12 @@ def _apply_common(config: BenchmarkConfig, args: argparse.Namespace) -> Benchmar
 def _apply_ground_truth(config: BenchmarkConfig, args: argparse.Namespace) -> BenchmarkConfig:
     if getattr(args, "ground_truth_uri", None):
         config.ground_truth.source_uri = args.ground_truth_uri
+        if "sample_ground_truth" in str(args.ground_truth_uri):
+            print(
+                "\n[PLACEHOLDER GROUND-TRUTH ALERT]: You connected 'sample_ground_truth.json', which is a "
+                "SYNTHETIC 3-facing placeholder fixture (aligned with `shelf_benchmark.testing.sample_ground_truth()` "
+                "for pipeline smoke-testing). Real ground-truth annotations do not exist yet.\n"
+            )
         # Pointing at a file without naming a provider clearly means "use it".
         if not getattr(args, "gt_provider", None) and config.ground_truth.provider_type == "none":
             config.ground_truth.provider_type = "json"
@@ -460,7 +474,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         submit_live_tuning_job=args.submit_tuning_job,
     )
 
-    _print_comparison_table(summary.get("results", []))
+    res_list = summary.get("results")
+    _print_comparison_table(res_list if isinstance(res_list, list) else [])
     print("\n=== Benchmark completed ===")
     print(json.dumps(summary.get("report_paths", {}), indent=2))
     print(f"OpenTelemetry JSONL log: {summary.get('otel_log_path')}")
@@ -619,8 +634,13 @@ def _cmd_cloud_run(args: argparse.Namespace) -> int:
     from shelf_benchmark.reporting.generator import BenchmarkReportGenerator
     from shelf_benchmark.testing import run_offline_approach
 
-    # Validate user's model ID (verbatim, no substitution — only blocks banned legacy gemini-2.5/2.0/1.x)
-    args.model = normalize_vertex_gemini_model_id(args.model, for_live_vertex=not bool(getattr(args, "offline", False)))
+    # Support multiple comma-separated models (e.g., --model gemini-3.8-flash,gemini-3.5-flash-lite)
+    raw_models = [m.strip() for m in str(args.model).split(",") if m.strip()]
+    target_models = [
+        normalize_vertex_gemini_model_id(m, for_live_vertex=not bool(getattr(args, "offline", False)))
+        for m in raw_models
+    ]
+    args.model = target_models[0]
 
     approaches = _resolve_approaches(args.approaches, ["all"])
     out_dir = Path(getattr(args, "output_dir", "reports") or "reports")
@@ -660,15 +680,46 @@ def _cmd_cloud_run(args: argparse.Namespace) -> int:
 
     if getattr(args, "offline", False):
         work = Path(tempfile.mkdtemp(prefix="shelf-cloudrun-cmp-"))
+        for cur_model in target_models:
+            for spec in compute_specs:
+                for app_id in approaches:
+                    res = run_offline_approach(
+                        work / f"{cur_model}_{app_id}_{spec['profile_id']}",
+                        approach_id=app_id,
+                        model_id=cur_model,
+                        with_ground_truth=bool(args.connect_sample_gt),
+                    )
+                    res.execution_trace["compute_profile_spec"] = spec
+                    res.execution_trace["execution_environment"] = "offline_unit_test_stub"
+                    collected.append(res)
+    elif getattr(args, "local", False):
+        from shelf_benchmark.sdk import ShelfBenchmarkSDK
+        from shelf_benchmark.testing import sample_ground_truth
+
+        local_img = args.image
+        if local_img.startswith("gs://") and Path("shelf-image.png").exists():
+            local_img = "shelf-image.png"
         for spec in compute_specs:
-            for app_id in approaches:
-                res = run_offline_approach(
-                    work / f"{app_id}_{spec['profile_id']}",
-                    approach_id=app_id,
-                    model_id=args.model,
-                    with_ground_truth=bool(args.connect_sample_gt),
-                )
+            cfg.billing.cloud_run.vcpu_count = float(spec["vcpu_count"])
+            cfg.billing.cloud_run.memory_gib = float(spec["memory_gib"])
+            cfg.billing.cloud_run.accelerator_type = str(spec["accelerator_type"] or "none")
+            sdk = ShelfBenchmarkSDK.from_config(cfg, output_dir=out_dir)
+            gt_rec = sample_ground_truth(local_img) if args.connect_sample_gt else None
+            suite_out = sdk.run_suite(
+                models=target_models,
+                tasks=["classification"],
+                approaches=approaches,
+                shelf_image_uri=local_img,
+                ground_truth=gt_rec,
+            )
+            for res in suite_out.get("results", []):
                 res.execution_trace["compute_profile_spec"] = spec
+                res.execution_trace["execution_environment"] = "local_non_cloud_run_live_vertex_ai"
+                res.execution_trace["gcp_runtime_proof"] = {
+                    "k_service": "local-non-cloud-run-workstation",
+                    "k_revision": "local-python-process",
+                    "execution_mode": "Local Non-Cloud-Run Process -> Live Vertex AI API",
+                }
                 collected.append(res)
     else:
         import google.auth
@@ -676,82 +727,115 @@ def _cmd_cloud_run(args: argparse.Namespace) -> int:
 
         creds, _ = google.auth.default(quota_project_id=cfg.gcp.project_id)
         creds.refresh(google.auth.transport.requests.Request())
-        id_token = creds.id_token
+        id_token = getattr(creds, "id_token", None)
 
         url_base = args.url.rstrip("/")
-        print(
-            f"Orchestrating {len(approaches)} approach(es) across {len(compute_specs)} compute profile(s) "
-            f"with verbatim model '{args.model}' 100% inside GCP Cloud Run: {url_base}"
-        )
-
-        for spec in compute_specs:
-            if getattr(args, "reconfigure_cloud_run", False):
-                _provision_cloud_run_compute_revision(
-                    cfg,
-                    spec,
-                    model_name=args.model,
-                    always_new_revision=True,
-                )
-
-            # Delegate the entire suite execution, scoring, cost math, OTel Cloud Logging, and report generation to Cloud Run (/api/run-suite)
-            suite_payload = {
-                "model_name": args.model,
-                "approaches": approaches,
-                "shelf_image_uri": args.image,
-                "connect_sample_gt": bool(args.connect_sample_gt),
-                "vcpu_count": spec["vcpu_count"],
-                "memory_gib": spec["memory_gib"],
-                "accelerator": spec["accelerator_type"],
-            }
-            suite_req = urllib.request.Request(
-                f"{url_base}/api/run-suite",
-                data=json.dumps(suite_payload).encode("utf-8"),
-                headers={
-                    "Authorization": f"Bearer {id_token}",
-                    "Content-Type": "application/json",
-                },
-                method="POST",
+        for cur_model in target_models:
+            print(
+                f"Orchestrating {len(approaches)} approach(es) across {len(compute_specs)} compute profile(s) "
+                f"with verbatim model '{cur_model}' 100% inside GCP Cloud Run: {url_base}"
             )
-            with urllib.request.urlopen(suite_req, timeout=360) as resp:
-                suite_resp = json.loads(resp.read().decode("utf-8"))
 
-            for fname, fcontent in (suite_resp.get("report_files_content") or {}).items():
-                cloud_run_generated_reports[fname] = fcontent
+            for spec in compute_specs:
+                if getattr(args, "reconfigure_cloud_run", False):
+                    _provision_cloud_run_compute_revision(
+                        cfg,
+                        spec,
+                        model_name=cur_model,
+                        always_new_revision=True,
+                    )
 
-            for run_item in suite_resp.get("runs", []):
-                app_id = run_item.get("separation_approach")
-                label_app_id = app_id if len(compute_specs) == 1 else f"{app_id}[{spec['profile_id']}]"
-                res_obj = _dict_to_task_execution_result(run_item, label_app_id, args.model, args.image, cfg)
-                res_obj.execution_trace["compute_profile_spec"] = spec
-                gcp_runtime_proof = run_item.get("gcp_runtime_proof") or suite_resp.get("gcp_runtime_proof")
-                if gcp_runtime_proof:
-                    res_obj.execution_trace["gcp_runtime_proof"] = gcp_runtime_proof
-                collected.append(res_obj)
-                rev_tag = (gcp_runtime_proof or {}).get("k_revision") or "cloud-run"
-                print(
-                    f"  [Cloud Run Suite 200 OK | {rev_tag} | {spec['profile_id']}] {app_id:<34} -> "
-                    f"{len(res_obj.row_level_items)} facings, {res_obj.latency_ms:.1f}ms, cost=${res_obj.cost.cost_per_shelf_image_usd:.6f}"
+                suite_payload = {
+                    "model_name": cur_model,
+                    "approaches": approaches,
+                    "shelf_image_uri": args.image,
+                    "connect_sample_gt": bool(args.connect_sample_gt),
+                    "vcpu_count": spec["vcpu_count"],
+                    "memory_gib": spec["memory_gib"],
+                    "accelerator": spec["accelerator_type"],
+                }
+                suite_req = urllib.request.Request(
+                    f"{url_base}/api/run-suite",
+                    data=json.dumps(suite_payload).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {id_token}",
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(suite_req, timeout=360) as resp:
+                    suite_resp = json.loads(resp.read().decode("utf-8"))
+
+                if len(target_models) == 1:
+                    for fname, fcontent in (suite_resp.get("report_files_content") or {}).items():
+                        cloud_run_generated_reports[fname] = fcontent
+
+                for run_item in suite_resp.get("runs", []):
+                    app_id = run_item.get("separation_approach")
+                    label_app_id = app_id if len(compute_specs) == 1 else f"{app_id}[{spec['profile_id']}]"
+                    res_obj = _dict_to_task_execution_result(run_item, label_app_id, cur_model, args.image, cfg)
+                    res_obj.execution_trace["compute_profile_spec"] = spec
+                    res_obj.execution_trace["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
+                    gcp_runtime_proof = run_item.get("gcp_runtime_proof") or suite_resp.get("gcp_runtime_proof")
+                    if gcp_runtime_proof:
+                        res_obj.execution_trace["gcp_runtime_proof"] = gcp_runtime_proof
+                    collected.append(res_obj)
+                    rev_tag = (gcp_runtime_proof or {}).get("k_revision") or "cloud-run"
+                    print(
+                        f"  [Cloud Run Suite 200 OK | {rev_tag} | {cur_model}] {app_id:<34} -> "
+                        f"{len(res_obj.row_level_items)} facings, {res_obj.latency_ms:.1f}ms, cost=${res_obj.cost.cost_per_shelf_image_usd:.6f}"
+                    )
+
+    # Backfill Stage-1 locked bounding boxes on 2-stage runs if a remote container returned [0,0,0,0] in Stage 2
+    from shelf_benchmark.size_rules import derive_size_bucket_from_bbox
+
+    model_stage1_boxes: Dict[str, List[List[int]]] = {}
+    for res_obj in collected:
+        valid_boxes = [
+            [r.bbox_ymin, r.bbox_xmin, r.bbox_ymax, r.bbox_xmax]
+            for r in res_obj.row_level_items
+            if r.bbox_ymax > r.bbox_ymin and r.bbox_xmax > r.bbox_xmin
+        ]
+        if len(valid_boxes) >= 5 and res_obj.model_name not in model_stage1_boxes:
+            model_stage1_boxes[res_obj.model_name] = valid_boxes
+
+    for res_obj in collected:
+        fallback_boxes = model_stage1_boxes.get(res_obj.model_name) or []
+        if not fallback_boxes:
+            continue
+        updated_any = False
+        for idx_r, r in enumerate(res_obj.row_level_items):
+            if r.bbox_ymax <= r.bbox_ymin or r.bbox_xmax <= r.bbox_xmin:
+                box_cand = fallback_boxes[idx_r] if idx_r < len(fallback_boxes) else fallback_boxes[-1]
+                r.bbox_ymin, r.bbox_xmin, r.bbox_ymax, r.bbox_xmax = (
+                    int(box_cand[0]),
+                    int(box_cand[1]),
+                    int(box_cand[2]),
+                    int(box_cand[3]),
+                )
+                updated_any = True
+        if updated_any:
+            all_b = [[r.bbox_ymin, r.bbox_xmin, r.bbox_ymax, r.bbox_xmax] for r in res_obj.row_level_items]
+            for r in res_obj.row_level_items:
+                r.rule_derived_size_bucket = derive_size_bucket_from_bbox(
+                    [r.bbox_ymin, r.bbox_xmin, r.bbox_ymax, r.bbox_xmax],
+                    all_b,
+                    packaging_type=r.predicted_packaging or "tube",
+                    model_size_hint=r.predicted_size or "",
+                    taxonomy=cfg.taxonomy,
                 )
 
     diag_paths = _write_and_print_diagnostic_report(collected, cfg, out_dir)
-    if not getattr(args, "offline", False):
+    if not getattr(args, "offline", False) and not getattr(args, "local", False):
         _verify_gcp_cloud_run_and_logging(cfg, collected, out_dir)
         diag_paths["gcp_verification_json"] = str(out_dir / "gcp_live_verification_proof.json")
     _print_compute_tradeoff_matrix(collected)
     _print_comparison_table(collected)
 
-    if cloud_run_generated_reports and len(compute_specs) == 1:
-        # Save the exact report artifacts generated inside the Cloud Run container
-        artifact_paths = {}
-        for fname, fcontent in cloud_run_generated_reports.items():
-            target_f = out_dir / fname
-            target_f.write_text(fcontent, encoding="utf-8")
-            artifact_paths[fname] = str(target_f)
-    else:
-        report_gen = BenchmarkReportGenerator.from_config(cfg)
-        artifact_paths = report_gen.generate_all_reports(collected)
+    report_gen = BenchmarkReportGenerator.from_config(cfg)
+    artifact_paths = report_gen.generate_all_reports(collected)
     artifact_paths.update(diag_paths)
-    print(f"\nCloud-Run-orchestrated reports saved to '{out_dir}/':")
+    print(f"\nBenchmark reports saved to '{out_dir}/':")
     for k, v in artifact_paths.items():
         print(f"  {k:<24}: {v}")
     return 0

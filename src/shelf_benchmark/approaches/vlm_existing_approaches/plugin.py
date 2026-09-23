@@ -54,11 +54,13 @@ class ExistingVLMClassificationApproachPlugin(BaseShelfApproachPlugin):
         cls_task = ProductClassificationTask(
             ctx.config, ctx.storage, ctx.telemetry, genai_client=ctx.genai_client
         )
-        # Do not pre-run ProductDetectionTask here and pass `detected_boxes`: that threw away
-        # `det_res` (its tokens, cost and latency) while making `cls_task` skip its own Stage-1
-        # call, under-reporting two-stage cost/tokens on the plugin path. `ProductClassificationTask`
-        # runs Stage 1 internally when `detected_boxes` is None and folds Stage-1 + Stage-2 tokens
-        # and latency into the single returned TaskExecutionResult.
+        prior_boxes = (
+            ctx.get_prior_detected_boxes(prior_detection)
+            if prior_detection is not None
+            and self._sep_approach
+            in ("two_stage_bbox_guided_nms", "two_stage_physical_crop_per_facing")
+            else None
+        )
         return cls_task.execute(
             model_name=model_name,
             shelf_image_uri=record.shelf_image_uri,
@@ -66,6 +68,13 @@ class ExistingVLMClassificationApproachPlugin(BaseShelfApproachPlugin):
             store_id=record.store_id,
             ground_truth=gt_record,
             separation_approach=self._sep_approach,
+            detected_boxes=prior_boxes,
+            prior_stage1_tokens=prior_detection.tokens if (prior_detection and prior_boxes) else None,
+            prior_depth_filtered=(
+                prior_detection.accuracy.depth_duplicates_filtered
+                if (prior_detection and prior_boxes)
+                else 0
+            ),
         )
 
 
