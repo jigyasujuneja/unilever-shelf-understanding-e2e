@@ -1,0 +1,10 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+*.log
+# NOTE: reports/crops is deliberately NOT excluded. The dashboard's crops
+# manifest references those files by URL, so excluding them shipped an image
+# whose gallery 404s on every tile.

@@ -2,11 +2,49 @@
 
 from __future__ import annotations
 
+import copy
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, Field
+
+# The taxonomy ships inside the package and is resolved relative to *this file*, never relative to
+# the current working directory. Resolving it against the CWD used to mean `shelf-benchmark run`
+# produced a different set of categories depending on where you happened to launch it from, and the
+# mismatch was silent because the loader fell back to a second, divergent copy hardcoded in Python.
+PACKAGED_TAXONOMY_PATH = Path(__file__).resolve().parent / "_resources" / "taxonomy.yaml"
+
+
+@lru_cache(maxsize=1)
+def _packaged_taxonomy_data() -> Dict[str, Any]:
+    """Parse the bundled taxonomy YAML once per process."""
+    if not PACKAGED_TAXONOMY_PATH.exists():
+        raise FileNotFoundError(
+            f"The bundled taxonomy is missing from the installed package: "
+            f"'{PACKAGED_TAXONOMY_PATH}'. This means the wheel was built without "
+            f"[tool.setuptools.package-data] shelf_benchmark = ['_resources/*.yaml']."
+        )
+    with open(PACKAGED_TAXONOMY_PATH, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"'{PACKAGED_TAXONOMY_PATH}' must contain a YAML mapping.")
+    return data
+
+
+def _packaged_default(key: str, fallback: Any) -> Callable[[], Any]:
+    """Build a Pydantic `default_factory` that reads `key` from the bundled taxonomy YAML.
+
+    This is what keeps the YAML the single source of truth: the Python model declares *which*
+    fields exist, the YAML declares their values, and the two can no longer drift apart.
+    """
+
+    def factory() -> Any:
+        return copy.deepcopy(_packaged_taxonomy_data().get(key, fallback))
+
+    return factory
+
 
 
 class GCPConfig(BaseModel):
@@ -231,52 +269,28 @@ class CustomAttributeSpec(BaseModel):
 class TaxonomyConfig(BaseModel):
     """Centralized, configurable taxonomy for Categories, Subcategories, Brands, Packaging, Pack Types, Size Buckets, and Custom Attributes (>8 attributes)."""
 
-    taxonomy_file: str = Field(default="configs/taxonomy.yaml")
-    categories: List[str] = Field(
-        default_factory=lambda: [
-            "Hair Care",
-            "Oral Care",
-            "Laundry",
-            "Skin Care",
-            "Skin Cleansing",
-            "Deodorants & Fragrances",
-            "Home & Surface Care",
-            "Tea & Coffee",
-            "Packaged Foods",
-            "Health & Nutrition",
-        ]
+    taxonomy_file: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional path to a YAML file that overrides the taxonomy bundled with the package. "
+            "`None` (the default) means 'use the bundled taxonomy'. Keys omitted from an override "
+            "file fall back to the bundled values."
+        ),
     )
-    subcategories: List[str] = Field(
-        default_factory=lambda: [
-            "Shampoo",
-            "Conditioner",
-            "Hair Oil",
-            "Mouthwash",
-            "Toothpaste",
-            "Soaps",
-            "Body Wash",
-            "Face Wash",
-            "Moisturizer / Cream",
-            "Facial Gel / Serum",
-            "Detergent Bar",
-            "Detergent Powder",
-            "Liquid Detergent",
-            "Fabric Conditioner",
-        ]
+    # Every default below is read from the bundled YAML (see `_packaged_default`) rather than
+    # restated here. Keeping a second copy in Python is what allowed the two to drift into
+    # completely different category sets.
+    categories: List[str] = Field(default_factory=_packaged_default("categories", []))
+    subcategories: List[str] = Field(default_factory=_packaged_default("subcategories", []))
+    packaging_types: List[str] = Field(default_factory=_packaged_default("packaging_types", []))
+    pack_types: List[str] = Field(
+        default_factory=_packaged_default("pack_types", ["Single", "Multiple"])
     )
-    packaging_types: List[str] = Field(
-        default_factory=lambda: [
-            "box",
-            "jar",
-            "sachet",
-            "tube",
-            "bottle",
-            "pouch",
-            "bar",
-        ]
+    size_buckets: SizeBucketRulesConfig = Field(
+        default_factory=lambda: SizeBucketRulesConfig.model_validate(
+            _packaged_taxonomy_data().get("size_buckets", {})
+        )
     )
-    pack_types: List[str] = Field(default_factory=lambda: ["Single", "Multiple"])
-    size_buckets: SizeBucketRulesConfig = Field(default_factory=SizeBucketRulesConfig)
     brand_extraction_mode: str = Field(
         default="open_vocabulary_generative",
         description=(
@@ -335,24 +349,57 @@ class TaxonomyConfig(BaseModel):
             self.size_buckets.large_label,
         ]
 
+    @property
+    def taxonomy_source(self) -> str:
+        """Absolute path of the YAML this taxonomy came from, for report/UI provenance."""
+        return str(Path(self.taxonomy_file).resolve()) if self.taxonomy_file else str(PACKAGED_TAXONOMY_PATH)
+
     @classmethod
-    def from_yaml_or_defaults(cls, path: str | Path = "configs/taxonomy.yaml") -> "TaxonomyConfig":
+    def from_yaml_or_defaults(cls, path: Optional[str | Path] = None) -> "TaxonomyConfig":
+        """Load a taxonomy, defaulting to the one bundled with the package.
+
+        `path=None` returns the bundled taxonomy. A non-`None` `path` that does not exist raises
+        `FileNotFoundError`: quietly falling back to a different taxonomy after a path typo used to
+        produce a run whose categories had nothing to do with the file the engineer had just edited.
+        """
+        if path is None:
+            return cls()
         p = Path(path)
-        if p.exists():
-            with open(p, encoding="utf-8") as f:
-                data: Dict[str, Any] = yaml.safe_load(f) or {}
-            return cls.model_validate(data)
-        return cls()
+        if not p.exists():
+            raise FileNotFoundError(
+                f"Taxonomy file not found: '{p}'. Pass an existing YAML path, or omit it to use "
+                f"the taxonomy bundled with the package ('{PACKAGED_TAXONOMY_PATH}')."
+            )
+        with open(p, encoding="utf-8") as f:
+            data: Dict[str, Any] = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            raise ValueError(f"Taxonomy file '{p}' must contain a YAML mapping, got {type(data).__name__}.")
+        # Keys the override omits fall back to the bundled defaults via each field's default_factory.
+        data.setdefault("taxonomy_file", str(p))
+        return cls.model_validate(data)
 
 
 class ProvisionedThroughputConfig(BaseModel):
-    """Configuration for Vertex AI Provisioned Throughput (GSU — Generative AI Scale Units) cost calculation."""
+    """Configuration for Vertex AI Provisioned Throughput (GSU — Generative AI Scale Units) cost calculation.
+
+    There is exactly one field per quantity here. This model previously carried two names for the
+    GSU count and two for the hourly rate (`hourly_rate_per_gsu_usd=22.00` alongside
+    `gsu_hourly_rate_usd=2.70`, an 8.1x difference). The cost engine read them as
+    `getattr(a, X, None) or getattr(a, Y, default)`, which on a Pydantic model always resolves to
+    the first name because it is always present and non-zero. Setting the second one therefore did
+    nothing at all, silently.
+    """
 
     enabled: bool = False
     gsu_count: int = 1
-    reserved_gsus: int = 1
-    hourly_rate_per_gsu_usd: float = 22.00
-    gsu_hourly_rate_usd: float = 2.70  # Official GCP hourly rate per GSU under monthly commitment
+    hourly_rate_per_gsu_usd: float = Field(
+        default=22.00,
+        description=(
+            "List on-demand price per GSU-hour. Committed-use pricing is substantially lower; "
+            "express that with `monthly_commitment_discount_pct` rather than by editing this rate, "
+            "so reports can still show list vs. effective cost."
+        ),
+    )
     monthly_commitment_discount_pct: float = 0.0
     target_images_per_hour_per_gsu: int = 1800
     concurrent_request_slots_per_gsu: int = 4
@@ -385,11 +432,11 @@ class CloudRunCostConfig(BaseModel):
             "tpu-v6e": 2.70,
         }
     )
-    vcpu_per_second_usd: float = 0.00002400
-    memory_gib_per_second_usd: float = 0.00000250
-    vcpu_second_rate_usd: float = 0.00002400  # Official GCP Cloud Run rate ($0.000024 / vCPU-sec)
-    gib_second_rate_usd: float = 0.00000250   # Official GCP Cloud Run rate ($0.0000025 / GiB-sec)
-    per_million_requests_usd: float = 0.40    # Official GCP Cloud Run rate ($0.40 / 1M requests)
+    # One name per rate. `vcpu_second_rate_usd` / `gib_second_rate_usd` were duplicate aliases of
+    # these two; the cost engine only ever read the names below, so the aliases were inert.
+    vcpu_per_second_usd: float = 0.00002400  # Official GCP Cloud Run rate ($0.000024 / vCPU-sec)
+    memory_gib_per_second_usd: float = 0.00000250  # Official GCP Cloud Run rate ($0.0000025 / GiB-sec)
+    per_million_requests_usd: float = 0.40  # Official GCP Cloud Run rate ($0.40 / 1M requests)
 
     def accelerator_per_second_usd(self) -> float:
         acc_key = (self.accelerator_type or "none").strip().lower()
@@ -415,7 +462,12 @@ class EmbeddingAndVisionCostConfig(BaseModel):
         default_factory=lambda: {
             "two_stage_physical_crop_per_facing": 0.000125,
             "class_agnostic_visual_embedding": 0.000125,
-            "demo_prototype_visual_embedding": 0.000125,
+            # Was "demo_prototype_visual_embedding", which is not a registered
+            # approach -- so this override never matched anything and the real
+            # crop-per-facing Cloud Vision pipeline silently fell through to the
+            # cheaper per-task rate. Keep this list in sync with the ids from
+            # `shelf-benchmark list-approaches`.
+            "cloud_vision_visual_embedding": 0.000125,
         },
         description="Approach-specific override (crop-per-facing pipelines embed one image per facing).",
     )
@@ -450,6 +502,14 @@ class GCPBillingConfig(BaseModel):
     """
 
     pricing_source: str = "gcp_billing_catalog_api"
+    pricing_last_verified_date: str = Field(
+        default="2026-09-23",
+        description="ISO date (YYYY-MM-DD) when the YAML rate table was last verified against GCP pricing.",
+    )
+    max_pricing_age_days: Optional[int] = Field(
+        default=None,
+        description="If set, `check_pricing_staleness` raises when `pricing_last_verified_date` is older than this many days.",
+    )
     use_live_cloud_billing_catalog_api: bool = True
     # Vertex AI ("Cloud AI Platform") service ID in the Cloud Billing Catalog API.
     vertex_ai_service_id: str = "6F81-5844-456A"
@@ -533,12 +593,25 @@ class DepthDeduplicationConfig(BaseModel):
 
 
 class FineTuningConfig(BaseModel):
-    """YAML-configurable Supervised Fine-Tuning (SFT) job parameters."""
+    """YAML-configurable Supervised Fine-Tuning (SFT) job parameters.
+
+    Every field here is read by `GeminiFineTuningTask`. `epochs`, `tuned_model_display_name` and
+    the example count were previously declared but never passed to the tuning call, so editing
+    them in YAML changed nothing about the submitted job.
+    """
 
     submit_live_tuning_job: bool = False
     tuned_model_display_name: str = "unilever-shelf-classifier-tuned"
     epochs: int = 3
-    num_synthetic_replicas: int = 16
+    duplicate_single_example_times: int = Field(
+        default=1,
+        description=(
+            "Number of times to write the SAME single SFT example, purely to clear Vertex AI's "
+            "minimum-row check. Nothing is synthesised and no supervision is added. Was named "
+            "`num_synthetic_replicas` and defaulted to 16, which made a one-example fixture look "
+            "like a 16-example dataset. Supply multiple annotated images for a real dataset."
+        ),
+    )
     dataset_gcs_subpath: str = "tuning/shelf_sft_train.jsonl"
 
 
@@ -645,10 +718,15 @@ class BenchmarkConfig(BaseModel):
         if not isinstance(raw, dict):
             raise ValueError(f"Benchmark config '{p}' must contain a YAML mapping, got {type(raw).__name__}.")
         if "taxonomy" not in raw:
-            tax_file = raw.get("taxonomy_file", "configs/taxonomy.yaml")
-            if Path(tax_file).exists():
-                with open(tax_file, encoding="utf-8") as tf:
-                    raw["taxonomy"] = yaml.safe_load(tf) or {}
+            tax_file = raw.get("taxonomy_file")
+            if tax_file:
+                # Resolve relative to the config file that declares it, not to the process CWD --
+                # otherwise `shelf-benchmark --config /abs/path/cfg.yaml` picked up (or silently
+                # missed) a taxonomy depending on where the command happened to be launched from.
+                tax_path = Path(tax_file)
+                if not tax_path.is_absolute():
+                    tax_path = p.resolve().parent / tax_path
+                raw["taxonomy"] = TaxonomyConfig.from_yaml_or_defaults(tax_path).model_dump()
         return cls.model_validate(raw)
 
     def has_explicit_pricing(self, model_name: str) -> bool:

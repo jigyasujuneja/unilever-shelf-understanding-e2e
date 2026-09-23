@@ -14,34 +14,36 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from shelf_benchmark.auth import create_bigquery_client
 from shelf_benchmark.config import AssociationConfig, AssociationSchemaMapping, BucketConfig
+from shelf_benchmark.data.field_access import extract_field
 from shelf_benchmark.data.storage import StorageManager
 from shelf_benchmark.models import ShelfAssociationRecord
 
+logger = logging.getLogger(__name__)
 
-def _extract_nested(row: Dict[str, Any], field_spec: str, *fallbacks: str) -> Any:
-    """Extract a field from a flat or nested dict (supports dot-paths like 'metadata.store_id' and fallback aliases)."""
-    for candidate in (field_spec, *fallbacks):
-        if not candidate:
-            continue
-        if candidate in row and row[candidate] is not None and row[candidate] != "":
-            return row[candidate]
-        if "." in candidate:
-            cur: Any = row
-            for part in candidate.split("."):
-                if isinstance(cur, dict) and part in cur:
-                    cur = cur[part]
-                else:
-                    cur = None
-                    break
-            if cur is not None and cur != "":
-                return cur
-    return None
+VALID_ASSOCIATION_PROVIDER_TYPES = ("json", "jsonl", "csv", "bigquery", "bq", "bucket_discovery")
+
+#: Provider types that read a named source. `bucket_discovery` is the only one that does not.
+_SOURCE_BACKED_PROVIDER_TYPES = frozenset({"json", "jsonl", "csv", "bigquery", "bq"})
+
+
+class AssociationConfigError(ValueError):
+    """Raised when `AssociationConfig` cannot be resolved to a concrete provider."""
+
+
+class AssociationParseError(ValueError):
+    """Raised when an association source is reachable but cannot be parsed."""
+
+
+#: Deprecated private alias kept so any in-tree caller of the old name keeps working.
+_extract_nested = extract_field
+
 
 
 class BaseAssociationProvider(ABC):
@@ -59,11 +61,11 @@ class BaseAssociationProvider(ABC):
         """Map an arbitrary row dictionary (BigQuery, CSV, JSON, AutoML manifest) into a canonical ShelfAssociationRecord."""
         m = self.mapping
         assoc_id = str(
-            _extract_nested(row, m.association_id_field, "association_id", "id", "record_id", "session_id")
+            extract_field(row, m.association_id_field, "association_id", "id", "record_id", "session_id")
             or f"assoc-{index:04d}"
         )
         raw_uri = str(
-            _extract_nested(
+            extract_field(
                 row,
                 m.shelf_image_uri_field,
                 "shelf_image_uri",
@@ -79,7 +81,7 @@ class BaseAssociationProvider(ABC):
             or ""
         ).strip()
 
-        local_path = _extract_nested(row, "local_shelf_image_path", "local_path")
+        local_path = extract_field(row, "local_shelf_image_path", "local_path")
         if (
             raw_uri
             and not raw_uri.startswith(("gs://", "http://", "https://", "/"))
@@ -90,10 +92,10 @@ class BaseAssociationProvider(ABC):
         else:
             shelf_uri = raw_uri
 
-        store_id = _extract_nested(row, m.store_id_field, "store_id", "store_code", "outlet_id", "metadata.store_id")
-        catalog_uri = _extract_nested(row, m.catalog_uri_field, "catalog_uri", "catalog_gcs_uri")
-        planogram_uri = _extract_nested(row, m.planogram_uri_field, "planogram_uri", "planogram_gcs_uri")
-        gt_id = _extract_nested(row, m.ground_truth_id_field, "ground_truth_id", "image_id") or (
+        store_id = extract_field(row, m.store_id_field, "store_id", "store_code", "outlet_id", "metadata.store_id")
+        catalog_uri = extract_field(row, m.catalog_uri_field, "catalog_uri", "catalog_gcs_uri")
+        planogram_uri = extract_field(row, m.planogram_uri_field, "planogram_uri", "planogram_gcs_uri")
+        gt_id = extract_field(row, m.ground_truth_id_field, "ground_truth_id", "image_id") or (
             shelf_uri.split("/")[-1] if shelf_uri else f"img-{index:04d}"
         )
 
@@ -102,7 +104,7 @@ class BaseAssociationProvider(ABC):
             shelf_image_uri=shelf_uri,
             local_shelf_image_path=str(local_path) if local_path else None,
             store_id=str(store_id) if store_id is not None else None,
-            aisle_category=_extract_nested(row, "aisle_category", "category", "department"),
+            aisle_category=extract_field(row, "aisle_category", "category", "department"),
             catalog_uri=str(catalog_uri) if catalog_uri else None,
             planogram_uri=str(planogram_uri) if planogram_uri else None,
             ground_truth_id=str(gt_id),
@@ -144,20 +146,70 @@ class JSONAssociationProvider(BaseAssociationProvider):
         text = self.storage.read_text(self.source_uri).strip()
         if not text:
             return []
-        if text.startswith("["):
-            rows = json.loads(text)
-        elif text.startswith("{") and "\n" not in text:
-            parsed = json.loads(text)
-            rows = (
-                parsed.get("records")
-                or parsed.get("associations")
-                or parsed.get("images")
-                or parsed.get("items")
-                or ([parsed] if isinstance(parsed, dict) else [])
-            )
-        else:
-            rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+        rows = self._parse_rows(text)
         return [self.map_raw_row(r, i + 1) for i, r in enumerate(rows)]
+
+    def _parse_rows(self, text: str) -> List[Dict[str, Any]]:
+        """Parse a JSON array, a JSON object wrapping a record list, or a JSONL document.
+
+        The document is parsed as a whole first. The previous heuristic routed any source
+        containing a newline into the JSONL branch unless it started with `[`, so an
+        ordinary pretty-printed JSON object failed with a confusing
+        "Expecting value: line 1 column 2" instead of loading.
+        """
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return self._parse_jsonl(text)
+
+        if isinstance(parsed, list):
+            return self._require_dict_rows(parsed)
+        if isinstance(parsed, dict):
+            for wrapper_key in ("records", "associations", "images", "items"):
+                if wrapper_key in parsed:
+                    value = parsed[wrapper_key]
+                    if not isinstance(value, list):
+                        raise AssociationParseError(
+                            f"Association source '{self.source_uri}' has "
+                            f"'{wrapper_key}' of type {type(value).__name__}; expected a list."
+                        )
+                    # An explicitly present but empty list means "no associations", not
+                    # "keep looking under another key".
+                    return self._require_dict_rows(value)
+            return [parsed]
+        raise AssociationParseError(
+            f"Association source '{self.source_uri}' has unsupported JSON root type "
+            f"{type(parsed).__name__}; expected an array, an object, or JSONL."
+        )
+
+    def _parse_jsonl(self, text: str) -> List[Dict[str, Any]]:
+        rows: List[Any] = []
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise AssociationParseError(
+                    f"Association source '{self.source_uri}' is neither valid JSON nor "
+                    f"valid JSONL (line {line_no}): {exc}"
+                ) from exc
+        return self._require_dict_rows(rows)
+
+    def _require_dict_rows(self, rows: List[Any]) -> List[Dict[str, Any]]:
+        """Reject non-object rows rather than skipping them.
+
+        Dropping them would shrink the benchmarked image set without any signal, which is
+        exactly the failure mode this module is meant to avoid.
+        """
+        for position, row in enumerate(rows, start=1):
+            if not isinstance(row, dict):
+                raise AssociationParseError(
+                    f"Association source '{self.source_uri}' record #{position} is a "
+                    f"{type(row).__name__}, not an object: {row!r}."
+                )
+        return list(rows)
+
 
 
 class CSVAssociationProvider(BaseAssociationProvider):
@@ -206,7 +258,13 @@ class BigQueryAssociationProvider(BaseAssociationProvider):
 
 
 class BucketDiscoveryAssociationProvider(BaseAssociationProvider):
-    """Fallback provider when no association table exists yet: discovers images in `shelf_images_bucket`."""
+    """Discovers images directly in `shelf_images_bucket` when no association table exists yet.
+
+    This provider *invents* the catalog and planogram URIs by convention
+    (`<bucket>/sample_catalog.json`). Those objects frequently do not exist, and the
+    optional-artifact readers downstream return `None` for a missing catalog, so the
+    assumption is logged rather than made silently.
+    """
 
     def __init__(self, bucket_config: BucketConfig, storage_manager: StorageManager, schema_mapping: AssociationSchemaMapping):
         super().__init__(schema_mapping, default_shelf_bucket=bucket_config.shelf_images_bucket)
@@ -226,6 +284,13 @@ class BucketDiscoveryAssociationProvider(BaseAssociationProvider):
             if self.buckets.planograms_bucket
             else None
         )
+        if default_catalog or default_planogram:
+            logger.warning(
+                "Bucket discovery is assuming catalog_uri=%r and planogram_uri=%r by naming "
+                "convention; these objects are not verified to exist.",
+                default_catalog,
+                default_planogram,
+            )
         for idx, uri in enumerate(uris, start=1):
             records.append(
                 ShelfAssociationRecord(
@@ -236,7 +301,13 @@ class BucketDiscoveryAssociationProvider(BaseAssociationProvider):
                     ground_truth_id=uri.split("/")[-1],
                 )
             )
+        if not records:
+            logger.warning(
+                "Bucket discovery found no images in %r. The run will benchmark 0 images.",
+                self.buckets.shelf_images_bucket,
+            )
         return records
+
 
 
 class CustomCallableAssociationProvider(BaseAssociationProvider):
@@ -256,24 +327,51 @@ def create_association_provider(
     storage_manager: StorageManager,
     project_id: str = "unilever-shelf-understanding",
 ) -> BaseAssociationProvider:
-    """Factory to build the configured association provider."""
-    ptype = assoc_config.provider_type.lower()
+    """Factory to build the configured association provider.
+
+    Raises `AssociationConfigError` for an unrecognised `provider_type`, and for a
+    source-backed `provider_type` with no `source_uri`, instead of falling through to
+    `BucketDiscoveryAssociationProvider`. That fall-through meant a typo such as
+    `provider_type: bigqeury` silently swapped the benchmark's input set for a scan of the
+    shelf-images bucket: the run still succeeded, still produced numbers, and nothing in
+    the report said the association table had never been read. Selecting bucket discovery
+    is now something a config has to ask for by name.
+    """
+    ptype = (assoc_config.provider_type or "").strip().lower()
     default_bucket = bucket_config.shelf_images_bucket
-    if ptype in ("json", "jsonl") and assoc_config.source_uri:
+
+    if ptype not in VALID_ASSOCIATION_PROVIDER_TYPES:
+        raise AssociationConfigError(
+            f"Unknown associations.provider_type {assoc_config.provider_type!r}. "
+            f"Expected one of: {', '.join(VALID_ASSOCIATION_PROVIDER_TYPES)}. "
+            f"Refusing to default to bucket discovery, because that would silently "
+            f"benchmark every image in {default_bucket!r} instead of the configured "
+            f"association table."
+        )
+
+    if ptype in _SOURCE_BACKED_PROVIDER_TYPES and not assoc_config.source_uri:
+        raise AssociationConfigError(
+            f"associations.provider_type={ptype!r} needs `associations.source_uri` to "
+            f"point at the file or table to read, but it is empty. Set it, or set "
+            f"provider_type='bucket_discovery' to deliberately enumerate "
+            f"{default_bucket!r} instead."
+        )
+
+    if ptype in ("json", "jsonl"):
         return JSONAssociationProvider(
             assoc_config.source_uri,
             storage_manager,
             assoc_config.schema_mapping,
             default_shelf_bucket=default_bucket,
         )
-    if ptype == "csv" and assoc_config.source_uri:
+    if ptype == "csv":
         return CSVAssociationProvider(
             assoc_config.source_uri,
             storage_manager,
             assoc_config.schema_mapping,
             default_shelf_bucket=default_bucket,
         )
-    if ptype in ("bigquery", "bq") and assoc_config.source_uri:
+    if ptype in ("bigquery", "bq"):
         return BigQueryAssociationProvider(
             project_id,
             assoc_config.source_uri,
@@ -281,3 +379,4 @@ def create_association_provider(
             default_shelf_bucket=default_bucket,
         )
     return BucketDiscoveryAssociationProvider(bucket_config, storage_manager, assoc_config.schema_mapping)
+

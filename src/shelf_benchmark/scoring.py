@@ -91,10 +91,10 @@ def write_predictions_file(
             }
         )
 
-    out = Path(path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-    logger.info("Wrote %d run(s) of raw predictions to '%s'.", len(payload["runs"]), out)
+    from shelf_benchmark.artifacts import atomic_write_json
+
+    out = atomic_write_json(path, payload, indent=2, default=str)
+    logger.info("Wrote %d run(s) of raw predictions atomically to '%s'.", len(payload["runs"]), out)
     return out
 
 

@@ -29,23 +29,15 @@ from shelf_benchmark.approaches import (
     BaseShelfApproachPlugin,
     CommonLayerContext,
 )
-from shelf_benchmark.approaches.registry import BUILTIN_VLM_CLASSIFICATION_APPROACHES
 from shelf_benchmark.config import BenchmarkConfig, ModelPricing, TaxonomyConfig
 from shelf_benchmark.data.storage import StorageManager
 from shelf_benchmark.models import (
     ImageGroundTruth,
-    RowLevelReportItem,
     ShelfAssociationRecord,
     TaskExecutionResult,
-    TokenUsageMetrics,
 )
 from shelf_benchmark.reporting.generator import BenchmarkReportGenerator
-from shelf_benchmark.tasks.classification import ProductClassificationTask
 from shelf_benchmark.tasks.detection import ProductDetectionTask
-from shelf_benchmark.tasks.facing_utils import (
-    check_is_hul_brand,
-    derive_size_bucket_from_bbox,
-)
 from shelf_benchmark.tasks.fine_tuning import GeminiFineTuningTask
 from shelf_benchmark.tasks.matching import ProductMatchingTask
 from shelf_benchmark.telemetry import OpenTelemetryBenchmarkLogger
@@ -688,35 +680,15 @@ class ShelfBenchmarkSDK:
 
                 if "classification" in selected_tasks:
                     for app_id in selected_approaches:
-                        plugin = (
-                            None
-                            if app_id in BUILTIN_VLM_CLASSIFICATION_APPROACHES
-                            else GLOBAL_APPROACH_REGISTRY.require(app_id)
+                        plugin = GLOBAL_APPROACH_REGISTRY.require(app_id)
+                        results.append(
+                            plugin.execute(
+                                ctx=ctx,
+                                model_name=model_name,
+                                record=record,
+                                gt_record=gt_record,
+                            )
                         )
-                        use_builtin_task = plugin is None or (
-                            custom_client is not None and app_id in BUILTIN_VLM_CLASSIFICATION_APPROACHES
-                        )
-                        if use_builtin_task:
-                            cls_task = ProductClassificationTask(
-                                self.config, self.storage, self.telemetry, genai_client=custom_client
-                            )
-                            results.append(
-                                cls_task.execute(
-                                    model_name=model_name,
-                                    shelf_image_uri=current_uri,
-                                    separation_approach=app_id,
-                                    ground_truth=gt_record,
-                                )
-                            )
-                        else:
-                            results.append(
-                                plugin.execute(
-                                    ctx=ctx,
-                                    model_name=model_name,
-                                    record=record,
-                                    gt_record=gt_record,
-                                )
-                            )
 
                 if "matching" in selected_tasks:
                     mat_task = ProductMatchingTask(

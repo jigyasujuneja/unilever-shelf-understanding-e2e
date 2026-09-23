@@ -190,7 +190,46 @@ def main() -> None:
         service_name="unilever-shelf-benchmark-service",
         region="us-central1",
     )
-    print(f"  {spec['gcloud_deploy_command']}")
+    generated_cmd = spec["gcloud_deploy_command"]
+
+    # This dashboard exposes benchmark costs, trace ids and shelf imagery, so the
+    # service must never be deployed publicly. `--allow-unauthenticated` grants
+    # roles/run.invoker to allUsers, i.e. the whole internet; we deploy with
+    # `--no-allow-unauthenticated` and reach the service either through
+    # `gcloud run services proxy` or by binding a specific invoker principal.
+    #
+    # NOTE: generate_cloud_run_deploy_command() in
+    # src/shelf_benchmark/evaluation/gcp_billing.py still appends
+    # `--allow-unauthenticated`. Until that helper is fixed, this sample prints a
+    # corrected command rather than repeating an insecure one.
+    deploy_cmd = generated_cmd.replace(
+        "--allow-unauthenticated", "--no-allow-unauthenticated"
+    )
+    if "--no-allow-unauthenticated" not in deploy_cmd:
+        deploy_cmd = f"{deploy_cmd} --no-allow-unauthenticated"
+
+    print(f"  {deploy_cmd}")
+
+    if "--allow-unauthenticated" in generated_cmd:
+        print(
+            "\n  WARNING: generate_cloud_run_deploy_command() returned a command containing\n"
+            "  --allow-unauthenticated (src/shelf_benchmark/evaluation/gcp_billing.py:496).\n"
+            "  That flag binds roles/run.invoker to allUsers and makes this service\n"
+            "  world-readable. The command printed above has been corrected; fix the helper."
+        )
+
+    print(
+        "\n  Reaching the service once it is deployed privately:\n"
+        "    # a) Local authenticated tunnel, no IAM change required:\n"
+        "    gcloud run services proxy unilever-shelf-benchmark-service \\\n"
+        "        --project unilever-shelf-understanding --region us-central1\n"
+        "\n"
+        "    # b) Or grant a specific principal permission to invoke it:\n"
+        "    gcloud run services add-iam-policy-binding unilever-shelf-benchmark-service \\\n"
+        "        --project unilever-shelf-understanding --region us-central1 \\\n"
+        "        --member='user:you@example.com' --role='roles/run.invoker'\n"
+        "    # (use serviceAccount:...  or group:...  for non-interactive callers)"
+    )
 
     if not args.live:
         print(

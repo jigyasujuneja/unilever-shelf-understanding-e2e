@@ -1,7 +1,14 @@
 """Pytest configuration and shared fixtures for the Shelf Understanding Benchmark Suite.
 
 Enforces two properties across all `@pytest.mark.offline` tests:
-1. Working directory is pinned to the repository root so relative config paths always resolve.
+1. Working directory is pinned to the repository root so that repo-relative *test inputs*
+   (`configs/default_config.yaml`, `configs/sample_ground_truth.json`, ...) resolve.
+
+   This pin is a convenience for fixtures only. Library code must never need it: anything
+   `shelf_benchmark` loads for itself is resolved relative to the installed package, not the CWD.
+   This pin previously masked exactly that bug for the taxonomy --
+   `tests/test_config_and_packaging_contracts.py` now probes from other directories in a
+   subprocess specifically so the pin cannot hide a regression.
 2. Live GCP network exporters (Cloud Logging, GCS report/OTel sync, and live Cloud Billing Catalog
    HTTP calls) are stubbed out so offline tests run in <2 seconds and never touch real GCP
    resources on a credentialed developer workstation.
@@ -10,8 +17,8 @@ Enforces two properties across all `@pytest.mark.offline` tests:
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest

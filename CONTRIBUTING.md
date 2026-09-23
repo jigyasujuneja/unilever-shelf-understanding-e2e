@@ -107,14 +107,33 @@ gitignored. Keep it that way.
 ## 6. Before you open a PR
 
 ```bash
-.venv/bin/ruff check src tests
-.venv/bin/mypy src/shelf_benchmark   # advisory today, blocking later
-.venv/bin/pytest -q -m "not live"
+make check     # lint + typecheck + offline tests + wheel packaging check
 ```
 
-Ruff and the offline test lane are blocking in CI. Mypy runs with `continue-on-error: true` as a
-ratchet while annotations are backfilled -- do not add new type errors, and fix ones you touch.
+or individually:
 
-Known baseline as of this config landing: `ruff check src tests` reports 41 pre-existing findings
-(unsorted imports and unused imports), 40 of them auto-fixable. Land `ruff check --fix src tests` as
-one standalone cleanup PR with no behaviour changes, then the lint lane is green and stays green.
+```bash
+make lint       # ruff check .
+make typecheck  # mypy
+make test       # pytest -q -m "not live"
+make wheel      # builds a wheel and asserts the bundled fixture is packaged
+```
+
+These run in CI (`.github/workflows/ci.yml`) on every push and pull request. Ruff, the offline test
+lane, the wheel-install check and the Docker build are blocking. Mypy runs with
+`continue-on-error: true` as a ratchet while annotations are backfilled -- do not add new type
+errors, and fix ones you touch.
+
+`make wheel` exists because `pip install -e .` cannot catch packaging bugs: the editable install
+resolves files from the source tree, so a wheel missing `_fixtures/*.png` still "works" locally
+while every non-editable install raises `FileNotFoundError`. CI installs a real wheel into a clean
+virtualenv for the same reason.
+
+Known lint baseline, measured with **ruff 0.16.8** (the version pinned in `.pre-commit-config.yaml`
+and `.github/workflows/ci.yml`): `ruff check .` reports 31 findings, 25 of them auto-fixable
+(unsorted and unused imports, plus a handful of `E402`s caused by import-time side effects in
+`auth.py`). The count is version-sensitive -- ruff 0.11.x reports 314 because it predates the
+`UP007`/`UP045` split that `[tool.ruff.lint] ignore` relies on, which is why the dev extra floors at
+`ruff>=0.12.0`. Land `ruff check --fix .` as one standalone cleanup PR with no behaviour changes,
+then the lint lane is green and stays green.
+

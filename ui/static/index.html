@@ -19,7 +19,7 @@
     </div>
     <div class="topbar-badges">
       <span class="badge badge-gcp" id="badge-project">GCP: unilever-shelf-understanding</span>
-      <span class="badge badge-tax">Taxonomy: configs/taxonomy.yaml</span>
+      <span class="badge badge-tax">Taxonomy: packaged _resources/taxonomy.yaml</span>
       <span class="badge badge-gt">Ground Truth: Placeholder (Ready to Swap)</span>
     </div>
   </header>
@@ -248,17 +248,17 @@
     <section id="tab-sft-config" class="tab-panel">
       <div class="section-header">
         <div>
-          <h2>Centralized Taxonomy Configuration (<code>configs/taxonomy.yaml</code>) &amp; Vertex AI Fine-Tuning (SFT)</h2>
+          <h2>Centralized Taxonomy Configuration (<code>shelf_benchmark/_resources/taxonomy.yaml</code>) &amp; Vertex AI Fine-Tuning (SFT)</h2>
           <p>
-            All taxonomy lists (categories, subcategories, packaging types, pack types, size bucket rules, and HUL/non-HUL brands) are loaded from a single configuration file (<code>configs/taxonomy.yaml</code>) without any hardcoded brand or variant counts.
+            All taxonomy lists (categories, subcategories, packaging types, pack types, size bucket rules, and HUL/non-HUL brands) are loaded from a single configuration file (<code>shelf_benchmark/_resources/taxonomy.yaml</code>) without any hardcoded brand or variant counts.
           </p>
         </div>
       </div>
 
       <div class="split-2col">
         <div class="card">
-          <h3>Centralized 7-Dimension Taxonomy (<code>configs/taxonomy.yaml</code>)</h3>
-          <p class="muted">Edit <code>configs/taxonomy.yaml</code> to update categories, subcategories, packaging types, or brand lists across all 4 paths automatically.</p>
+          <h3>Centralized 7-Dimension Taxonomy (<code>shelf_benchmark/_resources/taxonomy.yaml</code>)</h3>
+          <p class="muted">Edit <code>shelf_benchmark/_resources/taxonomy.yaml</code> to update categories, subcategories, packaging types, or brand lists across all 4 paths automatically.</p>
           <div id="taxonomy-config-viewer" class="taxonomy-viewer"></div>
         </div>
 

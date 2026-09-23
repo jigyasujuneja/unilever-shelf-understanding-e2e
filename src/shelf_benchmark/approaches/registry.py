@@ -60,7 +60,7 @@ class ApproachRegistry:
     def register(self, plugin: BaseShelfApproachPlugin) -> None:
         """Register (or replace) a plugin under its `approach_id`."""
         existing = self._plugins.get(plugin.approach_id)
-        if existing is not None and type(existing) is not type(plugin):
+        if existing is not None and existing is not plugin:
             logger.warning(
                 "Approach id '%s' is being re-registered by %s (previously %s). "
                 "The most recent registration wins.",
@@ -111,7 +111,6 @@ class ApproachRegistry:
 
     def discover_all(self) -> None:
         """Import every `<subfolder>/plugin.py` under `shelf_benchmark.approaches`."""
-        self._discovered = True
         self.discovery_errors = {}
         tolerant = os.environ.get(TOLERANT_PLUGINS_ENV, "").strip().lower() in {"1", "true", "yes"}
         approaches_dir = Path(__file__).resolve().parent
@@ -148,6 +147,7 @@ class ApproachRegistry:
                         f"Failed to load approach plugin '{module_name}': {exc}. "
                         f"Fix the plugin, or set {TOLERANT_PLUGINS_ENV}=1 to skip broken plugins."
                     ) from exc
+        self._discovered = True
 
 
 GLOBAL_APPROACH_REGISTRY = ApproachRegistry()

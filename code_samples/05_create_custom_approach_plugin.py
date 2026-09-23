@@ -24,8 +24,8 @@ For a permanent approach, promote it to `src/shelf_benchmark/approaches/<your_id
 
 from __future__ import annotations
 
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from typing import Any, Dict, List
 
 from shelf_benchmark import register_approach_function

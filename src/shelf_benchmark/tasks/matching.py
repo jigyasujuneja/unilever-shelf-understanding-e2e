@@ -59,6 +59,7 @@ class ProductMatchingTask(BaseBenchmarkTask):
     """Product Matching benchmark task using Hybrid Search (Dense Vector + Sparse Lexical + 7 HUL Dimensions)."""
 
     task_type = "matching"
+    default_separation_approach = "hybrid_search_facing_nms"
 
     def _compute_dense_embeddings(self, texts: List[str]) -> Optional[int]:
         """Call Vertex AI `gemini-embedding-001` to generate 3072-D dense vectors for hybrid search."""

@@ -27,8 +27,8 @@ deployments, connect full multi-image GCS buckets or BigQuery tables via `sdk.co
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from shelf_benchmark.config import BenchmarkConfig
 from shelf_benchmark.data.ground_truth import create_ground_truth_provider

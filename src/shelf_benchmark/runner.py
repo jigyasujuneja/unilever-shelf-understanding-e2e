@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
@@ -12,6 +13,7 @@ from shelf_benchmark.data.ground_truth import create_ground_truth_provider
 from shelf_benchmark.data.storage import StorageManager
 from shelf_benchmark.models import ShelfAssociationRecord, TaskExecutionResult
 from shelf_benchmark.reporting.generator import BenchmarkReportGenerator
+from shelf_benchmark.run_ids import build_run_id
 from shelf_benchmark.tasks import (
     GeminiFineTuningTask,
     ProductClassificationTask,
@@ -19,6 +21,8 @@ from shelf_benchmark.tasks import (
     ProductMatchingTask,
 )
 from shelf_benchmark.telemetry import OpenTelemetryBenchmarkLogger
+
+logger = logging.getLogger(__name__)
 
 
 class BenchmarkRunner:
@@ -137,13 +141,12 @@ class BenchmarkRunner:
         for rec in records:
             gt = self.gt_provider.get_ground_truth(rec.shelf_image_uri, rec.ground_truth_id)
             for model_name in active_models:
-                cached_detected_boxes = None
                 for task_name in tasks:
                     t_norm = task_name.lower().strip()
 
                     if t_norm == "detection":
                         run_id = f"{batch_id}-det-{model_name.split('-')[-1]}"
-                        print(f"[BenchmarkRunner] task='detection' model='{model_name}' ...")
+                        logger.info(f"[BenchmarkRunner] task='detection' model='{model_name}' ...")
                         res = self.detection_task.execute(
                             model_name=model_name,
                             shelf_image_uri=rec.shelf_image_uri,
@@ -151,7 +154,6 @@ class BenchmarkRunner:
                             store_id=rec.store_id,
                             ground_truth=gt,
                         )
-                        cached_detected_boxes = res.raw_output.get("detected_products")
                         self._log_progress(res)
                         results.append(res)
 
@@ -159,9 +161,6 @@ class BenchmarkRunner:
                         from shelf_benchmark.approaches import (
                             GLOBAL_APPROACH_REGISTRY,
                             CommonLayerContext,
-                        )
-                        from shelf_benchmark.approaches.registry import (
-                            BUILTIN_VLM_CLASSIFICATION_APPROACHES,
                         )
 
                         ctx = CommonLayerContext(
@@ -172,34 +171,25 @@ class BenchmarkRunner:
                             genai_client=self._genai_client,
                         )
                         for approach in active_approaches:
-                            run_id = f"{batch_id}-cls-{approach[:9]}-{model_name.split('-')[-1]}"
-                            print(
+                            run_id = build_run_id(
+                                batch_id, "cls", approach, model_name.split("-")[-1]
+                            )
+                            logger.info(
                                 f"[BenchmarkRunner] task='classification' approach='{approach}' model='{model_name}' ..."
                             )
-                            if approach in BUILTIN_VLM_CLASSIFICATION_APPROACHES:
-                                res = self.classification_task.execute(
-                                    model_name=model_name,
-                                    shelf_image_uri=rec.shelf_image_uri,
-                                    run_id=run_id,
-                                    store_id=rec.store_id,
-                                    ground_truth=gt,
-                                    separation_approach=approach,
-                                    detected_boxes=cached_detected_boxes if approach != "single_pass_full_shelf" else None,
-                                )
-                            else:
-                                plugin = GLOBAL_APPROACH_REGISTRY.require(approach)
-                                res = plugin.execute(
-                                    ctx=ctx,
-                                    model_name=model_name,
-                                    record=rec,
-                                    gt_record=gt,
-                                )
+                            plugin = GLOBAL_APPROACH_REGISTRY.require(approach)
+                            res = plugin.execute(
+                                ctx=ctx,
+                                model_name=model_name,
+                                record=rec,
+                                gt_record=gt,
+                            )
                             self._log_progress(res)
                             results.append(res)
 
                     elif t_norm == "matching":
                         run_id = f"{batch_id}-mat-{model_name.split('-')[-1]}"
-                        print(f"[BenchmarkRunner] task='matching' model='{model_name}' ...")
+                        logger.info(f"[BenchmarkRunner] task='matching' model='{model_name}' ...")
                         res = self.matching_task.execute(
                             model_name=model_name,
                             shelf_image_uri=rec.shelf_image_uri,
@@ -214,7 +204,7 @@ class BenchmarkRunner:
 
                     elif t_norm in ("fine_tuning", "tuning"):
                         run_id = f"{batch_id}-sft-{model_name.split('-')[-1]}"
-                        print(f"[BenchmarkRunner] task='fine_tuning' model='{model_name}' ...")
+                        logger.info(f"[BenchmarkRunner] task='fine_tuning' model='{model_name}' ...")
                         res = self.fine_tuning_task.execute(
                             model_name=model_name,
                             shelf_image_uri=rec.shelf_image_uri,
@@ -229,6 +219,7 @@ class BenchmarkRunner:
                     else:
                         raise ValueError(f"Unknown benchmark task: {task_name}")
 
+        self.telemetry.flush()
         report_paths = self.report_generator.generate_all_reports(results)
         return {
             "results": results,
@@ -240,7 +231,7 @@ class BenchmarkRunner:
 
     @staticmethod
     def _log_progress(res: TaskExecutionResult) -> None:
-        print(
+        logger.info(
             f"  -> status={res.status} approach={res.separation_approach} "
             f"facings={res.cost.product_count} depth_filtered={res.accuracy.depth_duplicates_filtered} "
             f"latency={res.latency_ms:.1f}ms tokens(in={res.tokens.input_tokens}, "

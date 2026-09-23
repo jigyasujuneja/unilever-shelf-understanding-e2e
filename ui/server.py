@@ -11,12 +11,12 @@ import json
 import math
 import mimetypes
 import os
-from pathlib import Path
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List
-from urllib.parse import parse_qs, urlparse
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 # Ensure `src/` is importable without modifying anything in `src/`
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -24,14 +24,12 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from shelf_benchmark.auth import create_genai_client
-from shelf_benchmark.config import BenchmarkConfig
-from shelf_benchmark.models import TaskExecutionResult
-from shelf_benchmark.runner import BenchmarkRunner
-from shelf_benchmark.tasks.facing_utils import (
-    check_is_hul_brand,
+from shelf_benchmark.auth import create_genai_client  # noqa: E402
+from shelf_benchmark.config import BenchmarkConfig  # noqa: E402
+from shelf_benchmark.models import TaskExecutionResult  # noqa: E402
+from shelf_benchmark.runner import BenchmarkRunner  # noqa: E402
+from shelf_benchmark.tasks.facing_utils import (  # noqa: E402
     deduplicate_depth_stacked_facings,
-    derive_size_bucket_from_bbox,
 )
 
 UI_DIR = Path(__file__).resolve().parent
@@ -80,7 +78,7 @@ def _build_real_depth_candidates(
         return []
 
     kept_after_nms, _filtered_count = deduplicate_depth_stacked_facings(
-        candidates, x_overlap_threshold=0.45
+        candidates, x_overlap_threshold=BenchmarkConfig().depth_deduplication.x_overlap_threshold
     )
     kept_coords = {tuple(item["bbox_2d"]) for item in kept_after_nms}
 
@@ -268,7 +266,7 @@ def load_dashboard_payload() -> Dict[str, Any]:
                 otel_log_path=str(cfg.telemetry.otel_log_path),
                 gcp_project_id=cfg.gcp.project_id,
                 gcp_log_name=cfg.telemetry.gcp_log_name,
-                taxonomy_source=cfg.taxonomy.taxonomy_file,
+                taxonomy_source=cfg.taxonomy.taxonomy_source,
                 ground_truth_provider=cfg.ground_truth.provider_type,
                 reference_catalog_uri=cfg.embeddings.reference_catalog.source_uri,
             )
@@ -293,7 +291,7 @@ def load_dashboard_payload() -> Dict[str, Any]:
             "cloud_run_service": os.environ.get("K_SERVICE") or "local-workstation",
         },
         "taxonomy_reference": {
-            "config_source": cfg.taxonomy.taxonomy_file,
+            "config_source": cfg.taxonomy.taxonomy_source,
             "categories": cfg.taxonomy.categories,
             "subcategories": cfg.taxonomy.subcategories,
             "hul_brands": cfg.taxonomy.hul_brands,
@@ -534,8 +532,7 @@ def execute_live_benchmark_task(
     Supports both `mode="live"` (Vertex AI Gemini 3) and `mode="offline"`,
     plus `connect_sample_gt=True`, `brand_mode`, `attribute_call_mode`, `vcpu_count`, `memory_gib`, and `accelerator`.
     """
-    from shelf_benchmark.approaches import CommonLayerContext, GLOBAL_APPROACH_REGISTRY
-    from shelf_benchmark.approaches.registry import BUILTIN_VLM_CLASSIFICATION_APPROACHES
+    from shelf_benchmark.approaches import GLOBAL_APPROACH_REGISTRY, CommonLayerContext
     from shelf_benchmark.config import normalize_vertex_gemini_model_id
     from shelf_benchmark.testing import sample_ground_truth
 
@@ -587,34 +584,20 @@ def execute_live_benchmark_task(
             ground_truth=gt_record,
         )
     elif task_type == "classification":
-        plugin = (
-            None
-            if separation_approach in BUILTIN_VLM_CLASSIFICATION_APPROACHES
-            else GLOBAL_APPROACH_REGISTRY.get(separation_approach)
+        plugin = GLOBAL_APPROACH_REGISTRY.require(separation_approach)
+        ctx = CommonLayerContext(
+            config=cfg,
+            storage=runner.storage,
+            telemetry=runner.telemetry,
+            reports_dir=REPORTS_DIR,
+            genai_client=runner._genai_client,
         )
-        if plugin is not None:
-            ctx = CommonLayerContext(
-                config=cfg,
-                storage=runner.storage,
-                telemetry=runner.telemetry,
-                reports_dir=REPORTS_DIR,
-                genai_client=runner._genai_client,
-            )
-            res = plugin.execute(
-                ctx=ctx,
-                model_name=model_name,
-                record=record,
-                gt_record=gt_record,
-            )
-        else:
-            res = runner.classification_task.execute(
-                model_name=model_name,
-                shelf_image_uri=record.shelf_image_uri,
-                run_id=f"{mode}-cls-{model_name}",
-                store_id=record.store_id,
-                ground_truth=gt_record,
-                separation_approach=separation_approach,
-            )
+        res = plugin.execute(
+            ctx=ctx,
+            model_name=model_name,
+            record=record,
+            gt_record=gt_record,
+        )
     elif task_type == "matching":
         res = runner.matching_task.execute(
             model_name=model_name,
@@ -636,35 +619,12 @@ def execute_live_benchmark_task(
 
     gcp_proof = collect_gcp_runtime_proof()
     res.execution_trace["gcp_runtime_proof"] = gcp_proof
+    from shelf_benchmark.reporting.aggregation import build_summary_records
+
     summary_record = {
-        "run_id": res.run_id,
-        "trace_id": res.trace_id,
-        "span_id": res.span_id,
-        "task_type": res.task_type,
-        "separation_approach": res.separation_approach,
-        "model_name": res.model_name,
-        "shelf_image_uri": res.shelf_image_uri,
-        "status": res.status,
-        "execution_mode": "offline_local_fixture" if is_offline else "live_vertex_ai",
-        "start_time": res.start_time,
-        "end_time": res.end_time,
+        **build_summary_records([res])[0],
         "latency_ms": round(res.latency_ms, 2),
-        "front_facings_count": len(res.row_level_items),
-        "depth_duplicates_filtered": res.accuracy.depth_duplicates_filtered,
-        "latency_per_facing_ms": round(
-            res.latency_ms / max(len(res.row_level_items), 1), 2
-        ),
-        "input_tokens": res.tokens.input_tokens,
-        "thinking_tokens": res.tokens.thinking_tokens,
-        "output_tokens": res.tokens.output_tokens,
-        "total_tokens": res.tokens.total_tokens,
-        "vertex_ai_payg_tokens_usd": res.cost.vertex_ai_payg_tokens_usd,
-        "vertex_ai_provisioned_throughput_usd": res.cost.vertex_ai_provisioned_throughput_usd,
-        "vertex_ai_embeddings_and_vision_usd": res.cost.vertex_ai_embeddings_and_vision_usd,
-        "cloud_run_compute_usd": res.cost.cloud_run_compute_usd,
-        "gcs_and_observability_usd": res.cost.gcs_and_observability_usd,
-        "cost_per_shelf_image_usd": res.cost.cost_per_shelf_image_usd,
-        "cost_per_product_usd": res.cost.cost_per_product_usd,
+        "execution_mode": "offline_local_fixture" if is_offline else "live_vertex_ai",
         "all_in_pt_gsu_total_usd": (
             round(
                 res.cost.vertex_ai_provisioned_throughput_usd
@@ -678,33 +638,8 @@ def execute_live_benchmark_task(
         ),
         "cloud_run_worker_service": os.environ.get("K_SERVICE") or "local (not Cloud Run)",
         "gcp_runtime_proof": gcp_proof,
-        "billing_source": res.cost.billing_source,
-        "rates_from_live_catalog": res.cost.rates_from_live_catalog,
-        "includes_modelled_infrastructure": res.cost.includes_modelled_infrastructure,
-        "ground_truth_available": res.accuracy.ground_truth_available,
-        "accuracy_status": res.accuracy.accuracy_status,
-        "gt_version": res.accuracy.gt_version,
-        "iou_threshold": res.accuracy.iou_threshold,
-        "pairing_strategy": res.accuracy.pairing_strategy,
-        "brand_matcher": res.accuracy.brand_matcher,
-        "product_matcher": res.accuracy.product_matcher,
-        "matched_pairs": res.accuracy.matched_pairs,
-        "true_positives": res.accuracy.true_positives,
-        "false_positives": res.accuracy.false_positives,
-        "false_negatives": res.accuracy.false_negatives,
-        "count_accuracy": res.accuracy.count_accuracy,
-        "mean_iou_matched": res.accuracy.mean_iou_matched,
-        "detection_precision": res.accuracy.detection_precision,
-        "detection_recall": res.accuracy.detection_recall,
-        "detection_f1": res.accuracy.detection_f1,
-        "brand_classification_accuracy": res.accuracy.brand_classification_accuracy,
-        "brand_set_recall": res.accuracy.brand_set_recall,
-        "product_classification_accuracy": res.accuracy.product_classification_accuracy,
-        "sku_matching_accuracy": res.accuracy.sku_matching_accuracy,
-        "planogram_compliance_rate": res.accuracy.planogram_compliance_rate,
         "execution_trace": res.execution_trace,
     }
-
     return {
         "run_id": res.run_id,
         "trace_id": res.trace_id,
@@ -746,7 +681,11 @@ def execute_cloud_run_benchmark_suite(body: Dict[str, Any]) -> Dict[str, Any]:
        inside the Cloud Run container and syncs them to GCS, returning the complete suite bundle to the thin CLI client.
     """
     import tempfile
-    from shelf_benchmark.approaches.registry import BUILTIN_VLM_CLASSIFICATION_APPROACHES, GLOBAL_APPROACH_REGISTRY
+
+    from shelf_benchmark.approaches.registry import (
+        BUILTIN_VLM_CLASSIFICATION_APPROACHES,
+        GLOBAL_APPROACH_REGISTRY,
+    )
     from shelf_benchmark.config import normalize_vertex_gemini_model_id
     from shelf_benchmark.reporting.generator import BenchmarkReportGenerator
 

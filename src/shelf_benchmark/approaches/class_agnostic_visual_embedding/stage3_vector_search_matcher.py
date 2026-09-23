@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from shelf_benchmark.approaches.base import CommonLayerContext
 from shelf_benchmark.approaches.class_agnostic_visual_embedding.stage2_visual_crop_embedder import (
+    EMBEDDING_STATUS_OK,
     embed_visual_text_prototypes,
 )
 
@@ -166,7 +167,10 @@ def run_stage3_vector_search_matching(
     - `predicted_brand` / `predicted_variant` / `matched_sku_id`: the nearest reference catalog
       entry above `min_match_similarity`, or the configured unknown label when no catalog is
       indexed or nothing clears the floor.
-    - `catalog_status`: one of `MATCHED`, `BELOW_MATCH_THRESHOLD`, `NO_CATALOG_INDEXED`.
+    - `catalog_status`: one of `MATCHED`, `BELOW_MATCH_THRESHOLD`, `NO_CATALOG_INDEXED`,
+      `EMBEDDING_FAILED`. The last one means stage 2 never produced a usable vector for this
+      facing, so nothing was compared -- it is an infrastructure failure, not a model result,
+      and must not be aggregated as a missed match.
     """
     cat_cfg = ctx.config.embeddings.reference_catalog
     entries, vectors = _get_catalog_vectors(ctx)
@@ -199,18 +203,28 @@ def run_stage3_vector_search_matching(
                 best_peer_idx = int(other.get("product_index", j + 1))
 
         # 2. Reference catalog ANN match (only as good as the configured catalog).
-        match, match_sim = (
-            _best_catalog_match(vec_i, entries, vectors, cat_cfg.min_match_similarity)
-            if entries
-            else (None, 0.0)
-        )
+        # A facing whose embedding never arrived must not be silently compared:
+        # cosine against an empty/zero vector scores 0.0 against everything, which
+        # is indistinguishable from a real product that failed to match. Report the
+        # infrastructure failure as itself.
+        embed_status = facing.get("visual_embedding_status", EMBEDDING_STATUS_OK)
+        embedding_usable = bool(vec_i) and embed_status == EMBEDDING_STATUS_OK
 
-        if not entries:
-            catalog_status = "NO_CATALOG_INDEXED"
-        elif match is None:
-            catalog_status = "BELOW_MATCH_THRESHOLD"
+        if not embedding_usable:
+            match, match_sim = None, 0.0
+            catalog_status = "EMBEDDING_FAILED"
         else:
-            catalog_status = "MATCHED"
+            match, match_sim = (
+                _best_catalog_match(vec_i, entries, vectors, cat_cfg.min_match_similarity)
+                if entries
+                else (None, 0.0)
+            )
+            if not entries:
+                catalog_status = "NO_CATALOG_INDEXED"
+            elif match is None:
+                catalog_status = "BELOW_MATCH_THRESHOLD"
+            else:
+                catalog_status = "MATCHED"
 
         bbox = facing.get("bbox_2d", [0, 0, 0, 0])
         packaging = str(match.get("packaging", "")) if match else ""

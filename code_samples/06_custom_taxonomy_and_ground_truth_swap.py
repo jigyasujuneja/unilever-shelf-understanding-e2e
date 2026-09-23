@@ -17,8 +17,8 @@ What this sample shows:
 
 from __future__ import annotations
 
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from shelf_benchmark import BenchmarkConfig, CustomAttributeSpec, TaxonomyConfig
 from shelf_benchmark.config import SizeBucketRulesConfig

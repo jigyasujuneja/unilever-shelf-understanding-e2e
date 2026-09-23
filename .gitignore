@@ -1,0 +1,51 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Packaging / build artifacts
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Benchmark output (regenerated on every run, never reviewed)
+reports/
+
+# Local environment and credentials. Never commit service account keys.
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+client_secret*.json
+service-account*.json
+*-service-account.json
+application_default_credentials.json
+gcp-key*.json
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+
+# Kept intentionally: configs/ and tests/fixtures/ are version controlled.

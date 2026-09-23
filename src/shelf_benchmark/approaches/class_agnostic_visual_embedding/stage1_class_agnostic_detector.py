@@ -21,7 +21,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 from shelf_benchmark.approaches.base import CommonLayerContext
-from shelf_benchmark.auth import create_genai_client, get_gcp_credentials
+from shelf_benchmark.auth import get_gcp_credentials
 from shelf_benchmark.models import TokenUsageMetrics
 
 
@@ -56,20 +56,58 @@ RULES:
 3. Do NOT box products stacked behind the front unit in the same horizontal column (depth duplicates).
 """
 
+# The backends this stage knows how to run. Anything else is a config error, not a
+# reason to quietly fall back to the VLM: the run would be labelled with the
+# requested backend while a completely different algorithm produced the boxes.
+_VLM_DETECTOR_BACKEND = "google_open_vocab_class_agnostic_box2d"
+SUPPORTED_DETECTOR_BACKENDS = frozenset(
+    {
+        _VLM_DETECTOR_BACKEND,
+        "cloud_vision_object_localization",
+        "vertex_ai_custom_detector_endpoint",
+    }
+)
+
+
+class DetectorBackendError(RuntimeError):
+    """Raised when the configured stage-1 detector backend cannot be run as specified.
+
+    Never caught in order to fall back to another backend. A benchmark that
+    substitutes a different algorithm under the requested label is not measuring
+    what it claims to measure.
+    """
+
 
 def run_stage1_class_agnostic_detection(
     ctx: CommonLayerContext,
     image_bytes: bytes,
     model_name: str,
-    detector_backend: str = "google_open_vocab_class_agnostic_box2d",
+    detector_backend: str = _VLM_DETECTOR_BACKEND,
     vertex_endpoint_url: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int, TokenUsageMetrics, float]:
     """Executes Stage 1 Class-Agnostic ('product') Object Detection and applies
     shared `ctx.deduplicate_depth_stacked_facings()` from `facing_utils.py`.
 
+    Raises:
+        DetectorBackendError: if `detector_backend` is unknown, or if
+            `vertex_ai_custom_detector_endpoint` was requested without a URL.
+
     Returns:
         (kept_front_facings, depth_duplicates_filtered, token_usage, extra_api_cost_usd)
     """
+    if detector_backend not in SUPPORTED_DETECTOR_BACKENDS:
+        raise DetectorBackendError(
+            f"Unknown detector_backend {detector_backend!r}. "
+            f"Supported: {sorted(SUPPORTED_DETECTOR_BACKENDS)}."
+        )
+    if detector_backend == "vertex_ai_custom_detector_endpoint" and not vertex_endpoint_url:
+        raise DetectorBackendError(
+            "detector_backend='vertex_ai_custom_detector_endpoint' requires a "
+            "vertex_endpoint_url. Previously this silently fell through to the "
+            "open-vocabulary VLM detector, so the run was labelled as using a custom "
+            "endpoint while a different algorithm produced every box."
+        )
+
     raw_candidates: List[Dict[str, Any]] = []
     tokens = TokenUsageMetrics()
     extra_api_cost_usd = 0.0
@@ -103,34 +141,42 @@ def run_stage1_class_agnostic_detection(
             },
             timeout=30,
         )
-        extra_api_cost_usd = 0.0015
-        if resp.status_code == 200:
-            annotations = (
-                resp.json()
-                .get("responses", [{}])[0]
-                .get("localizedObjectAnnotations", [])
+        if resp.status_code != 200:
+            # Previously this fell through with zero detections while still charging
+            # $0.0015, so a Cloud Vision outage was reported as "the detector found
+            # nothing" -- a model-quality result. Fail loudly instead.
+            raise DetectorBackendError(
+                f"Cloud Vision OBJECT_LOCALIZATION -> HTTP {resp.status_code}: {resp.text[:200]}"
             )
-            for idx, obj in enumerate(annotations, start=1):
-                verts = obj.get("boundingPoly", {}).get("normalizedVertices", [])
-                if len(verts) >= 3:
-                    xs = [int(round(float(v.get("x", 0.0)) * 1000)) for v in verts]
-                    ys = [int(round(float(v.get("y", 0.0)) * 1000)) for v in verts]
-                    ymin, ymax = max(0, min(ys)), min(1000, max(ys))
-                    xmin, xmax = max(0, min(xs)), min(1000, max(xs))
-                    shelf_row = "bottom" if ymax > 840 else "middle"
-                    raw_candidates.append(
-                        {
-                            "product_index": idx,
-                            "class_label": "product",
-                            "bbox_2d": [ymin, xmin, ymax, xmax],
-                            "shelf_row": shelf_row,
-                            "position_on_shelf": idx,
-                            "is_front_facing": True,
-                            "confidence": round(float(obj.get("score", 0.75)), 3),
-                        }
-                    )
+        # Google Cloud Vision API: OBJECT_LOCALIZATION ($0.0015 per image).
+        # Charged only after a confirmed 200.
+        extra_api_cost_usd = 0.0015
+        annotations = (
+            resp.json()
+            .get("responses", [{}])[0]
+            .get("localizedObjectAnnotations", [])
+        )
+        for idx, obj in enumerate(annotations, start=1):
+            verts = obj.get("boundingPoly", {}).get("normalizedVertices", [])
+            if len(verts) >= 3:
+                xs = [int(round(float(v.get("x", 0.0)) * 1000)) for v in verts]
+                ys = [int(round(float(v.get("y", 0.0)) * 1000)) for v in verts]
+                ymin, ymax = max(0, min(ys)), min(1000, max(ys))
+                xmin, xmax = max(0, min(xs)), min(1000, max(xs))
+                shelf_row = "bottom" if ymax > 840 else "middle"
+                raw_candidates.append(
+                    {
+                        "product_index": idx,
+                        "class_label": "product",
+                        "bbox_2d": [ymin, xmin, ymax, xmax],
+                        "shelf_row": shelf_row,
+                        "position_on_shelf": idx,
+                        "is_front_facing": True,
+                        "confidence": round(float(obj.get("score", 0.75)), 3),
+                    }
+                )
 
-    elif detector_backend == "vertex_ai_custom_detector_endpoint" and vertex_endpoint_url:
+    elif detector_backend == "vertex_ai_custom_detector_endpoint":
         # Custom Vertex AI Online Prediction Endpoint (EfficientDet / YOLOv8 / Faster-RCNN)
         creds = get_gcp_credentials(project_id=ctx.config.gcp.project_id)
         headers = {
@@ -145,26 +191,31 @@ def run_stage1_class_agnostic_detection(
             json={"instances": [{"image_bytes": {"b64": img_b64}}]},
             timeout=30,
         )
+        if resp.status_code != 200:
+            raise DetectorBackendError(
+                f"Vertex AI custom detector endpoint {vertex_endpoint_url} -> "
+                f"HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+        # Charged only after a confirmed 200.
         extra_api_cost_usd = 0.00025
-        if resp.status_code == 200:
-            preds = resp.json().get("predictions", [{}])[0]
-            boxes = preds.get("detection_boxes", [])
-            scores = preds.get("detection_scores", [])
-            for idx, (b, sc) in enumerate(zip(boxes, scores), start=1):
-                if float(sc) < 0.35:
-                    continue
-                ymin, xmin, ymax, xmax = [int(round(float(v) * 1000)) for v in b]
-                raw_candidates.append(
-                    {
-                        "product_index": idx,
-                        "class_label": "product",
-                        "bbox_2d": [ymin, xmin, ymax, xmax],
-                        "shelf_row": "bottom" if ymax > 840 else "middle",
-                        "position_on_shelf": idx,
-                        "is_front_facing": True,
-                        "confidence": round(float(sc), 3),
-                    }
-                )
+        preds = resp.json().get("predictions", [{}])[0]
+        boxes = preds.get("detection_boxes", [])
+        scores = preds.get("detection_scores", [])
+        for idx, (b, sc) in enumerate(zip(boxes, scores), start=1):
+            if float(sc) < 0.35:
+                continue
+            ymin, xmin, ymax, xmax = [int(round(float(v) * 1000)) for v in b]
+            raw_candidates.append(
+                {
+                    "product_index": idx,
+                    "class_label": "product",
+                    "bbox_2d": [ymin, xmin, ymax, xmax],
+                    "shelf_row": "bottom" if ymax > 840 else "middle",
+                    "position_on_shelf": idx,
+                    "is_front_facing": True,
+                    "confidence": round(float(sc), 3),
+                }
+            )
 
     else:
         # Default: Google Open-Vocabulary Single-Class ("product") Spatial Box2D Detector

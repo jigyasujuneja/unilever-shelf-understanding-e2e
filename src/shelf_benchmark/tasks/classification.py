@@ -1,6 +1,6 @@
 """Separated Task 2: 7-Dimension HUL Product Classification & Multi-Approach Bounding-Box Separation (`ProductClassificationTask`).
 
-Supports the configurable 7-Dimension Retail Classification Taxonomy (configured in `configs/taxonomy.yaml`):
+Supports the configurable 7-Dimension Retail Classification Taxonomy (configured in the packaged `shelf_benchmark/_resources/taxonomy.yaml`):
   1. `Category`: Configured retail categories (e.g., Hair Care, Oral Care, Laundry, Skin Care, Skin Cleansing)
   2. `Subcategory`: Configured subcategories (e.g., Shampoo, Mouthwash, Soaps, Face Wash, Body Wash, Detergent)
   3. `Brand`: Configured HUL portfolio brands & non-HUL brands (+ `is_hul_brand` flag)
@@ -115,13 +115,14 @@ For EVERY front-facing product slot on the main middle shelf, extract all config
 Also provide `bbox_2d` (`[ymin, xmin, ymax, xmax]` 0..1000), `product_name`, `extra_attributes`, and `confidence` (0.0 to 1.0)."""
 
 
-CLASSIFICATION_PROMPT = build_classification_prompt()
+
 
 
 class ProductClassificationTask(BaseBenchmarkTask):
     """N-Dimension Product Classification task supporting single-step, two-stage, and configurable multi-attribute VLM approaches."""
 
     task_type = "classification"
+    default_separation_approach = "single_pass_full_shelf"
 
     def _sum_tokens(self, t1: TokenUsageMetrics, t2: TokenUsageMetrics) -> TokenUsageMetrics:
         return TokenUsageMetrics(
@@ -283,7 +284,7 @@ class ProductClassificationTask(BaseBenchmarkTask):
             box = item.get("bbox_2d") or [0, 0, 0, 0]
             if len(box) < 4:
                 box = [0, 0, 0, 0]
-            pkg = item.get("packaging_type") or "tube"
+            pkg = item.get("packaging_type") or ""
             model_size = item.get("size") or ""
             rule_size = derive_size_bucket_from_bbox(
                 box, all_boxes, pkg, model_size, taxonomy=self.config.taxonomy
@@ -296,7 +297,15 @@ class ProductClassificationTask(BaseBenchmarkTask):
                 taxonomy=self.config.taxonomy,
                 model_predicted=item.get("is_hul_brand"),
             )
-            crop_path = crop_paths[idx - 1] if idx - 1 < len(crop_paths) else None
+            # Align the crop by the facing number the prompt actually numbered (#1..#N), not by
+            # position in the response list. The crops are produced in `detected_boxes` order
+            # (which `crop_detected_facings` re-sorts), while these rows iterate the model's
+            # response order, and `two_stage_physical_crop_per_facing` does not dedup -- so
+            # `crop_paths[idx - 1]` attached the wrong crop image to a row whenever the model
+            # reordered or dropped a facing.
+            facing_no = item.get("product_index")
+            crop_slot = (int(facing_no) - 1) if isinstance(facing_no, int) and facing_no > 0 else (idx - 1)
+            crop_path = crop_paths[crop_slot] if 0 <= crop_slot < len(crop_paths) else None
             extra_attrs = dict(item.get("extra_attributes") or {})
 
             rows.append(
@@ -319,17 +328,20 @@ class ProductClassificationTask(BaseBenchmarkTask):
                     bbox_ymax=box[2],
                     bbox_xmax=box[3],
                     crop_image_path=crop_path,
-                    predicted_category=item.get("category", "Skin Care"),
-                    predicted_subcategory=item.get("subcategory", "Face Wash"),
+                    # No invented fallbacks. These used to default to "Skin Care" / "Face Wash" /
+                    # "Single" / a synthesised "<brand> <variant>" product name, all of which the
+                    # scorer then compared against ground truth as if the model had said them.
+                    predicted_category=item.get("category") or "",
+                    predicted_subcategory=item.get("subcategory") or "",
                     predicted_brand=brand_val,
                     is_hul_brand=hul_flag,
-                    predicted_variant=item.get("variant", ""),
+                    predicted_variant=item.get("variant") or "",
                     predicted_packaging=pkg,
-                    predicted_pack_type=item.get("pack_type", "Single"),
+                    predicted_pack_type=item.get("pack_type") or "",
                     predicted_size=model_size,
                     rule_derived_size_bucket=rule_size,
-                    predicted_product_name=item.get("product_name") or f"{brand_val} {item.get('variant', '')}".strip(),
-                    confidence=float(item.get("confidence", 0.95)),
+                    predicted_product_name=item.get("product_name") or "",
+                    confidence=float(item.get("confidence") or 0.0),
                     extra_attributes=extra_attrs,
                 )
             )

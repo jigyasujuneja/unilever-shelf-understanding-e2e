@@ -24,88 +24,35 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from shelf_benchmark.config import GroundTruthConfig, GroundTruthSchemaMapping
+from shelf_benchmark.data.bbox import (
+    PIXEL_BBOX_FORMATS as _PIXEL_FORMATS,
+)
+from shelf_benchmark.data.bbox import (
+    SUPPORTED_BBOX_FORMATS,
+    convert_bbox,
+)
+from shelf_benchmark.data.field_access import extract_field
+from shelf_benchmark.data.ground_truth_errors import GroundTruthError
+from shelf_benchmark.data.ground_truth_schema import GroundTruthItemMapper
+from shelf_benchmark.data.ground_truth_schema import as_bool as _as_bool
 from shelf_benchmark.data.storage import StorageManager
 from shelf_benchmark.models import GroundTruthProductItem, ImageGroundTruth
 
+__all__ = [
+    "BaseGroundTruthProvider",
+    "BigQueryGroundTruthProvider",
+    "CSVGroundTruthProvider",
+    "GroundTruthError",
+    "JSONGroundTruthProvider",
+    "NullGroundTruthProvider",
+    "SUPPORTED_BBOX_FORMATS",
+    "_PIXEL_FORMATS",
+    "_as_bool",
+    "convert_bbox",
+    "create_ground_truth_provider",
+]
+
 logger = logging.getLogger(__name__)
-
-SUPPORTED_BBOX_FORMATS = (
-    "ymin_xmin_ymax_xmax_1000",
-    "coco_xywh_px",
-    "xyxy_px",
-    "xyxy_norm",
-    "yxyx_norm",
-    "yolo_xywh_norm",
-)
-
-_PIXEL_FORMATS = ("coco_xywh_px", "xyxy_px")
-
-_TRUTHY = {"true", "1", "yes", "y", "t"}
-
-
-class GroundTruthError(RuntimeError):
-    """Raised when a configured ground-truth source cannot be loaded or is unusable."""
-
-
-def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    return str(value).strip().lower() in _TRUTHY
-
-
-def convert_bbox(
-    raw_bbox: Sequence[float],
-    bbox_format: str,
-    image_width: Optional[int] = None,
-    image_height: Optional[int] = None,
-) -> List[int]:
-    """Convert an annotator bounding box into canonical `[ymin, xmin, ymax, xmax]` 0..1000.
-
-    Raises `GroundTruthError` for unknown formats or for pixel formats supplied without image
-    dimensions - silently mis-scaling boxes would corrupt every detection metric downstream.
-    """
-    if bbox_format not in SUPPORTED_BBOX_FORMATS:
-        raise GroundTruthError(
-            f"Unsupported bbox_format '{bbox_format}'. Supported: {', '.join(SUPPORTED_BBOX_FORMATS)}."
-        )
-    if len(raw_bbox) < 4:
-        raise GroundTruthError(f"Bounding box needs 4 values, got {list(raw_bbox)!r}.")
-
-    a, b, c, d = (float(v) for v in raw_bbox[:4])
-
-    if bbox_format == "ymin_xmin_ymax_xmax_1000":
-        ymin, xmin, ymax, xmax = a, b, c, d
-    elif bbox_format == "yxyx_norm":
-        ymin, xmin, ymax, xmax = a * 1000.0, b * 1000.0, c * 1000.0, d * 1000.0
-    elif bbox_format == "xyxy_norm":
-        ymin, xmin, ymax, xmax = b * 1000.0, a * 1000.0, d * 1000.0, c * 1000.0
-    elif bbox_format == "yolo_xywh_norm":
-        x_c, y_c, w, h = a, b, c, d
-        ymin = (y_c - h / 2.0) * 1000.0
-        xmin = (x_c - w / 2.0) * 1000.0
-        ymax = (y_c + h / 2.0) * 1000.0
-        xmax = (x_c + w / 2.0) * 1000.0
-    else:  # pixel formats
-        if not image_width or not image_height:
-            raise GroundTruthError(
-                f"bbox_format '{bbox_format}' is in absolute pixels, so image_width/image_height "
-                f"are required. Set them per image or via "
-                f"GroundTruthSchemaMapping.default_image_width/height."
-            )
-        if bbox_format == "coco_xywh_px":
-            x, y, w, h = a, b, c, d
-            x2, y2 = x + w, y + h
-        else:  # xyxy_px
-            x, y, x2, y2 = a, b, c, d
-        ymin = (y / image_height) * 1000.0
-        xmin = (x / image_width) * 1000.0
-        ymax = (y2 / image_height) * 1000.0
-        xmax = (x2 / image_width) * 1000.0
-
-    box = [int(round(v)) for v in (ymin, xmin, ymax, xmax)]
-    return [max(0, min(1000, v)) for v in box]
 
 
 class BaseGroundTruthProvider(ABC):
@@ -150,22 +97,7 @@ class BaseGroundTruthProvider(ABC):
 
     @staticmethod
     def _extract_field(raw_item: Dict[str, Any], field_spec: str, *fallbacks: str) -> Any:
-        for candidate in (field_spec, *fallbacks):
-            if not candidate:
-                continue
-            if candidate in raw_item and raw_item[candidate] is not None and raw_item[candidate] != "":
-                return raw_item[candidate]
-            if "." in candidate:
-                cur: Any = raw_item
-                for part in candidate.split("."):
-                    if isinstance(cur, dict) and part in cur:
-                        cur = cur[part]
-                    else:
-                        cur = None
-                        break
-                if cur is not None and cur != "":
-                    return cur
-        return None
+        return extract_field(raw_item, field_spec, *fallbacks)
 
     def map_raw_item(
         self,
@@ -175,111 +107,11 @@ class BaseGroundTruthProvider(ABC):
         image_height: Optional[int] = None,
     ) -> GroundTruthProductItem:
         """Map one annotator record onto the canonical item model across any JSON/CSV/BigQuery/AutoML schema."""
-        m = self.mapping
-        ex = self._extract_field
-        raw_bbox: Any = ex(raw_item, m.bbox_field, "bbox", "bbox_2d", "box_2d", "bounding_box")
-        effective_format = m.bbox_format
-
-        if raw_bbox is None:
-            # Check for polygon vertices (Cloud Vision / Vertex AI AutoML Vision)
-            raw_bbox = ex(raw_item, "normalizedVertices", "vertices", "boundingPoly.normalizedVertices", "boundingPoly.vertices")
-            if raw_bbox is None:
-                # Check for separate 4-column bounding boxes in BigQuery / CSV tables
-                if all(ex(raw_item, k) is not None for k in ("ymin", "xmin", "ymax", "xmax")):
-                    raw_bbox = [ex(raw_item, "ymin"), ex(raw_item, "xmin"), ex(raw_item, "ymax"), ex(raw_item, "xmax")]
-                elif all(ex(raw_item, k) is not None for k in ("y_min", "x_min", "y_max", "x_max")):
-                    raw_bbox = [ex(raw_item, "y_min"), ex(raw_item, "x_min"), ex(raw_item, "y_max"), ex(raw_item, "x_max")]
-                elif all(ex(raw_item, k) is not None for k in ("xmin", "ymin", "xmax", "ymax")):
-                    raw_bbox = [ex(raw_item, "xmin"), ex(raw_item, "ymin"), ex(raw_item, "xmax"), ex(raw_item, "ymax")]
-                    if effective_format == "ymin_xmin_ymax_xmax_1000":
-                        effective_format = "xyxy_norm" if max(float(v) for v in raw_bbox) <= 1.05 else "xyxy_px"
-                elif all(ex(raw_item, k) is not None for k in ("x", "y", "width", "height")):
-                    raw_bbox = [ex(raw_item, "x"), ex(raw_item, "y"), ex(raw_item, "width"), ex(raw_item, "height")]
-                    if effective_format == "ymin_xmin_ymax_xmax_1000":
-                        effective_format = "coco_xywh_px"
-
-        if isinstance(raw_bbox, str):
-            raw_bbox = json.loads(raw_bbox)
-        if isinstance(raw_bbox, list) and len(raw_bbox) >= 3 and isinstance(raw_bbox[0], dict):
-            xs = [float(v.get("x", 0.0)) for v in raw_bbox]
-            ys = [float(v.get("y", 0.0)) for v in raw_bbox]
-            raw_bbox = [min(ys), min(xs), max(ys), max(xs)]
-            effective_format = (
-                "yxyx_norm"
-                if max(xs + ys) <= 1.05
-                else ("xyxy_px" if (image_width or m.default_image_width) else "ymin_xmin_ymax_xmax_1000")
-            )
-            if effective_format == "xyxy_px":
-                raw_bbox = [min(xs), min(ys), max(xs), max(ys)]
-        if raw_bbox is None:
-            raise GroundTruthError(
-                f"Ground-truth item #{idx} has no bounding box under field '{m.bbox_field}'. "
-                f"Available fields: {sorted(raw_item)}"
-            )
-
-        bbox = convert_bbox(
-            raw_bbox,
-            bbox_format=effective_format,
-            image_width=image_width or m.default_image_width,
-            image_height=image_height or m.default_image_height,
-        )
-
-        raw_id = ex(raw_item, m.item_id_field, "item_id", "id")
-        try:
-            item_id = int(raw_id) if raw_id is not None and str(raw_id).strip() != "" else idx
-        except (TypeError, ValueError):
-            item_id = idx
-
-        reserved_keys = {
-            m.item_id_field, "item_id", "id",
-            m.brand_field, "brand", "brand_name", "manufacturer",
-            m.product_name_field, "product_name", "sku_name", "title",
-            m.category_field, "category",
-            m.subcategory_field, "subcategory",
-            m.variant_field, "variant",
-            m.packaging_type_field, "packaging_type",
-            m.pack_type_field, "pack_type",
-            m.size_field, "size", "pack_size",
-            m.sku_id_field, "sku_id", "sku_code", "ean", "gtin",
-            m.bbox_field, "bbox", "bbox_2d", "box_2d", "bounding_box",
-            "ymin", "xmin", "ymax", "xmax", "y_min", "x_min", "y_max", "x_max", "x", "y", "width", "height",
-            "boundingPoly", "normalizedVertices", "vertices",
-            m.shelf_row_field, "shelf_row", "row",
-            m.back_row_field, "back_row", "is_back_row",
-            m.occluded_field, "occluded", "is_occluded",
-            m.image_key_field, "image_id", "shelf_image_uri", "image_uri", "gcs_uri", "file_name",
-            m.image_width_field, m.image_height_field, "image_width", "image_height",
-            "extra_attributes", "attributes",
-        }
-        extra_attrs: Dict[str, Any] = {}
-        if isinstance(raw_item.get("attributes"), dict):
-            for k, v in raw_item["attributes"].items():
-                if k not in reserved_keys and v is not None:
-                    extra_attrs[str(k)] = v
-        if isinstance(raw_item.get("extra_attributes"), dict):
-            for k, v in raw_item["extra_attributes"].items():
-                if v is not None:
-                    extra_attrs[str(k)] = v
-        for k, v in raw_item.items():
-            if k not in reserved_keys and v is not None and not isinstance(v, (dict, list)):
-                extra_attrs[str(k)] = v
-
-        return GroundTruthProductItem(
-            item_id=item_id,
-            brand=str(ex(raw_item, m.brand_field, "brand", "brand_name", "manufacturer", "attributes.brand") or ""),
-            product_name=str(ex(raw_item, m.product_name_field, "product_name", "sku_name", "title", "attributes.product_name") or ""),
-            category=ex(raw_item, m.category_field, "category", "attributes.category"),
-            subcategory=ex(raw_item, m.subcategory_field, "subcategory", "attributes.subcategory"),
-            variant=ex(raw_item, m.variant_field, "variant", "attributes.variant"),
-            packaging_type=ex(raw_item, m.packaging_type_field, "packaging_type", "attributes.packaging_type"),
-            pack_type=ex(raw_item, m.pack_type_field, "pack_type", "attributes.pack_type"),
-            size=ex(raw_item, m.size_field, "size", "pack_size", "attributes.size"),
-            sku_id=ex(raw_item, m.sku_id_field, "sku_id", "sku_code", "ean", "gtin", "attributes.sku_id"),
-            bbox_2d=bbox,
-            shelf_row=str(ex(raw_item, m.shelf_row_field, "shelf_row", "row") or "middle"),
-            back_row=_as_bool(ex(raw_item, m.back_row_field, "back_row", "is_back_row")),
-            occluded=_as_bool(ex(raw_item, m.occluded_field, "occluded", "is_occluded")),
-            extra_attributes=extra_attrs,
+        return GroundTruthItemMapper(self.mapping).map_raw_item(
+            raw_item,
+            idx=idx,
+            image_width=image_width,
+            image_height=image_height,
         )
 
     def _filter_items(self, items: List[GroundTruthProductItem]) -> List[GroundTruthProductItem]:

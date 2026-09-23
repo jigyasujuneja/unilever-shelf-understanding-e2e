@@ -24,8 +24,8 @@ See `docs/EVALUATION_PROTOCOL.md`.
 
 from __future__ import annotations
 
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from shelf_benchmark import register_approach_function

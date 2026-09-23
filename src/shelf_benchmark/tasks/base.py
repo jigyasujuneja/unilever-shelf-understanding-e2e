@@ -1,55 +1,65 @@
-"""Abstract Base Task providing standardized execution, token extraction, cost calculation, accuracy scoring, and OpenTelemetry logging."""
+"""Abstract base task: declares *how to call the model*, and delegates everything else.
+
+A task's only job is `invoke_model()`. Timing, retry, token accounting, the separated GCP cost
+model, ground-truth scoring, OpenTelemetry spans and execution-trace provenance all live in
+`shelf_benchmark.pipeline`, which the approach-plugin path shares. Before that module existed,
+this file and `approaches/base.py` each implemented that logic separately and disagreed -- see
+the `pipeline` module docstring for the list of divergences and what they cost.
+"""
 
 from __future__ import annotations
 
 import logging
-import time
-import uuid
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from google import genai
 
 from shelf_benchmark.auth import create_genai_client
 from shelf_benchmark.config import BenchmarkConfig
 from shelf_benchmark.data.storage import StorageManager
-from shelf_benchmark.evaluation.cost import compute_cost_metrics
-from shelf_benchmark.evaluation.metrics import evaluate_task_accuracy
 from shelf_benchmark.models import (
     ImageGroundTruth,
     RowLevelReportItem,
     TaskExecutionResult,
     TokenUsageMetrics,
 )
+from shelf_benchmark.pipeline import (
+    InvocationContext,
+    PipelineExecutor,
+    RawInvocation,
+    RetryPolicy,
+)
 from shelf_benchmark.telemetry import OpenTelemetryBenchmarkLogger
 
 logger = logging.getLogger(__name__)
-
-_WARNED_UNPRICED_MODELS: Set[str] = set()
-
-
-def _warn_unpriced_model(model_name: str) -> None:
-    """Warn once per process that a model is being costed off the generic 'default' rate card.
-
-    Without this, an unrecognized model name produces plausible-looking dollar figures that are
-    really just the default Gemini Flash rates, which silently corrupts cost comparisons.
-    """
-    if model_name in _WARNED_UNPRICED_MODELS:
-        return
-    _WARNED_UNPRICED_MODELS.add(model_name)
-    logger.warning(
-        "No explicit token pricing for model '%s'; falling back to the 'default' rate card. "
-        "Cost figures for this model are estimates. Add an entry under "
-        "'pricing_per_million_tokens' in your config to fix this.",
-        model_name,
-    )
-
 
 
 class BaseBenchmarkTask(ABC):
     """Base class for separated Shelf Understanding tasks."""
 
     task_type: str = "base"
+
+    #: Approach id reported when the caller does not pass `separation_approach=`.
+    #:
+    #: Declared per subclass rather than defaulted inside `execute()`. The fallback used to be the
+    #: literal "single_pass_full_shelf" -- a *classification* approach id -- so the fine-tuning
+    #: task, which never sets one, labelled every row, cost record and GCP billing label as if it
+    #: had run classification. `__init_subclass__` below turns that omission into an import-time
+    #: error instead of a plausible-looking wrong label in a report.
+    default_separation_approach: str = ""
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Skip intermediate abstract bases that do not declare a concrete task.
+        if getattr(cls, "task_type", "base") == "base":
+            return
+        if not getattr(cls, "default_separation_approach", ""):
+            raise TypeError(
+                f"{cls.__name__} sets task_type={cls.task_type!r} but no "
+                f"`default_separation_approach`. Declare one; reports, cost attribution and GCP "
+                f"billing labels are all keyed on it."
+            )
 
     def __init__(
         self,
@@ -62,6 +72,7 @@ class BaseBenchmarkTask(ABC):
         self.storage = storage_manager
         self.telemetry = telemetry_logger
         self._genai_client = genai_client
+        self._executor = PipelineExecutor(config=config, telemetry=telemetry_logger)
 
     def get_client(self, location: Optional[str] = None) -> genai.Client:
         if self._genai_client is not None and location is None:
@@ -69,14 +80,6 @@ class BaseBenchmarkTask(ABC):
         return create_genai_client(
             project_id=self.config.gcp.project_id,
             location=location or self.config.gcp.location,
-        )
-
-    def _get_billing_engine(self):
-        from shelf_benchmark.evaluation.gcp_billing import GCPBillingAndCostEngine
-
-        return GCPBillingAndCostEngine(
-            project_id=self.config.gcp.project_id,
-            billing_cfg=self.config.billing,
         )
 
     @abstractmethod
@@ -97,195 +100,44 @@ class BaseBenchmarkTask(ABC):
         ground_truth: Optional[ImageGroundTruth] = None,
         **kwargs: Any,
     ) -> TaskExecutionResult:
-        """Standardized execution wrapper recording start_time, end_time, OTel telemetry, cost, accuracy, and row-level records."""
-        active_run_id = run_id or f"run-{uuid.uuid4().hex[:8]}"
-        separation_approach = str(kwargs.get("separation_approach") or "single_pass_full_shelf")
+        """Invoke the task and finalise it through the shared pipeline.
 
-        from shelf_benchmark.config import normalize_vertex_gemini_model_id
-
-        # Enforce Gemini 3+ policy (raises ValueError if legacy gemini-2.5/2.0/1.x is passed)
-        live_vertex_model = normalize_vertex_gemini_model_id(
-            model_name,
-            for_live_vertex=not bool(self.config.offline.enabled),
+        All of the timing, retry, cost, scoring, telemetry and trace logic that used to live here
+        now lives in `shelf_benchmark.pipeline`, shared with the approach-plugin path. See that
+        module's docstring for the divergences this collapse fixed.
+        """
+        # Copy before popping: the previous implementation did `kwargs.pop("max_attempts", 3)` on
+        # the caller's own dict when it was splatted in, silently removing the key for the caller.
+        invoke_kwargs = dict(kwargs)
+        max_attempts = int(invoke_kwargs.pop("max_attempts", 3))
+        approach_id = str(
+            invoke_kwargs.get("separation_approach") or self.default_separation_approach
         )
 
-        status = "SUCCESS"
-        error_message: Optional[str] = None
-        raw_output: Dict[str, Any] = {}
-        tokens = TokenUsageMetrics()
-        rows: List[RowLevelReportItem] = []
+        def _invoke(live_vertex_model: str) -> RawInvocation:
+            raw_output, tokens, rows = self.invoke_model(
+                model_name=live_vertex_model,
+                shelf_image_uri=shelf_image_uri,
+                ground_truth=ground_truth,
+                **invoke_kwargs,
+            )
+            return RawInvocation(
+                rows=list(rows or []),
+                tokens=tokens,
+                raw_output=dict(raw_output or {}),
+            )
 
-        start_dt = self.telemetry.now_utc()
-        start_iso = self.telemetry.format_iso(start_dt)
-        cpu_start_sec = time.process_time()
-
-        max_attempts = int(kwargs.pop("max_attempts", 3))
-        for attempt in range(1, max_attempts + 1):
-            start_dt = self.telemetry.now_utc()
-            start_iso = self.telemetry.format_iso(start_dt)
-            cpu_start_sec = time.process_time()
-            try:
-                raw_output, tokens, rows = self.invoke_model(
-                    model_name=live_vertex_model,
-                    shelf_image_uri=shelf_image_uri,
-                    ground_truth=ground_truth,
-                    **kwargs,
-                )
-                status = "SUCCESS"
-                error_message = None
-                break
-            except Exception as exc:
-                status = "ERROR"
-                error_message = f"{type(exc).__name__}: {exc}"
-                if attempt < max_attempts:
-                    logger.warning(
-                        "Attempt %d/%d failed for task=%s model=%s image=%s: %s. Retrying.",
-                        attempt, max_attempts, self.task_type, model_name, shelf_image_uri, error_message,
-                    )
-                    time.sleep(2.0 * attempt)
-                else:
-                    logger.error(
-                        "All %d attempts failed for task=%s model=%s image=%s. "
-                        "Emitting an ERROR row; this image contributes no metrics.",
-                        max_attempts, self.task_type, model_name, shelf_image_uri,
-                        exc_info=exc,
-                    )
-
-        end_dt = self.telemetry.now_utc()
-        end_iso = self.telemetry.format_iso(end_dt)
-        latency_ms = round((end_dt - start_dt).total_seconds() * 1000.0, 3)
-        measured_cpu_ms = max(12.0, round((time.process_time() - cpu_start_sec) * 1000.0, 2))
-
-        if rows and rows[0].separation_approach:
-            separation_approach = rows[0].separation_approach
-
-        pricing = self.config.get_pricing(model_name)
-        if self.config.warn_on_unpriced_model and not self.config.has_explicit_pricing(model_name):
-            _warn_unpriced_model(model_name)
-        billing_engine = self._get_billing_engine()
-        gcp_labels = billing_engine.build_gcp_billing_labels(
-            run_id=active_run_id,
-            approach_id=separation_approach,
-            task_type=self.task_type,
-            model_name=model_name,
-        )
-        eff_facings = max(1, len(rows))
-        per_facing_embed_usd = self.config.billing.embeddings_and_vision.per_facing_usd(
-            task_type=self.task_type,
-            approach_id=separation_approach,
-        )
-        extra_embed_vision_usd = round(eff_facings * per_facing_embed_usd, 8)
-
-        cost = compute_cost_metrics(
-            tokens=tokens,
-            pricing=pricing,
-            product_count=len(rows),
-            latency_ms=latency_ms,
-            extra_embedding_or_vision_cost_usd=extra_embed_vision_usd,
-            billing_cfg=self.config.billing,
-            project_id=self.config.gcp.project_id,
-            model_name=model_name,
-            gcp_labels=gcp_labels,
-            container_cpu_active_ms=measured_cpu_ms,
+        return self._executor.run(
+            _invoke,
+            InvocationContext(
+                task_type=self.task_type,
+                approach_id=approach_id,
+                model_name=model_name,
+                shelf_image_uri=shelf_image_uri,
+                run_id=run_id or "",
+                store_id=store_id,
+                ground_truth=ground_truth,
+            ),
+            RetryPolicy(max_attempts=max_attempts),
         )
 
-        for r in rows:
-            r.run_id = active_run_id
-            r.task_type = self.task_type
-            r.separation_approach = separation_approach
-            r.model_name = model_name
-            r.shelf_image_uri = shelf_image_uri
-            r.store_id = store_id
-            r.start_time = start_iso
-            r.end_time = end_iso
-            r.image_latency_ms = latency_ms
-            r.input_tokens = tokens.input_tokens
-            r.thinking_tokens = tokens.thinking_tokens
-            r.output_tokens = tokens.output_tokens
-            r.total_tokens = tokens.total_tokens
-            r.cost_per_shelf_image_usd = cost.cost_per_shelf_image_usd
-            r.cost_per_product_usd = cost.cost_per_product_usd
-            r.vertex_ai_payg_tokens_usd = cost.vertex_ai_payg_tokens_usd
-            r.vertex_ai_provisioned_throughput_usd = cost.vertex_ai_provisioned_throughput_usd
-            r.vertex_ai_embeddings_and_vision_usd = cost.vertex_ai_embeddings_and_vision_usd
-            r.cloud_run_compute_usd = cost.cloud_run_compute_usd
-            r.gcs_and_observability_usd = cost.gcs_and_observability_usd
-            r.traffic_type = cost.traffic_type
-            r.billing_source = cost.billing_source
-
-        accuracy = evaluate_task_accuracy(
-            task_type=self.task_type,
-            rows=rows,
-            ground_truth=ground_truth,
-            config=self.config.evaluation,
-        )
-        accuracy.depth_duplicates_filtered = int(raw_output.get("depth_duplicates_filtered", 0) or 0)
-
-        for r in rows:
-            r.gt_version = accuracy.gt_version
-            r.iou_threshold = accuracy.iou_threshold
-
-        trace_id, span_id, _ = self.telemetry.log_task_execution(
-            run_id=active_run_id,
-            task_type=self.task_type,
-            model_name=model_name,
-            shelf_image_uri=shelf_image_uri,
-            start_dt=start_dt,
-            end_dt=end_dt,
-            tokens=tokens,
-            cost=cost,
-            accuracy=accuracy,
-            status=status,
-            error_message=error_message,
-            extra_attributes={
-                "shelf_benchmark.separation_approach": separation_approach,
-                "shelf_benchmark.depth_duplicates_filtered": accuracy.depth_duplicates_filtered,
-            },
-        )
-
-        for r in rows:
-            r.trace_id = trace_id
-            r.span_id = span_id
-
-        from shelf_benchmark.models import build_execution_trace_metadata
-
-        raw_output["execution_trace"] = build_execution_trace_metadata(
-            run_id=active_run_id,
-            trace_id=trace_id,
-            span_id=span_id,
-            task_type=self.task_type,
-            separation_approach=separation_approach,
-            model_name=model_name,
-            shelf_image_uri=shelf_image_uri,
-            latency_ms=latency_ms,
-            tokens=tokens,
-            cost=cost,
-            accuracy=accuracy,
-            facings_count=len(rows),
-            otel_log_path=str(self.config.telemetry.otel_log_path),
-            gcp_project_id=self.config.gcp.project_id,
-            gcp_log_name=self.config.telemetry.gcp_log_name,
-            taxonomy_source=self.config.taxonomy.taxonomy_file,
-            ground_truth_provider=self.config.ground_truth.provider_type,
-            reference_catalog_uri=self.config.embeddings.reference_catalog.source_uri,
-        )
-
-        return TaskExecutionResult(
-            run_id=active_run_id,
-            trace_id=trace_id,
-            span_id=span_id,
-            task_type=self.task_type,
-            separation_approach=separation_approach,
-            model_name=model_name,
-            shelf_image_uri=shelf_image_uri,
-            start_time=start_iso,
-            end_time=end_iso,
-            latency_ms=latency_ms,
-            tokens=tokens,
-            cost=cost,
-            accuracy=accuracy,
-            raw_output=raw_output,
-            row_level_items=rows,
-            status=status,
-            error_message=error_message,
-        )

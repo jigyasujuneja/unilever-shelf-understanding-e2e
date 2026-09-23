@@ -7,6 +7,79 @@
 let DASHBOARD_DATA = null;
 let SHELF_IMAGE_OBJ = null;
 
+// ============================================================================
+// OUTPUT ENCODING
+//
+// Everything this dashboard renders that did not originate in this file is
+// untrusted input: brand / product / variant strings are model-generated, the
+// catalog and ground-truth rows are operator-supplied files, approach plugins
+// self-report their display names and stage descriptions, and OTel attributes
+// are read off disk. All of it must be escaped before it is interpolated into
+// an innerHTML template literal or into an HTML attribute value, otherwise a
+// crafted product name on a shelf becomes script in the operator's browser.
+//
+// Interactive controls are wired via delegated listeners keyed on data-action
+// (see setupDelegatedActions) rather than inline on* attributes, because an
+// inline handler assembled by string interpolation puts untrusted text directly
+// into a JavaScript parsing context, where HTML escaping alone does not help.
+// ============================================================================
+const HTML_ESCAPES = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).replace(/[&<>"']/g, (ch) => HTML_ESCAPES[ch]);
+}
+
+// Short alias; this is used at well over a hundred interpolation sites.
+const esc = escapeHtml;
+
+// ============================================================================
+// HONEST RENDERING OF MEASUREMENTS
+//
+// A benchmark that prints a plausible number where it holds no measurement is
+// worse than one that prints nothing, because the reader cannot tell the two
+// apart. These helpers render an explicit marker instead of falling back to 0,
+// 1.0, or any other good-looking default.
+//
+// reportedNumber() is defined further down next to the cost helpers; function
+// declarations hoist, so it is callable from here.
+// ============================================================================
+const NOT_MEASURED_HTML = `<span class="muted">not measured</span>`;
+const NOT_REPORTED_HTML = `<span class="muted">not reported</span>`;
+const NOT_MEASURED_TEXT = "not measured";
+
+function fmtFixed(value, digits, fallback = NOT_REPORTED_HTML) {
+  const n = reportedNumber(value);
+  return n === null ? fallback : n.toFixed(digits);
+}
+
+function fmtUsd(value, digits = 6, fallback = NOT_REPORTED_HTML) {
+  const n = reportedNumber(value);
+  return n === null ? fallback : `$${n.toFixed(digits)}`;
+}
+
+function fmtMs(value, digits = 1, fallback = NOT_REPORTED_HTML) {
+  const n = reportedNumber(value);
+  return n === null ? fallback : `${n.toFixed(digits)} ms`;
+}
+
+// Expects a 0..1 ratio (confidence, accuracy, F1).
+function fmtPercent(value, digits = 1, fallback = NOT_MEASURED_HTML) {
+  const n = reportedNumber(value);
+  return n === null ? fallback : `${(n * 100).toFixed(digits)}%`;
+}
+
+function fmtCount(value, fallback = NOT_REPORTED_HTML) {
+  const n = reportedNumber(value);
+  return n === null ? fallback : String(n);
+}
+
 // Per-container state for selected model, selected facing index, and depth toggle
 const CONTAINER_STATE = {
   "pipeline-container-path-1": { approachId: "single_pass_full_shelf", model: "gemini-3.8-flash", selectedIdx: 0, showDepth: true, livePayload: null },
@@ -149,6 +222,7 @@ const USE_CASE_PATHS = {
 
 document.addEventListener("DOMContentLoaded", async () => {
   setupTabNavigation();
+  setupDelegatedActions();
   await loadShelfImage();
   await fetchDashboardData();
   renderOverviewTab();
@@ -164,6 +238,61 @@ function setupTabNavigation() {
       const targetTab = btn.getAttribute("data-tab");
       switchToTab(targetTab);
     });
+  });
+}
+
+// Single pair of delegated listeners for every dynamically rendered control.
+// Panels are re-rendered wholesale via innerHTML, so listeners attached to the
+// individual elements would be thrown away on each render; delegating from
+// `document` survives that. Parameters travel in data-* attributes (escaped as
+// ordinary attribute values) instead of being spliced into executable JS.
+function setupDelegatedActions() {
+  const actionTarget = (evt) =>
+    evt.target && evt.target.closest ? evt.target.closest("[data-action]") : null;
+
+  document.addEventListener("click", (evt) => {
+    const el = actionTarget(evt);
+    if (!el) return;
+    switch (el.getAttribute("data-action")) {
+      case "switch-tab":
+        switchToTab(el.getAttribute("data-tab-id"));
+        break;
+      case "open-live-studio":
+        openInLiveStudio(
+          el.getAttribute("data-approach-id"),
+          el.getAttribute("data-model-name")
+        );
+        break;
+      case "jump-path-model":
+        jumpToPathAndModel(
+          el.getAttribute("data-approach-id"),
+          el.getAttribute("data-model-name")
+        );
+        break;
+      case "select-facing":
+        selectPipelineFacing(
+          el.getAttribute("data-container-id"),
+          Number(el.getAttribute("data-facing-idx"))
+        );
+        break;
+      default:
+        break;
+    }
+  });
+
+  document.addEventListener("change", (evt) => {
+    const el = actionTarget(evt);
+    if (!el) return;
+    switch (el.getAttribute("data-action")) {
+      case "change-model":
+        changePipelineModel(el.getAttribute("data-container-id"), el.value);
+        break;
+      case "toggle-depth":
+        togglePipelineDepth(el.getAttribute("data-container-id"), el.checked);
+        break;
+      default:
+        break;
+    }
   });
 }
 
@@ -253,11 +382,11 @@ function renderOverviewTab() {
       (r) => r.task_type === "classification" && r.separation_approach === pathMeta.id && r.model_name === "gemini-3.8-flash"
     ) || {};
     const facings = rec38.front_facings_count ?? "--";
-    const latency = rec38.latency_ms ? `${rec38.latency_ms.toFixed(0)} ms` : "--";
-    const costImg = rec38.cost_per_shelf_image_usd != null ? `$${rec38.cost_per_shelf_image_usd.toFixed(5)}` : "--";
+    const latency = fmtMs(rec38.latency_ms, 0, "--");
+    const costImg = fmtUsd(rec38.cost_per_shelf_image_usd, 5, "--");
 
     const stepsHtml = pathMeta.steps.map(
-      (s) => `<li class="mini-flow-item"><strong>${s.num}:</strong> ${s.title}</li>`
+      (s) => `<li class="mini-flow-item"><strong>${esc(s.num)}:</strong> ${esc(s.title)}</li>`
     ).join("");
 
     return `
@@ -265,23 +394,23 @@ function renderOverviewTab() {
         <div>
           <div class="usecase-card-header">
             <span class="usecase-tag">Use Case ${idx + 1}</span>
-            <span class="mono muted" style="font-size:11px;">${pathMeta.architectureTag}</span>
+            <span class="mono muted" style="font-size:11px;">${esc(pathMeta.architectureTag)}</span>
           </div>
-          <h3>${pathMeta.shortLabel}</h3>
-          <p class="muted">${pathMeta.summary}</p>
+          <h3>${esc(pathMeta.shortLabel)}</h3>
+          <p class="muted">${esc(pathMeta.summary)}</p>
           <ul class="mini-flow-list">${stepsHtml}</ul>
         </div>
         <div>
           <div style="display:flex; justify-content:space-between; font-size:12px; background:#f8fafc; padding:8px 10px; border-radius:6px; margin-bottom:10px;">
-            <span><strong>3.8-flash:</strong> ${facings} facings</span>
+            <span><strong>3.8-flash:</strong> ${esc(facings)} facings</span>
             <span><strong>Latency:</strong> ${latency}</span>
             <span><strong>Cost:</strong> ${costImg}</span>
           </div>
           <div class="usecase-actions">
-            <button class="btn-primary" onclick="switchToTab('${pathMeta.tabId}')">
+            <button class="btn-primary" data-action="switch-tab" data-tab-id="${esc(pathMeta.tabId)}">
               Inspect Step-by-Step Flow &rarr;
             </button>
-            <button class="btn-secondary" onclick="openInLiveStudio('${pathMeta.id}', 'gemini-3.8-flash')">
+            <button class="btn-secondary" data-action="open-live-studio" data-approach-id="${esc(pathMeta.id)}" data-model-name="gemini-3.8-flash">
               &#9889; Run Live
             </button>
           </div>
@@ -309,13 +438,13 @@ function renderOverviewTab() {
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Fastest Classification Path</div>
-      <div class="kpi-value">${fastestRun ? (fastestRun.latency_ms / 1000).toFixed(1) + "s" : "--"}</div>
-      <div class="kpi-sub">${fastestRun ? `${fastestRun.separation_approach} (${fastestRun.model_name})` : ""}</div>
+      <div class="kpi-value">${fastestRun ? fmtFixed(reportedNumber(fastestRun.latency_ms) === null ? null : fastestRun.latency_ms / 1000, 1, "--") + "s" : "--"}</div>
+      <div class="kpi-sub">${fastestRun ? `${esc(fastestRun.separation_approach)} (${esc(fastestRun.model_name)})` : ""}</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Lowest Cost / Shelf Image</div>
-      <div class="kpi-value">${lowestCostRun ? "$" + lowestCostRun.cost_per_shelf_image_usd.toFixed(5) : "--"}</div>
-      <div class="kpi-sub">${lowestCostRun ? `${lowestCostRun.separation_approach} (${lowestCostRun.model_name})` : ""}</div>
+      <div class="kpi-value">${lowestCostRun ? fmtUsd(lowestCostRun.cost_per_shelf_image_usd, 5, "--") : "--"}</div>
+      <div class="kpi-sub">${lowestCostRun ? `${esc(lowestCostRun.separation_approach)} (${esc(lowestCostRun.model_name)})` : ""}</div>
     </div>
   `;
 
@@ -334,21 +463,21 @@ function renderOverviewTab() {
     tbody.innerHTML = filtered.map((r) => {
       const pathMeta = USE_CASE_PATHS[r.separation_approach];
       const jumpBtn = pathMeta
-        ? `<button class="btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="jumpToPathAndModel('${r.separation_approach}', '${r.model_name}')">Open Path</button>`
+        ? `<button class="btn-secondary" style="padding:4px 8px; font-size:11px;" data-action="jump-path-model" data-approach-id="${esc(r.separation_approach)}" data-model-name="${esc(r.model_name)}">Open Path</button>`
         : `<span class="muted">Standalone</span>`;
       return `
         <tr>
-          <td><strong>${pathMeta ? pathMeta.shortLabel : r.separation_approach}</strong></td>
-          <td><code>${r.task_type}</code></td>
-          <td><code>${r.model_name}</code></td>
-          <td><strong>${r.front_facings_count}</strong></td>
-          <td>${r.depth_duplicates_filtered || 0}</td>
-          <td>${r.latency_ms.toFixed(1)}</td>
-          <td>${r.input_tokens}</td>
-          <td>${r.thinking_tokens}</td>
-          <td>${r.output_tokens}</td>
-          <td><strong>$${r.cost_per_shelf_image_usd.toFixed(6)}</strong></td>
-          <td>$${r.cost_per_product_usd.toFixed(6)}</td>
+          <td><strong>${esc(pathMeta ? pathMeta.shortLabel : r.separation_approach)}</strong></td>
+          <td><code>${esc(r.task_type)}</code></td>
+          <td><code>${esc(r.model_name)}</code></td>
+          <td><strong>${fmtCount(r.front_facings_count)}</strong></td>
+          <td>${fmtCount(r.depth_duplicates_filtered)}</td>
+          <td>${fmtFixed(r.latency_ms, 1)}</td>
+          <td>${fmtCount(r.input_tokens)}</td>
+          <td>${fmtCount(r.thinking_tokens)}</td>
+          <td>${fmtCount(r.output_tokens)}</td>
+          <td><strong>${fmtUsd(r.cost_per_shelf_image_usd)}</strong></td>
+          <td>${fmtUsd(r.cost_per_product_usd)}</td>
           <td>${jumpBtn}</td>
         </tr>
       `;
@@ -404,8 +533,11 @@ function getPipelineRunData(approachId, modelName, livePayload) {
   const rows = (DASHBOARD_DATA.rows || []).filter(
     (r) => r.task_type === "classification" && r.separation_approach === approachId && r.model_name === modelName
   );
-  const cropsKey = approachId === "class_agnostic_visual_embedding" ? `visual_embed_${modelName}` : modelName;
-  const cropsInfo = (DASHBOARD_DATA.crops_manifest || {})[cropsKey] || (DASHBOARD_DATA.crops_manifest || {})[modelName] || {};
+  // The manifest is keyed by "<model>_<approach>" (see ui/server.py:188 and the
+  // directory names under reports/crops/). The previous keys ("visual_embed_<model>"
+  // and a bare "<model>") matched nothing, so cropsInfo was always empty.
+  const cropsKey = `${modelName}_${approachId}`;
+  const cropsInfo = (DASHBOARD_DATA.crops_manifest || {})[cropsKey] || {};
   const depthDemo = (DASHBOARD_DATA.depth_demos || {})[modelName] || {};
   return { isLiveRun: false, summaryRec, rows, cropsInfo, depthDemo };
 }
@@ -433,9 +565,9 @@ function renderUseCasePipeline(containerId) {
   // 1. Build Linear Flowchart Stepper HTML
   const flowStepperHtml = pathMeta.steps.map((s) => `
     <div class="flow-step-node done-stage">
-      <span class="flow-step-num">${s.num}</span>
-      <div class="flow-step-title">${s.title}</div>
-      <div class="flow-step-desc">${s.desc}</div>
+      <span class="flow-step-num">${esc(s.num)}</span>
+      <div class="flow-step-title">${esc(s.title)}</div>
+      <div class="flow-step-desc">${esc(s.desc)}</div>
     </div>
   `).join("");
 
@@ -459,22 +591,24 @@ function renderUseCasePipeline(containerId) {
       <div class="linear-step-card">
         <div class="linear-step-header">
           <h3><span class="step-badge-pill">Step 2</span> Coordinate-Conditioned 7-Dimension Classification (Stage 1 Boxes &rarr; Stage 2 VLM Prompt)</h3>
-          <span class="muted">Stage 1 filtered <strong>${rawCount} raw candidates &rarr; ${rows.length} front facings</strong> (${filteredCount} back-row depth duplicates removed) before Stage 2 classification.
-          ${depthDemo.suppressed_boxes_note ? `<br /><em>${depthDemo.suppressed_boxes_note}</em>` : ""}</span>
+          <span class="muted">Stage 1 filtered <strong>${esc(rawCount)} raw candidates &rarr; ${rows.length} front facings</strong> (${esc(filteredCount)} back-row depth duplicates removed) before Stage 2 classification.
+          ${depthDemo.suppressed_boxes_note ? `<br /><em>${esc(depthDemo.suppressed_boxes_note)}</em>` : ""}</span>
         </div>
         ${buildSevenDimensionTableHtml(rows, containerId, state.selectedIdx, false)}
       </div>
     `;
   } else if (approachId === "two_stage_physical_crop_per_facing") {
-    const cropFiles = cropsInfo.crop_files || [];
-    const montageUrl = cropsInfo.montage_file || "";
+    // The server emits {montage_url, facing_urls} (ui/server.py:188-191). Reading
+    // crop_files / montage_file meant this gallery could never render.
+    const cropFiles = cropsInfo.facing_urls || [];
+    const montageUrl = cropsInfo.montage_url || "";
     const cropsGalleryHtml = cropFiles.map((url, idx) => {
       const r = rows[idx] || {};
       return `
-        <div class="crop-card" onclick="selectPipelineFacing('${containerId}', ${idx})" style="cursor:pointer; border-color:${idx === state.selectedIdx ? '#0057b8' : '#e2e8f0'}">
-          <img src="${url}" alt="Facing #${idx + 1}" loading="lazy" />
+        <div class="crop-card" data-action="select-facing" data-container-id="${esc(containerId)}" data-facing-idx="${idx}" style="cursor:pointer; border-color:${idx === state.selectedIdx ? '#0057b8' : '#e2e8f0'}">
+          <img src="${esc(url)}" alt="Facing #${idx + 1}" loading="lazy" />
           <div><strong>Facing #${idx + 1}</strong></div>
-          <div class="muted" style="font-size:11px;">${r.predicted_brand || "Crop"} (${r.predicted_size || ""})</div>
+          <div class="muted" style="font-size:11px;">${esc(r.predicted_brand) || "Crop"} (${esc(r.predicted_size)})</div>
         </div>
       `;
     }).join("");
@@ -485,7 +619,7 @@ function renderUseCasePipeline(containerId) {
           <h3><span class="step-badge-pill">Step 2</span> Physical PIL Bounding-Box Cropping (<code>facing_01..${cropFiles.length}.png</code>) &amp; Numbered Montage Strip</h3>
           <span class="muted">Each detected front-facing bounding box is physically cropped from the shelf image and assembled into a numbered montage strip.</span>
         </div>
-        ${montageUrl ? `<div style="margin-bottom:12px;"><div class="muted" style="margin-bottom:4px; font-weight:600;">Numbered Montage Strip Sent to Gemini Stage 2 (<code>${montageUrl}</code>):</div><img src="${montageUrl}" alt="Montage Strip" style="max-width:100%; border-radius:6px; border:1px solid #cbd5e1;" /></div>` : ""}
+        ${montageUrl ? `<div style="margin-bottom:12px;"><div class="muted" style="margin-bottom:4px; font-weight:600;">Numbered Montage Strip Sent to Gemini Stage 2 (<code>${esc(montageUrl)}</code>):</div><img src="${esc(montageUrl)}" alt="Montage Strip" style="max-width:100%; border-radius:6px; border:1px solid #cbd5e1;" /></div>` : ""}
         <div class="crops-strip">${cropsGalleryHtml}</div>
       </div>
 
@@ -498,19 +632,19 @@ function renderUseCasePipeline(containerId) {
       </div>
     `;
   } else if (approachId === "class_agnostic_visual_embedding") {
-    const cropFiles = cropsInfo.crop_files || [];
+    const cropFiles = cropsInfo.facing_urls || [];
     const vectorCardsHtml = rows.map((r, idx) => {
-      const cropUrl = cropFiles[idx] || (DASHBOARD_DATA.crops_manifest[modelName]?.crop_files?.[idx] || "");
-      // Deterministic preview slice of the 1408-D vector from row metadata
-      const seed = (idx + 1) * 0.0137;
-      const vecSlice = `[${(0.0412 + seed).toFixed(4)}, ${(-0.0289 + seed).toFixed(4)}, ${(0.0631 - seed).toFixed(4)}, ..., ${(0.0194 + seed).toFixed(4)}]`;
+      const cropUrl = cropFiles[idx] || "";
+      // The actual 1408-D embedding is never sent to the browser. This card used
+      // to print a "preview slice" synthesised from (idx + 1) * 0.0137 and label
+      // it as the vector, which is fabricated data presented as a measurement.
       return `
-        <div class="crop-card" onclick="selectPipelineFacing('${containerId}', ${idx})" style="cursor:pointer; border-color:${idx === state.selectedIdx ? '#7c3aed' : '#e2e8f0'}">
-          ${cropUrl ? `<img src="${cropUrl}" alt="Class-Agnostic Crop #${idx + 1}" loading="lazy" />` : `<div style="height:80px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;">Crop #${idx + 1}</div>`}
+        <div class="crop-card" data-action="select-facing" data-container-id="${esc(containerId)}" data-facing-idx="${idx}" style="cursor:pointer; border-color:${idx === state.selectedIdx ? '#7c3aed' : '#e2e8f0'}">
+          ${cropUrl ? `<img src="${esc(cropUrl)}" alt="Class-Agnostic Crop #${idx + 1}" loading="lazy" />` : `<div style="height:80px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;">Crop #${idx + 1}</div>`}
           <div><strong>Crop #${idx + 1} (class: "product")</strong></div>
-          <div class="vector-pill">1408-D ViT Vector<br/>${vecSlice}</div>
+          <div class="vector-pill">1408-D ViT Vector<br/><span class="muted">component values not exported to the UI</span></div>
           <div style="margin-top:5px; font-size:11px; color:#065f46; font-weight:700;">
-            ScaNN Match: ${r.predicted_brand} (${(r.confidence * 100).toFixed(1)}%)
+            ScaNN Match: ${esc(r.predicted_brand) || "--"} (${fmtPercent(r.confidence)})
           </div>
         </div>
       `;
@@ -542,22 +676,22 @@ function renderUseCasePipeline(containerId) {
     <div class="pipeline-hero-card">
       <div class="pipeline-hero-top">
         <div>
-          <span class="usecase-tag">${pathMeta.architectureTag}</span>
+          <span class="usecase-tag">${esc(pathMeta.architectureTag)}</span>
           ${isLiveRun ? `<span class="tag-hul" style="margin-left:8px;">&#9889; LIVE VERTEX AI EXECUTION OUTPUT</span>` : ""}
-          <h2>${pathMeta.title}</h2>
-          <p class="muted">${pathMeta.summary}</p>
+          <h2>${esc(pathMeta.title)}</h2>
+          <p class="muted">${esc(pathMeta.summary)}</p>
         </div>
         <div class="pipeline-controls">
           <label style="font-size:12.5px; font-weight:700;">
             Active Model:
-            <select onchange="changePipelineModel('${containerId}', this.value)">
+            <select data-action="change-model" data-container-id="${esc(containerId)}">
               <option value="gemini-3.8-flash" ${modelName === "gemini-3.8-flash" ? "selected" : ""}>gemini-3.8-flash</option>
               <option value="gemini-3.7-flash" ${modelName === "gemini-3.7-flash" ? "selected" : ""}>gemini-3.7-flash</option>
               <option value="gemini-3.5-flash-lite" ${modelName === "gemini-3.5-flash-lite" ? "selected" : ""}>gemini-3.5-flash-lite</option>
             </select>
           </label>
           ${containerId !== "pipeline-container-live" ? `
-            <button class="btn-primary btn-live-execute" style="padding:7px 13px; font-size:12.5px;" onclick="openInLiveStudio('${approachId}', '${modelName}')">
+            <button class="btn-primary btn-live-execute" style="padding:7px 13px; font-size:12.5px;" data-action="open-live-studio" data-approach-id="${esc(approachId)}" data-model-name="${esc(modelName)}">
               &#9889; Run This Path Live in Studio
             </button>
           ` : ""}
@@ -580,7 +714,7 @@ function renderUseCasePipeline(containerId) {
             : "Front-Facing Bounding-Box Localization &amp; Back-Row Depth Duplicate Suppression"}
         </h3>
         <label style="font-size:12.5px; cursor:pointer;">
-          <input type="checkbox" ${state.showDepth ? "checked" : ""} onchange="togglePipelineDepth('${containerId}', this.checked)" />
+          <input type="checkbox" ${state.showDepth ? "checked" : ""} data-action="toggle-depth" data-container-id="${esc(containerId)}" />
           Show Filtered Back-Row Depth Duplicates (Dashed Red)
         </label>
       </div>
@@ -588,7 +722,7 @@ function renderUseCasePipeline(containerId) {
       <div class="split-canvas-inspector">
         <div>
           <div class="canvas-wrapper">
-            <canvas id="canvas-${containerId}" class="shelf-canvas" width="980" height="620"></canvas>
+            <canvas id="canvas-${esc(containerId)}" class="shelf-canvas" width="980" height="620"></canvas>
           </div>
           <div class="canvas-legend">
             <span><i class="legend-dot" style="background:#10b981;"></i>HUL Brand Facing</span>
@@ -611,29 +745,29 @@ function renderUseCasePipeline(containerId) {
     <div class="linear-step-card">
       <div class="linear-step-header">
         <h3><span class="step-badge-pill">${step3Badge}</span> End-to-End Benchmark Metrics, Vector Catalog Retrieval &amp; OpenTelemetry Audit</h3>
-        <span class="mono muted">Run ID: ${summaryRec.run_id || "N/A"} &bull; Trace ID: ${summaryRec.trace_id || "N/A"}</span>
+        <span class="mono muted">Run ID: ${esc(summaryRec.run_id || "N/A")} &bull; Trace ID: ${esc(summaryRec.trace_id || "N/A")}</span>
       </div>
 
       <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-label">Front Facings Detected</div>
-          <div class="kpi-value">${summaryRec.front_facings_count ?? rows.length}</div>
-          <div class="kpi-sub">Depth Duplicates Filtered: ${summaryRec.depth_duplicates_filtered ?? 0}</div>
+          <div class="kpi-value">${esc(summaryRec.front_facings_count ?? rows.length)}</div>
+          <div class="kpi-sub">Depth Duplicates Filtered: ${fmtCount(summaryRec.depth_duplicates_filtered)}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">End-to-End Latency</div>
-          <div class="kpi-value">${summaryRec.latency_ms ? summaryRec.latency_ms.toFixed(1) + " ms" : "--"}</div>
-          <div class="kpi-sub">${summaryRec.latency_per_facing_ms ? summaryRec.latency_per_facing_ms.toFixed(1) + " ms / facing" : ""}</div>
+          <div class="kpi-value">${fmtMs(summaryRec.latency_ms, 1, "--")}</div>
+          <div class="kpi-sub">${reportedNumber(summaryRec.latency_per_facing_ms) === null ? "" : fmtMs(summaryRec.latency_per_facing_ms) + " / facing"}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Cost / Shelf Image</div>
-          <div class="kpi-value">${summaryRec.cost_per_shelf_image_usd != null ? "$" + summaryRec.cost_per_shelf_image_usd.toFixed(6) : "--"}</div>
-          <div class="kpi-sub">Cost / Facing: ${summaryRec.cost_per_product_usd != null ? "$" + summaryRec.cost_per_product_usd.toFixed(6) : "--"}</div>
+          <div class="kpi-value">${fmtUsd(summaryRec.cost_per_shelf_image_usd, 6, "--")}</div>
+          <div class="kpi-sub">Cost / Facing: ${fmtUsd(summaryRec.cost_per_product_usd, 6, "--")}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Token Breakdown</div>
-          <div class="kpi-value">${summaryRec.total_tokens ?? 0} tok</div>
-          <div class="kpi-sub">In: ${summaryRec.input_tokens ?? 0} &bull; Think: ${summaryRec.thinking_tokens ?? 0} &bull; Out: ${summaryRec.output_tokens ?? 0}</div>
+          <div class="kpi-value">${fmtCount(summaryRec.total_tokens)} tok</div>
+          <div class="kpi-sub">In: ${fmtCount(summaryRec.input_tokens)} &bull; Think: ${fmtCount(summaryRec.thinking_tokens)} &bull; Out: ${fmtCount(summaryRec.output_tokens)}</div>
         </div>
       </div>
 
@@ -659,6 +793,9 @@ function buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId) {
   const otelPath = otel.otel_log_path || "reports/otel_logs.jsonl";
   const jqCmd = otel.local_jq_command || `jq 'select(.TraceId == "${traceId}")' ${otelPath}`;
   const gcpQuery = otel.gcp_cloud_logging_query || `logName="projects/unilever-shelf-understanding/logs/unilever-shelf-benchmark-otel" AND trace="projects/unilever-shelf-understanding/traces/${traceId}"`;
+  // The IoU threshold a run was actually scored at. Falling back to 0.5 told the
+  // reader a threshold had been applied when none was recorded.
+  const iouThreshold = reportedNumber(summaryRec.iou_threshold ?? acc.iou_threshold);
 
   const fmtMetric = (v) => (v === null || v === undefined ? `<span class="muted">None (awaiting GT)</span>` : Number(v).toFixed(4));
 
@@ -671,29 +808,31 @@ function buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId) {
           <div class="inspector-grid">
             <div class="inspector-item">
               <span>Call Pattern</span>
-              <strong>${trace.call_topology || approachId}</strong>
+              <strong>${esc(trace.call_topology || approachId)}</strong>
             </div>
             <div class="inspector-item">
               <span>API Calls / Image</span>
-              <strong>${trace.api_calls_count ?? (approachId === "single_pass_full_shelf" ? 1 : 2)} call(s)</strong>
+              <strong>${trace.api_calls_count == null
+                ? NOT_REPORTED_HTML
+                : `${esc(trace.api_calls_count)} call(s)`}</strong>
             </div>
             <div class="inspector-item" style="grid-column: span 2;">
               <span>How Detection &amp; Classification Execute</span>
-              <strong>${trace.detect_and_classify_mode || "See pipeline stages above"}</strong>
+              <strong>${esc(trace.detect_and_classify_mode || "See pipeline stages above")}</strong>
             </div>
             <div class="inspector-item" style="grid-column: span 2;">
               <span>Models &amp; Services Invoked per Stage</span>
               <div>
-                ${modelsInvoked.map((m) => `<div style="margin-top:3px;"><code>${m.stage}</code> &rarr; <strong><code>${m.model}</code></strong> <span class="muted">(${m.type})</span></div>`).join("")}
+                ${modelsInvoked.map((m) => `<div style="margin-top:3px;"><code>${esc(m.stage)}</code> &rarr; <strong><code>${esc(m.model)}</code></strong> <span class="muted">(${esc(m.type)})</span></div>`).join("")}
               </div>
             </div>
             <div class="inspector-item">
               <span>Shelf Image Input</span>
-              <strong><code>${(dataUsed.shelf_image_uri || summaryRec.shelf_image_uri || "shelf-image.png").split("/").slice(-2).join("/")}</code></strong>
+              <strong><code>${esc(String(dataUsed.shelf_image_uri || summaryRec.shelf_image_uri || "shelf-image.png").split("/").slice(-2).join("/"))}</code></strong>
             </div>
             <div class="inspector-item">
               <span>Taxonomy Config</span>
-              <strong><code>${dataUsed.taxonomy_source || "configs/taxonomy.yaml"}</code></strong>
+              <strong><code>${esc(dataUsed.taxonomy_source || "(unreported)")}</code></strong>
             </div>
           </div>
         </div>
@@ -703,11 +842,11 @@ function buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId) {
           <div class="inspector-grid">
             <div class="inspector-item">
               <span>Accuracy Status</span>
-              <strong><code>${summaryRec.accuracy_status || acc.accuracy_status || "PLACEHOLDER_AWAITING_GROUND_TRUTH"}</code></strong>
+              <strong><code>${esc(summaryRec.accuracy_status || acc.accuracy_status || "PLACEHOLDER_AWAITING_GROUND_TRUTH")}</code></strong>
             </div>
             <div class="inspector-item">
               <span>GT Version &amp; IoU Threshold</span>
-              <strong><code>${summaryRec.gt_version || acc.gt_version || "unversioned"}</code> (IoU &ge; ${summaryRec.iou_threshold ?? acc.iou_threshold ?? 0.5})</strong>
+              <strong><code>${esc(summaryRec.gt_version || acc.gt_version || "unversioned")}</code> (IoU &ge; ${iouThreshold === null ? NOT_REPORTED_HTML : esc(iouThreshold)})</strong>
             </div>
             <div class="inspector-item">
               <span>Detection Precision / Recall / F1</span>
@@ -721,17 +860,17 @@ function buildOnboardingTraceAndObservabilityHtml(summaryRec, approachId) {
               <span>Why is Accuracy <code>${gtAvailable ? "Evaluated" : "None (not 0.0)"}</code>?</span>
               <div class="muted" style="font-size:12px;">
                 ${gtAvailable
-                  ? `Scored against connected ground truth (${summaryRec.gt_version || "v1"}). Geometry paired first at IoU &ge; ${summaryRec.iou_threshold ?? 0.5}; brand &amp; product scored on matched pairs.`
+                  ? `Scored against connected ground truth (${esc(summaryRec.gt_version || acc.gt_version || "unversioned")}). Geometry paired first at IoU &ge; ${iouThreshold === null ? NOT_REPORTED_HTML : esc(iouThreshold)}; brand &amp; product scored on matched pairs.`
                   : `Ground truth is not connected yet, so metrics report <code>None</code> rather than <code>0.0</code>. In Run Live Studio above, select <strong>Connect Sample GT</strong> or run <code>shelf-benchmark score</code> when annotations arrive.`}
               </div>
             </div>
             <div class="inspector-item" style="grid-column: span 2;">
               <span>OpenTelemetry Trace Lookup (Local JSONL &amp; GCP Cloud Logging)</span>
-              <pre class="code-box" style="margin:4px 0 0 0; font-size:11px; padding:8px;"># 1. Inspect span locally in ${otelPath}:
-${jqCmd}
+              <pre class="code-box" style="margin:4px 0 0 0; font-size:11px; padding:8px;"># 1. Inspect span locally in ${esc(otelPath)}:
+${esc(jqCmd)}
 
 # 2. Query in GCP Cloud Logging (Cloud Run / Vertex AI):
-${gcpQuery}</pre>
+${esc(gcpQuery)}</pre>
             </div>
           </div>
         </div>
@@ -764,12 +903,67 @@ function sumReported(values) {
   return present.length ? present.reduce((a, b) => a + b, 0) : null;
 }
 
+// Returns the OpenTelemetry records actually present for this trace id.
+// Nothing is synthesised: if the JSONL has no span, the caller renders an
+// explicit "unavailable" state.
+function realSpansForTrace(traceId) {
+  if (!traceId || traceId === "N/A") return [];
+  return ((DASHBOARD_DATA && DASHBOARD_DATA.otel_spans) || []).filter(
+    (s) => s && s.TraceId === traceId
+  );
+}
+
+// Renders one row per real span. Bar offset/width come from the recorded
+// start/end nanosecond timestamps; when those are missing the bar is omitted
+// and said to be omitted, rather than being positioned by guesswork.
+function buildRealSpanRowsHtml(spans) {
+  const starts = [];
+  const ends = [];
+  spans.forEach((s) => {
+    const attr = s.Attributes || {};
+    const st = reportedNumber(attr.start_time_unix_nano);
+    const en = reportedNumber(attr.end_time_unix_nano);
+    if (st !== null) starts.push(st);
+    if (en !== null) ends.push(en);
+  });
+  const t0 = starts.length ? Math.min(...starts) : null;
+  const t1 = ends.length ? Math.max(...ends) : null;
+  const windowNs = t0 !== null && t1 !== null && t1 > t0 ? t1 - t0 : null;
+
+  return spans.map((s) => {
+    const attr = s.Attributes || {};
+    const op = attr["gen_ai.operation.name"] || attr["shelf_benchmark.task_type"] || "span";
+    const model = attr["gen_ai.request.model"] || "";
+    const durMs = reportedNumber(attr.latency_ms);
+    const st = reportedNumber(attr.start_time_unix_nano);
+    const en = reportedNumber(attr.end_time_unix_nano);
+    const hasBar = windowNs !== null && st !== null && en !== null;
+    const offsetPct = hasBar ? ((st - t0) / windowNs) * 100 : 0;
+    const widthPct = hasBar ? Math.max(1, ((en - st) / windowNs) * 100) : 0;
+    const tokens = reportedNumber(attr["gen_ai.usage.total_tokens"]);
+    return `
+      <div style="display:grid; grid-template-columns: 320px 1fr 95px; gap:12px; align-items:center; padding:7px 10px; border-bottom:1px solid #e2e8f0; font-size:12px;">
+        <div>
+          <div class="mono" style="font-weight:700; color:#0f172a;">gen_ai.${esc(op)}</div>
+          <div class="muted" style="font-size:11px;">span_id: <code>${esc(s.SpanId) || "unreported"}</code></div>
+        </div>
+        <div>
+          <div style="background:#f1f5f9; height:18px; border-radius:4px; position:relative; overflow:hidden;">
+            ${hasBar ? `<div style="position:absolute; left:${offsetPct}%; width:${widthPct}%; height:100%; background:#0284c7; border-radius:4px;"></div>` : ""}
+          </div>
+          <div class="muted" style="font-size:11px; margin-top:2px;">
+            ${esc(model) || "model unreported"}${tokens === null ? "" : ` &bull; ${tokens} tokens`}${hasBar ? "" : " &bull; <em>no start/end timestamps recorded; bar omitted</em>"}
+          </div>
+        </div>
+        <div class="mono" style="text-align:right; font-weight:700; color:#0f172a;">${durMs === null ? NOT_REPORTED_HTML : durMs.toFixed(1) + " ms"}</div>
+      </div>
+    `;
+  }).join("");
+}
+
 function buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows) {
   const reportedLat = reportedNumber(summaryRec.latency_ms);
-  // Only used to scale the waterfall bars, never to derive a cost.
-  const totalLat = Math.max(100, reportedLat === null ? 1000 : reportedLat);
   const traceId = summaryRec.trace_id || "N/A";
-  const rootSpanId = summaryRec.span_id || "N/A";
   const runId = summaryRec.run_id || "N/A";
   const facings = Number(summaryRec.front_facings_count || rows.length || 0);
 
@@ -798,82 +992,28 @@ function buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows) {
     ? "Modelled infrastructure (rows 4 and 5) IS included in the all-in totals."
     : "Modelled infrastructure (rows 4 and 5) is shown for reference only and is EXCLUDED from the all-in totals. Enable billing.include_infrastructure_costs to fold it in.";
 
-  // Build proportional child spans for the OpenTelemetry Waterfall
-  const s1Dur = Math.round(totalLat * 0.34);
-  const s2Dur = Math.round(totalLat * 0.22);
-  const s3Dur = Math.round(totalLat * 0.31);
-  const s4Dur = Math.max(15, totalLat - s1Dur - s2Dur - s3Dur);
+  // ---------------------------------------------------------------------------
+  // OpenTelemetry waterfall.
+  //
+  // The benchmark emits ONE OTel record per task execution (see
+  // reports/otel_logs.jsonl); it does not emit per-stage child spans. This panel
+  // previously manufactured four child spans by multiplying the total latency by
+  // hardcoded fractions (0.34 / 0.22 / 0.31 / remainder) and derived their
+  // span_ids by slicing substrings out of the trace id. None of those spans ever
+  // existed, and they were rendered identically to real telemetry. Only spans
+  // actually present in the JSONL are shown now; when there are none, the
+  // breakdown is reported as unavailable rather than estimated.
+  // ---------------------------------------------------------------------------
+  const realSpans = realSpansForTrace(summaryRec.trace_id);
+  const waterfallRowsHtml = realSpans.length
+    ? buildRealSpanRowsHtml(realSpans)
+    : `<div class="muted" style="padding:12px; font-size:12px;">
+         Per-stage span breakdown <strong>unavailable</strong> &mdash; no OpenTelemetry spans matching
+         <code>trace_id=${esc(traceId)}</code> were found in <code>reports/otel_logs.jsonl</code>.
+         The benchmark records one span per task execution and does not emit per-stage child
+         spans, so no stage timings are shown here. They are not estimated.
+       </div>`;
 
-  const spans = [
-    {
-      name: `cloud_run.worker.pipeline (${approachId})`,
-      spanId: rootSpanId,
-      parentSpanId: "root",
-      offsetPct: 0,
-      widthPct: 100,
-      durMs: totalLat,
-      color: "#0f172a",
-      detail: `Cloud Run Revision: unilever-shelf-benchmark-service-00001-mbs (2 vCPU, 4 GiB RAM) • Status: HTTP 200 OK`,
-    },
-    {
-      name: `gen_ai.stage1.detection_and_depth_nms`,
-      spanId: traceId.slice(0, 16),
-      parentSpanId: rootSpanId,
-      offsetPct: 2,
-      widthPct: 33,
-      durMs: s1Dur,
-      color: "#0284c7",
-      detail: `Front-Facing BBox Localization (${facings} kept, ${summaryRec.depth_duplicates_filtered ?? 0} back-row duplicates suppressed)`,
-    },
-    {
-      name: approachId === "class_agnostic_visual_embedding"
-        ? `vertex_ai.stage2.multimodalembedding_1408d_crops`
-        : `vertex_ai.stage2.crop_isolation_and_roi_prep`,
-      spanId: traceId.slice(4, 20),
-      parentSpanId: rootSpanId,
-      offsetPct: 35,
-      widthPct: 22,
-      durMs: s2Dur,
-      color: "#7c3aed",
-      detail: `Extracted ${facings} high-res bounding-box regions + generated 1408-D / 3072-D L2-normalized vectors ($${embedUsd.toFixed(6)})`,
-    },
-    {
-      name: `gen_ai.stage3.seven_dimension_taxonomy`,
-      spanId: traceId.slice(8, 24),
-      parentSpanId: rootSpanId,
-      offsetPct: 57,
-      widthPct: 30,
-      durMs: s3Dur,
-      color: "#059669",
-      detail: `7-Dimension Classification (Category, Subcategory, Open-Vocab Brand, Variant, Packaging, Pack Type, Size Rule)`,
-    },
-    {
-      name: `vertex_ai.stage4.hybrid_rrf_catalog_search_and_otel_sink`,
-      spanId: traceId.slice(12, 28),
-      parentSpanId: rootSpanId,
-      offsetPct: 87,
-      widthPct: 13,
-      durMs: s4Dur,
-      color: "#d97706",
-      detail: `Catalog SKU Matching + Direct Export to Cloud Logging (projects/unilever-shelf-understanding/logs/unilever-shelf-benchmark-otel)`,
-    },
-  ];
-
-  const waterfallRowsHtml = spans.map((sp) => `
-    <div style="display:grid; grid-template-columns: 320px 1fr 95px; gap:12px; align-items:center; padding:7px 10px; border-bottom:1px solid #e2e8f0; font-size:12px;">
-      <div>
-        <div class="mono" style="font-weight:700; color:#0f172a;">${sp.parentSpanId === "root" ? "&#9660; " : "&nbsp;&nbsp;&#9492;&#9472; "}${sp.name}</div>
-        <div class="muted" style="font-size:11px;">span_id: <code>${sp.spanId}</code> ${sp.parentSpanId !== "root" ? `&larr; parent: <code>${sp.parentSpanId}</code>` : "(ROOT SPAN)"}</div>
-      </div>
-      <div>
-        <div style="background:#f1f5f9; height:18px; border-radius:4px; position:relative; overflow:hidden;">
-          <div style="position:absolute; left:${sp.offsetPct}%; width:${sp.widthPct}%; height:100%; background:${sp.color}; border-radius:4px;"></div>
-        </div>
-        <div class="muted" style="font-size:11px; margin-top:2px;">${sp.detail}</div>
-      </div>
-      <div class="mono" style="text-align:right; font-weight:700; color:#0f172a;">${sp.durMs.toFixed(1)} ms</div>
-    </div>
-  `).join("");
 
   return `
     <div style="margin-top:18px; display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
@@ -895,13 +1035,13 @@ function buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows) {
           <tbody>
             <tr>
               <td><strong>1. Vertex AI PAYG Tokens</strong> <span class="muted">(metered)</span></td>
-              <td><code>gemini (${summaryRec.input_tokens ?? 0} in / ${summaryRec.thinking_tokens ?? 0} think / ${summaryRec.output_tokens ?? 0} out)</code></td>
+              <td><code>gemini (${fmtCount(summaryRec.input_tokens)} in / ${fmtCount(summaryRec.thinking_tokens)} think / ${fmtCount(summaryRec.output_tokens)} out)</code></td>
               <td class="mono" style="text-align:right; font-weight:700; color:#0284c7;">${usd(paygUsd)}</td>
               <td class="mono" style="text-align:right;">${usdPer(paygUsd, facings)}</td>
             </tr>
             <tr>
               <td><strong>2. Vertex AI Provisioned GSU</strong> <span class="muted">(metered)</span></td>
-              <td><code>${ptGsuUsd === null ? "Traffic did not run as PROVISIONED_THROUGHPUT" : `Reserved GSU slot occupancy (${(totalLat / 1000).toFixed(1)}s)`}</code></td>
+              <td><code>${ptGsuUsd === null ? "Traffic did not run as PROVISIONED_THROUGHPUT" : `Reserved GSU slot occupancy (${reportedLat === null ? "duration not reported" : (reportedLat / 1000).toFixed(1) + "s"})`}</code></td>
               <td class="mono" style="text-align:right; font-weight:700; color:#7c3aed;">${usd(ptGsuUsd)}</td>
               <td class="mono" style="text-align:right;">${usdPer(ptGsuUsd, facings)}</td>
             </tr>
@@ -936,7 +1076,7 @@ function buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows) {
           </tbody>
         </table>
         <div class="muted" style="font-size:11px; margin-top:8px;">
-          <strong>billing_source:</strong> <code>${billingSource}</code> &bull; ${infraNote}
+          <strong>billing_source:</strong> <code>${esc(billingSource)}</code> &bull; ${infraNote}
           Blank cells mean the backend did not report that component for this run. They are not zeros.
         </div>
       </div>
@@ -945,14 +1085,14 @@ function buildTraceWaterfallAndCostHtml(summaryRec, approachId, rows) {
       <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:14px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <h4 style="margin:0; font-size:14px;">OpenTelemetry Distributed Trace Waterfall (Cloud Run Worker &rarr; Vertex AI)</h4>
-          <span class="mono" style="font-size:11px; background:#0f172a; color:#38bdf8; padding:3px 7px; border-radius:4px;">trace_id: ${traceId}</span>
+          <span class="mono" style="font-size:11px; background:#0f172a; color:#38bdf8; padding:3px 7px; border-radius:4px;">trace_id: ${esc(traceId)}</span>
         </div>
         <div style="background:#fff; border:1px solid #e2e8f0; border-radius:6px;">
           ${waterfallRowsHtml}
         </div>
         <div class="muted" style="font-size:11px; margin-top:8px;">
           <strong>GCP Sinks:</strong> Cloud Logging <code>projects/unilever-shelf-understanding/logs/unilever-shelf-benchmark-otel</code> &bull;
-          Cloud Trace <code>projects/unilever-shelf-understanding/traces/${traceId}</code> &bull;
+          Cloud Trace <code>projects/unilever-shelf-understanding/traces/${esc(traceId)}</code> &bull;
           GCS <code>gs://unilever-shelf-understanding-shelf-images/otel/otel_logs.jsonl</code>
         </div>
       </div>
@@ -971,30 +1111,30 @@ function buildInspectorHtml(row, approachId) {
 
   return `
     <div style="display:flex; justify-content:space-between; align-items:center;">
-      <h4 style="margin:0;">Facing #${row.product_index} Inspector</h4>
+      <h4 style="margin:0;">Facing #${esc(row.product_index)} Inspector</h4>
       ${badgeHtml}
     </div>
     <p class="muted" style="margin-top:4px;">
-      BBox <code>[${row.bbox_ymin}, ${row.bbox_xmin}, ${row.bbox_ymax}, ${row.bbox_xmax}]</code> &bull; Row: <code>${row.shelf_row}</code>
+      BBox <code>[${esc(row.bbox_ymin)}, ${esc(row.bbox_xmin)}, ${esc(row.bbox_ymax)}, ${esc(row.bbox_xmax)}]</code> &bull; Row: <code>${esc(row.shelf_row)}</code>
     </p>
     <div class="inspector-grid">
-      <div class="inspector-item"><span>1. Category</span><strong>${row.predicted_category || "--"}</strong></div>
-      <div class="inspector-item"><span>2. Subcategory</span><strong>${row.predicted_subcategory || "--"}</strong></div>
-      <div class="inspector-item"><span>3. Brand</span><strong>${row.predicted_brand || "--"}</strong></div>
-      <div class="inspector-item"><span>4. Variant</span><strong>${row.predicted_variant || "--"}</strong></div>
-      <div class="inspector-item"><span>5. Packaging Type</span><strong>${row.predicted_packaging || "--"}</strong></div>
-      <div class="inspector-item"><span>6. Pack Type</span><strong>${row.predicted_pack_type || "Single"}</strong></div>
+      <div class="inspector-item"><span>1. Category</span><strong>${esc(row.predicted_category) || "--"}</strong></div>
+      <div class="inspector-item"><span>2. Subcategory</span><strong>${esc(row.predicted_subcategory) || "--"}</strong></div>
+      <div class="inspector-item"><span>3. Brand</span><strong>${esc(row.predicted_brand) || "--"}</strong></div>
+      <div class="inspector-item"><span>4. Variant</span><strong>${esc(row.predicted_variant) || "--"}</strong></div>
+      <div class="inspector-item"><span>5. Packaging Type</span><strong>${esc(row.predicted_packaging) || "--"}</strong></div>
+      <div class="inspector-item"><span>6. Pack Type</span><strong>${esc(row.predicted_pack_type) || "--"}</strong></div>
       <div class="inspector-item" style="grid-column: span 2;">
         <span>7. Rule-Derived Size Bucket</span>
-        <strong>${row.rule_derived_size_bucket || row.predicted_size || "--"} (OCR hint: ${row.predicted_size || "none"})</strong>
+        <strong>${esc(row.rule_derived_size_bucket || row.predicted_size) || "--"} (OCR hint: ${esc(row.predicted_size) || "none"})</strong>
       </div>
     </div>
     <div style="margin-top:10px; padding:9px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; font-size:12px;">
       <div><strong>${isAgnostic ? "Stage 3 ScaNN Catalog SKU Match:" : "Hybrid Search Keywords &amp; Vector Passage:"}</strong></div>
       <div class="mono muted" style="margin-top:3px;">
         ${isAgnostic
-          ? `Matched Catalog SKU: <strong>${row.matched_sku_id || "N/A"}</strong> &bull; Cosine ANN Similarity: <strong>${(row.confidence * 100).toFixed(2)}%</strong>`
-          : `Keywords: ${row.lexical_search_keywords || row.predicted_product_name}<br/>Vector Dim: ${row.embedding_dimensions || 3072}-D`}
+          ? `Matched Catalog SKU: <strong>${esc(row.matched_sku_id) || "N/A"}</strong> &bull; Cosine ANN Similarity: <strong>${fmtPercent(row.confidence, 2)}</strong>`
+          : `Keywords: ${esc(row.lexical_search_keywords || row.predicted_product_name)}<br/>Vector Dim: ${row.embedding_dimensions ? esc(row.embedding_dimensions) + "-D" : NOT_REPORTED_HTML}`}
       </div>
     </div>
   `;
@@ -1020,23 +1160,23 @@ function buildSevenDimensionTableHtml(rows, containerId, selectedIdx, isScannMod
         </thead>
         <tbody>
           ${rows.map((r, idx) => `
-            <tr onclick="selectPipelineFacing('${containerId}', ${idx})" style="cursor:pointer; background:${idx === selectedIdx ? '#eff6ff' : 'transparent'};">
-              <td><strong>#${r.product_index}</strong></td>
-              <td><code>[${r.bbox_ymin},${r.bbox_xmin},${r.bbox_ymax},${r.bbox_xmax}]</code></td>
-              <td>${r.predicted_category}</td>
-              <td>${r.predicted_subcategory}</td>
+            <tr data-action="select-facing" data-container-id="${esc(containerId)}" data-facing-idx="${idx}" style="cursor:pointer; background:${idx === selectedIdx ? '#eff6ff' : 'transparent'};">
+              <td><strong>#${esc(r.product_index)}</strong></td>
+              <td><code>[${esc(r.bbox_ymin)},${esc(r.bbox_xmin)},${esc(r.bbox_ymax)},${esc(r.bbox_xmax)}]</code></td>
+              <td>${esc(r.predicted_category)}</td>
+              <td>${esc(r.predicted_subcategory)}</td>
               <td>
-                <strong>${r.predicted_brand}</strong>
+                <strong>${esc(r.predicted_brand)}</strong>
                 ${r.is_hul_brand ? `<span class="tag-hul">HUL</span>` : `<span class="tag-non-hul">Non-HUL</span>`}
               </td>
-              <td>${r.predicted_variant}</td>
-              <td><code>${r.predicted_packaging}</code></td>
-              <td>${r.predicted_pack_type}</td>
-              <td><strong>${r.rule_derived_size_bucket}</strong></td>
+              <td>${esc(r.predicted_variant)}</td>
+              <td><code>${esc(r.predicted_packaging)}</code></td>
+              <td>${esc(r.predicted_pack_type)}</td>
+              <td><strong>${esc(r.rule_derived_size_bucket)}</strong></td>
               <td>
                 ${isScannMode
-                  ? `<code>${r.matched_sku_id || "SKU"}</code> (<strong>${(r.confidence * 100).toFixed(1)}%</strong>)`
-                  : `<code>${r.embedding_dimensions || 3072}-D</code> &bull; $${(r.cost_per_product_usd || 0).toFixed(5)}`}
+                  ? `<code>${r.matched_sku_id ? esc(r.matched_sku_id) : NOT_REPORTED_HTML}</code> (<strong>${fmtPercent(r.confidence)}</strong>)`
+                  : `<code>${r.embedding_dimensions ? esc(r.embedding_dimensions) + "-D" : NOT_REPORTED_HTML}</code> &bull; ${fmtUsd(r.cost_per_product_usd, 5)}`}
               </td>
             </tr>
           `).join("")}
@@ -1226,9 +1366,24 @@ function initLiveStudioTab() {
         statusPill.textContent = `ERROR: ${liveResult.error}`;
       } else {
         const modeTag = execMode === "offline" ? "OFFLINE LOCAL RUN COMPLETE" : "LIVE VERTEX AI RUN COMPLETE";
-        const gtTag = connectGt ? ` • GT F1=${(liveResult.accuracy?.detection_f1 ?? 1.0).toFixed(2)}` : " • GT=Placeholder (None)";
+        // A ground-truth score that the backend did not return is NOT a perfect
+        // score. Defaulting to 1.0 here reported flawless detection for runs
+        // that were never scored at all.
+        const f1 = reportedNumber(liveResult.accuracy?.detection_f1);
+        const gtTag = connectGt
+          ? ` • GT F1=${f1 === null ? NOT_MEASURED_TEXT : f1.toFixed(2)}`
+          : " • GT=Placeholder (None)";
+        const latencyMs = reportedNumber(liveResult.latency_ms);
+        const facingCount = reportedNumber(liveResult.front_facings_count);
+        const latencyTxt = latencyMs === null
+          ? "latency not reported"
+          : `${(latencyMs / 1000).toFixed(2)}s`;
+        const facingTxt = facingCount === null
+          ? "facing count not reported"
+          : `${facingCount} Front Facings`;
         statusPill.className = "status-pill status-done";
-        statusPill.textContent = `${modeTag} (${(liveResult.latency_ms / 1000).toFixed(2)}s • ${liveResult.front_facings_count} Front Facings${gtTag})`;
+        statusPill.textContent = `${modeTag} (${latencyTxt} • ${facingTxt}${gtTag})`;
+
         renderLiveProgressStepper(appId, (USE_CASE_PATHS[appId] && USE_CASE_PATHS[appId].steps.length) || 3, true);
 
         CONTAINER_STATE["pipeline-container-live"].approachId = appId;
@@ -1267,9 +1422,9 @@ function renderLiveProgressStepper(approachId, activeIdx, allDone) {
     }
     return `
       <div class="${cls}">
-        <span class="flow-step-num">${s.num} &bull; ${statusBadge}</span>
-        <div class="flow-step-title">${s.title}</div>
-        <div class="flow-step-desc">${s.desc}</div>
+        <span class="flow-step-num">${esc(s.num)} &bull; ${statusBadge}</span>
+        <div class="flow-step-title">${esc(s.title)}</div>
+        <div class="flow-step-desc">${esc(s.desc)}</div>
       </div>
     `;
   }).join("");
@@ -1283,38 +1438,39 @@ function renderSftAndConfigTab() {
   const tax = DASHBOARD_DATA.taxonomy_reference || {};
   const viewer = document.getElementById("taxonomy-config-viewer");
   if (viewer) {
+    const escList = (items, sep) => (items || []).map(esc).join(sep);
     viewer.innerHTML = `
       <div class="inspector-grid">
         <div class="inspector-item">
           <span>Config File Source</span>
-          <strong><code>${tax.config_source || "configs/taxonomy.yaml"}</code></strong>
+          <strong><code>${esc(tax.config_source || "(unreported)")}</code></strong>
         </div>
         <div class="inspector-item">
           <span>Pack Types</span>
-          <strong>${(tax.pack_types || []).join(", ")}</strong>
+          <strong>${escList(tax.pack_types, ", ")}</strong>
         </div>
         <div class="inspector-item" style="grid-column: span 2;">
           <span>Categories (Configurable)</span>
-          <strong>${(tax.categories || []).join(" • ")}</strong>
+          <strong>${escList(tax.categories, " • ")}</strong>
         </div>
         <div class="inspector-item" style="grid-column: span 2;">
           <span>Subcategories (Configurable)</span>
-          <strong>${(tax.subcategories || []).join(" • ")}</strong>
+          <strong>${escList(tax.subcategories, " • ")}</strong>
         </div>
         <div class="inspector-item" style="grid-column: span 2;">
           <span>Packaging Types (Configurable)</span>
-          <strong>${(tax.packaging_types || []).join(" • ")}</strong>
+          <strong>${escList(tax.packaging_types, " • ")}</strong>
         </div>
         <div class="inspector-item" style="grid-column: span 2;">
           <span>Rule-Derived Size Buckets (Configurable)</span>
-          <strong>${(tax.size_buckets || []).join(" • ")}</strong>
+          <strong>${escList(tax.size_buckets, " • ")}</strong>
         </div>
         <div class="inspector-item" style="grid-column: span 2;">
           <span>Brand Attribution Mode (HUL vs. Non-HUL)</span>
           <strong>${
             (tax.hul_brands || []).length > 0
-              ? (tax.hul_brands || []).slice(0, 20).join(", ")
-              : "Open-Vocabulary VLM &amp; Catalog Attribution (No predefined brand definitions required in configs/taxonomy.yaml)"
+              ? escList((tax.hul_brands || []).slice(0, 20), ", ")
+              : "Open-Vocabulary VLM &amp; Catalog Attribution (No predefined brand definitions required in shelf_benchmark/_resources/taxonomy.yaml)"
           }</strong>
         </div>
       </div>
@@ -1328,11 +1484,11 @@ function renderSftAndConfigTab() {
       const attr = s.Attributes || {};
       return `
         <tr>
-          <td><code>${(s.TraceId || "").slice(0, 12)}...</code></td>
-          <td><code>${attr["shelf_benchmark.task_type"] || ""}</code> (${attr["shelf_benchmark.separation_approach"] || ""})</td>
-          <td><code>${attr["gen_ai.request.model"] || ""}</code></td>
-          <td>${attr["shelf_benchmark.latency_ms"] || ""}</td>
-          <td>${attr["gen_ai.usage.total_tokens"] || ""}</td>
+          <td><code>${esc(String(s.TraceId || "").slice(0, 12))}...</code></td>
+          <td><code>${esc(attr["shelf_benchmark.task_type"])}</code> (${esc(attr["shelf_benchmark.separation_approach"])})</td>
+          <td><code>${esc(attr["gen_ai.request.model"])}</code></td>
+          <td>${esc(attr["shelf_benchmark.latency_ms"])}</td>
+          <td>${esc(attr["gen_ai.usage.total_tokens"])}</td>
         </tr>
       `;
     }).join("");
@@ -1344,13 +1500,13 @@ function renderSftAndConfigTab() {
     const sftRuns = (DASHBOARD_DATA.summary || []).filter((r) => r.task_type === "fine_tuning");
     sftBody.innerHTML = sftRuns.map((r) => `
       <tr>
-        <td><code>${r.model_name}</code></td>
+        <td><code>${esc(r.model_name)}</code></td>
         <td><code>gs://unilever-shelf-understanding-shelf-images/sft/sft_training_examples.jsonl</code></td>
-        <td><span class="tag-hul">${r.status}</span></td>
-        <td><strong>${r.front_facings_count}</strong></td>
-        <td>${r.latency_ms.toFixed(1)} ms</td>
-        <td>$${r.cost_per_shelf_image_usd.toFixed(6)}</td>
-        <td>$${r.cost_per_product_usd.toFixed(6)}</td>
+        <td><span class="tag-hul">${esc(r.status)}</span></td>
+        <td><strong>${fmtCount(r.front_facings_count)}</strong></td>
+        <td>${fmtMs(r.latency_ms)}</td>
+        <td>${fmtUsd(r.cost_per_shelf_image_usd)}</td>
+        <td>${fmtUsd(r.cost_per_product_usd)}</td>
       </tr>
     `).join("");
   }

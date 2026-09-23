@@ -10,8 +10,8 @@ from shelf_benchmark.models import (
     ShelfAssociationRecord,
     TaskExecutionResult,
 )
+from shelf_benchmark.run_ids import build_run_id
 from shelf_benchmark.tasks.classification import ProductClassificationTask
-from shelf_benchmark.tasks.detection import ProductDetectionTask
 
 
 class ExistingVLMClassificationApproachPlugin(BaseShelfApproachPlugin):
@@ -54,32 +54,18 @@ class ExistingVLMClassificationApproachPlugin(BaseShelfApproachPlugin):
         cls_task = ProductClassificationTask(
             ctx.config, ctx.storage, ctx.telemetry, genai_client=ctx.genai_client
         )
-        detected_boxes = None
-        if prior_detection is not None:
-            detected_boxes = prior_detection.raw_output.get("detected_products")
-        elif self._sep_approach in (
-            "two_stage_bbox_guided_nms",
-            "two_stage_physical_crop_per_facing",
-        ):
-            det_task = ProductDetectionTask(
-                ctx.config, ctx.storage, ctx.telemetry, genai_client=ctx.genai_client
-            )
-            det_res = det_task.execute(
-                model_name=model_name,
-                shelf_image_uri=record.shelf_image_uri,
-                run_id=f"det-{model_name}",
-                store_id=record.store_id,
-                ground_truth=gt_record,
-            )
-            detected_boxes = det_res.raw_output.get("detected_products")
+        # Do not pre-run ProductDetectionTask here and pass `detected_boxes`: that threw away
+        # `det_res` (its tokens, cost and latency) while making `cls_task` skip its own Stage-1
+        # call, under-reporting two-stage cost/tokens on the plugin path. `ProductClassificationTask`
+        # runs Stage 1 internally when `detected_boxes` is None and folds Stage-1 + Stage-2 tokens
+        # and latency into the single returned TaskExecutionResult.
         return cls_task.execute(
             model_name=model_name,
             shelf_image_uri=record.shelf_image_uri,
-            run_id=f"cls-{self._sep_approach[:9]}-{model_name}",
+            run_id=build_run_id("cls", self._sep_approach, model_name),
             store_id=record.store_id,
             ground_truth=gt_record,
             separation_approach=self._sep_approach,
-            detected_boxes=detected_boxes,
         )
 
 

@@ -12,26 +12,41 @@ task always apply the same thresholds, taxonomy and scoring policy to the same i
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from shelf_benchmark.config import BenchmarkConfig, ModelPricing
+from shelf_benchmark.config import BenchmarkConfig
+from shelf_benchmark.cropping import crop_detected_facings, load_pil_image
 from shelf_benchmark.data.storage import StorageManager
-from shelf_benchmark.evaluation.cost import compute_cost_metrics, extract_token_usage
+from shelf_benchmark.evaluation.cost import extract_token_usage
 from shelf_benchmark.evaluation.metrics import evaluate_task_accuracy
+from shelf_benchmark.geometry import deduplicate_depth_stacked_facings
 from shelf_benchmark.models import (
     AccuracyMetrics,
-    CostMetrics,
     ImageGroundTruth,
     RowLevelReportItem,
     ShelfAssociationRecord,
     TaskExecutionResult,
     TokenUsageMetrics,
-    build_execution_trace_metadata,
 )
-from shelf_benchmark.tasks import facing_utils
+from shelf_benchmark.pipeline import (
+    InvocationContext,
+    PipelineExecutor,
+    RawInvocation,
+)
+from shelf_benchmark.size_rules import derive_size_bucket_from_bbox
 from shelf_benchmark.telemetry import OpenTelemetryBenchmarkLogger
+
+#: Keys a plugin may return that map onto a first-class `RowLevelReportItem` column. Anything else
+#: a plugin returns (that is not underscore-prefixed) is preserved in `extra_attributes`, which is
+#: how the suite supports more than the 8 core attributes without a schema change.
+_STANDARD_FACING_KEYS = frozenset({
+    "bbox_2d", "brand", "product_name", "category", "subcategory",
+    "variant", "packaging_type", "pack_type", "size", "matched_sku_id",
+    "crop_image_path", "shelf_row", "position_on_shelf", "product_index",
+    "confidence", "is_hul_brand", "extra_attributes",
+})
 
 
 @dataclass
@@ -43,6 +58,18 @@ class CommonLayerContext:
     telemetry: OpenTelemetryBenchmarkLogger
     reports_dir: Path
     genai_client: Optional[Any] = None
+    _executor_cache: Optional[PipelineExecutor] = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    @property
+    def _executor(self) -> PipelineExecutor:
+        """The one finalisation pipeline, shared with the built-in task path."""
+        if self._executor_cache is None:
+            self._executor_cache = PipelineExecutor(
+                config=self.config, telemetry=self.telemetry
+            )
+        return self._executor_cache
 
     def get_client(self, location: Optional[str] = None) -> Any:
         """Return the injected GenAI client/adapter (for offline fakes, GEAP, Gemma, Tuned Endpoints) or a Vertex AI client."""
@@ -71,7 +98,7 @@ class CommonLayerContext:
             if x_overlap_threshold is not None
             else self.config.depth_deduplication.x_overlap_threshold
         )
-        return facing_utils.deduplicate_depth_stacked_facings(
+        return deduplicate_depth_stacked_facings(
             items, x_overlap_threshold=threshold
         )
 
@@ -87,7 +114,7 @@ class CommonLayerContext:
         Returns `(crops, montage_bytes, montage_path)`, where `crops` is a list of
         `(facing_index, png_bytes, file_path)` tuples ordered left-to-right.
         """
-        crop_paths, montage_bytes = facing_utils.crop_detected_facings(
+        crop_paths, montage_bytes = crop_detected_facings(
             storage=self.storage,
             shelf_image_uri=shelf_image_uri,
             detected_items=facings,
@@ -116,7 +143,7 @@ class CommonLayerContext:
         Uses the run's configured taxonomy, so a plugin and a built-in task cannot disagree about
         the bucket for the same product.
         """
-        return facing_utils.derive_size_bucket_from_bbox(
+        return derive_size_bucket_from_bbox(
             bbox_2d=bbox_2d,
             all_bboxes_on_row=all_bboxes_on_shelf,
             packaging_type=packaging_type,
@@ -128,13 +155,15 @@ class CommonLayerContext:
         self, brand_name: str, model_predicted: Optional[bool] = None
     ) -> bool:
         """Check whether a predicted brand belongs to the configured HUL portfolio."""
-        return facing_utils.check_is_hul_brand(
+        from shelf_benchmark.tasks.facing_utils import check_is_hul_brand
+
+        return check_is_hul_brand(
             brand_name, taxonomy=self.config.taxonomy, model_predicted=model_predicted
         )
 
     def load_shelf_image(self, record: ShelfAssociationRecord):
         """Load the record's shelf image as a PIL image, honouring its declared local path."""
-        return facing_utils.load_pil_image(
+        return load_pil_image(
             self.storage,
             record.shelf_image_uri,
             local_fallback=record.local_shelf_image_path,
@@ -144,43 +173,6 @@ class CommonLayerContext:
     def extract_tokens(self, response: Any) -> TokenUsageMetrics:
         """Extract input/thinking/output/cached token counts from a model response."""
         return extract_token_usage(response)
-
-    def compute_cost(
-        self,
-        tokens: TokenUsageMetrics,
-        model_name: str,
-        product_count: int,
-        extra_api_cost_usd: float = 0.0,
-        latency_ms: float = 0.0,
-        run_id: Optional[str] = None,
-        approach_id: str = "custom_approach",
-        task_type: str = "classification",
-    ) -> CostMetrics:
-        """Compute the separated GCP cost breakdown for one approach execution."""
-        from shelf_benchmark.evaluation.gcp_billing import GCPBillingAndCostEngine
-
-        pricing: ModelPricing = self.config.get_pricing(model_name)
-        engine = GCPBillingAndCostEngine(
-            project_id=self.config.gcp.project_id,
-            billing_cfg=self.config.billing,
-        )
-        gcp_labels = engine.build_gcp_billing_labels(
-            run_id=run_id or "plugin-run",
-            approach_id=approach_id,
-            task_type=task_type,
-            model_name=model_name,
-        )
-        return compute_cost_metrics(
-            tokens=tokens,
-            pricing=pricing,
-            product_count=product_count,
-            latency_ms=latency_ms,
-            extra_embedding_or_vision_cost_usd=extra_api_cost_usd,
-            billing_cfg=self.config.billing,
-            project_id=self.config.gcp.project_id,
-            model_name=model_name,
-            gcp_labels=gcp_labels,
-        )
 
     def evaluate_accuracy(
         self,
@@ -196,207 +188,146 @@ class CommonLayerContext:
         accuracy.depth_duplicates_filtered = depth_duplicates_filtered
         return accuracy
 
+    def rows_from_facing_dicts(
+        self,
+        raw_outputs: List[Dict[str, Any]],
+        *,
+        task_type: str = "classification",
+    ) -> List[RowLevelReportItem]:
+        """Map a plugin's list of per-facing dicts onto report rows.
+
+        Only fields the plugin actually supplied are populated. An absent field stays at the
+        schema default (empty string / `None`), which downstream scoring treats as "not
+        predicted".
+
+        This used to invent values for anything the plugin omitted -- `"Personal Care"`,
+        `"General"`, `"Standard"`, `"Single"`, `"box"`, `"Unknown"`, `f"{brand} Product"`,
+        `confidence=0.95`, and a bounding box of `[500, 100, 800, 200]`. Those were then written
+        into the report and **graded against ground truth**, so a plugin that predicted nothing
+        but a brand still scored on six other attributes, and a plugin that returned no geometry
+        was scored against a box in the middle of the shelf.
+        """
+        all_bboxes = [item.get("bbox_2d") or [0, 0, 0, 0] for item in raw_outputs]
+        rows: List[RowLevelReportItem] = []
+        for idx, item in enumerate(raw_outputs, start=1):
+            bbox = item.get("bbox_2d")
+            brand = str(item.get("brand", ""))
+            pkg = str(item.get("packaging_type", ""))
+            size_hint = str(item.get("size", ""))
+            is_hul = item.get("is_hul_brand")
+            if is_hul is None and brand:
+                is_hul = self.check_is_hul_brand(brand)
+
+            extra_attrs: Dict[str, Any] = dict(item.get("extra_attributes") or {})
+            for k, v in item.items():
+                if not str(k).startswith("_") and k not in _STANDARD_FACING_KEYS and v is not None:
+                    extra_attrs[str(k)] = v
+
+            rows.append(
+                RowLevelReportItem(
+                    task_type=task_type,
+                    product_index=int(item.get("product_index", idx)),
+                    predicted_category=str(item.get("category", "")),
+                    predicted_subcategory=str(item.get("subcategory", "")),
+                    predicted_brand=brand,
+                    is_hul_brand=None if is_hul is None else bool(is_hul),
+                    predicted_product_name=str(item.get("product_name", "")),
+                    predicted_variant=str(item.get("variant", "")),
+                    predicted_packaging=pkg,
+                    predicted_pack_type=str(item.get("pack_type", "")),
+                    predicted_size=size_hint,
+                    rule_derived_size_bucket=self.derive_size_bucket_from_bbox(
+                        bbox or [0, 0, 0, 0],
+                        all_bboxes,
+                        packaging_type=pkg,
+                        model_size_hint=size_hint,
+                    ),
+                    matched_sku_id=item.get("matched_sku_id"),
+                    crop_image_path=item.get("crop_image_path"),
+                    bbox_ymin=int(bbox[0]) if bbox else 0,
+                    bbox_xmin=int(bbox[1]) if bbox else 0,
+                    bbox_ymax=int(bbox[2]) if bbox else 0,
+                    bbox_xmax=int(bbox[3]) if bbox else 0,
+                    shelf_row=str(item.get("shelf_row", "")),
+                    position_on_shelf=int(item.get("position_on_shelf", idx)),
+                    confidence=float(item.get("confidence", 0.0) or 0.0),
+                    extra_attributes=extra_attrs,
+                )
+            )
+        return rows
+
     def finalize(
         self,
         *,
         approach_id: str,
         model_name: str,
         record: ShelfAssociationRecord,
-        raw_outputs: List[Dict[str, Any]],
-        start_dt: Any,
+        raw_outputs: Optional[List[Dict[str, Any]]] = None,
+        rows: Optional[List[RowLevelReportItem]] = None,
+        start_dt: Any = None,
         end_dt: Any,
         gt_record: Optional[ImageGroundTruth] = None,
         task_type: str = "classification",
         run_id: Optional[str] = None,
         tokens: Optional[TokenUsageMetrics] = None,
-        extra_api_cost_usd: float = 0.0,
+        extra_api_cost_usd: Optional[float] = None,
         depth_duplicates_filtered: Optional[int] = None,
         stages_description: Optional[List[str]] = None,
         raw_output_extra: Optional[Dict[str, Any]] = None,
+        span_attributes: Optional[Dict[str, Any]] = None,
+        cpu_active_ms: Optional[float] = None,
     ) -> TaskExecutionResult:
         """Turn raw facing prediction dicts into a fully scored, OTel-logged `TaskExecutionResult`.
 
-        Eliminates ~180 lines of boilerplate per plugin by applying the shared taxonomy, size rules,
-        5-bucket GCP cost model, ground-truth evaluation, OpenTelemetry span logging, and
-        structured execution trace generation in one call.
+        This is now a thin adapter over `shelf_benchmark.pipeline.PipelineExecutor`, which the
+        built-in tasks also use, so a plugin and a built-in task fed identical predictions produce
+        identical cost, token and accuracy figures. They previously did not: see the `pipeline`
+        module docstring.
+
+        `extra_api_cost_usd=None` means "derive embeddings/vision cost from the run's billing
+        config", which is what the built-in tasks have always done. It used to default to `0.0`
+        here, so a plugin's crops were free and a task's were not.
+
+        Pass **either** `raw_outputs=` (a list of per-facing dicts, mapped by
+        `rows_from_facing_dicts`) **or** `rows=` (rows you built yourself, for approaches that
+        populate columns the dict mapping does not cover, such as the embedding fields). Passing
+        neither or both is a programming error and raises.
         """
-        effective_run_id = run_id or f"run-{approach_id}-{model_name}"
-        latency_ms = max(0.1, round((end_dt - start_dt).total_seconds() * 1000.0, 3))
-
-        all_bboxes = [item.get("bbox_2d", [0, 0, 0, 0]) for item in raw_outputs]
-        if tokens is None:
-            total_in = sum(int(item.get("_input_tokens", 180)) for item in raw_outputs) or 350
-            total_think = sum(int(item.get("_thinking_tokens", 0)) for item in raw_outputs)
-            total_out = sum(int(item.get("_output_tokens", 90)) for item in raw_outputs) or 160
-            tokens = TokenUsageMetrics(
-                input_tokens=total_in,
-                thinking_tokens=total_think,
-                output_tokens=total_out,
-                total_tokens=total_in + total_think + total_out,
+        if (raw_outputs is None) == (rows is None):
+            raise ValueError(
+                "finalize() takes exactly one of `raw_outputs=` or `rows=`; "
+                f"got raw_outputs={'set' if raw_outputs is not None else 'None'}, "
+                f"rows={'set' if rows is not None else 'None'}."
             )
+        if rows is None:
+            assert raw_outputs is not None  # narrowed by the check above
+            rows = self.rows_from_facing_dicts(raw_outputs, task_type=task_type)
+        if depth_duplicates_filtered is None and raw_outputs:
+            depth_duplicates_filtered = int(raw_outputs[0].get("_depth_filtered", 0) or 0)
 
-        cost = self.compute_cost(
+        invocation = RawInvocation(
+            rows=rows,
             tokens=tokens,
-            model_name=model_name,
-            product_count=max(len(raw_outputs), 1),
+            raw_output=dict(raw_output_extra or {}),
             extra_api_cost_usd=extra_api_cost_usd,
-            latency_ms=latency_ms,
-            run_id=effective_run_id,
-            approach_id=approach_id,
-            task_type=task_type,
+            depth_duplicates_filtered=depth_duplicates_filtered,
+            stages_description=stages_description,
+            span_attributes=dict(span_attributes or {}),
         )
-        per_facing_cost = round(
-            cost.cost_per_shelf_image_usd / max(len(raw_outputs), 1), 8
-        )
-        depth_filtered = (
-            depth_duplicates_filtered
-            if depth_duplicates_filtered is not None
-            else (int(raw_outputs[0].get("_depth_filtered", 0)) if raw_outputs else 0)
-        )
-
-        row_items: List[RowLevelReportItem] = []
-        for idx, item in enumerate(raw_outputs, start=1):
-            bbox = item.get("bbox_2d", [500, 100, 800, 200])
-            brand = str(item.get("brand", "Unknown"))
-            pkg = str(item.get("packaging_type", "box"))
-            size_hint = str(item.get("size", ""))
-            is_hul = item.get(
-                "is_hul_brand",
-                self.check_is_hul_brand(brand),
-            )
-            rule_size = self.derive_size_bucket_from_bbox(
-                bbox,
-                all_bboxes,
-                packaging_type=pkg,
-                model_size_hint=size_hint,
-            )
-            std_keys = {
-                "bbox_2d", "brand", "product_name", "category", "subcategory",
-                "variant", "packaging_type", "pack_type", "size", "matched_sku_id",
-                "crop_image_path", "shelf_row", "position_on_shelf", "confidence",
-                "is_hul_brand", "extra_attributes",
-            }
-            extra_attrs: Dict[str, Any] = dict(item.get("extra_attributes") or {})
-            for k, v in item.items():
-                if not str(k).startswith("_") and k not in std_keys and v is not None:
-                    extra_attrs[str(k)] = v
-
-            row_items.append(
-                RowLevelReportItem(
-                    run_id=effective_run_id,
-                    start_time=self.telemetry.format_iso(start_dt),
-                    end_time=self.telemetry.format_iso(end_dt),
-                    image_latency_ms=latency_ms,
-                    task_type=task_type,
-                    separation_approach=approach_id,
-                    model_name=model_name,
-                    shelf_image_uri=record.shelf_image_uri,
-                    store_id=record.store_id,
-                    product_index=idx,
-                    predicted_category=str(item.get("category", "Personal Care")),
-                    predicted_subcategory=str(item.get("subcategory", "General")),
-                    predicted_brand=brand,
-                    is_hul_brand=bool(is_hul),
-                    predicted_product_name=str(item.get("product_name", f"{brand} Product")),
-                    predicted_variant=str(item.get("variant", "Standard")),
-                    predicted_packaging=pkg,
-                    predicted_pack_type=str(item.get("pack_type", "Single")),
-                    predicted_size=size_hint,
-                    rule_derived_size_bucket=rule_size,
-                    matched_sku_id=item.get("matched_sku_id"),
-                    crop_image_path=item.get("crop_image_path"),
-                    bbox_ymin=int(bbox[0]),
-                    bbox_xmin=int(bbox[1]),
-                    bbox_ymax=int(bbox[2]),
-                    bbox_xmax=int(bbox[3]),
-                    shelf_row=str(item.get("shelf_row", "middle")),
-                    position_on_shelf=int(item.get("position_on_shelf", idx)),
-                    is_front_facing=True,
-                    confidence=float(item.get("confidence", 0.95)),
-                    extra_attributes=extra_attrs,
-                    input_tokens=tokens.input_tokens // max(len(raw_outputs), 1),
-                    thinking_tokens=tokens.thinking_tokens // max(len(raw_outputs), 1),
-                    output_tokens=tokens.output_tokens // max(len(raw_outputs), 1),
-                    total_tokens=tokens.total_tokens // max(len(raw_outputs), 1),
-                    billing_source=cost.billing_source,
-                    traffic_type=cost.traffic_type,
-                    vertex_ai_payg_tokens_usd=cost.vertex_ai_payg_tokens_usd,
-                    vertex_ai_provisioned_throughput_usd=cost.vertex_ai_provisioned_throughput_usd,
-                    vertex_ai_embeddings_and_vision_usd=cost.vertex_ai_embeddings_and_vision_usd,
-                    cloud_run_compute_usd=cost.cloud_run_compute_usd,
-                    gcs_and_observability_usd=cost.gcs_and_observability_usd,
-                    cost_per_product_usd=per_facing_cost,
-                    cost_per_shelf_image_usd=cost.cost_per_shelf_image_usd,
-                )
-            )
-
-        accuracy = self.evaluate_accuracy(
-            task_type=task_type,
-            rows=row_items,
-            gt_record=gt_record,
-            depth_duplicates_filtered=depth_filtered,
-        )
-        trace_id, span_id, _ = self.telemetry.log_task_execution(
-            run_id=effective_run_id,
-            task_type=task_type,
-            model_name=model_name,
-            shelf_image_uri=record.shelf_image_uri,
+        return self._executor.finalize(
+            invocation,
+            ctx=InvocationContext(
+                task_type=task_type,
+                approach_id=approach_id,
+                model_name=model_name,
+                shelf_image_uri=record.shelf_image_uri,
+                run_id=run_id or f"run-{approach_id}-{model_name}",
+                store_id=record.store_id,
+                ground_truth=gt_record,
+            ),
             start_dt=start_dt,
             end_dt=end_dt,
-            tokens=tokens,
-            cost=cost,
-            accuracy=accuracy,
-            extra_attributes={"shelf_benchmark.separation_approach": approach_id},
-        )
-        for r in row_items:
-            r.trace_id = trace_id
-            r.span_id = span_id
-
-        exec_trace = build_execution_trace_metadata(
-            run_id=effective_run_id,
-            trace_id=trace_id,
-            span_id=span_id,
-            task_type=task_type,
-            separation_approach=approach_id,
-            model_name=model_name,
-            shelf_image_uri=record.shelf_image_uri,
-            latency_ms=latency_ms,
-            tokens=tokens,
-            cost=cost,
-            accuracy=accuracy,
-            facings_count=len(row_items),
-            otel_log_path=str(self.config.telemetry.otel_log_path),
-            gcp_project_id=self.config.gcp.project_id,
-            gcp_log_name=self.config.telemetry.gcp_log_name,
-            taxonomy_source=self.config.taxonomy.taxonomy_file,
-            ground_truth_provider=self.config.ground_truth.provider_type,
-            reference_catalog_uri=self.config.embeddings.reference_catalog.source_uri,
-            custom_stages=stages_description,
-        )
-        raw_payload: Dict[str, Any] = {
-            "total_classified_products": len(row_items),
-            "depth_duplicates_filtered": depth_filtered,
-            "execution_trace": exec_trace,
-        }
-        if raw_output_extra:
-            raw_payload.update(raw_output_extra)
-
-        return TaskExecutionResult(
-            run_id=effective_run_id,
-            trace_id=trace_id,
-            span_id=span_id,
-            task_type=task_type,
-            separation_approach=approach_id,
-            model_name=model_name,
-            shelf_image_uri=record.shelf_image_uri,
-            start_time=self.telemetry.format_iso(start_dt),
-            end_time=self.telemetry.format_iso(end_dt),
-            latency_ms=latency_ms,
-            tokens=tokens,
-            cost=cost,
-            accuracy=accuracy,
-            raw_output=raw_payload,
-            row_level_items=row_items,
+            cpu_active_ms=cpu_active_ms,
         )
 
 

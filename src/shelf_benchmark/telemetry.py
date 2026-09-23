@@ -57,13 +57,18 @@ class OpenTelemetryBenchmarkLogger:
         self.provider = TracerProvider(resource=resource)
         if config.export_to_console:
             self.provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
-        trace.set_tracer_provider(self.provider)
+        if not isinstance(trace.get_tracer_provider(), TracerProvider):
+            trace.set_tracer_provider(self.provider)
         self.tracer = trace.get_tracer(config.service_name, "0.1.0")
 
         self.log_path = Path(config.otel_log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._last_cloud_logging_status: Optional[str] = None
         self._last_gcs_otel_uri: Optional[str] = None
+        self._gcs_dirty: bool = False
+        self._gcs_upload_count: int = 0
+        self._cached_creds: Any = None
+        self._cached_storage_client: Any = None
 
     @staticmethod
     def now_utc() -> datetime:
@@ -176,6 +181,23 @@ class OpenTelemetryBenchmarkLogger:
             self._last_cloud_logging_status = f"FALLBACK_LOCAL_AND_GCS ({type(exc).__name__}: {exc})"
         return None
 
+    def target_gcs_uri(self) -> Optional[str]:
+        """Return the canonical `gs://` destination for the OTel JSONL log without performing I/O."""
+        if not getattr(self.config, "sync_otel_logs_to_gcs", True):
+            return None
+        clean_bucket = self.bucket_name.replace("gs://", "").strip("/").split("/")[0]
+        if not clean_bucket:
+            return None
+        prefix = getattr(self.config, "gcs_otel_logs_prefix", "otel").strip("/")
+        return f"gs://{clean_bucket}/{prefix}/{self.log_path.name}"
+
+    def _get_credentials(self) -> Any:
+        if self._cached_creds is None:
+            from shelf_benchmark.auth import get_gcp_credentials
+
+            self._cached_creds = get_gcp_credentials(self.project_id)
+        return self._cached_creds
+
     def _sync_to_gcs(self) -> Optional[str]:
         """Uploads the OpenTelemetry JSONL log file to Google Cloud Storage (`gs://<bucket>/otel/otel_logs.jsonl`)."""
         if not getattr(self.config, "sync_otel_logs_to_gcs", True):
@@ -183,21 +205,35 @@ class OpenTelemetryBenchmarkLogger:
         try:
             from google.cloud import storage
 
-            from shelf_benchmark.auth import get_gcp_credentials
-
-            creds = get_gcp_credentials(self.project_id)
-            client = storage.Client(project=self.project_id, credentials=creds)
+            if self._cached_storage_client is None:
+                creds = self._get_credentials()
+                self._cached_storage_client = storage.Client(
+                    project=self.project_id, credentials=creds
+                )
             clean_bucket = self.bucket_name.replace("gs://", "").strip("/").split("/")[0]
-            bucket = client.bucket(clean_bucket)
+            bucket = self._cached_storage_client.bucket(clean_bucket)
             prefix = getattr(self.config, "gcs_otel_logs_prefix", "otel").strip("/")
             blob_path = f"{prefix}/{self.log_path.name}"
             blob = bucket.blob(blob_path)
             blob.upload_from_filename(str(self.log_path), content_type="application/jsonl")
             gcs_uri = f"gs://{clean_bucket}/{blob_path}"
             self._last_gcs_otel_uri = gcs_uri
+            self._gcs_dirty = False
+            self._gcs_upload_count += 1
             return gcs_uri
         except Exception:
             return None
+
+    def flush(self) -> Optional[str]:
+        """Upload the accumulated JSONL log to GCS once if new spans were written since the last sync.
+
+        Previously `_sync_to_gcs()` ran inside `log_task_execution` on every span, re-uploading the
+        entire JSONL file N times (O(N^2) bytes transferred). Buffering per-span writes and flushing
+        at run completion makes GCS sync O(N) in bytes and O(1) in upload requests.
+        """
+        if not self._gcs_dirty:
+            return self._last_gcs_otel_uri
+        return self._sync_to_gcs()
 
     def log_task_execution(
         self,
@@ -358,17 +394,26 @@ class OpenTelemetryBenchmarkLogger:
             "Attributes": attributes,
         }
 
-        with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(otel_record) + "\n")
+        import os
 
-        # Export directly to Google Cloud Logging and Google Cloud Storage
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        encoded_line = (json.dumps(otel_record) + "\n").encode("utf-8")
+        fd = os.open(str(self.log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        try:
+            os.write(fd, encoded_line)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        self._gcs_dirty = True
+
+        # Export directly to Google Cloud Logging; record target GCS URI and defer full-file upload to flush()
         cloud_log_name = self._export_to_cloud_logging(
             otel_record=otel_record,
             trace_id_hex=trace_id_hex,
             span_id_hex=span_id_hex,
             gcp_labels=cost.gcp_billing_labels,
         )
-        gcs_otel_uri = self._sync_to_gcs()
+        gcs_otel_uri = self.target_gcs_uri()
         if cloud_log_name:
             otel_record["Attributes"]["gcp.cloud_logging.log_name"] = cloud_log_name
         if gcs_otel_uri:

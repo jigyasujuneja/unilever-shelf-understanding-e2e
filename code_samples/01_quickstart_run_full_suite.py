@@ -23,8 +23,8 @@ See `docs/EVALUATION_PROTOCOL.md`.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from shelf_benchmark import ShelfBenchmarkSDK
 from shelf_benchmark.testing import OFFLINE_IMAGE_URI, benchmark_harness
@@ -78,10 +78,9 @@ def run_offline() -> None:
 
 
 def run_live() -> None:
-    # Loads configs/default_config.yaml and configs/taxonomy.yaml.
+    # Loads configs/default_config.yaml; the taxonomy comes from the installed package.
     sdk = ShelfBenchmarkSDK(
         config_path="configs/default_config.yaml",
-        taxonomy_path="configs/taxonomy.yaml",
         output_dir="reports/sample_01_quickstart",
     )
 

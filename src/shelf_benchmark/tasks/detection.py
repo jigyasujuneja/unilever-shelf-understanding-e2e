@@ -50,6 +50,7 @@ class ProductDetectionTask(BaseBenchmarkTask):
     """Standalone Front-Facing-Only Product Detection benchmark task with Depth NMS."""
 
     task_type = "detection"
+    default_separation_approach = "single_pass_facing_nms"
 
     def invoke_model(
         self,
@@ -87,8 +88,10 @@ class ProductDetectionTask(BaseBenchmarkTask):
         for idx, item in enumerate(dedup_items, start=1):
             box = item.get("bbox_2d") or [0, 0, 0, 0]
             brand_hint = item.get("preliminary_brand_hint") or ""
+            # Packaging type is genuinely unknown at this stage, so pass "" rather than asserting
+            # "tube". (Both take the same branch in the size rule, but "" does not claim knowledge.)
             rule_size = derive_size_bucket_from_bbox(
-                box, all_boxes, "tube", "", taxonomy=self.config.taxonomy
+                box, all_boxes, "", "", taxonomy=self.config.taxonomy
             )
             rows.append(
                 RowLevelReportItem(
@@ -109,17 +112,26 @@ class ProductDetectionTask(BaseBenchmarkTask):
                     bbox_xmin=box[1],
                     bbox_ymax=box[2],
                     bbox_xmax=box[3],
-                    predicted_category="Detected Facing",
-                    predicted_subcategory="Shelf Facing",
+                    # Detection localises facings; it does not classify them. These fields are left
+                    # empty on purpose. They used to carry the literals "Detected Facing",
+                    # "Shelf Facing", "tube" and "Single", which `evaluate_task_accuracy` then
+                    # scored against real ground truth -- guaranteeing ~0% on category,
+                    # subcategory, packaging_type and pack_type, and dragging
+                    # `macro_attribute_accuracy` down for reasons unrelated to detection quality.
+                    predicted_category="",
+                    predicted_subcategory="",
                     predicted_brand=brand_hint,
                     is_hul_brand=check_is_hul_brand(brand_hint, taxonomy=self.config.taxonomy),
-                    predicted_variant=item.get("visual_description", ""),
-                    predicted_packaging="tube",
-                    predicted_pack_type="Single",
+                    predicted_variant="",
+                    predicted_packaging="",
+                    predicted_pack_type="",
                     predicted_size=rule_size,
                     rule_derived_size_bucket=rule_size,
-                    predicted_product_name=item.get("visual_description", ""),
+                    # A free-text visual description is not a product name; keep it out of the
+                    # field the scorer reads as one.
+                    predicted_product_name="",
                     confidence=float(item.get("confidence", 0.95)),
+                    extra_attributes={"visual_description": item.get("visual_description", "")},
                 )
             )
 

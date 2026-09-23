@@ -323,11 +323,11 @@ class GCPBillingAndCostEngine:
 
         # 1B. Always compute Amortized Provisioned Throughput (GSU) Cost for the exact latency & slot occupancy
         pt = b_cfg.provisioned_throughput
-        gsu_count = float(getattr(pt, "gsu_count", None) or getattr(pt, "reserved_gsus", 1) or 1)
-        hourly_rate = float(getattr(pt, "hourly_rate_per_gsu_usd", None) or getattr(pt, "gsu_hourly_rate_usd", 22.0) or 22.0)
-        discount_pct = float(getattr(pt, "monthly_commitment_discount_pct", 0.0) or 0.0)
+        gsu_count = float(pt.gsu_count)
+        hourly_rate = float(pt.hourly_rate_per_gsu_usd)
+        discount_pct = float(pt.monthly_commitment_discount_pct)
         hourly_total_gsu_usd = gsu_count * hourly_rate * max(0.0, 1.0 - discount_pct)
-        slots = max(1, int(getattr(pt, "concurrent_request_slots_per_gsu", 4)))
+        slots = max(1, int(pt.concurrent_request_slots_per_gsu))
         slot_hourly_usd = hourly_total_gsu_usd / slots
         pt_gsu_usd = slot_hourly_usd * (latency_sec / 3600.0)
 
@@ -337,11 +337,11 @@ class GCPBillingAndCostEngine:
 
         # 3. Granular Cloud Run / Accelerator compute (vCPU + RAM + NVIDIA L4 GPU / Cloud TPU v5e/v6e + Request Fee).
         cr = b_cfg.cloud_run
-        concurrency = max(1, int(getattr(cr, "concurrency", 1) or 1))
+        concurrency = max(1, int(cr.concurrency))
         billable_sec_per_req = latency_sec / float(concurrency)
-        vcpu_rate = float(getattr(cr, "vcpu_per_second_usd", None) or getattr(cr, "vcpu_second_rate_usd", 0.000024))
-        mem_rate = float(getattr(cr, "memory_gib_per_second_usd", None) or getattr(cr, "gib_second_rate_usd", 0.0000025))
-        accel_per_sec = cr.accelerator_per_second_usd() if hasattr(cr, "accelerator_per_second_usd") else 0.0
+        vcpu_rate = float(cr.vcpu_per_second_usd)
+        mem_rate = float(cr.memory_gib_per_second_usd)
+        accel_per_sec = cr.accelerator_per_second_usd()
 
         vcpu_cost = float(cr.vcpu_count) * vcpu_rate * billable_sec_per_req
         mem_cost = float(cr.memory_gib) * mem_rate * billable_sec_per_req
@@ -349,16 +349,27 @@ class GCPBillingAndCostEngine:
         req_cost = float(cr.per_million_requests_usd) / 1_000_000.0
         raw_compute_usd = vcpu_cost + mem_cost + accel_cost + req_cost
 
-        if (include_infra_overhead or accel_per_sec > 0.0) and b_cfg.cloud_run.enabled:
+        # `include_infrastructure_costs` is the only thing that decides whether modelled
+        # infrastructure is folded into the reported total. It used to be `include_infra_overhead or
+        # accel_per_sec > 0.0`, so merely selecting `--accelerator tpu-v5e` silently overrode an
+        # explicit `include_infrastructure_costs: false` and made the two runs incomparable.
+        if include_infra_overhead and cr.enabled:
             cloud_run_usd = raw_compute_usd
         else:
             cloud_run_usd = 0.0
 
         # Active Container Compute vs External API-Wait Cost Attribution
-        if container_cpu_active_ms is not None and container_cpu_active_ms > 0.0:
-            active_ms = min(eff_latency_ms, float(container_cpu_active_ms))
+        if container_cpu_active_ms is not None:
+            # A measured 0.0 is a legitimate measurement, not a missing one. The gate used to be
+            # `is not None and > 0.0`, so a fast offline run whose CPU time rounded to zero fell
+            # into the estimate branch and was billed on a guess.
+            active_ms = min(eff_latency_ms, max(0.0, float(container_cpu_active_ms)))
         else:
-            # Estimate baseline local PIL decode/crop/NMS container time when not explicitly passed
+            # No caller measured container CPU time. Everything in-tree now routes through
+            # `pipeline.PipelineExecutor`, which always measures, so reaching this branch means a
+            # third-party caller invoked the billing engine directly. The figure below is an
+            # ESTIMATE, not a measurement. It was previously reached by the entire approach-plugin
+            # path, which is one reason plugins and built-in tasks reported different costs.
             active_ms = min(eff_latency_ms * 0.15, 65.0 + (14.0 * eff_products))
         api_wait_ms = max(0.0, eff_latency_ms - active_ms)
         active_ratio = active_ms / eff_latency_ms if eff_latency_ms > 0 else 0.0
@@ -381,11 +392,25 @@ class GCPBillingAndCostEngine:
         is_provisioned = eff_traffic == "PROVISIONED_THROUGHPUT"
         reported_pt_usd = pt_gsu_usd if is_provisioned else 0.0
         active_llm_usd = reported_pt_usd if is_provisioned else payg_tokens_usd
-        folded_compute_usd = cloud_run_usd if (include_infra_overhead or accel_per_sec > 0.0) else 0.0
-        total_shelf_usd = active_llm_usd + embed_vision_usd + folded_compute_usd + gcs_and_obs_usd
-        per_product_usd = total_shelf_usd / eff_products
-        per_1k_usd = (active_llm_usd + embed_vision_usd + cloud_run_usd + raw_gcs_obs_usd) * 1000.0
-        compute_share_pct = (raw_compute_usd / (active_llm_usd + embed_vision_usd + cloud_run_usd + raw_gcs_obs_usd) * 100.0) if (active_llm_usd + embed_vision_usd + cloud_run_usd) > 0 else 0.0
+
+        # One definition of "the cost of this run", used by every derived figure below. Previously
+        # `cost_per_1k_images_usd` and `compute_share_of_total_cost_pct` were each built from their
+        # own ad-hoc mix of gated and un-gated components, so `cost_per_1k_images_usd` was not
+        # 1000x `cost_per_shelf_image_usd` and always included infrastructure the headline total
+        # had excluded.
+        total_shelf_usd = active_llm_usd + embed_vision_usd + cloud_run_usd + gcs_and_obs_usd
+        # Derive the other two headline figures from the *published* (rounded) per-image cost, not
+        # from the unrounded intermediate. Rounding each independently made cost_per_1k_images_usd
+        # differ from 1000x cost_per_shelf_image_usd, which readers reasonably treat as an error.
+        reported_per_image_usd = round(total_shelf_usd, 8)
+        per_product_usd = reported_per_image_usd / eff_products
+        per_1k_usd = reported_per_image_usd * 1000.0
+
+        # Compute's share is deliberately measured against the *full modelled* cost (infrastructure
+        # always included), because the question it answers -- "how much of this is container time
+        # rather than model time?" -- is meaningless once compute has been gated out of the total.
+        full_modelled_usd = active_llm_usd + embed_vision_usd + raw_compute_usd + raw_gcs_obs_usd
+        compute_share_pct = (raw_compute_usd / full_modelled_usd * 100.0) if full_modelled_usd > 0 else 0.0
         pareto_idx = per_1k_usd * latency_sec
 
         return CostMetrics(
@@ -413,7 +438,9 @@ class GCPBillingAndCostEngine:
             gcs_and_observability_usd=round(gcs_and_obs_usd, 8),
             cost_per_shelf_image_usd=round(total_shelf_usd, 8),
             cost_per_product_usd=round(per_product_usd, 8),
-            cost_per_1k_images_usd=round(per_1k_usd, 4),
+            # 6 dp, not 4: at 4 dp this stopped being exactly 1000x cost_per_shelf_image_usd
+            # (which is stored at 8 dp), so the two figures in the same report disagreed.
+            cost_per_1k_images_usd=round(per_1k_usd, 6),
             cost_latency_pareto_index=round(pareto_idx, 4),
             product_count=product_count,
             gcp_billing_labels=gcp_labels or {},
@@ -473,7 +500,7 @@ ORDER BY net_true_gcp_cost_usd DESC"""
             f"--concurrency {int(cr.concurrency)} "
             f"--labels application=unilever-shelf-benchmark,component=benchmark-runner "
             f"--set-env-vars GCP_PROJECT_ID={self.project_id} "
-            f"--allow-unauthenticated"
+            f"--no-allow-unauthenticated"
         )
         return {
             "service_name": service_name,
@@ -515,3 +542,55 @@ ORDER BY net_true_gcp_cost_usd DESC"""
                 "sql_query": sql,
                 "rows": [],
             }
+
+    @classmethod
+    def check_pricing_staleness(
+        cls,
+        billing_cfg: Optional[GCPBillingConfig] = None,
+        *,
+        reference_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Validate the age of `billing_cfg.pricing_last_verified_date` against `max_pricing_age_days`."""
+        from datetime import date
+
+        cfg = billing_cfg or GCPBillingConfig()
+        verified = date.fromisoformat(cfg.pricing_last_verified_date)
+        ref = date.fromisoformat(reference_date) if reference_date else date.today()
+        age_days = (ref - verified).days
+        max_age = cfg.max_pricing_age_days
+        is_stale = bool(max_age is not None and age_days > max_age)
+        if is_stale:
+            raise ValueError(
+                f"Pricing rate table was last verified on {cfg.pricing_last_verified_date} "
+                f"({age_days} days ago), exceeding max_pricing_age_days={max_age}. "
+                f"Update the rates in configs/default_config.yaml and bump pricing_last_verified_date."
+            )
+        return {
+            "pricing_last_verified_date": cfg.pricing_last_verified_date,
+            "reference_date": ref.isoformat(),
+            "age_days": age_days,
+            "max_pricing_age_days": max_age,
+            "is_stale": is_stale,
+        }
+
+    @classmethod
+    def reconcile_modelled_vs_billed(
+        cls,
+        modelled_cost_usd: float,
+        billed_cost_usd: float,
+        *,
+        tolerance_pct: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Compare modelled run cost against actual BigQuery billing export cost for the same `run_id`."""
+        delta_usd = round(modelled_cost_usd - billed_cost_usd, 8)
+        denom = max(abs(billed_cost_usd), 1e-9)
+        drift_pct = round((abs(delta_usd) / denom) * 100.0, 2) if billed_cost_usd > 0 else (0.0 if modelled_cost_usd == 0 else 100.0)
+        within_tolerance = drift_pct <= tolerance_pct
+        return {
+            "modelled_cost_usd": round(modelled_cost_usd, 8),
+            "billed_cost_usd": round(billed_cost_usd, 8),
+            "delta_usd": delta_usd,
+            "drift_pct": drift_pct,
+            "tolerance_pct": tolerance_pct,
+            "within_tolerance": within_tolerance,
+        }

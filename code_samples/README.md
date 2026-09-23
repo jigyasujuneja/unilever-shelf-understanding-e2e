@@ -43,7 +43,7 @@ All 7 registered approaches can be listed via `.venv/bin/shelf-benchmark list-ap
 
 ## 3. Predicting >8 Attributes (Single VLM Call vs Grouped VLM Calls)
 
-Add any number of custom attributes in `configs/taxonomy.yaml` or Python (`TaxonomyConfig.custom_attributes`):
+Add any number of custom attributes in the packaged `shelf_benchmark/_resources/taxonomy.yaml` or Python (`TaxonomyConfig.custom_attributes`):
 
 ```python
 from shelf_benchmark import CustomAttributeSpec, TaxonomyConfig

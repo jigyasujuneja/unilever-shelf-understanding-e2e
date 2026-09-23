@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import io
 import time
-import uuid
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from shelf_benchmark.approaches.base import BaseShelfApproachPlugin, CommonLayerContext
@@ -71,11 +69,11 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
         gt_record: Optional[ImageGroundTruth] = None,
         prior_detection: Optional[TaskExecutionResult] = None,
     ) -> TaskExecutionResult:
-        run_id = f"{uuid.uuid4().hex[:6]}-cv3s-{model_name.split('-')[-1]}"
+        from shelf_benchmark.run_ids import build_run_id
 
-        start_dt = datetime.now(timezone.utc)
-        start_iso = start_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        t0 = time.perf_counter()
+        run_id = build_run_id(self.approach_id, model_name)
+        start_dt = ctx.telemetry.now_utc()
+        cpu_start_sec = time.process_time()
 
         pil_img = ctx.load_shelf_image(record)
         buf = io.BytesIO()
@@ -116,46 +114,24 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
         )
         stage3_latency_ms = round((time.perf_counter() - t_s3) * 1000.0, 2)
 
-        end_dt = datetime.now(timezone.utc)
-        end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        total_latency_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+        end_dt = ctx.telemetry.now_utc()
+        cpu_active_ms = round(max(0.0, time.process_time() - cpu_start_sec) * 1000.0, 3)
 
-        total_extra_api_cost = round(s1_extra_cost + s2_embed_cost, 8)
-        cost_metrics = ctx.compute_cost(
-            tokens=s1_tokens,
-            model_name=model_name,
-            product_count=len(matched_facings),
-            extra_api_cost_usd=total_extra_api_cost,
-            latency_ms=total_latency_ms,
-            run_id=run_id,
-            approach_id=self.approach_id,
-        )
-
-        # Create temp trace/span IDs before OTel logger emits official hex IDs
-        trace_id_hex, span_id_hex = uuid.uuid4().hex, uuid.uuid4().hex[:16]
-
+        # Only prediction fields are populated here; run_id, timings, tokens, 5-bucket GCP cost,
+        # ground-truth scoring, OTel span and execution-trace provenance are all stamped by the
+        # shared `ctx.finalize()` pipeline (this method used to assemble them inline -- the third
+        # independent copy in the codebase).
         row_items: List[RowLevelReportItem] = []
         for item in matched_facings:
-            bbox = item.get("bbox_2d", [0, 0, 0, 0])
+            bbox = item.get("bbox_2d") or [0, 0, 0, 0]
             peer_idx = item.get("nearest_shelf_facing_idx")
             peer_sim = item.get("nearest_shelf_facing_visual_sim", 0.0)
             match_sim = item.get("catalog_match_similarity_1408d", 0.0)
             catalog_status = item.get("catalog_status", "NO_CATALOG_INDEXED")
             row_items.append(
                 RowLevelReportItem(
-                    run_id=run_id,
-                    trace_id=trace_id_hex,
-                    span_id=span_id_hex,
-                    task_type="classification",
-                    separation_approach=self.approach_id,
-                    model_name=model_name,
-                    shelf_image_uri=record.shelf_image_uri,
-                    store_id=record.store_id,
-                    start_time=start_iso,
-                    end_time=end_iso,
-                    image_latency_ms=total_latency_ms,
                     product_index=int(item.get("product_index", 1)),
-                    shelf_row=str(item.get("shelf_row", "middle")),
+                    shelf_row=str(item.get("shelf_row", "")),
                     position_on_shelf=int(item.get("position_on_shelf", 1)),
                     bbox_ymin=int(bbox[0]),
                     bbox_xmin=int(bbox[1]),
@@ -165,7 +141,7 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
                     predicted_category=item.get("predicted_category", ""),
                     predicted_subcategory=item.get("predicted_subcategory", ""),
                     predicted_brand=item.get("predicted_brand", "") or "",
-                    is_hul_brand=bool(item.get("is_hul_brand", False)),
+                    is_hul_brand=item.get("is_hul_brand"),
                     predicted_variant=item.get("predicted_variant", ""),
                     predicted_packaging=item.get("predicted_packaging", ""),
                     predicted_pack_type=item.get("predicted_pack_type", ""),
@@ -174,7 +150,7 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
                     predicted_product_name=" ".join(
                         p for p in (item.get("predicted_brand"), item.get("predicted_variant")) if p
                     ),
-                    confidence=float(item.get("confidence", 0.0)),
+                    confidence=float(item.get("confidence", 0.0) or 0.0),
                     lexical_search_keywords=(
                         f"class:product visual_peer_slot:#{peer_idx} (sim={peer_sim}) "
                         f"catalog_status={catalog_status} catalog_sim={match_sim}"
@@ -186,69 +162,31 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
                     ),
                     embedding_vector_dim=int(item.get("visual_embedding_dim", 1408)),
                     matched_sku_id=item.get("matched_sku_id"),
-                    planogram_compliant=None,
-                    input_tokens=s1_tokens.input_tokens,
-                    thinking_tokens=s1_tokens.thinking_tokens,
-                    output_tokens=s1_tokens.output_tokens,
-                    total_tokens=s1_tokens.total_tokens,
-                    cost_per_shelf_image_usd=cost_metrics.cost_per_shelf_image_usd,
-                    cost_per_product_usd=cost_metrics.cost_per_product_usd,
-                    vertex_ai_payg_tokens_usd=cost_metrics.vertex_ai_payg_tokens_usd,
-                    vertex_ai_provisioned_throughput_usd=cost_metrics.vertex_ai_provisioned_throughput_usd,
-                    vertex_ai_embeddings_and_vision_usd=cost_metrics.vertex_ai_embeddings_and_vision_usd,
-                    cloud_run_compute_usd=cost_metrics.cloud_run_compute_usd,
-                    gcs_and_observability_usd=cost_metrics.gcs_and_observability_usd,
-                    traffic_type=cost_metrics.traffic_type,
-                    billing_source=cost_metrics.billing_source,
                 )
             )
 
-        acc_metrics = ctx.evaluate_accuracy(
-            task_type="classification",
-            rows=row_items,
-            gt_record=gt_record,
-            depth_duplicates_filtered=depth_filtered,
-        )
-
-        trace_id_hex, span_id_hex, _ = ctx.telemetry.log_task_execution(
-            run_id=run_id,
-            task_type=f"classification.{self.approach_id}",
+        return ctx.finalize(
+            approach_id=self.approach_id,
             model_name=model_name,
-            shelf_image_uri=record.shelf_image_uri,
+            record=record,
+            rows=row_items,
             start_dt=start_dt,
             end_dt=end_dt,
+            gt_record=gt_record,
+            run_id=run_id,
             tokens=s1_tokens,
-            cost=cost_metrics,
-            accuracy=acc_metrics,
-            status="SUCCESS",
-            extra_attributes={
-                "shelf_benchmark.separation_approach": self.approach_id,
+            extra_api_cost_usd=round(s1_extra_cost + s2_embed_cost, 8),
+            depth_duplicates_filtered=depth_filtered,
+            stages_description=self.stages_description,
+            cpu_active_ms=cpu_active_ms,
+            span_attributes={
                 "shelf_benchmark.stage1_latency_ms": stage1_latency_ms,
                 "shelf_benchmark.stage2_latency_ms": stage2_latency_ms,
                 "shelf_benchmark.stage3_latency_ms": stage3_latency_ms,
                 "shelf_benchmark.visual_embedding_model": "multimodalembedding@001",
                 "shelf_benchmark.visual_embedding_dim": 1408,
             },
-        )
-        for r in row_items:
-            r.trace_id = trace_id_hex
-            r.span_id = span_id_hex
-
-        result = TaskExecutionResult(
-            run_id=run_id,
-            trace_id=trace_id_hex,
-            span_id=span_id_hex,
-            task_type="classification",
-            separation_approach=self.approach_id,
-            model_name=model_name,
-            shelf_image_uri=record.shelf_image_uri,
-            start_time=start_iso,
-            end_time=end_iso,
-            latency_ms=total_latency_ms,
-            tokens=s1_tokens,
-            cost=cost_metrics,
-            accuracy=acc_metrics,
-            raw_output={
+            raw_output_extra={
                 "approach_id": self.approach_id,
                 "display_name": self.display_name,
                 "detector_backend": self._detector_backend,
@@ -260,7 +198,6 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
                 "visual_embedding_dimension": 1408,
                 "montage_path": montage_path,
                 "front_facings_detected": len(matched_facings),
-                "depth_duplicates_filtered": depth_filtered,
                 "catalog_status": (
                     matched_facings[0].get("catalog_status") if matched_facings else "NO_FACINGS"
                 ),
@@ -282,11 +219,7 @@ class ClassAgnosticVisualEmbeddingApproach(BaseShelfApproachPlugin):
                     for f in matched_facings
                 ],
             },
-            row_level_items=row_items,
-            status="SUCCESS",
         )
-        return result
-
 
 def get_plugins() -> List[BaseShelfApproachPlugin]:
     """Returns the registered plugins for this approach directory."""

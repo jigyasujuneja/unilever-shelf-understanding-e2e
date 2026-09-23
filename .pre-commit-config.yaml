@@ -1,0 +1,23 @@
+# Install with: pip install pre-commit && pre-commit install
+# This rev is pinned to the exact ruff CI runs (see RUFF_VERSION in .github/workflows/ci.yml),
+# so local and CI cannot disagree. Bump both together, and re-measure the baseline recorded in
+# CONTRIBUTING.md when you do -- ruff's rule set changes between minors.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # reports/ holds multi-MB generated PNGs. Keep new ones out.
+        args: [--maxkb=512]

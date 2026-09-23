@@ -16,7 +16,6 @@ Design rules (see `docs/EVALUATION_PROTOCOL.md` for the full rationale):
 from __future__ import annotations
 
 import re
-import unicodedata
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from shelf_benchmark.config import EvaluationConfig
@@ -27,30 +26,12 @@ from shelf_benchmark.models import (
     RowLevelReportItem,
 )
 
-def normalize_text(text: Optional[str]) -> str:
-    """Normalize a brand/product string for comparison (strips accents, apostrophes, punctuation and case).
+# Re-exported for backwards compatibility. The implementations live in one place now; there used
+# to be a second, subtly different normalizer in `tasks/facing_utils.py` that rewrote brands
+# before this module ever compared them. See `shelf_benchmark.text_normalization`.
+from shelf_benchmark.text_normalization import canonical_brand, normalize_text
 
-    Collapses possessive/contraction apostrophes first (`"Brand_A"` -> `"ponds"`, `"Brand_F"` -> `"loreal"`)
-    so punctuation variants match across any brand portfolio without hardcoded alias lists.
-    """
-    if not text:
-        return ""
-    nfkd = unicodedata.normalize("NFKD", text)
-    ascii_str = "".join(c for c in nfkd if not unicodedata.combining(c))
-    no_apostrophes = re.sub(r"['’`]", "", ascii_str.lower())
-    cleaned = re.sub(r"[^a-z0-9\s]", " ", no_apostrophes)
-    return " ".join(cleaned.split())
-
-
-def canonical_brand(brand: Optional[str], aliases: Optional[Dict[str, str]] = None) -> str:
-    """Normalize a brand and fold it onto its canonical form via the optional configured alias table."""
-    norm = normalize_text(brand)
-    if not norm:
-        return ""
-    table = aliases or {}
-    if norm in table:
-        return normalize_text(table[norm])
-    return norm
+__all__ = ["canonical_brand", "normalize_text"]
 
 
 def brands_match(
@@ -160,6 +141,165 @@ def has_valid_bbox(row: RowLevelReportItem) -> bool:
     return row.bbox_ymax > row.bbox_ymin and row.bbox_xmax > row.bbox_xmin
 
 
+
+def _optimal_bipartite_match(
+    n_rows: int,
+    n_gt: int,
+    candidates: List[Tuple[float, float, int, int]],
+) -> Dict[int, Tuple[int, float]]:
+    """Maximum-weight bipartite matching (Hungarian / Kuhn-Munkres potentials).
+
+    Greedy IoU pairing (`sorted(candidates, key=-score)`) can make a sub-optimal global choice when
+    two adjacent shelf products overlap: assigning Pred 1 to GT 1 with IoU 0.62 can leave Pred 2
+    with 0.0 IoU even when (Pred 1 -> GT 2 at 0.58, Pred 2 -> GT 1 at 0.60) yields two true
+    positives (total 1.18 vs 0.62). This solver finds the exact global maximum-weight matching in
+    pure Python.
+    """
+    if not candidates or n_rows == 0 or n_gt == 0:
+        return {}
+
+    score_map: Dict[Tuple[int, int], Tuple[float, float]] = {}
+    for score, iou, r_idx, g_idx in candidates:
+        if (r_idx, g_idx) not in score_map or score > score_map[(r_idx, g_idx)][0]:
+            score_map[(r_idx, g_idx)] = (score, iou)
+
+    size = max(n_rows, n_gt)
+    max_w = max((s for s, _ in score_map.values()), default=1.0)
+    cost = [[max_w] * (size + 1) for _ in range(size + 1)]
+    for (r_idx, g_idx), (score, _iou) in score_map.items():
+        cost[r_idx + 1][g_idx + 1] = max_w - score
+
+    u = [0.0] * (size + 1)
+    v = [0.0] * (size + 1)
+    p = [0] * (size + 1)
+    way = [0] * (size + 1)
+
+    for i in range(1, size + 1):
+        p[0] = i
+        j0 = 0
+        minv = [float("inf")] * (size + 1)
+        used = [False] * (size + 1)
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            delta = float("inf")
+            j1 = 0
+            for j in range(1, size + 1):
+                if not used[j]:
+                    cur = cost[i0][j] - u[i0] - v[j]
+                    if cur < minv[j]:
+                        minv[j] = cur
+                        way[j] = j0
+                    if minv[j] < delta:
+                        delta = minv[j]
+                        j1 = j
+            for j in range(size + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while True:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+            if j0 == 0:
+                break
+
+    result: Dict[int, Tuple[int, float]] = {}
+    for j in range(1, size + 1):
+        r_idx = p[j] - 1
+        g_idx = j - 1
+        if 0 <= r_idx < n_rows and 0 <= g_idx < n_gt and (r_idx, g_idx) in score_map:
+            _score, iou = score_map[(r_idx, g_idx)]
+            result[r_idx] = (g_idx, round(iou, 4))
+    return result
+
+
+def compute_precision_recall_and_ap(
+    rows: List[RowLevelReportItem],
+    gt_items: List[GroundTruthProductItem],
+    iou_threshold: float = 0.50,
+) -> Tuple[Optional[float], List[Dict[str, float]]]:
+    """Compute confidence-ranked Precision-Recall curve points and all-point interpolated AP."""
+    if not gt_items:
+        return None, []
+    if not rows or not any(has_valid_bbox(r) for r in rows):
+        return 0.0, []
+
+    ranked = sorted(
+        enumerate(rows),
+        key=lambda pair: (-float(pair[1].confidence or 0.0), pair[0]),
+    )
+    matched_gt: Set[int] = set()
+    tp_cum = 0
+    fp_cum = 0
+    n_gt = len(gt_items)
+    curve: List[Dict[str, float]] = []
+
+    for _orig_idx, row in ranked:
+        if not has_valid_bbox(row):
+            fp_cum += 1
+        else:
+            best_iou = 0.0
+            best_g = -1
+            rb = row_bbox(row)
+            for g_idx, gt in enumerate(gt_items):
+                if g_idx in matched_gt:
+                    continue
+                iou = compute_iou(rb, gt.bbox_2d)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_g = g_idx
+            if best_g >= 0 and best_iou >= iou_threshold:
+                matched_gt.add(best_g)
+                tp_cum += 1
+            else:
+                fp_cum += 1
+
+        prec = tp_cum / max(tp_cum + fp_cum, 1)
+        rec = tp_cum / max(n_gt, 1)
+        curve.append(
+            {
+                "confidence": round(float(row.confidence or 0.0), 4),
+                "precision": round(prec, 4),
+                "recall": round(rec, 4),
+            }
+        )
+
+    mrec = [0.0] + [pt["recall"] for pt in curve] + [1.0]
+    mpre = [0.0] + [pt["precision"] for pt in curve] + [0.0]
+    for i in range(len(mpre) - 2, -1, -1):
+        if mpre[i] < mpre[i + 1]:
+            mpre[i] = mpre[i + 1]
+    ap = 0.0
+    for i in range(1, len(mrec)):
+        if mrec[i] != mrec[i - 1]:
+            ap += (mrec[i] - mrec[i - 1]) * mpre[i]
+    return round(ap, 4), curve
+
+
+def compute_coco_map_50_95(
+    rows: List[RowLevelReportItem],
+    gt_items: List[GroundTruthProductItem],
+) -> Optional[float]:
+    """Compute COCO-style mAP averaged over IoU thresholds 0.50:0.05:0.95."""
+    if not gt_items:
+        return None
+    if not rows or not any(has_valid_bbox(r) for r in rows):
+        return 0.0
+    thresholds = [round(0.50 + 0.05 * k, 2) for k in range(10)]
+    aps = []
+    for thr in thresholds:
+        ap, _ = compute_precision_recall_and_ap(rows, gt_items, iou_threshold=thr)
+        if ap is not None:
+            aps.append(ap)
+    return round(sum(aps) / len(aps), 4) if aps else None
+
+
 def pair_predictions_with_gt(
     rows: List[RowLevelReportItem],
     gt_items: List[GroundTruthProductItem],
@@ -197,14 +337,18 @@ def pair_predictions_with_gt(
             candidates.append((score, iou, r_idx, g_idx))
 
     paired: Dict[int, Tuple[Optional[GroundTruthProductItem], float]] = {}
-    used_rows: Set[int] = set()
-    used_gt: Set[int] = set()
-    for _score, iou, r_idx, g_idx in sorted(candidates, key=lambda c: (-c[0], c[2], c[3])):
-        if r_idx in used_rows or g_idx in used_gt:
-            continue
-        used_rows.add(r_idx)
-        used_gt.add(g_idx)
-        paired[r_idx] = (gt_items[g_idx], round(iou, 4))
+    if cfg.pairing_strategy in ("optimal", "hungarian"):
+        for r_idx, (g_idx, iou) in _optimal_bipartite_match(len(rows), len(gt_items), candidates).items():
+            paired[r_idx] = (gt_items[g_idx], iou)
+    else:
+        used_rows: Set[int] = set()
+        used_gt: Set[int] = set()
+        for _score, iou, r_idx, g_idx in sorted(candidates, key=lambda c: (-c[0], c[2], c[3])):
+            if r_idx in used_rows or g_idx in used_gt:
+                continue
+            used_rows.add(r_idx)
+            used_gt.add(g_idx)
+            paired[r_idx] = (gt_items[g_idx], round(iou, 4))
 
     if not geometry_available:
         # Classification-only output with no usable geometry: fall back to left-to-right positional
@@ -217,6 +361,25 @@ def pair_predictions_with_gt(
             paired[r_idx] = (gt_items[slot], 0.0)
 
     return [(row, *paired.get(idx, (None, 0.0))) for idx, row in enumerate(rows)]
+
+
+# Attributes a given task does not predict, and must therefore not be scored on.
+#
+# `evaluate_task_accuracy` receives `task_type` but used to ignore it when computing
+# `per_attribute_accuracy`, scoring all six core attributes on every row of every task. The
+# detection task emits only boxes (plus a preliminary brand hint), so it was being graded on
+# category, subcategory, variant, packaging_type, pack_type and product_name that it had never
+# produced -- a guaranteed ~0% that then dragged down `macro_attribute_accuracy` and made
+# detection look worse than classification for reasons unrelated to either.
+#
+# This is a deny-list rather than an allow-list on purpose: a task added later is scored on
+# everything by default, which is visible and arguable, whereas an allow-list default of "nothing"
+# would silently report no accuracy at all.
+_UNPREDICTED_ATTRIBUTES_BY_TASK: Dict[str, frozenset] = {
+    "detection": frozenset(
+        {"category", "subcategory", "variant", "packaging_type", "pack_type", "size", "product_name"}
+    ),
+}
 
 
 def evaluate_task_accuracy(
@@ -309,12 +472,14 @@ def evaluate_task_accuracy(
         if is_hit:
             attr_hits[name] = attr_hits.get(name, 0) + 1
 
+    unpredicted = _UNPREDICTED_ATTRIBUTES_BY_TASK.get(task_type, frozenset())
+
     for r, g, _ in pairings:
         if g is None:
             continue
-        if g.brand:
+        if g.brand and "brand" not in unpredicted:
             _record_attr("brand", bool(r.brand_correct))
-        if g.product_name:
+        if g.product_name and "product_name" not in unpredicted:
             _record_attr("product_name", bool(r.product_correct))
         core_pairs = [
             ("category", r.predicted_category, g.category),
@@ -325,9 +490,13 @@ def evaluate_task_accuracy(
             ("size", r.predicted_size, g.size),
         ]
         for attr_name, p_val, g_val in core_pairs:
+            if attr_name in unpredicted:
+                continue
             if g_val is not None and str(g_val).strip() != "":
                 _record_attr(attr_name, normalize_text(str(p_val or "")) == normalize_text(str(g_val)))
         for attr_name, g_val in (g.extra_attributes or {}).items():
+            if attr_name in unpredicted:
+                continue
             if g_val is not None and str(g_val).strip() != "":
                 p_val = (r.extra_attributes or {}).get(attr_name)
                 _record_attr(attr_name, normalize_text(str(p_val or "")) == normalize_text(str(g_val)))
@@ -385,6 +554,9 @@ def evaluate_task_accuracy(
         detection_precision=_round(precision) if geometry_available else None,
         detection_recall=_round(recall) if geometry_available else None,
         detection_f1=_round(f1) if geometry_available else None,
+        average_precision_at_50=compute_precision_recall_and_ap(rows, gt_items, iou_threshold=cfg.iou_threshold)[0] if geometry_available else None,
+        map_50_95=compute_coco_map_50_95(rows, gt_items) if geometry_available else None,
+        pr_curve_points=compute_precision_recall_and_ap(rows, gt_items, iou_threshold=cfg.iou_threshold)[1] if geometry_available else [],
         mean_iou=_round(sum(all_ious) / len(all_ious)) if all_ious and geometry_available else None,
         mean_iou_matched=(_round(sum(matched_ious) / len(matched_ious)) if matched_ious else None),
         brand_classification_accuracy=_round(brand_acc),

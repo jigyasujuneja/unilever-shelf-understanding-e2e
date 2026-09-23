@@ -27,7 +27,7 @@ def test_approach_registry_auto_discovers_all_plugins() -> None:
 
 
 def test_centralized_taxonomy_config_and_prompts() -> None:
-    """Verify TaxonomyConfig loads from configs/taxonomy.yaml and builds prompts dynamically without hardcoded counts."""
+    """Verify TaxonomyConfig loads from the packaged taxonomy YAML and builds prompts dynamically without hardcoded counts."""
     from shelf_benchmark.config import BenchmarkConfig, TaxonomyConfig
     from shelf_benchmark.tasks.classification import build_classification_prompt
     from shelf_benchmark.tasks.facing_utils import check_is_hul_brand, derive_size_bucket_from_bbox

@@ -24,7 +24,26 @@ Given shelf photographs of any resolution (from a single quickstart fixture loca
 
 ---
 
-## 2. Repository Directory Structure
+## 2. Getting started
+
+From a fresh clone, three commands:
+
+```bash
+make setup    # creates .venv and installs the package with dev extras
+make test     # offline test lane: no network, no GCP credentials
+make check    # what CI runs: lint + typecheck + tests + wheel packaging
+```
+
+Then follow [`ENGINEER_ONBOARDING_GUIDE.md`](ENGINEER_ONBOARDING_GUIDE.md). Everything under `docs/`
+is reference material -- read it when you need it, not before.
+
+> [!NOTE]
+> Nothing above touches GCP. Credentials are only needed for `--live` runs and the `cloud-run`
+> subcommand; see [`CONTRIBUTING.md`](CONTRIBUTING.md) §1.
+
+---
+
+## 3. Repository Directory Structure
 
 ```text
 unilever-shelf-understanding-with-cv/
@@ -103,7 +122,7 @@ unilever-shelf-understanding-with-cv/
 
 ---
 
-## 3. Engineer Cheat Sheet: How to Configure & Test Everything
+## 4. Engineer Cheat Sheet: How to Configure & Test Everything
 
 | What You Want to Do | Command / File to Use |
 | :--- | :--- |
@@ -111,7 +130,7 @@ unilever-shelf-understanding-with-cv/
 | **Test & compare ALL 7 approaches on live Cloud Run** (and write local reports + `diagnostic_trace_report.md`) | `.venv/bin/shelf-benchmark cloud-run --approaches all --model gemini-3.8-flash --image gs://unilever-shelf-understanding-shelf-images/shelf-image.png` |
 | **Test & compare ALL 7 approaches offline** (instant, zero GCP cost) | `.venv/bin/shelf-benchmark cloud-run --approaches all --offline --connect-sample-gt` |
 | **Configure Cloud Run / Vertex AI Hardware & Accelerators** (`none` CPU, `nvidia-l4` GPU, `tpu-v5e`, `tpu-v6e` Trillium TPU) | Pass `--accelerator tpu-v5e --include-infra-costs` (or set `billing.cloud_run.accelerator_type` in `configs/default_config.yaml`) |
-| **Predict >8 Attributes** (e.g., 12 attributes in 1 VLM call or split into attribute groups) | Add fields under `custom_attributes:` and `attribute_call_groups:` in [`configs/taxonomy.yaml`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/configs/taxonomy.yaml) and run `--approaches configurable_multi_attribute_vlm` |
+| **Predict >8 Attributes** (e.g., 12 attributes in 1 VLM call or split into attribute groups) | Add fields under `custom_attributes:` and `attribute_call_groups:` in [`src/shelf_benchmark/_resources/taxonomy.yaml`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/src/shelf_benchmark/_resources/taxonomy.yaml) (or your own file via `taxonomy_file:`) and run `--approaches configurable_multi_attribute_vlm` |
 | **Write your own custom approach** (~15 lines) | Subclass `SimpleShelfApproachPlugin` (see [`code_samples/11_complete_engineer_approach_playground.py`](file:///usr/local/google/home/rgavigan/unilever-shelf-understanding-with-cv/code_samples/11_complete_engineer_approach_playground.py)) or pass `--plugin-module path/to/my_plugin.py` |
 | **Connect any GCP image dataset** (multi-image GCS bucket, BigQuery table/SQL, CSV, JSON) | Call `sdk.connect_dataset(provider_type="gcs_bucket" \| "bigquery" \| "csv" \| "json", source_uri=..., schema_mapping=...)` |
 | **Connect any provided Ground-Truth dataset** & re-score saved predictions for free | `.venv/bin/shelf-benchmark score --predictions reports/predictions.json --gt-provider json --ground-truth-uri <path_or_gs_uri>` |
@@ -120,7 +139,7 @@ unilever-shelf-understanding-with-cv/
 
 ---
 
-## 4. Built-in Approaches (`shelf-benchmark list-approaches`)
+## 5. Built-in Approaches (`shelf-benchmark list-approaches`)
 
 | Approach ID | Call Topology | Description |
 | :--- | :--- | :--- |

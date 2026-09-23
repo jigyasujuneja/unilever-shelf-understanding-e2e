@@ -3,7 +3,7 @@
 # Every operational layer (GCP, Buckets, Models, GEAP/Gemma/Tuned Endpoints,
 # Tasks, 4 Separation Approaches, Embeddings, Depth NMS, SFT Fine-Tuning,
 # Taxonomy, Associations, Ground Truth, OpenTelemetry, and Reporting)
-# is 100% configurable from this file + configs/taxonomy.yaml.
+# is 100% configurable from this file + the packaged shelf_benchmark/_resources/taxonomy.yaml.
 # =============================================================================
 
 gcp:
@@ -60,8 +60,11 @@ approaches:
   # That is deliberate: it used to invent a brand name, which looked like a result.
   - "class_agnostic_visual_embedding"
 
-# Centralized product taxonomy configuration (Categories, Subcategories, Brands, Packaging, Pack Types, Size Rules)
-taxonomy_file: "configs/taxonomy.yaml"
+# Centralized product taxonomy (Categories, Subcategories, Brands, Packaging, Pack Types, Size Rules).
+# The taxonomy ships inside the installed package at `shelf_benchmark/_resources/taxonomy.yaml` and
+# is loaded automatically -- there is nothing to set here. Uncomment below only to override it with
+# your own file; a relative path is resolved next to THIS config file, and a missing path is an error.
+# taxonomy_file: "my_taxonomy.yaml"
 
 # Dense & Visual Embedding Models + Hybrid Search RRF Weights
 embeddings:
@@ -92,7 +95,10 @@ fine_tuning:
   submit_live_tuning_job: false
   tuned_model_display_name: "unilever-shelf-classifier-tuned"
   epochs: 3
-  num_synthetic_replicas: 16
+  # Writes the SAME single example N times only to satisfy Vertex AI's minimum row count.
+  # It adds no supervision. Was `num_synthetic_replicas: 16`, which made a one-example
+  # smoke-test fixture report itself as a 16-example training dataset.
+  duplicate_single_example_times: 1
   dataset_gcs_subpath: "tuning/shelf_sft_train.jsonl"
 
 # =============================================================================
@@ -130,9 +136,12 @@ billing:
   attach_gcp_billing_labels: true
   billing_label_prefix: "unilever_shelf"
 
-  # Enabled by default so granular compute (vCPU + RAM + GPU/TPU) and observability costs
-  # are always calculated and included in cost/latency tradeoff comparisons.
-  include_infrastructure_costs: true
+  # Off by default, matching config.py and docs/EVALUATION_PROTOCOL.md §10.
+  # When true, modelled Cloud Run compute and GCS/Logging dollars are folded into
+  # cost_per_shelf_image_usd, which makes runs non-comparable against runs that
+  # priced only real API usage. Turn it on deliberately, per comparison, with
+  # `--include-infra-costs`.
+  include_infrastructure_costs: false
 
   # Rates used for the modelled infrastructure buckets above.
   gcs_and_logging_overhead_per_image_usd: 0.000015
@@ -151,7 +160,16 @@ billing:
       two_stage_physical_crop_per_facing: 0.000125
       class_agnostic_visual_embedding: 0.000125
       cloud_vision_visual_embedding: 0.000125
-    per_task_per_facing_usd: {}              # e.g. {matching: 0.00001}
+    # These MUST mirror config.py EmbeddingAndVisionCostConfig. An empty mapping
+    # here does not mean "use the Python defaults" -- it replaces them, which
+    # silently halved the matching embed rate (0.000050 -> 0.000025) and inflated
+    # detection/fine_tuning by 25%. docs/EVALUATION_PROTOCOL.md documents these
+    # exact numbers.
+    per_task_per_facing_usd:
+      classification: 0.000025
+      matching: 0.000050
+      detection: 0.000020
+      fine_tuning: 0.000020
 
   # Vertex AI Provisioned Throughput (GSU — Generative AI Scale Units).
   # A GSU charge is only reported when traffic actually ran as PROVISIONED_THROUGHPUT.

@@ -12,6 +12,7 @@ Provides end-to-end support for Vertex AI Gemini Supervised Fine-Tuning (SFT):
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,13 +26,16 @@ from shelf_benchmark.models import (
     TokenUsageMetrics,
 )
 from shelf_benchmark.tasks.base import BaseBenchmarkTask
-from shelf_benchmark.tasks.classification import CLASSIFICATION_PROMPT
+from shelf_benchmark.tasks.classification import build_classification_prompt
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiFineTuningTask(BaseBenchmarkTask):
     """Vertex AI Gemini Fine-Tuning dataset builder, job launcher, and benchmark evaluator."""
 
     task_type = "fine_tuning"
+    default_separation_approach = "vertex_sft_fine_tuning"
 
     def build_sft_jsonl_example(
         self,
@@ -43,20 +47,36 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
         if ground_truth and ground_truth.items:
             target_items = []
             for idx, it in enumerate(ground_truth.items, start=1):
-                target_items.append(
-                    {
-                        "product_index": idx,
-                        "bbox_2d": it.bbox_2d,
-                        "shelf_row": it.shelf_row,
-                        "position_on_shelf": idx,
-                        "brand": it.brand,
-                        "product_name": it.product_name,
-                        "variant": it.sku_id or "",
-                        "category": "Face Wash",
-                        "packaging_type": "Tube",
-                        "confidence": 1.0,
-                    }
-                )
+                # Only emit attributes the annotation actually carries. This block used to write
+                # `"variant": it.sku_id` (a SKU id is not a variant) plus the constants
+                # `"category": "Face Wash"` (which is a *sub*category, and the same one for every
+                # product) and `"packaging_type": "Tube"` (the taxonomy uses lowercase "tube").
+                # The real `category`, `subcategory`, `variant`, `packaging_type`, `pack_type` and
+                # `size` fields were present on GroundTruthProductItem and simply never read, so a
+                # model fine-tuned on this dataset learned to emit those two literals.
+                item: Dict[str, Any] = {
+                    "product_index": idx,
+                    "bbox_2d": it.bbox_2d,
+                    "shelf_row": it.shelf_row,
+                    "position_on_shelf": idx,
+                    "brand": it.brand,
+                    "product_name": it.product_name,
+                    "confidence": 1.0,
+                }
+                for key, value in (
+                    ("category", it.category),
+                    ("subcategory", it.subcategory),
+                    ("variant", it.variant),
+                    ("packaging_type", it.packaging_type),
+                    ("pack_type", it.pack_type),
+                    ("size", it.size),
+                    ("sku_id", it.sku_id),
+                ):
+                    if value:
+                        item[key] = value
+                if it.extra_attributes:
+                    item["extra_attributes"] = dict(it.extra_attributes)
+                target_items.append(item)
             target_payload = {
                 "total_classified_products": len(target_items),
                 "distinct_brands_found": ground_truth.expected_brands,
@@ -70,8 +90,6 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
                 "distinct_brands_found": [],
                 "classified_products": [],
             }
-
-        from shelf_benchmark.tasks.classification import build_classification_prompt
 
         dynamic_prompt = build_classification_prompt(self.config.taxonomy)
         return {
@@ -101,9 +119,19 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
         ground_truth: Optional[ImageGroundTruth],
         distilled_output: Optional[Dict[str, Any]] = None,
         local_dir: str | Path = "reports/tuning_data",
-        num_synthetic_replicas: int = 16,
+        duplicate_single_example_times: int = 1,
     ) -> Tuple[str, str, int]:
-        """Create a valid Vertex AI SFT JSONL dataset locally and upload to the artifacts GCS bucket."""
+        """Create a Vertex AI SFT JSONL dataset from ONE shelf image and upload it to GCS.
+
+        This builds a single training example. `duplicate_single_example_times` writes that one
+        example N times to clear Vertex AI's minimum-row check; it adds no information and the
+        result is a smoke-test fixture, not a training set. It was previously named
+        `num_synthetic_replicas` and defaulted to 16, which made a 16-line file of one repeated
+        row look like a 16-example dataset in the report.
+
+        Raises on upload failure -- the caller records a GCS URI in the report, and a silently
+        swallowed exception meant that URI could point at nothing.
+        """
         out_dir = Path(local_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         local_jsonl = out_dir / "shelf_sft_train.jsonl"
@@ -113,8 +141,18 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
             ground_truth=ground_truth,
             distilled_output=distilled_output,
         )
+        copies = max(1, int(duplicate_single_example_times))
+        if copies > 1:
+            logger.warning(
+                "Writing the SAME SFT example %d times to '%s'. This is a smoke-test fixture to "
+                "satisfy Vertex AI's minimum row count, not a training dataset: it contains one "
+                "distinct shelf image and adds no supervision. Supply multiple annotated images "
+                "to build a real dataset.",
+                copies,
+                local_jsonl,
+            )
         with open(local_jsonl, "w", encoding="utf-8") as f:
-            for _ in range(max(1, num_synthetic_replicas)):
+            for _ in range(copies):
                 f.write(json.dumps(example) + "\n")
 
         bucket_base = (
@@ -122,11 +160,8 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
             or self.config.buckets.shelf_images_bucket
         ).rstrip("/")
         gcs_dest = f"{bucket_base}/tuning/shelf_sft_train.jsonl"
-        try:
-            self.storage.upload_file(local_jsonl, gcs_dest)
-        except Exception:
-            pass
-        return str(local_jsonl), gcs_dest, num_synthetic_replicas
+        self.storage.upload_file(local_jsonl, gcs_dest)
+        return str(local_jsonl), gcs_dest, copies
 
     def submit_vertex_tuning_job(
         self,
@@ -180,7 +215,7 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
 
         response = client.models.generate_content(
             model=model_name,
-            contents=[image_part, CLASSIFICATION_PROMPT],
+            contents=[image_part, build_classification_prompt(self.config.taxonomy)],
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 response_mime_type="application/json",
@@ -194,16 +229,22 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
         parsed_dict = json.loads(raw_text)
         validated = ProductClassificationOutput.model_validate(parsed_dict)
 
-        local_jsonl, gcs_jsonl, num_records = self.prepare_and_upload_sft_dataset(
+        ft_cfg = self.config.fine_tuning
+        local_jsonl, gcs_jsonl, jsonl_row_count = self.prepare_and_upload_sft_dataset(
             shelf_image_uri=shelf_image_uri,
             ground_truth=ground_truth,
             distilled_output=validated.model_dump(),
+            duplicate_single_example_times=ft_cfg.duplicate_single_example_times,
         )
 
         tuning_job_info: Dict[str, Any] = {
             "sft_dataset_local_path": local_jsonl,
             "sft_dataset_gcs_uri": gcs_jsonl,
-            "sft_example_count": num_records,
+            # Distinct vs. written rows are reported separately. A single key called
+            # "sft_example_count" that returned the duplication factor made a one-image fixture
+            # indistinguishable from a real multi-image dataset in the report.
+            "sft_distinct_example_count": 1,
+            "sft_jsonl_row_count": jsonl_row_count,
             "label_source": "ground_truth" if (ground_truth and ground_truth.items) else "distilled_placeholder",
             "submit_live_tuning_job": submit_live_tuning_job,
         }
@@ -211,6 +252,8 @@ class GeminiFineTuningTask(BaseBenchmarkTask):
             tuning_job_info["vertex_tuning_job"] = self.submit_vertex_tuning_job(
                 base_model=model_name,
                 training_dataset_gcs_uri=gcs_jsonl,
+                tuned_model_display_name=ft_cfg.tuned_model_display_name,
+                epochs=ft_cfg.epochs,
             )
 
         rows: List[RowLevelReportItem] = []

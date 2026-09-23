@@ -112,8 +112,8 @@ class MyCustomShelfApproach(SimpleShelfApproachPlugin):
 - `ctx.load_shelf_image(record)`: Loads the shelf image as a PIL `Image`.
 - `ctx.deduplicate_depth_stacked_facings(items, x_overlap_threshold=None)`: Suppresses back-row stacked units using `config.depth_deduplication.x_overlap_threshold`.
 - `ctx.crop_facing_images(shelf_image_uri, facings, model_tag, local_fallback=None)`: Crops each facing to `facing_XX.png` + `montage_all_facings.png`.
-- `ctx.derive_size_bucket_from_bbox(bbox_2d, all_bboxes_on_shelf, packaging_type="tube", model_size_hint="")`: Rule-derived size bucket from `configs/taxonomy.yaml`.
-- `ctx.check_is_hul_brand(brand_name)`: Portfolio lookup from `configs/taxonomy.yaml`.
+- `ctx.derive_size_bucket_from_bbox(bbox_2d, all_bboxes_on_shelf, packaging_type="tube", model_size_hint="")`: Rule-derived size bucket from the packaged `shelf_benchmark/_resources/taxonomy.yaml`.
+- `ctx.check_is_hul_brand(brand_name)`: Portfolio lookup from the packaged `shelf_benchmark/_resources/taxonomy.yaml`.
 
 ---
 

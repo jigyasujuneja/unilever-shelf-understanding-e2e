@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
@@ -409,7 +409,30 @@ def test_two_thousand_brands_scale_without_prompt_bloat():
     assert "CatalogBrand_1500" not in prompt, "2,000 brands must never be dumped into the VLM prompt"
     assert "open-vocabulary generative extraction" in prompt
 
-    resolved = resolve_brand_against_catalog("CatalogBrand's 0742", tax)
-    assert resolved == "CatalogBrand_0742"
-    assert check_is_hul_brand(resolved, tax) is True
+    # Punctuation variants fold: "CatalogBrand-0742" / "CatalogBrand 0742" all normalize to the
+    # same token run as the catalog's "CatalogBrand_0742".
+    for variant in ("CatalogBrand_0742", "CatalogBrand-0742", "catalogbrand 0742", "CatalogBrand.0742"):
+        assert resolve_brand_against_catalog(variant, tax) == "CatalogBrand_0742", variant
+
+    # Brand extraction from a longer generated string folds to the catalog entry.
+    assert resolve_brand_against_catalog("CatalogBrand_0742 Extra Moisturising", tax) == "CatalogBrand_0742"
+
+    # Known, deliberate limitation of the single shared normalizer: apostrophes are deleted rather
+    # than treated as possessive markers, because real brands are spelled both ways ("Pond's" and
+    # "Ponds" must match, and they do). The cost is that a spurious possessive inside a
+    # multi-token brand does NOT fold, and the resolver leaves the string alone rather than
+    # guessing. The resolver and the scorer now agree on that, which is the point -- previously
+    # the resolver rewrote the prediction under one rule and the scorer graded it under another.
+    assert resolve_brand_against_catalog("CatalogBrand's 0742", tax) == "CatalogBrand's 0742"
+
+    from shelf_benchmark.text_normalization import normalize_text
+
+    assert normalize_text("Pond's") == normalize_text("Ponds")
+
+    # Whole-token matching: a catalog brand must not be inferred from an incidental substring.
+    narrow = TaxonomyConfig(hul_brands=["Lux"], non_hul_brands=[])
+    assert resolve_brand_against_catalog("Deluxe", narrow) == "Deluxe"
+    assert check_is_hul_brand("Deluxe", narrow) is False
+
+    assert check_is_hul_brand("CatalogBrand_0742", tax) is True
     assert check_is_hul_brand("CatalogBrand_1850", tax) is False

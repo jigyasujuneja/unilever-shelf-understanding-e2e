@@ -8,141 +8,59 @@ to `0.0`) when aggregating, so "not measured" can never be misread as "scored ze
 
 from __future__ import annotations
 
-import csv
 import getpass
-import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
+from shelf_benchmark.artifacts import RunArtifacts, atomic_write_text
 from shelf_benchmark.models import RowLevelReportItem, TaskExecutionResult
-
-# Accuracy metrics that are averaged (skipping `None`) when building the leaderboard.
-LEADERBOARD_AVERAGED_METRICS: Sequence[str] = (
-    "detection_precision",
-    "detection_recall",
-    "detection_f1",
-    "mean_iou_matched",
-    "count_accuracy",
-    "brand_classification_accuracy",
-    "brand_set_recall",
-    "product_classification_accuracy",
-    "sku_matching_accuracy",
-    "planogram_compliance_rate",
+from shelf_benchmark.reporting.aggregation import (
+    LEADERBOARD_AVERAGED_METRICS,
+    LEADERBOARD_SUMMED_COUNTERS,
+    build_leaderboard_records,
+    build_provenance,
+    build_summary_records,
+)
+from shelf_benchmark.reporting.formatting import (
+    UNKNOWN as _UNKNOWN,
+)
+from shelf_benchmark.reporting.formatting import (
+    fmt_count as _fmt_count,
+)
+from shelf_benchmark.reporting.formatting import (
+    fmt_float as _fmt_float,
+)
+from shelf_benchmark.reporting.formatting import (
+    fmt_pct as _fmt_pct,
+)
+from shelf_benchmark.reporting.formatting import (
+    fmt_usd as _fmt_usd,
+)
+from shelf_benchmark.reporting.formatting import (
+    slugify as _slugify,
+)
+from shelf_benchmark.reporting.tabular import (
+    SUMMARY_FIELDNAMES,
+    write_leaderboard_csv,
+    write_row_level_csv,
+    write_row_level_json,
+    write_summary_csv,
+    write_summary_json,
 )
 
-# Accuracy counters that are summed across images.
-LEADERBOARD_SUMMED_COUNTERS: Sequence[str] = (
-    "matched_pairs",
-    "true_positives",
-    "false_positives",
-    "false_negatives",
-    "depth_duplicates_filtered",
-)
-
-# Canonical column order for `benchmark_summary.csv` (kept stable for downstream consumers).
-SUMMARY_FIELDNAMES: Sequence[str] = (
-    "run_id",
-    "trace_id",
-    "span_id",
-    "task_type",
-    "separation_approach",
-    "model_name",
-    "shelf_image_uri",
-    "status",
-    "start_time",
-    "end_time",
-    "latency_ms",
-    "front_facings_count",
-    "depth_duplicates_filtered",
-    "latency_per_facing_ms",
-    "input_tokens",
-    "thinking_tokens",
-    "output_tokens",
-    "total_tokens",
-    "cost_per_shelf_image_usd",
-    "cost_per_product_usd",
-    "vertex_ai_payg_tokens_usd",
-    "vertex_ai_provisioned_throughput_usd",
-    "vertex_ai_embeddings_and_vision_usd",
-    "cloud_run_compute_usd",
-    "gcs_and_observability_usd",
-    "traffic_type",
-    "billing_source",
-    "rates_from_live_catalog",
-    "includes_modelled_infrastructure",
-    "ground_truth_available",
-    "accuracy_status",
-    "gt_version",
-    "iou_threshold",
-    "pairing_strategy",
-    "brand_matcher",
-    "product_matcher",
-    "gt_count",
-    "predicted_count",
-    "matched_pairs",
-    "true_positives",
-    "false_positives",
-    "false_negatives",
-    "count_accuracy",
-    "mean_iou_matched",
-    "detection_precision",
-    "detection_recall",
-    "detection_f1",
-    "brand_classification_accuracy",
-    "brand_set_recall",
-    "product_classification_accuracy",
-    "sku_matching_accuracy",
-    "planogram_compliance_rate",
-    "error_message",
-)
-
-_UNKNOWN = "unknown"
-
-
-def _mean_ignoring_none(values: Iterable[Optional[float]]) -> Tuple[Optional[float], int]:
-    """Average only the measured values.
-
-    Returns `(mean, n_contributing)`. `None` entries are skipped rather than treated as
-    `0.0`, and a metric measured on zero images returns `(None, 0)` so the report shows
-    "not measured" instead of a fabricated zero.
-    """
-    measured = [float(v) for v in values if v is not None]
-    if not measured:
-        return None, 0
-    return sum(measured) / len(measured), len(measured)
-
-
-def _distinct_labels(values: Iterable[Any]) -> str:
-    """Join distinct non-empty provenance labels, e.g. two GT versions in one batch.
-
-    A semicolon is used rather than a pipe so the result stays safe inside a Markdown table cell.
-    """
-    seen: List[str] = []
-    for v in values:
-        if v is None or v == "":
-            continue
-        text = str(v)
-        if text not in seen:
-            seen.append(text)
-    return "; ".join(seen) if seen else _UNKNOWN
-
-
-def _fmt_pct(value: Optional[float]) -> str:
-    return "n/a" if value is None else f"{value * 100:.1f}%"
-
-
-def _fmt_float(value: Optional[float], digits: int = 3) -> str:
-    return "n/a" if value is None else f"{value:.{digits}f}"
-
-
-def _fmt_count(value: Optional[int]) -> str:
-    """Render a confusion-matrix count, keeping "not measured" distinct from "zero"."""
-    return "n/a" if value is None else str(value)
-
-
-def _fmt_usd(value: Optional[float]) -> str:
-    return "n/a" if value is None else f"${value:.6f}"
+__all__ = [
+    "BenchmarkReportGenerator",
+    "LEADERBOARD_AVERAGED_METRICS",
+    "LEADERBOARD_SUMMED_COUNTERS",
+    "SUMMARY_FIELDNAMES",
+    "_UNKNOWN",
+    "_fmt_count",
+    "_fmt_float",
+    "_fmt_pct",
+    "_fmt_usd",
+    "_slugify",
+]
 
 
 class BenchmarkReportGenerator:
@@ -277,11 +195,17 @@ class BenchmarkReportGenerator:
             all_rows.extend(res.row_level_items)
 
         row_csv_path = run_dir / "row_level_report.csv"
-        row_json_path = run_dir / "row_level_report.json"
-        summary_csv_path = run_dir / "benchmark_summary.csv"
-        summary_json_path = run_dir / "benchmark_summary.json"
-        leaderboard_csv_path = run_dir / "leaderboard.csv"
-        md_report_path = run_dir / "benchmark_report.md"
+        run_artifacts = RunArtifacts(
+            run_dir,
+            base_dir=self.output_dir,
+            run_id=results[0].run_id if results else None,
+        )
+        row_csv_path = run_artifacts.path_for("row_level_csv")
+        row_json_path = run_artifacts.path_for("row_level_json")
+        summary_csv_path = run_artifacts.path_for("summary_csv")
+        summary_json_path = run_artifacts.path_for("summary_json")
+        leaderboard_csv_path = run_artifacts.path_for("leaderboard_csv")
+        md_report_path = run_artifacts.path_for("markdown_report")
 
         summary_records = self._build_summary_records(results)
         leaderboard_records = self._build_leaderboard_records(results)
@@ -300,6 +224,16 @@ class BenchmarkReportGenerator:
             provenance=provenance,
         )
 
+        for key, target in (
+            ("row_level_csv", row_csv_path),
+            ("row_level_json", row_json_path),
+            ("summary_csv", summary_csv_path),
+            ("summary_json", summary_json_path),
+            ("leaderboard_csv", leaderboard_csv_path),
+            ("markdown_report", md_report_path),
+        ):
+            run_artifacts.record(key, target)
+
         artifacts = {
             "row_level_csv": str(row_csv_path),
             "row_level_json": str(row_json_path),
@@ -310,9 +244,13 @@ class BenchmarkReportGenerator:
         }
 
         if self.write_predictions_file:
-            predictions_path = run_dir / "predictions.json"
+            predictions_path = run_artifacts.path_for("predictions_json")
             self._write_predictions_file(results, predictions_path)
+            run_artifacts.record("predictions_json", predictions_path)
             artifacts["predictions_json"] = str(predictions_path)
+
+        manifest_path = run_artifacts.write_manifest()
+        artifacts["manifest_json"] = str(manifest_path)
 
         gcs_artifacts = self._upload_reports_to_gcs(artifacts)
         artifacts.update(gcs_artifacts)
@@ -321,122 +259,27 @@ class BenchmarkReportGenerator:
         return artifacts
 
     # -----------------------------------------------------------------
-    # Row-level writers
+    # Delegated writers & aggregators (`reporting.tabular` / `reporting.aggregation`)
     # -----------------------------------------------------------------
 
     def _write_row_level_csv(self, rows: List[RowLevelReportItem], path: Path) -> None:
-        fieldnames = list(RowLevelReportItem.model_fields.keys())
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for r in rows:
-                writer.writerow(r.model_dump())
+        write_row_level_csv(rows, path)
 
     def _write_row_level_json(self, rows: List[RowLevelReportItem], path: Path) -> None:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump([r.model_dump() for r in rows], f, indent=2)
+        write_row_level_json(rows, path)
 
     def _write_predictions_file(
         self, results: Sequence[TaskExecutionResult], path: Path
     ) -> None:
-        """Writes raw model output only (no scoring) so a run can be re-scored later.
-
-        Delegates to `shelf_benchmark.scoring.write_predictions_file` so there is exactly one
-        definition of this file format. It must round-trip through `score_predictions`, which
-        needs the row-level items, not just `raw_output`.
-        """
         from shelf_benchmark.scoring import write_predictions_file as _write
 
         _write(list(results), path)
 
-    # -----------------------------------------------------------------
-    # Per-run summary records
-    # -----------------------------------------------------------------
-
     def _build_summary_records(self, results: List[TaskExecutionResult]) -> List[Dict[str, Any]]:
-        records: List[Dict[str, Any]] = []
-        for r in results:
-            acc = r.accuracy
-            cost = r.cost
-            records.append(
-                {
-                    "run_id": r.run_id,
-                    "trace_id": r.trace_id,
-                    "span_id": r.span_id,
-                    "task_type": r.task_type,
-                    "separation_approach": r.separation_approach,
-                    "model_name": r.model_name,
-                    "shelf_image_uri": r.shelf_image_uri,
-                    "status": r.status,
-                    "start_time": r.start_time,
-                    "end_time": r.end_time,
-                    "latency_ms": r.latency_ms,
-                    "front_facings_count": cost.product_count,
-                    "depth_duplicates_filtered": acc.depth_duplicates_filtered,
-                    "latency_per_facing_ms": round(
-                        r.latency_ms / max(cost.product_count, 1), 2
-                    ),
-                    "input_tokens": r.tokens.input_tokens,
-                    "thinking_tokens": r.tokens.thinking_tokens,
-                    "output_tokens": r.tokens.output_tokens,
-                    "total_tokens": r.tokens.total_tokens,
-                    "cost_per_shelf_image_usd": cost.cost_per_shelf_image_usd,
-                    "cost_per_product_usd": cost.cost_per_product_usd,
-                    "vertex_ai_payg_tokens_usd": cost.vertex_ai_payg_tokens_usd,
-                    "vertex_ai_provisioned_throughput_usd": cost.vertex_ai_provisioned_throughput_usd,
-                    "vertex_ai_embeddings_and_vision_usd": cost.vertex_ai_embeddings_and_vision_usd,
-                    "cloud_run_compute_usd": cost.cloud_run_compute_usd,
-                    "gcs_and_observability_usd": cost.gcs_and_observability_usd,
-                    "traffic_type": cost.traffic_type,
-                    # Cost provenance: where the rates came from and what is inside the total.
-                    "billing_source": cost.billing_source,
-                    "rates_from_live_catalog": cost.rates_from_live_catalog,
-                    "includes_modelled_infrastructure": cost.includes_modelled_infrastructure,
-                    "ground_truth_available": acc.ground_truth_available,
-                    "accuracy_status": (
-                        "EVALUATED_AGAINST_GT"
-                        if acc.ground_truth_available
-                        else acc.accuracy_status
-                    ),
-                    # Scoring provenance: no accuracy number below can be read out of context.
-                    "gt_version": acc.gt_version,
-                    "iou_threshold": acc.iou_threshold,
-                    "pairing_strategy": acc.pairing_strategy,
-                    "brand_matcher": acc.brand_matcher,
-                    "product_matcher": acc.product_matcher,
-                    "gt_count": acc.ground_truth_count,
-                    "predicted_count": acc.predicted_count,
-                    "matched_pairs": acc.matched_pairs,
-                    "true_positives": acc.true_positives,
-                    "false_positives": acc.false_positives,
-                    "false_negatives": acc.false_negatives,
-                    "count_accuracy": acc.count_accuracy,
-                    "mean_iou_matched": acc.mean_iou_matched,
-                    "detection_precision": acc.detection_precision,
-                    "detection_recall": acc.detection_recall,
-                    "detection_f1": acc.detection_f1,
-                    "brand_classification_accuracy": acc.brand_classification_accuracy,
-                    "brand_set_recall": acc.brand_set_recall,
-                    "product_classification_accuracy": acc.product_classification_accuracy,
-                    "sku_matching_accuracy": acc.sku_matching_accuracy,
-                    "planogram_compliance_rate": acc.planogram_compliance_rate,
-                    "error_message": r.error_message,
-                }
-            )
-        return records
+        return build_summary_records(results)
 
     def _write_summary_csv(self, records: List[Dict[str, Any]], path: Path) -> None:
-        fieldnames = list(SUMMARY_FIELDNAMES)
-        if records:
-            # Tolerate extra keys that a caller-built record might carry.
-            for key in records[0]:
-                if key not in fieldnames:
-                    fieldnames.append(key)
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-            writer.writeheader()
-            for rec in records:
-                writer.writerow(rec)
+        write_summary_csv(records, path)
 
     def _write_summary_json(
         self,
@@ -446,145 +289,24 @@ class BenchmarkReportGenerator:
         leaderboard_records: Optional[List[Dict[str, Any]]] = None,
         provenance: Optional[Dict[str, Any]] = None,
     ) -> None:
-        payload = {
-            "provenance": provenance if provenance is not None else self._build_provenance(full_results),
-            "summary": summary_records,
-            "leaderboard": leaderboard_records if leaderboard_records is not None else [],
-            "detailed_runs": [r.model_dump() for r in full_results],
-        }
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
-
-    # -----------------------------------------------------------------
-    # Provenance
-    # -----------------------------------------------------------------
+        write_summary_json(
+            summary_records,
+            full_results,
+            path,
+            leaderboard_records=leaderboard_records,
+            provenance=provenance if provenance is not None else self._build_provenance(full_results),
+        )
 
     def _build_provenance(self, results: Sequence[TaskExecutionResult]) -> Dict[str, Any]:
-        """Collects the scoring and billing provenance shared by this batch of results."""
-        accs = [r.accuracy for r in results]
-        costs = [r.cost for r in results]
-        try:
-            user = getpass.getuser()
-        except Exception:
-            user = "unknown-user"
-        return {
-            "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "generated_by_user": user,
-            "result_count": len(results),
-            "ground_truth_available_any": any(a.ground_truth_available for a in accs),
-            "ground_truth_available_all": bool(accs) and all(a.ground_truth_available for a in accs),
-            "gt_version": _distinct_labels(a.gt_version for a in accs),
-            "iou_threshold": _distinct_labels(a.iou_threshold for a in accs),
-            "pairing_strategy": _distinct_labels(a.pairing_strategy for a in accs),
-            "brand_matcher": _distinct_labels(a.brand_matcher for a in accs),
-            "product_matcher": _distinct_labels(a.product_matcher for a in accs),
-            "accuracy_status": _distinct_labels(a.accuracy_status for a in accs),
-            "billing_source": _distinct_labels(c.billing_source for c in costs),
-            "rates_from_live_catalog_all": bool(costs) and all(c.rates_from_live_catalog for c in costs),
-            "rates_from_live_catalog_any": any(c.rates_from_live_catalog for c in costs),
-            "includes_modelled_infrastructure_any": any(
-                c.includes_modelled_infrastructure for c in costs
-            ),
-            "includes_modelled_infrastructure_all": bool(costs)
-            and all(c.includes_modelled_infrastructure for c in costs),
-        }
-
-    # -----------------------------------------------------------------
-    # Aggregate leaderboard
-    # -----------------------------------------------------------------
+        return build_provenance(results)
 
     def _build_leaderboard_records(
         self, results: Sequence[TaskExecutionResult]
     ) -> List[Dict[str, Any]]:
-        """Averages per-image metrics for each `(approach_id, model_name)` pair.
-
-        Metrics that are `None` on an image are skipped for that image rather than counted
-        as `0.0`, and the number of images that actually contributed to each average is
-        emitted alongside it (`<metric>_n_images`).
-        """
-        groups: Dict[Tuple[str, str], List[TaskExecutionResult]] = {}
-        for r in results:
-            groups.setdefault((r.separation_approach, r.model_name), []).append(r)
-
-        records: List[Dict[str, Any]] = []
-        for (approach_id, model_name), grouped in groups.items():
-            accs = [g.accuracy for g in grouped]
-            costs = [g.cost for g in grouped]
-            record: Dict[str, Any] = {
-                "approach_id": approach_id,
-                "model_name": model_name,
-                "task_types": _distinct_labels(sorted({g.task_type for g in grouped})),
-                "images_scored": len(grouped),
-                "images_with_ground_truth": sum(1 for a in accs if a.ground_truth_available),
-                "successful_runs": sum(1 for g in grouped if g.status == "SUCCESS"),
-            }
-
-            for metric in LEADERBOARD_AVERAGED_METRICS:
-                mean_value, n_contributing = _mean_ignoring_none(
-                    getattr(a, metric) for a in accs
-                )
-                record[metric] = None if mean_value is None else round(mean_value, 4)
-                record[f"{metric}_n_images"] = n_contributing
-
-            for counter in LEADERBOARD_SUMMED_COUNTERS:
-                # Sum only the images that were actually scored. If none were, the total
-                # stays None: reporting "0 false negatives" for an unscored group would
-                # read as a perfect recall result.
-                contributing = [
-                    getattr(a, counter) for a in accs if getattr(a, counter, None) is not None
-                ]
-                record[counter] = sum(contributing) if contributing else None
-
-            avg_latency, _ = _mean_ignoring_none(g.latency_ms for g in grouped)
-            avg_cost_image, _ = _mean_ignoring_none(c.cost_per_shelf_image_usd for c in costs)
-            avg_cost_product, _ = _mean_ignoring_none(c.cost_per_product_usd for c in costs)
-            avg_tokens, _ = _mean_ignoring_none(g.tokens.total_tokens for g in grouped)
-
-            record.update(
-                {
-                    "avg_latency_ms": None if avg_latency is None else round(avg_latency, 1),
-                    "avg_cost_per_shelf_image_usd": (
-                        None if avg_cost_image is None else round(avg_cost_image, 8)
-                    ),
-                    "total_cost_usd": round(
-                        sum(c.cost_per_shelf_image_usd for c in costs), 8
-                    ),
-                    "avg_cost_per_product_usd": (
-                        None if avg_cost_product is None else round(avg_cost_product, 8)
-                    ),
-                    "avg_total_tokens": None if avg_tokens is None else round(avg_tokens, 1),
-                    "gt_version": _distinct_labels(a.gt_version for a in accs),
-                    "iou_threshold": _distinct_labels(a.iou_threshold for a in accs),
-                    "pairing_strategy": _distinct_labels(a.pairing_strategy for a in accs),
-                    "brand_matcher": _distinct_labels(a.brand_matcher for a in accs),
-                    "product_matcher": _distinct_labels(a.product_matcher for a in accs),
-                    "accuracy_status": _distinct_labels(a.accuracy_status for a in accs),
-                    "billing_source": _distinct_labels(c.billing_source for c in costs),
-                    "rates_from_live_catalog": bool(costs)
-                    and all(c.rates_from_live_catalog for c in costs),
-                    "includes_modelled_infrastructure": any(
-                        c.includes_modelled_infrastructure for c in costs
-                    ),
-                }
-            )
-            records.append(record)
-
-        records.sort(key=_leaderboard_sort_key)
-        for rank, record in enumerate(records, start=1):
-            record["rank"] = rank
-        return records
+        return build_leaderboard_records(results)
 
     def _write_leaderboard_csv(self, records: List[Dict[str, Any]], path: Path) -> None:
-        fieldnames = _leaderboard_fieldnames(records)
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-            writer.writeheader()
-            for rec in records:
-                writer.writerow(rec)
-
-    # -----------------------------------------------------------------
-    # Markdown report
-    # -----------------------------------------------------------------
+        write_leaderboard_csv(records, path)
 
     def _write_markdown_report(
         self,
@@ -609,7 +331,7 @@ class BenchmarkReportGenerator:
         lines.extend(self._otel_markdown(summary_records))
         lines.extend(self._row_level_markdown(all_rows))
 
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        atomic_write_text(path, "\n".join(lines) + "\n")
 
     def _provenance_markdown(
         self, provenance: Dict[str, Any], summary_records: List[Dict[str, Any]]
@@ -822,64 +544,3 @@ class BenchmarkReportGenerator:
         return lines
 
 
-def _slugify(value: str) -> str:
-    """Filesystem-safe fragment for run directory names."""
-    return "".join(ch if (ch.isalnum() or ch in "-_") else "-" for ch in str(value)).strip("-")
-
-
-def _leaderboard_sort_key(record: Dict[str, Any]) -> tuple:
-    """Sort by detection F1 desc, then product classification accuracy desc.
-
-    Unmeasured (`None`) metrics rank after every measured value instead of being treated
-    as zero, so a model that was never scored does not appear to have lost.
-    """
-    f1 = record.get("detection_f1")
-    product_acc = record.get("product_classification_accuracy")
-    return (
-        0 if f1 is not None else 1,
-        -(f1 if f1 is not None else 0.0),
-        0 if product_acc is not None else 1,
-        -(product_acc if product_acc is not None else 0.0),
-        str(record.get("approach_id", "")),
-        str(record.get("model_name", "")),
-    )
-
-
-def _leaderboard_fieldnames(records: Sequence[Dict[str, Any]]) -> List[str]:
-    """Stable leaderboard CSV column order, even when there are no records."""
-    fieldnames: List[str] = [
-        "rank",
-        "approach_id",
-        "model_name",
-        "task_types",
-        "images_scored",
-        "images_with_ground_truth",
-        "successful_runs",
-    ]
-    for metric in LEADERBOARD_AVERAGED_METRICS:
-        fieldnames.append(metric)
-        fieldnames.append(f"{metric}_n_images")
-    fieldnames.extend(LEADERBOARD_SUMMED_COUNTERS)
-    fieldnames.extend(
-        [
-            "avg_latency_ms",
-            "avg_cost_per_shelf_image_usd",
-            "avg_cost_per_product_usd",
-            "total_cost_usd",
-            "avg_total_tokens",
-            "gt_version",
-            "iou_threshold",
-            "pairing_strategy",
-            "brand_matcher",
-            "product_matcher",
-            "accuracy_status",
-            "billing_source",
-            "rates_from_live_catalog",
-            "includes_modelled_infrastructure",
-        ]
-    )
-    for rec in records:
-        for key in rec:
-            if key not in fieldnames:
-                fieldnames.append(key)
-    return fieldnames

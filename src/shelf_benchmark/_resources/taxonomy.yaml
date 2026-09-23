@@ -1,6 +1,16 @@
-# Centralized Product Taxonomy Configuration
-# Update this file whenever your category, subcategory, packaging, or size rules change.
-# All tasks (Detection, Classification, Hybrid Matching, Fine-Tuning) and the Web UI load this file automatically.
+# Centralized Product Taxonomy Configuration -- THE single source of truth.
+#
+# This file ships *inside* the installed package (shelf_benchmark/_resources/taxonomy.yaml) and is
+# resolved relative to the package directory, never relative to the current working directory. That
+# means `shelf-benchmark run` behaves identically from the repo root, from /, and from a wheel
+# install. Every field below is also the default for the corresponding `TaxonomyConfig` attribute,
+# so there is no second copy of these lists hardcoded in Python.
+#
+# To use a different taxonomy WITHOUT editing this file, point `taxonomy_file:` in your benchmark
+# config (or `ShelfBenchmarkSDK(..., taxonomy_path=...)`) at your own YAML. Keys you omit there fall
+# back to the values below; a path that does not exist is a hard error, never a silent fallback.
+#
+# All tasks (Detection, Classification, Hybrid Matching, Fine-Tuning) and the Web UI read this.
 # Note: Brand names (`brand`) and HUL vs. Non-HUL attribution (`is_hul_brand`) are extracted
 # openly from the shelf image / connected product catalog without requiring predefined brand lists.
 

@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from shelf_benchmark.config import PACKAGED_TAXONOMY_PATH
+
 # =====================================================================
 # 1. Structured Gemini Output Schemas (used in response_schema)
 # =====================================================================
@@ -19,8 +21,8 @@ class DetectedProductItem(BaseModel):
         description="Normalized 2D bounding box [ymin, xmin, ymax, xmax] scaled 0 to 1000 of ONLY the front-most unit in this facing"
     )
     shelf_row: str = Field(
-        default="middle",
-        description="Shelf row identifier (e.g., top, middle, bottom)"
+        default="",
+        description="Shelf row identifier (top, middle, bottom); \"\" if the model did not report one"
     )
     position_on_shelf: int = Field(
         default=1,
@@ -39,8 +41,8 @@ class DetectedProductItem(BaseModel):
         description="Visible brand text read directly from packaging if legible, else Unknown"
     )
     confidence: float = Field(
-        default=0.95,
-        description="Detection confidence score between 0.0 and 1.0"
+        default=0.0,
+        description="Detection confidence score between 0.0 and 1.0. 0.0 means not reported.",
     )
 
 
@@ -59,21 +61,27 @@ class ClassifiedProductItem(BaseModel):
         default_factory=lambda: [0, 0, 0, 0],
         description="Normalized 2D bounding box [ymin, xmin, ymax, xmax] scaled 0 to 1000"
     )
-    shelf_row: str = Field(default="middle", description="Shelf row (top, middle, bottom)")
+    shelf_row: str = Field(default="", description="Shelf row (top, middle, bottom); \"\" if not reported")
     position_on_shelf: int = Field(default=1, description="1-based horizontal facing slot from left to right")
+    # Defaults are "" (= not reported), never a plausible value. These fields are part of the
+    # Gemini `response_schema`, so a value the model omits is filled in by Pydantic and then
+    # reported and *scored* as if the model had predicted it. The previous defaults were
+    # "Skin Care" / "Face Wash" / "tube" / "Single" / "Medium / Regular (50-100g)" (a size label
+    # that does not even exist in the taxonomy), and `is_hul_brand=True`, i.e. an unanswered
+    # question silently became a confident claim about a Unilever brand.
     category: str = Field(
-        default="Skin Care",
+        default="",
         description="Dimension 1 (Category): Configured retail category (e.g., Hair Care, Oral Care, Laundry, Skin Care, Skin Cleansing, etc.)"
     )
     subcategory: str = Field(
-        default="Face Wash",
+        default="",
         description="Dimension 2 (Subcategory): Configured subcategory (e.g., Shampoo, Mouthwash, Soaps, Face Wash, Body Wash, Detergent, Cream, Gel)"
     )
     brand: str = Field(
         description="Dimension 3 (Brand): Exact brand name read from packaging (HUL portfolio or non-HUL brand)"
     )
-    is_hul_brand: bool = Field(
-        default=True,
+    is_hul_brand: Optional[bool] = Field(
+        default=None,
         description="True if brand belongs to the configured Hindustan Unilever (HUL) brand portfolio"
     )
     variant: str = Field(
@@ -81,22 +89,29 @@ class ClassifiedProductItem(BaseModel):
         description="Dimension 4 (Variant): Specific product line + variant/ingredient/claim read from packaging"
     )
     packaging_type: str = Field(
-        default="tube",
+        default="",
         description="Dimension 5 (Packaging type): e.g., box, jar, sachet, tube, bottle, pouch, bar"
     )
     pack_type: str = Field(
-        default="Single",
+        default="",
         description="Dimension 6 (Pack type): 'Single' or 'Multiple' (multipack/bundled)"
     )
     size: str = Field(
-        default="Medium / Regular (50-100g)",
+        default="",
         description="Dimension 7 (Size): Rule-derived size bucket (e.g., Sachet/Trial <25g, Small/Compact 25-50g, Medium/Regular 51-100g, Large/Family >100g)"
     )
     product_name: str = Field(
         default="",
         description="Full synthesized product display name (Brand + Sub-brand + Variant + Subcategory)"
     )
-    confidence: float = Field(default=0.95, description="Classification confidence between 0.0 and 1.0")
+    confidence: float = Field(
+        default=0.0,
+        description=(
+            "Classification confidence between 0.0 and 1.0. 0.0 means the model did not report "
+            "one -- it previously defaulted to 0.95, so an unanswered question was recorded as "
+            "high confidence."
+        ),
+    )
     extra_attributes: Dict[str, Any] = Field(
         default_factory=dict,
         description="Additional product/shelf attributes beyond the base 8 dimensions (>8 attributes support)"
@@ -114,15 +129,19 @@ class MatchedProductItem(BaseModel):
     """Single product prepared for Hybrid Search (Vector + Lexical) with all 7 HUL Taxonomy filters."""
     product_index: int = Field(description="1-based index of the product facing")
     bbox_2d: List[int] = Field(default_factory=lambda: [0, 0, 0, 0])
-    shelf_row: str = Field(default="middle")
+    shelf_row: str = Field(default="", description="Shelf row (top, middle, bottom); \"\" if not reported")
     position_on_shelf: int = Field(default=1)
-    category: str = Field(default="Skin Care")
-    subcategory: str = Field(default="Face Wash")
+    # As with ClassifiedProductItem, these are part of the Gemini `response_schema`: a field the
+    # model omits is filled in by Pydantic and then reported and *scored* as a prediction. The
+    # previous defaults ("Skin Care" / "Face Wash" / "tube" / "Single" / "Medium / Regular")
+    # meant an unanswered question became a confident, wrong, graded answer.
+    category: str = Field(default="")
+    subcategory: str = Field(default="")
     brand: str = Field(description="Visually extracted brand filter for hybrid search")
     variant: str = Field(default="", description="Visually extracted variant")
-    packaging_type: str = Field(default="tube")
-    pack_type: str = Field(default="Single")
-    size: str = Field(default="Medium / Regular")
+    packaging_type: str = Field(default="")
+    pack_type: str = Field(default="")
+    size: str = Field(default="")
     product_name: str = Field(description="Visually extracted product title")
     lexical_search_keywords: List[str] = Field(
         default_factory=list,
@@ -136,7 +155,10 @@ class MatchedProductItem(BaseModel):
         default="HYBRID_SEARCH_READY",
         description="Matched catalog SKU ID if a catalog is provided, otherwise HYBRID_SEARCH_READY"
     )
-    match_confidence: float = Field(default=0.95, description="Confidence in extracted search attributes (0.0 to 1.0)")
+    match_confidence: float = Field(
+        default=0.0,
+        description="Confidence in extracted search attributes (0.0 to 1.0). 0.0 means not reported.",
+    )
     planogram_compliant: Optional[bool] = Field(default=None, description="True/False if planogram provided, else null")
     extra_attributes: Dict[str, Any] = Field(
         default_factory=dict,
@@ -188,7 +210,7 @@ class GroundTruthProductItem(BaseModel):
     size: Optional[str] = None
     sku_id: Optional[str] = None
     bbox_2d: List[int] = Field(default_factory=lambda: [0, 0, 0, 0])
-    shelf_row: str = "middle"
+    shelf_row: str = ""  # "" = the annotation did not record a row
     back_row: bool = Field(
         default=False,
         description="True if this unit sits behind a front facing (excluded from front-facing scoring).",
@@ -298,6 +320,12 @@ class AccuracyMetrics(BaseModel):
     detection_precision: Optional[float] = None
     detection_recall: Optional[float] = None
     detection_f1: Optional[float] = None
+    average_precision_at_50: Optional[float] = None
+    map_50_95: Optional[float] = None
+    pr_curve_points: List[Dict[str, float]] = Field(
+        default_factory=list,
+        description="Confidence-ranked Precision-Recall curve points [{'confidence', 'precision', 'recall'}].",
+    )
     mean_iou: Optional[float] = None
     mean_iou_matched: Optional[float] = None
     brand_classification_accuracy: Optional[float] = None
@@ -321,8 +349,13 @@ class RowLevelReportItem(BaseModel):
     run_id: str = ""
     trace_id: str = ""
     span_id: str = ""
-    task_type: str = "classification"
-    separation_approach: str = "single_pass_full_shelf"
+    # Both default to "" and are stamped by the pipeline. They used to default to
+    # "classification" / "single_pass_full_shelf", and `tasks/base.py` did
+    # `if rows[0].separation_approach: approach = rows[0].separation_approach` -- an
+    # always-true test, so any task whose rows did not set the field had its real approach id
+    # silently replaced by a *classification* id in reports, cost records and billing labels.
+    task_type: str = ""
+    separation_approach: str = ""
     model_name: str = ""
     shelf_image_uri: str = ""
     store_id: Optional[str] = None
@@ -330,7 +363,7 @@ class RowLevelReportItem(BaseModel):
     end_time: str = ""
     image_latency_ms: float = 0.0
     product_index: int = 1
-    shelf_row: str = "middle"
+    shelf_row: str = ""  # "" = not predicted; never guess a shelf position
     position_on_shelf: int = 1
     is_front_facing: bool = True
     bbox_ymin: int = 0
@@ -345,7 +378,7 @@ class RowLevelReportItem(BaseModel):
     is_hul_brand: Optional[bool] = None
     predicted_variant: str = ""
     predicted_packaging: str = ""
-    predicted_pack_type: str = "Single"
+    predicted_pack_type: str = ""
     predicted_size: str = ""
     rule_derived_size_bucket: str = ""
     predicted_product_name: str = ""
@@ -406,7 +439,7 @@ def build_execution_trace_metadata(
     otel_log_path: str = "reports/otel_logs.jsonl",
     gcp_project_id: str = "unilever-shelf-understanding",
     gcp_log_name: str = "unilever-shelf-benchmark-otel",
-    taxonomy_source: str = "configs/taxonomy.yaml",
+    taxonomy_source: str = str(PACKAGED_TAXONOMY_PATH),
     ground_truth_provider: str = "none",
     reference_catalog_uri: Optional[str] = None,
     custom_stages: Optional[List[str]] = None,
@@ -547,6 +580,22 @@ def build_execution_trace_metadata(
             "stages": [
                 "Stage 1: VLM extracts product attributes + sparse lexical BM25 keywords + dense embedding passage",
                 "Stage 2: `gemini-embedding-001` generates 3072-D vectors combined via Reciprocal Rank Fusion (RRF)",
+            ],
+        }
+    elif task_type == "fine_tuning":
+        bp = {
+            "call_topology": "1 API Call (Zero-shot structured inference) -> Vertex AI SFT dataset build",
+            "api_calls_count": 1,
+            "detect_and_classify_mode": (
+                "Zero-shot structured extraction used as distillation input, then serialised to a "
+                "Vertex AI supervised fine-tuning (SFT) JSONL dataset and uploaded to GCS"
+            ),
+            "models_invoked": [
+                {"stage": "Stage 1 (Zero-shot Structured Inference)", "model": model_name, "type": "Vertex AI VLM"},
+            ],
+            "stages": [
+                "Stage 1: Zero-shot structured extraction over the shelf image",
+                "Stage 2: Build Vertex AI SFT JSONL examples and upload the dataset to GCS",
             ],
         }
     else:
