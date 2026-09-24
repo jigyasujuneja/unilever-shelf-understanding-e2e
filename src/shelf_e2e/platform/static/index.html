@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="ShelfBench Arena — MLflow Experiment Tracking & Kaggle Leaderboard for Unilever Retail Shelf Understanding (SPEC-001 & SPEC-002)." />
+  <title>ShelfBench Arena — MLflow & Kaggle Retail CV Benchmarking Platform</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="arena-header">
+    <div class="brand-block">
+      <h1>ShelfBench Arena — MLflow &amp; Kaggle Benchmarking Platform</h1>
+      <p class="brand-subtitle">SPEC-001 &amp; SPEC-002 • SKU-110k Dense Shelf Detection + RPC 83k Catalog Retrieval • Tracks A–D &amp; Jev/Diffusion</p>
+    </div>
+    <div class="sla-banner">
+      <span class="sla-chip" id="sla-cost-chip">Hard Cost Ceiling: &le; ₹0.22 / img</span>
+      <span class="sla-chip" id="sla-latency-chip">P95 SLA: &le; 20,000 ms (525 Workers)</span>
+      <span class="sla-chip" id="sla-scale-chip">Scale Target: 500,000 imgs / day</span>
+    </div>
+  </header>
+
+  <main class="arena-container">
+    <section class="action-toolbar" aria-label="Platform Navigation and Live Experiment Runner">
+      <nav class="nav-tabs" id="arena-nav-tabs">
+        <button type="button" class="tab-btn active" id="tab-btn-leaderboard" data-tab="panel-leaderboard">1. Kaggle Competition Leaderboard</button>
+        <button type="button" class="tab-btn" id="tab-btn-mlflow" data-tab="panel-mlflow">2. MLflow Experiment &amp; Run Diff</button>
+        <button type="button" class="tab-btn" id="tab-btn-pareto" data-tab="panel-pareto">3. Pareto Cost vs. Accuracy Plot</button>
+        <button type="button" class="tab-btn" id="tab-btn-inspector" data-tab="panel-inspector">4. SKU-110k Visual Shelf Inspector</button>
+      </nav>
+
+      <div class="run-trigger-group">
+        <label for="track-selector" class="section-subtitle">Track:</label>
+        <select id="track-selector" class="select-input">
+          <option value="track_d_jev_routing">Track D1: Jev State Machine + ScaNN</option>
+          <option value="track_d_gemini_diffusion_as_jev">Track D2: GeminiDiffusion-as-Jev</option>
+          <option value="track_c_tiered_hybrid">Track C: Tiered Hybrid Engine (FDE)</option>
+          <option value="track_a_cascading_vit">Track A: 13-Model Cascading ViT</option>
+          <option value="track_b_e2e_vlm">Track B: End-to-End Gemini 2.5 VLM</option>
+        </select>
+        <input type="text" id="engineer-ldap-input" class="text-input" value="jjuneja" aria-label="Engineer LDAP" />
+        <button type="button" id="trigger-run-btn" class="primary-btn">Run &amp; Submit to Arena</button>
+      </div>
+    </section>
+
+    <div id="status-toast" class="toast-banner hidden" role="status" aria-live="polite"></div>
+
+    <!-- TAB 1: KAGGLE LEADERBOARD -->
+    <section id="panel-leaderboard" class="tab-panel">
+      <div class="surface-card">
+        <div class="section-header">
+          <h2>Kaggle-Style Public vs. Private Holdout Split Leaderboard</h2>
+          <span class="section-subtitle">Public Split: sku110k_val_001 &amp; 002 (Glare + Standard) • Private Holdout: sku110k_val_003_dense147</span>
+        </div>
+        <div class="table-wrapper">
+          <table class="arena-table" id="leaderboard-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Medal</th>
+                <th>Run ID</th>
+                <th>Track Architecture</th>
+                <th>Owner</th>
+                <th>Pareto Score</th>
+                <th>Public Top-1</th>
+                <th>Private Holdout Top-1</th>
+                <th>mAP@50:95</th>
+                <th>MRR</th>
+                <th>P95 (525w)</th>
+                <th>Cost (₹ / img)</th>
+                <th>SLA Gate</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: MLFLOW RUN EXPLORER -->
+    <section id="panel-mlflow" class="tab-panel hidden">
+      <div class="surface-card">
+        <div class="section-header">
+          <h2>MLflow Experiment Run Registry &amp; Per-Tier Telemetry Breakdown</h2>
+          <span class="section-subtitle">Experiment: unilever-mt-500k-daily-arena • SQLite Store: reports/shelfbench_arena.sqlite</span>
+        </div>
+        <div class="table-wrapper">
+          <table class="arena-table" id="mlflow-table">
+            <thead>
+              <tr>
+                <th>Run ID</th>
+                <th>Timestamp (UTC)</th>
+                <th>Track ID</th>
+                <th>Glare Solver Hyperparam</th>
+                <th>Tier 1 Det (ms)</th>
+                <th>Tier 2 ScaNN (ms)</th>
+                <th>Tier 3 Promo (ms)</th>
+                <th>Total E2E (ms)</th>
+                <th>Daily 500k Cost (₹)</th>
+                <th>Hallucination %</th>
+              </tr>
+            </thead>
+            <tbody id="mlflow-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: PARETO FRONTIER PLOT -->
+    <section id="panel-pareto" class="tab-panel hidden">
+      <div class="surface-card">
+        <div class="section-header">
+          <h2>Pareto Frontier: Unit Cost (₹ / Image) vs. Top-1 SKU Accuracy (%)</h2>
+          <span class="section-subtitle">Vertical Dashed Line = Hard Cost Ceiling (₹0.22 / Image at 1 USD = 84 INR)</span>
+        </div>
+        <div class="svg-chart-container" id="pareto-svg-holder"></div>
+      </div>
+    </section>
+
+    <!-- TAB 4: SKU-110K VISUAL SHELF INSPECTOR -->
+    <section id="panel-inspector" class="tab-panel hidden">
+      <div class="surface-card">
+        <div class="section-header">
+          <h2>SKU-110k Interactive Bounding-Box &amp; RPC Candidate Inspector</h2>
+          <div class="run-trigger-group">
+            <label for="inspector-run-select" class="section-subtitle">Inspect Run:</label>
+            <select id="inspector-run-select" class="select-input"></select>
+            <label for="inspector-image-select" class="section-subtitle">Dataset Image:</label>
+            <select id="inspector-image-select" class="select-input">
+              <option value="sku110k_val_001.png">sku110k_val_001.png (Public Glare Bay)</option>
+              <option value="sku110k_val_002.png">sku110k_val_002.png (Public Multi-Brand)</option>
+              <option value="sku110k_val_003_dense147.png">sku110k_val_003_dense147.png (Private Holdout)</option>
+            </select>
+          </div>
+        </div>
+        <div class="inspector-layout">
+          <div class="canvas-stage" id="inspector-stage">
+            <img id="inspector-shelf-img" src="/images/sku110k_val_001.png" alt="SKU-110k Retail Shelf Validation Image" />
+            <svg id="inspector-bbox-svg" class="bbox-svg-overlay" viewBox="0 0 600 400" preserveAspectRatio="none"></svg>
+          </div>
+          <div class="table-wrapper">
+            <table class="arena-table">
+              <thead>
+                <tr>
+                  <th>Slot</th>
+                  <th>Box [x1,y1,x2,y2]</th>
+                  <th>Predicted Base Pack</th>
+                  <th>Ground Truth</th>
+                  <th>Conf</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="inspector-predictions-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
