@@ -9,7 +9,9 @@ with ``shelf-bench run -a <name> -m <model>``. See ``single_pass.py`` for a ~30-
 from __future__ import annotations
 
 import importlib
+import logging
 import pkgutil
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -17,6 +19,7 @@ from typing import Any
 
 from PIL import Image
 
+from utils import telemetry
 from utils.llm import LLMResult, Usage
 
 Box = tuple[float, float, float, float]  # x1, y1, x2, y2 in original-image pixels
@@ -36,7 +39,9 @@ class Trace:
     steps: list[dict] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
     billed: dict[str, float] = field(default_factory=dict)  # non-Gemini usage, see Context.bill
+    span: Any = None  # the image's OpenTelemetry span; each step is also an event on it
     _t0: float = field(default_factory=time.perf_counter)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def step(self, name: str, detail: str = "", boxes: list[Box] | None = None,
              regions: list[Box] | None = None) -> None:
@@ -49,6 +54,11 @@ class Trace:
             s["regions"] = [[round(v, 1) for v in r] for r in regions]
         self.steps.append(s)
         self._t0 = now
+        if self.span is not None:
+            self.span.add_event(f"step: {name}", telemetry.clean({
+                "detail": detail, "ms": s["ms"],
+                "boxes": len(boxes) if boxes is not None else None,
+                "regions": len(regions) if regions is not None else None}))
 
 
 @dataclass
@@ -62,11 +72,58 @@ class Context:
     model: str
     llm: Callable[..., LLMResult]
     trace: Trace = field(default_factory=Trace)
+    # Set by the runner: OTel parent for model-call spans (works from any thread), and
+    # usage -> Gemini cost dict (list_usd / credit_usd / net_usd) for the span.
+    otel_parent: Any = None
+    price: Callable[[Usage], dict] | None = None
 
     def ask(self, image: Image.Image, prompt: str, **kw) -> LLMResult:
-        """Call the run's Gemini model. kw: schema=<JSON schema>, max_side=<px downscale>."""
-        res = self.llm(image, prompt, **kw)
-        self.trace.usage = self.trace.usage + res.usage
+        """Call the run's Gemini model. kw: schema=<JSON schema>, max_side=<px downscale>.
+
+        Every call is a span (tokens, traffic type, retries, cost) plus a log entry with the
+        prompt and response, so it can be inspected in Cloud Trace / Cloud Logging.
+        """
+        req = {"gen_ai.operation.name": "generate_content", "gen_ai.provider.name": "gcp.vertex_ai",
+               "gen_ai.request.model": self.model, "shelf_bench.image.width": image.width,
+               "shelf_bench.image.height": image.height, "shelf_bench.max_side": kw.get("max_side"),
+               "shelf_bench.schema": bool(kw.get("schema")), "shelf_bench.prompt_chars": len(prompt)}
+        with telemetry.span(f"gemini {self.model}", parent=self.otel_parent, **req) as span:
+            t0 = time.perf_counter()
+            try:
+                res = self.llm(image, prompt, **kw)
+            except Exception as e:
+                telemetry.fail(span, e)
+                telemetry.log(span, "gemini_call_failed",
+                              {**req, "error": f"{type(e).__name__}: {e}"[:2000],
+                               "seconds": round(time.perf_counter() - t0, 3),
+                               "prompt": telemetry.truncate(prompt)}, level=logging.ERROR)
+                raise
+            with self.trace._lock:
+                self.trace.usage = self.trace.usage + res.usage
+            cost = self.price(res.usage) if self.price else {}
+            m = res.meta
+            fields = {
+                **req, **telemetry.usage_attrs(res.usage),
+                "gen_ai.response.model": m.get("model_version"),
+                "gen_ai.response.id": m.get("response_id"),
+                "gen_ai.response.finish_reasons": [m["finish_reason"]] if m.get("finish_reason") else None,
+                "shelf_bench.traffic_type": ",".join(res.usage.traffic) or None,
+                "shelf_bench.tier_requested": m.get("tier_requested"),
+                "shelf_bench.attempts": m.get("attempts", 1),
+                "shelf_bench.truncated": m.get("truncated"),
+                "shelf_bench.thinking_level": m.get("thinking_level"),
+                "gen_ai.request.temperature": m.get("temperature"),
+                "gen_ai.request.max_tokens": m.get("max_output_tokens"),
+                "shelf_bench.image_bytes": m.get("image_bytes"),
+                "shelf_bench.response_chars": len(res.text or ""),
+                "shelf_bench.model_seconds": round(res.seconds, 3),
+                **{f"shelf_bench.cost.{k}": v for k, v in cost.items() if isinstance(v, (int, float))},
+            }
+            telemetry.set_attrs(span, fields)
+            telemetry.log(span, "gemini_call", {
+                **{k: v for k, v in fields.items() if v is not None},
+                "token_buckets": res.usage.buckets, "retry_errors": m.get("retry_errors") or None,
+                "prompt": telemetry.truncate(prompt), "response": telemetry.truncate(res.text)})
         return res
 
     def bill(self, unit: str, amount: float = 1) -> None:
@@ -75,7 +132,8 @@ class Context:
         ``unit`` must be a key of the approach's ``skus``; it's priced from the Billing Catalog.
         The ``utils`` clients call this for you when you pass them ``ctx``.
         """
-        self.trace.billed[unit] = self.trace.billed.get(unit, 0) + amount
+        with self.trace._lock:
+            self.trace.billed[unit] = self.trace.billed.get(unit, 0) + amount
 
 
 class Approach:

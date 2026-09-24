@@ -14,6 +14,7 @@ from __future__ import annotations
 import getpass
 import io
 import json
+import logging
 import os
 import tempfile
 import time
@@ -27,7 +28,7 @@ from PIL import Image
 
 import approaches
 from approaches.base import Context, Trace
-from utils import dataset, metrics, pricing
+from utils import dataset, metrics, pricing, telemetry
 from utils.llm import Gemini, LLMResult, Usage, load_config
 
 RESULTS_DIR = Path("results")
@@ -92,9 +93,48 @@ def run(
     run_id = (f"{started:%m%d-%H%M%S}-{approach}-{model}" + ("-priority" if tier == "priority" else ""))
     log(f"[{run_id}] {len(samples)} images from {split} (seed {seed}) on {env['platform']}")
 
+    # One trace per run (Cloud Trace), with correlated log entries (Cloud Logging).
+    telemetry.init(config)
+    run_attrs = {"shelf_bench.run_id": run_id, "shelf_bench.approach": approach,
+                 "gen_ai.request.model": model, "shelf_bench.tier": tier,
+                 "shelf_bench.split": split, "shelf_bench.limit": limit, "shelf_bench.seed": seed,
+                 "shelf_bench.workers": workers, "shelf_bench.images": len(samples),
+                 "shelf_bench.owner": owner or getpass.getuser(),
+                 "shelf_bench.platform": env["platform"],
+                 "shelf_bench.execution": env.get("execution"),
+                 "shelf_bench.task_index": env.get("task_index")}
+    run_span = telemetry.tracer().start_span(f"run {run_id}", attributes=telemetry.clean(run_attrs))
+    run_ctx = telemetry.child_context(run_span)
+    telemetry.log(run_span, "run_started", run_attrs)
+
+    def price(u: Usage) -> dict:
+        return pricing.gemini_cost(model, u.buckets, sheet, started.date())
+
     def one(sample: dataset.Sample) -> dict:
-        trace = Trace()
-        ctx = Context(model=model, llm=llm, trace=trace)
+        with telemetry.span(f"image {sample.image_id}", parent=run_ctx,
+                            **{"shelf_bench.image_id": sample.image_id,
+                               "shelf_bench.split": split}) as span:
+            row = _one(sample, span)
+            telemetry.set_attrs(span, {f"shelf_bench.{k}": row[k] for k in (
+                "width", "height", "gt_count", "pred_count", "tp", "fp", "fn", "precision",
+                "recall", "f2", "accuracy", "latency_s", "cost_usd", "cost_list_usd",
+                "services_cost_usd", "error")})
+            telemetry.set_attrs(span, telemetry.usage_attrs(Usage(**row["usage"])))
+            if row["error"]:
+                span.set_status(telemetry.Status(telemetry.StatusCode.ERROR, row["error"]))
+            telemetry.log(span, "image_scored", {
+                "run_id": run_id, **{k: v for k, v in row.items()
+                                     if k not in ("preds", "matched", "steps")},
+                "steps": [{k: v for k, v in s.items() if k not in ("boxes", "regions")}
+                          for s in row["steps"]]},
+                level=logging.ERROR if row["error"] else logging.INFO)
+            row["telemetry"] = telemetry.links(span, per_span=True)
+            return row
+
+    def _one(sample: dataset.Sample, span) -> dict:
+        trace = Trace(span=span)
+        ctx = Context(model=model, llm=llm, trace=trace,
+                      otel_parent=telemetry.child_context(span), price=price)
         t0 = time.perf_counter()
         error = None
         try:
@@ -104,12 +144,13 @@ def run(
             preds = appr.detect(image, ctx)
         except Exception as e:  # a failed image scores as "found nothing"
             preds, error = [], f"{type(e).__name__}: {e}"[:300]
+            span.record_exception(e)
         latency = time.perf_counter() - t0
         m = metrics.match(preds, sample.boxes)
         trace.step("Score vs ground truth",
                    f"{m['tp']} correct, {m['fp']} false, {m['fn']} missed "
                    f"({len(sample.boxes)} products in ground truth)")
-        g = pricing.gemini_cost(model, trace.usage.buckets, sheet, started.date())
+        g = price(trace.usage)
         s_usd = pricing.extra_cost(trace.billed, sheet)
         return {
             "image_id": sample.image_id,
@@ -131,65 +172,86 @@ def run(
             "steps": trace.steps,
         }
 
-    rows: list[dict] = []
-    t_start = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        for i, row in enumerate(pool.map(one, samples), 1):
-            rows.append(row)
-            flag = f"  ERROR {row['error']}" if row["error"] else ""
-            log(f"  {i:>3}/{len(samples)} {row['image_id']:<16} "
-                f"{row['pred_count']:>4} pred / {row['gt_count']:>4} gt  "
-                f"F2 {row['f2']:.2f}  {row['latency_s']:.1f}s{flag}")
-    wall_s = time.perf_counter() - t_start
+    try:
+        rows: list[dict] = []
+        t_start = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            for i, row in enumerate(pool.map(one, samples), 1):
+                rows.append(row)
+                flag = f"  ERROR {row['error']}" if row["error"] else ""
+                log(f"  {i:>3}/{len(samples)} {row['image_id']:<16} "
+                    f"{row['pred_count']:>4} pred / {row['gt_count']:>4} gt  "
+                    f"F2 {row['f2']:.2f}  {row['latency_s']:.1f}s{flag}")
+        wall_s = time.perf_counter() - t_start
 
-    summary = summarize(rows)
-    n = len(rows)
-    usage = Usage(**summary["tokens"])
-    g = pricing.gemini_cost(model, usage.buckets, sheet, started.date())
-    on_gcs = str(data_root).startswith("gs://")
-    # GCS ops: one GET per image + the annotations CSV (Class B); two result uploads (Class A).
-    storage_usd = pricing.storage_cost(2, n + 1, sheet) if on_gcs else 0.0
-    calls = usage.calls
-    s_usd = sum(r["services_cost_usd"] for r in rows)
-    summary.update({
-        "run_id": run_id,
-        "approach": approach,
-        "model": model,
-        "tier": tier,
-        "traffic": usage.traffic,  # calls per traffic type Vertex actually served
-        # Share of calls Vertex actually served at priority (the rest were downgraded).
-        "priority_served": round(usage.traffic.get("priority", 0) / calls, 3)
-        if calls and tier == "priority" else None,
-        "architecture": f"{appr.architecture} [{model}"
-                        + (", priority" if tier == "priority" else "") + "]",
-        "steps": appr.steps,
-        "owner": owner or getpass.getuser(),
-        "split": split, "limit": limit, "seed": seed, "workers": workers,
-        "created_at": started.isoformat(timespec="seconds"),
-        "environment": env,
-        "wall_time_s": round(wall_s, 1),
-        "pricing": sheet,
-        "usd_to_inr": sheet["usd_to_inr"],
-        "cost": {
-            "gemini_list_usd_per_image": g["list_usd"] / n,
-            "gemini_credit_usd_per_image": g["credit_usd"] / n,
-            "gemini_net_usd_per_image": g["net_usd"] / n,
-            "storage_usd_per_image": storage_usd / n,
-            "services_usd_per_image": s_usd / n,  # embeddings, databases, ... (Approach.skus)
-        },
-        "token_cost_per_image_usd": g["net_usd"] / n,
-        "storage_cost_per_image_usd": storage_usd / n,
-    })
-    if env["platform"] == "cloud-run":  # provisional; `pull` swaps in the task's real duration
-        set_compute(summary, time.time() - _T_PROCESS, "in-task clock (provisional)")
-    else:
-        set_compute(summary, 0.0, "local run: compute not priced")
-    where = _write(Path(tempfile.mkdtemp()) if str(results_dir).startswith("gs://") else
-                   Path(results_dir), run_id, summary, rows, str(results_dir))
+        summary = summarize(rows)
+        n = len(rows)
+        usage = Usage(**summary["tokens"])
+        g = pricing.gemini_cost(model, usage.buckets, sheet, started.date())
+        on_gcs = str(data_root).startswith("gs://")
+        # GCS ops: one GET per image + the annotations CSV (Class B); two result uploads (Class A).
+        storage_usd = pricing.storage_cost(2, n + 1, sheet) if on_gcs else 0.0
+        calls = usage.calls
+        s_usd = sum(r["services_cost_usd"] for r in rows)
+        summary.update({
+            "run_id": run_id,
+            "approach": approach,
+            "model": model,
+            "tier": tier,
+            "traffic": usage.traffic,  # calls per traffic type Vertex actually served
+            # Share of calls Vertex actually served at priority (the rest were downgraded).
+            "priority_served": round(usage.traffic.get("priority", 0) / calls, 3)
+            if calls and tier == "priority" else None,
+            "architecture": f"{appr.architecture} [{model}"
+                            + (", priority" if tier == "priority" else "") + "]",
+            "steps": appr.steps,
+            "owner": owner or getpass.getuser(),
+            "split": split, "limit": limit, "seed": seed, "workers": workers,
+            "created_at": started.isoformat(timespec="seconds"),
+            "environment": env,
+            # Cloud Trace (run -> image -> gemini call spans) and Cloud Logging links.
+            "telemetry": telemetry.links(run_span, env),
+            "wall_time_s": round(wall_s, 1),
+            "pricing": sheet,
+            "usd_to_inr": sheet["usd_to_inr"],
+            "cost": {
+                "gemini_list_usd_per_image": g["list_usd"] / n,
+                "gemini_credit_usd_per_image": g["credit_usd"] / n,
+                "gemini_net_usd_per_image": g["net_usd"] / n,
+                "storage_usd_per_image": storage_usd / n,
+                "services_usd_per_image": s_usd / n,  # embeddings, databases, ... (Approach.skus)
+            },
+            "token_cost_per_image_usd": g["net_usd"] / n,
+            "storage_cost_per_image_usd": storage_usd / n,
+        })
+        if env["platform"] == "cloud-run":  # provisional; `pull` swaps in the task's real duration
+            set_compute(summary, time.time() - _T_PROCESS, "in-task clock (provisional)")
+        else:
+            set_compute(summary, 0.0, "local run: compute not priced")
+        final = {f"shelf_bench.{k}": summary[k] for k in (
+            "errors", "tp", "fp", "fn", "precision", "recall", "f2", "accuracy",
+            "p50_latency_s", "p95_latency_s", "p99_latency_s", "cost_per_image_usd",
+            "wall_time_s", "priority_served")}
+        telemetry.set_attrs(run_span, {**final, **telemetry.usage_attrs(usage),
+                                       "shelf_bench.traffic": json.dumps(usage.traffic)})
+        telemetry.log(run_span, "run_finished", {
+            **run_attrs, **final, "tokens": summary["tokens"], "cost": summary["cost"]})
+        where = _write(Path(tempfile.mkdtemp()) if str(results_dir).startswith("gs://") else
+                       Path(results_dir), run_id, summary, rows, str(results_dir))
+    except Exception as e:
+        telemetry.fail(run_span, e)
+        telemetry.log(run_span, "run_failed", {**run_attrs, "error": f"{type(e).__name__}: {e}"},
+                      level=logging.ERROR)
+        raise
+    finally:
+        run_span.end()
+        telemetry.flush()
     log(f"[{run_id}] F2 {summary['f2']:.3f}  recall {summary['recall']:.3f}  "
         f"acc {summary['accuracy']:.3f}  p95 {summary['p95_latency_s']:.1f}s  "
         f"₹{summary['cost_per_image_usd'] * sheet['usd_to_inr']:.3f}/img  "
         f"traffic {usage.traffic}  -> {where}")
+    if summary["telemetry"]:
+        log(f"[{run_id}] trace: {summary['telemetry']['trace_url']}")
     return summary
 
 

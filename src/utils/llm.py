@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from opentelemetry import trace as otel_trace
 from PIL import Image
 
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)  # hide AFC notice
@@ -95,6 +96,9 @@ class LLMResult:
     usage: Usage
     seconds: float
     text: str = ""
+    # Request/response details recorded on the call's span and log entry (see utils/telemetry):
+    # attempts, response id, model version, finish reason, request config, image bytes...
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 def image_to_jpeg(img: Image.Image, max_side: int | None = None) -> bytes:
@@ -169,10 +173,10 @@ class Gemini:
         )
         if self.thinking_level:
             cfg.thinking_config = types.ThinkingConfig(thinking_level=self.thinking_level)
-        contents = [
-            types.Part.from_bytes(data=image_to_jpeg(image, max_side), mime_type="image/jpeg"),
-            prompt,
-        ]
+        jpeg = image_to_jpeg(image, max_side)
+        contents = [types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), prompt]
+        span = otel_trace.get_current_span()  # the call's span, opened by Context.ask
+        retries_seen: list[str] = []
         for attempt in range(retries):
             t0 = time.perf_counter()
             try:
@@ -184,10 +188,34 @@ class Gemini:
             except Exception as e:  # 429 / 5xx / transient network
                 if attempt == retries - 1 or not _retryable(e):
                     raise
-                time.sleep(2 ** (attempt + 1) + random.random() * 2)  # 2..66s, jittered
+                sleep = 2 ** (attempt + 1) + random.random() * 2  # 2..66s, jittered
+                err = f"{type(e).__name__}: {e}"[:500]
+                retries_seen.append(err)
+                span.add_event("retry", {"attempt": attempt + 1, "error": err,
+                                         "sleep_s": round(sleep, 1),
+                                         "failed_after_s": round(time.perf_counter() - t0, 3)})
+                time.sleep(sleep)
         usage = usage_from_metadata(resp.usage_metadata)
         text = resp.text or ""
-        return LLMResult(parse_json(text) if text else [], usage, seconds, text)
+        cand = (resp.candidates or [None])[0]
+        finish = getattr(getattr(cand, "finish_reason", None), "name", None)
+        meta = {
+            "attempts": attempt + 1,
+            "retry_errors": retries_seen,
+            "response_id": getattr(resp, "response_id", None),
+            "model_version": getattr(resp, "model_version", None),
+            "finish_reason": finish,
+            "traffic_type": getattr(getattr(resp.usage_metadata, "traffic_type", None), "name", None),
+            "tier_requested": self.tier,
+            "thinking_level": self.thinking_level,
+            "temperature": cfg.temperature,
+            "max_output_tokens": cfg.max_output_tokens,
+            "image_bytes": len(jpeg),
+            "response_chars": len(text),
+            # Output hit max_output_tokens: parse_json kept only the complete boxes.
+            "truncated": finish == "MAX_TOKENS",
+        }
+        return LLMResult(parse_json(text) if text else [], usage, seconds, text, meta)
 
 
 def _retryable(e: Exception) -> bool:

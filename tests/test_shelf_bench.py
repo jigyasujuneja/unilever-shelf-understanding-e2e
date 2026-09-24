@@ -14,7 +14,7 @@ from PIL import Image
 
 import approaches
 import runner
-from utils import dataset, metrics, pricing
+from utils import dataset, metrics, pricing, telemetry
 from utils.llm import LLMResult, Usage, parse_json, usage_from_metadata
 
 W, H = 400, 300
@@ -41,6 +41,13 @@ def fake_sheet(models, promotions=()):
 def offline_prices(monkeypatch):
     monkeypatch.setattr(pricing, "price_sheet",
                         lambda models, config, session=None, extra_skus=None: fake_sheet(models))
+
+
+@pytest.fixture(autouse=True)
+def no_cloud_telemetry(monkeypatch):
+    monkeypatch.setenv("SHELF_BENCH_TELEMETRY", "0")  # tests opt in via telemetry.use_exporter
+    yield
+    telemetry.reset()
 
 
 def usage(inp=1000, out=250):
@@ -392,3 +399,71 @@ def test_alloydb_helper_runs_sql_on_a_per_thread_connection():
 
 def test_retrieval_template_is_not_registered():
     assert "detect_retrieve" not in approaches.all_approaches()
+
+
+# ---- OpenTelemetry --------------------------------------------------------------------------
+
+def test_run_is_one_trace_with_image_and_gemini_spans_and_linked_logs(fake_root, tmp_path, caplog):
+    """run -> image -> gemini spans carry every token count + cost; summary links to them."""
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    telemetry.use_exporter(exporter, project="proj")
+
+    class Thinking(OracleLLM):  # detect_classify calls this from a thread pool (pass 2)
+        def __call__(self, image, prompt, **kw):
+            res = super().__call__(image, prompt, **kw)
+            res.usage = Usage(1200, 250, 40, 1, {"priority": 1},
+                              {"priority/image_input": 1000, "priority/text_input": 200,
+                               "priority/output": 290})
+            res.meta = {"attempts": 2, "finish_reason": "STOP", "model_version": "fake-001",
+                        "response_id": "r-1", "tier_requested": "priority"}
+            if "contact sheet" in prompt:
+                res.data = [{"id": i, "label": "food"} for i in range(4)]
+            return res
+
+    with caplog.at_level("INFO", logger="shelf_bench.telemetry"):
+        s = runner.run("detect_classify", "fake-model", "val", 2, 0, 2, "t", results_dir=tmp_path,
+                       data_root=fake_root, llm=Thinking(), log=lambda *_: None)
+
+    spans = exporter.get_finished_spans()
+    run_span = next(x for x in spans if x.name.startswith("run "))
+    images = [x for x in spans if x.name.startswith("image ")]
+    calls = [x for x in spans if x.name == "gemini fake-model"]
+    assert len(images) == 2 and len(calls) == 4  # 2 images x (detect + 1 contact sheet)
+    assert {x.context.trace_id for x in spans} == {run_span.context.trace_id}
+    assert all(i.parent.span_id == run_span.context.span_id for i in images)
+    image_ids = {i.context.span_id for i in images}
+    assert all(c.parent.span_id in image_ids for c in calls)  # also from pass-2 threads
+
+    a = calls[0].attributes
+    assert a["gen_ai.usage.input_tokens"] == 1200 and a["gen_ai.usage.output_tokens"] == 250
+    assert a["shelf_bench.usage.thinking_tokens"] == 40
+    assert a["shelf_bench.usage.image_input_tokens"] == 1000
+    assert a["shelf_bench.usage.text_input_tokens"] == 200
+    assert a["shelf_bench.traffic_type"] == "priority" and a["shelf_bench.attempts"] == 2
+    assert a["gen_ai.response.model"] == "fake-001"
+    assert a["shelf_bench.cost.net_usd"] > 0
+    assert images[0].attributes["shelf_bench.usage.calls"] == 2
+    assert [e.name for e in images[0].events][:2] == ["step: Load image", "step: Pass 1: detection"]
+    assert run_span.attributes["shelf_bench.f2"] == s["f2"]
+    assert run_span.attributes["shelf_bench.usage.thinking_tokens"] == 4 * 40
+
+    tid = format(run_span.context.trace_id, "032x")
+    t = s["telemetry"]
+    assert t["trace_id"] == tid and tid in t["trace_url"] and "project=proj" in t["trace_url"]
+    assert "logs/query" in t["logs_url"] and tid in t["logs_url"]
+    _, rows = runner.load_run(s["run_id"], tmp_path)
+    assert {r["telemetry"]["span_id"] for r in rows} == {format(i, "016x") for i in image_ids}
+
+    events = [r.json_fields["event"] for r in caplog.records]
+    assert events.count("gemini_call") == 4 and events.count("image_scored") == 2
+    assert events[0] == "run_started" and events[-1] == "run_finished"
+    call_log = next(r for r in caplog.records if r.json_fields["event"] == "gemini_call")
+    assert call_log.trace == f"projects/proj/traces/{tid}" and call_log.json_fields["prompt"]
+
+
+def test_telemetry_off_leaves_no_links(fake_root, tmp_path):
+    s = runner.run("single_pass", "m", "test", 1, 0, 1, "t", results_dir=tmp_path,
+                   data_root=fake_root, llm=OracleLLM(), log=lambda *_: None)
+    assert s["telemetry"] is None

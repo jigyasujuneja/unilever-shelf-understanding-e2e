@@ -255,6 +255,34 @@ instance-hour, not per query, so it's a fixed monthly cost and not part of cost 
 **Scoring.** SKU-110K has no product identities, so match accuracy isn't scored yet. That needs a
 dataset labelled with catalog product ids.
 
+## Telemetry (Cloud Trace + Cloud Logging)
+
+Every run, local or Cloud Run, is **one OpenTelemetry trace** in Cloud Trace
+([telemetry.py](src/utils/telemetry.py)). Each span also writes one Cloud Logging entry
+(log `shelf-bench`) with the same fields, linked to its span:
+
+| Span | What it records |
+|------|-----------------|
+| `run <run_id>` | approach, model, tier, split / limit / seed, owner, Cloud Run execution + task; at the end F2, recall, precision, p50/p95/p99, cost/img, total tokens, traffic served |
+| `image <image_id>` | gt / pred / tp / fp / fn, F2, latency, cost (net + list + other APIs), tokens, error (span status = ERROR); each `ctx.trace.step` is a span event |
+| `gemini <model>` | `gen_ai.usage.input_tokens` / `output_tokens`, thinking tokens, image vs text vs cached input tokens, traffic type Vertex actually served, tier requested, attempts + one `retry` event per 429/5xx, finish reason, response id / model version, temperature / max tokens / thinking level, image size and JPEG bytes, model latency, cost. Its log entry also has the **prompt and response text** |
+
+Links are stored with the results and shown on the run page:
+
+* `summary.json["telemetry"]`: `trace_id`, `trace_url` (Cloud Trace), `logs_url` (every
+  entry of the run) and, on Cloud Run, `task_logs_url` (the task's full stdout/stderr).
+* each row of `images.jsonl` has `telemetry` with that image's span (`span_id`, `trace_url`,
+  `logs_url`).
+
+Handy Logs Explorer queries: `logName="projects/unilever-shelf-understanding/logs/shelf-bench"
+jsonPayload.event="gemini_call" jsonPayload."shelf_bench.attempts">1` (retried calls),
+`jsonPayload."shelf_bench.truncated"=true` (output hit the token limit), `severity>=ERROR`.
+
+Approaches get all of this for free through `ctx.ask` and `ctx.trace.step`. Writing needs
+`roles/cloudtrace.agent` + `roles/logging.logWriter`, and viewing needs `roles/cloudtrace.user` +
+`roles/logging.viewer`. Logs take up to a minute to show up. To turn it off, set
+`telemetry.enabled: false` in `config.yaml` or `SHELF_BENCH_TELEMETRY=0`. Tests never export.
+
 ## UI
 
 `shelf-bench serve` hosts two pages:
@@ -280,6 +308,7 @@ src/
     embeddings.py                Vertex multimodal embeddings client (for retrieval approaches)
     alloydb.py                   AlloyDB connection + query (for retrieval approaches)
     pricing.py                   live prices from the Cloud Billing Catalog API
+    telemetry.py                 OpenTelemetry traces (Cloud Trace) + linked logs (Cloud Logging)
     cloud.py                     Cloud Build + Cloud Run job orchestration
     server.py, static/           leaderboard UI (stdlib, no framework)
 docs/                          architecture, onboarding and sequence diagrams

@@ -62,6 +62,7 @@ async function showRun(runId) {
     <h1 class="mono">${esc(s.run_id)}</h1>
     <p class="muted">${esc(s.architecture)} · ${esc(s.owner)} · ${s.images} ${esc(s.split)} images · precision ${pct(s.precision)}</p>
     <p class="muted">${envLine(s)}</p>
+    ${telemetryLinks(s.telemetry)}
     <div class="stats">
       ${stat("Accuracy", pct(s.accuracy))}${stat("Recall", pct(s.recall))}${stat("F2", pct(s.f2))}
       ${stat("p95", sec(s.p95_latency_s))}${stat("p99", sec(s.p99_latency_s))}${stat("Cost / img", inr(s.cost_per_image_inr))}
@@ -95,6 +96,15 @@ async function showRun(runId) {
 
 function stat(label, value) {
   return `<div class="stat"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+}
+
+// Cloud Trace / Cloud Logging links stored by the runner (summary.json / images.jsonl "telemetry").
+function telemetryLinks(t) {
+  if (!t) return "";
+  const a = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener">${text}</a>`;
+  const parts = [a(t.trace_url, "Trace"), a(t.logs_url, "Logs")];
+  if (t.task_logs_url) parts.push(a(t.task_logs_url, "Cloud Run task logs"));
+  return `<p class="muted">${parts.join(" · ")} <span class="mono">${esc(t.trace_id)}</span></p>`;
 }
 
 function envLine(s) {
@@ -131,6 +141,7 @@ async function showImage(runId, imageId) {
       </div>
       <div>
         <div class="muted hint">Steps for ${esc(imageId)}. Click one to see what it produced.</div>
+        ${telemetryLinks(d.telemetry)}
         ${d.error ? `<p class="warn">${esc(d.error)}</p>` : ""}
         <ol class="steps">${d.steps.map((st, i) => `
           <li data-i="${i}"><b>${esc(st.name)}</b> <span class="muted">${dur(st.ms)}</span><br><span class="detail">${esc(st.detail)}</span></li>`).join("")}

@@ -28,6 +28,12 @@ defaults:
   workers: 4       # images processed concurrently
   tier: [standard] # Gemini PayGo tier(s) to run: standard and/or priority (-t on the CLI)
 
+# OpenTelemetry: one Cloud Trace trace per run (run -> image -> Gemini call spans with every
+# token count, traffic type, retry and cost) plus matching Cloud Logging entries (with prompts
+# and responses). Links land in summary.json["telemetry"]. SHELF_BENCH_TELEMETRY=0 overrides.
+telemetry:
+  enabled: true
+
 # Models offered by `shelf-bench list`. Any Vertex Gemini model id works with -m.
 models:
   - gemini-3.8-flash
