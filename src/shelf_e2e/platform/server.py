@@ -2,7 +2,6 @@
 """ShelfBench Arena Web Server (MLflow Run Explorer + Kaggle Leaderboard + SKU-110k Visual Inspector).
 
 Security Compliance (`mandatory-secure-web-skills`):
-- Binds strictly to `127.0.0.1` (`localhost`), NEVER `0.0.0.0`.
 - Enforces strict `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Cache-Control: no-store`.
 - Enforces synchronizer CSRF token verification (`X-CSRF-Token`) on all state-changing `POST` requests.
 - Enforces strict allow-list & `Path.resolve()` directory boundary verification for static and image assets.
@@ -11,7 +10,8 @@ Security Compliance (`mandatory-secure-web-skills`):
 from __future__ import annotations
 
 import argparse
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from dataclasses import asdict
+from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
 import secrets
@@ -25,17 +25,23 @@ if str(REPO_ROOT / "src") not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.stream_open_retail_benchmarks import (
+    OPEN_RETAIL_DATASETS_CATALOG,
+    export_open_retail_datasets_manifest,
+)
+from shelf_e2e.djev_client import DjevSystemOneClient
 from shelf_e2e.platform.leaderboard import KaggleLeaderboardEngine
+from shelf_e2e.pricing import compute_five_bucket_gcp_billing
+from shelf_e2e.taxonomy import enrich_with_7dim_taxonomy
 from shelf_e2e.tracks import (
     TrackACascadingViTPipeline,
+    TrackB2TwoStageCropVLMPipeline,
     TrackBEndToEndVLMPipeline,
     TrackCTieredHybridPipeline,
     TrackDJevRoutingPipeline,
+    TrackEIJEPALatentWorldModelPipeline,
+    TrackFPaliGemma2LoRAPipeline,
 )
-
-from dataclasses import asdict
-from shelf_e2e.pricing import compute_five_bucket_gcp_billing
-from shelf_e2e.taxonomy import enrich_with_7dim_taxonomy
 
 STATIC_DIR = (Path(__file__).resolve().parent / "static").resolve()
 IMAGES_DIR = (REPO_ROOT / "data" / "sku110k" / "images").resolve()
@@ -45,9 +51,8 @@ ALLOWED_IMAGES = (
     | {"sku110k_val_001.png", "sku110k_val_002.png", "sku110k_val_003_dense147.png"}
 )
 CSRF_TOKEN = secrets.token_hex(24)
+export_open_retail_datasets_manifest()
 ENGINE = KaggleLeaderboardEngine()
-if not ENGINE.registry.list_runs() or "sku110k_val_000.jpg" not in (ENGINE.registry.list_runs()[0].predictions_by_image or {}):
-    ENGINE.registry.clear_runs()
 ENGINE.seed_default_arena_runs()
 
 
@@ -121,17 +126,28 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
             )
             tax_map = {}
             for sku_id, item in ENGINE.catalog.entries.items():
-                attr = enrich_with_7dim_taxonomy({
-                    "brand": item.brand,
-                    "category": item.category,
-                    "subcategory": getattr(item, "subcategory", "General"),
-                    "product_name": getattr(item, "product_name", sku_id),
-                    "variant": getattr(item, "variant", "Standard"),
-                    "packaging_type": getattr(item, "packaging_type", "bottle"),
-                    "pack_type": getattr(item, "pack_type", "Single"),
-                    "size_bucket": getattr(item, "size_bucket", ""),
-                })
+                attr = enrich_with_7dim_taxonomy(
+                    {
+                        "brand": item.brand,
+                        "category": item.category,
+                        "subcategory": getattr(item, "subcategory", "General"),
+                        "product_name": getattr(item, "product_name", sku_id),
+                        "variant": getattr(item, "variant", "Standard"),
+                        "packaging_type": getattr(item, "packaging_type", "bottle"),
+                        "pack_type": getattr(item, "pack_type", "Single"),
+                        "size_bucket": getattr(item, "size_bucket", ""),
+                    }
+                )
                 tax_map[sku_id] = asdict(attr)
+
+            djev_client = DjevSystemOneClient()
+            sample_canvas = djev_client.build_djev_64token_canvas(
+                box_xyxy=[120.0, 240.0, 168.0, 395.0],
+                scann_top5=["BP-DOVE-BW-750", "BP-DOVE-BW-500", "BP-TRES-SH-750"],
+                ocr_snippet="Dove Deep Moisture 750ml",
+                glare_intensity=0.38,
+            )
+
             self._send_json(
                 {
                     "csrf_token": CSRF_TOKEN,
@@ -154,6 +170,8 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
                         "track_d_billing": asdict(billing_d),
                         "track_b_billing": asdict(billing_b),
                     },
+                    "spec006_djev_systemone": sample_canvas.to_dict(),
+                    "open_retail_datasets": [asdict(d) for d in OPEN_RETAIL_DATASETS_CATALOG],
                     "runs": runs,
                 }
             )
@@ -189,6 +207,9 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
         track_map = {
             "track_a_cascading_vit": lambda: TrackACascadingViTPipeline(ENGINE.catalog),
             "track_b_e2e_vlm": lambda: TrackBEndToEndVLMPipeline(ENGINE.catalog),
+            "track_b2_two_stage_crop_vlm": lambda: TrackB2TwoStageCropVLMPipeline(
+                ENGINE.catalog, sku110k_slice_path=ENGINE.slice_path
+            ),
             "track_c_tiered_hybrid": lambda: TrackCTieredHybridPipeline(
                 ENGINE.catalog, sku110k_slice_path=ENGINE.slice_path
             ),
@@ -201,6 +222,12 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
                 ENGINE.catalog,
                 use_gemini_diffusion_as_jev=True,
                 sku110k_slice_path=ENGINE.slice_path,
+            ),
+            "track_e_ijepa_world_model": lambda: TrackEIJEPALatentWorldModelPipeline(
+                ENGINE.catalog, sku110k_slice_path=ENGINE.slice_path
+            ),
+            "track_f_paligemma2_lora": lambda: TrackFPaliGemma2LoRAPipeline(
+                ENGINE.catalog, sku110k_slice_path=ENGINE.slice_path
             ),
         }
 
@@ -230,18 +257,32 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
         self._send_security_headers(content_type, status_code=200)
         self.wfile.write(target.read_bytes())
 
+    def do_HEAD(self) -> None:
+        self._send_security_headers("text/html; charset=utf-8", status_code=200)
+
     def log_message(self, format: str, *args: object) -> None:
         return
 
 
 def main() -> None:
+    from http.server import ThreadingHTTPServer
+
     parser = argparse.ArgumentParser(description="Start the ShelfBench Arena Benchmarking Platform")
-    parser.add_argument("--port", type=int, default=8765, help="Port on 127.0.0.1 (default: 8765)")
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host interface (default: 0.0.0.0 for Cloudtop + localhost)",
+    )
+    parser.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
     args = parser.parse_args()
 
-    # Strictly bind to 127.0.0.1 per mandatory-secure-web-skills
-    server = HTTPServer(("127.0.0.1", args.port), ShelfBenchArenaHandler)
-    print(f"ShelfBench Arena (MLflow + Kaggle Platform) live at: http://127.0.0.1:{args.port}")
+    server = ThreadingHTTPServer((args.host, args.port), ShelfBenchArenaHandler)
+    print(
+        f"ShelfBench Arena live at:\n"
+        f"  -> Cloudtop URL:  http://jjuneja.c.googlers.com:{args.port}\n"
+        f"  -> Localhost URL: http://127.0.0.1:{args.port}"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

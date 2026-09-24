@@ -1,4 +1,4 @@
-"""Kaggle-style Public & Private Split Evaluation & Pareto Leaderboard Engine."""
+"""Kaggle-style Public & Private Split Evaluation & Pareto Leaderboard Engine (`SPEC-006`)."""
 
 from __future__ import annotations
 
@@ -8,14 +8,18 @@ from typing import Any, Dict, List, Optional
 
 from scripts.download_open_datasets import build_sku110k_rpc_benchmark_slice
 from shelf_e2e.datasets import RPCCatalogAdapter
+from shelf_e2e.mt_gondola_analytics import evaluate_full_mt_gondola_audit
 from shelf_e2e.platform.registry import ExperimentRunRecord, MLflowRunRegistry
 from shelf_e2e.schemas import InputContract, PlanogramContract, PromoRules, StoreMetadata
 from shelf_e2e.tracks import (
     BaseTrackPipeline,
     TrackACascadingViTPipeline,
+    TrackB2TwoStageCropVLMPipeline,
     TrackBEndToEndVLMPipeline,
     TrackCTieredHybridPipeline,
     TrackDJevRoutingPipeline,
+    TrackEIJEPALatentWorldModelPipeline,
+    TrackFPaliGemma2LoRAPipeline,
 )
 from tests.benchmark_harness import (
     calculate_json_schema_adherence,
@@ -26,7 +30,7 @@ from tests.benchmark_harness import (
 
 
 class KaggleLeaderboardEngine:
-    """Evaluates tracks across Public & Private SKU-110k + RPC splits and logs to MLflowRunRegistry."""
+    """Evaluates tracks across Public & Private SKU-110k + Smart-Retail splits and logs to MLflowRunRegistry."""
 
     PUBLIC_IMAGES = ("sku110k_val_000.jpg", "sku110k_val_002.jpg", "smart_retail_val_000.jpg")
     PRIVATE_IMAGES = ("sku110k_val_001.jpg", "sku110k_val_003.jpg", "smart_retail_val_001.jpg")
@@ -54,11 +58,23 @@ class KaggleLeaderboardEngine:
         schema_vals: List[float] = []
         cost_vals: List[float] = []
         sos_vals: List[float] = []
-        tier_latencies = {"tier1_detection": 0.0, "tier2_catalog_match": 0.0, "tier3_compliance": 0.0, "total_e2e": 0.0}
+        linear_sos_vals: List[float] = []
+        area_sos_vals: List[float] = []
+        seq_comp_vals: List[float] = []
+        purity_vals: List[float] = []
+        oos_void_counts: List[int] = []
+
+        tier_latencies = {
+            "tier1_detection": 0.0,
+            "tier2_catalog_match": 0.0,
+            "tier3_compliance": 0.0,
+            "total_e2e": 0.0,
+        }
         preds_by_img: Dict[str, List[Dict[str, Any]]] = {}
 
         for img_name in image_names:
             img_path = self.repo_root / "data" / "sku110k" / "images" / img_name
+            target_skus = ["BP-DOVE-BW-750", "BP-TRES-SH-750"]
             contract = InputContract(
                 image_path=str(img_path),
                 store_metadata=StoreMetadata(
@@ -67,7 +83,7 @@ class KaggleLeaderboardEngine:
                     planogram_id="PLANO-SKIN-HAIR-Q3",
                 ),
                 planogram_contract=PlanogramContract(
-                    target_skus=["BP-DOVE-BW-750", "BP-TRES-SH-750"],
+                    target_skus=target_skus,
                     promo_rules=PromoRules(toker_text="20% Extra", min_display_count=2),
                 ),
             )
@@ -89,6 +105,8 @@ class KaggleLeaderboardEngine:
                 gt_categories=gt_cats,
                 master_catalog_ids=self.catalog.valid_base_pack_ids(),
             )
+            mt_audit = evaluate_full_mt_gondola_audit(out.marketshare.resolved_skus, target_skus)
+
             map50_vals.append(det.map_50)
             map50_95_vals.append(det.map_50_95)
             top1_vals.append(ret.top1_accuracy)
@@ -99,6 +117,11 @@ class KaggleLeaderboardEngine:
             schema_vals.append(calculate_json_schema_adherence([out.model_dump()]))
             cost_vals.append(out.metrics.estimated_cost_inr)
             sos_vals.append(out.metrics.share_of_shelf_pct)
+            linear_sos_vals.append(mt_audit.linear_width_sos_pct)
+            area_sos_vals.append(mt_audit.area_2d_sos_pct)
+            seq_comp_vals.append(mt_audit.planogram_sequence_compliance_pct)
+            purity_vals.append(mt_audit.brand_block_purity_pct)
+            oos_void_counts.append(len(mt_audit.oos_void_gaps))
 
             tier_latencies["tier1_detection"] = out.metrics.latency_ms.tier1_detection
             tier_latencies["tier2_catalog_match"] = out.metrics.latency_ms.tier2_catalog_match
@@ -128,6 +151,11 @@ class KaggleLeaderboardEngine:
             "hallucination_rate": round(sum(halluc_vals) / n, 4),
             "schema_adherence": round(sum(schema_vals) / n, 4),
             "sos_pct": round(sum(sos_vals) / n, 2),
+            "linear_width_sos_pct": round(sum(linear_sos_vals) / n, 2),
+            "area_2d_sos_pct": round(sum(area_sos_vals) / n, 2),
+            "planogram_seq_compliance_pct": round(sum(seq_comp_vals) / n, 2),
+            "brand_block_purity_pct": round(sum(purity_vals) / n, 2),
+            "avg_oos_void_gaps": round(sum(oos_void_counts) / n, 2),
         }
         return metrics, preds_by_img, tier_latencies, avg_cost
 
@@ -145,7 +173,6 @@ class KaggleLeaderboardEngine:
             track, self.PRIVATE_IMAGES
         )
 
-        # Concurrency stress test on real shelf image
         sample_contract = InputContract(
             image_path=str(self.repo_root / "data" / "sku110k" / "images" / "sku110k_val_001.jpg"),
             store_metadata=StoreMetadata(
@@ -170,7 +197,6 @@ class KaggleLeaderboardEngine:
             and pub_metrics["hallucination_rate"] == 0.0
         )
 
-        # Composite Pareto Score (0..100) combining Public (40%) + Private Holdout (60%) quality
         pub_q = 100.0 * (
             0.35 * pub_metrics["map_50_95"]
             + 0.35 * pub_metrics["top1_acc"]
@@ -231,36 +257,90 @@ class KaggleLeaderboardEngine:
         return self.registry.log_run(record)
 
     def seed_default_arena_runs(self) -> List[ExperimentRunRecord]:
-        """Ensure all 5 competing candidate tracks are evaluated and registered in the Arena."""
+        """Ensure all 8 neural architecture tracks (Tracks A, B1, B2, C, D1, D2 [djev], E [I-JEPA], F [PaliGemma-2]) are registered."""
+        required_ids = {
+            "track_a_cascading_vit",
+            "track_b_e2e_vlm",
+            "track_b2_two_stage_crop_vlm",
+            "track_c_tiered_hybrid",
+            "track_d_jev_routing",
+            "track_d_gemini_diffusion_as_jev",
+            "track_e_ijepa_world_model",
+            "track_f_paligemma2_lora",
+        }
         existing = self.registry.list_runs()
-        if len(existing) >= 5:
+        if required_ids.issubset({r.track_id for r in existing}):
             return existing
 
         self.registry.clear_runs()
         candidates = [
             (
                 TrackACascadingViTPipeline(self.catalog),
-                {"architecture": "13-Model CNN/ViT Cascade", "detector": "RT-DETR", "glare_solver": "None"},
+                {
+                    "architecture": "Legacy 8-Model Supervised Cascade (RT-DETR -> ViT-B/16 -> 6x InceptionNet)",
+                    "detector": "RT-DETR",
+                    "glare_solver": "None",
+                },
             ),
             (
                 TrackBEndToEndVLMPipeline(self.catalog),
-                {"architecture": "Single-Pass Full-Shelf VLM", "model": "gemini-2.5-flash-lite", "glare_solver": "Raw Prompt"},
+                {
+                    "architecture": "Riley Path 1/2/3/6: 1-Pass Full-Shelf Gemini 2.5 Flash VLM",
+                    "model": "gemini-2.5-flash",
+                    "glare_solver": "Raw Full-Image Prompt",
+                },
+            ),
+            (
+                TrackB2TwoStageCropVLMPipeline(self.catalog, sku110k_slice_path=self.slice_path),
+                {
+                    "architecture": "Riley Path 5 (two_stage_detection.py): Stage 1 Detector + Stage 2 Parallel PIL Crop Gemini 2.5 Flash-Lite",
+                    "model": "gemini-2.5-flash-lite (per-crop)",
+                    "glare_solver": "High-Res PIL Crop OCR",
+                },
             ),
             (
                 TrackCTieredHybridPipeline(self.catalog, sku110k_slice_path=self.slice_path),
-                {"architecture": "Tiered Hybrid (RT-DETR + ScaNN + Promo VLM)", "detector": "SKU-110k/RT-DETR", "glare_solver": "None"},
+                {
+                    "architecture": "Riley Path 4/7: DINOv2-ViT-L/14-reg4 + ScaNN Vector Search + Promo VLM",
+                    "detector": "SKU-110k/RT-DETR + Depth-NMS",
+                    "glare_solver": "None",
+                },
             ),
             (
                 TrackDJevRoutingPipeline(
                     self.catalog, use_gemini_diffusion_as_jev=False, sku110k_slice_path=self.slice_path
                 ),
-                {"architecture": "Jev + ScaNN Vector Routing", "detector": "SKU-110k/RT-DETR", "glare_solver": "Jev Spatial Width Lock"},
+                {
+                    "architecture": "Track D1: ScaNN + Jev Deterministic 7-Dim State Machine",
+                    "detector": "SKU-110k/RT-DETR + Depth-NMS",
+                    "glare_solver": "Jev Spatial Width Lock",
+                },
             ),
             (
                 TrackDJevRoutingPipeline(
                     self.catalog, use_gemini_diffusion_as_jev=True, sku110k_slice_path=self.slice_path
                 ),
-                {"architecture": "GeminiDiffusion-as-Jev + State Machine", "detector": "Diffusion Panoptic Mask", "glare_solver": "Latent De-Glare + Width Lock"},
+                {
+                    "architecture": "Track D2: mmastrac/djev (/v1/systemone DiffusionGemma-26B-A4B-it 64-Token Seeded/Pinned/Constrained Canvas)",
+                    "detector": "SKU-110k/RT-DETR + Depth-NMS",
+                    "glare_solver": "djev /v1/systemone + vllm#58216 Constrained Top-5 + DAG",
+                },
+            ),
+            (
+                TrackEIJEPALatentWorldModelPipeline(self.catalog, sku110k_slice_path=self.slice_path),
+                {
+                    "architecture": "Track E: I-JEPA / V-JEPA Latent World-Model Predictor + DINOv2-ViT-L/14-reg4 + ScaNN",
+                    "detector": "SKU-110k/RT-DETR + Depth-NMS",
+                    "glare_solver": "I-JEPA Masked Glare Patch Predictor in Latent Space (0 Token Cost)",
+                },
+            ),
+            (
+                TrackFPaliGemma2LoRAPipeline(self.catalog, sku110k_slice_path=self.slice_path),
+                {
+                    "architecture": "Track F (Riley Path 8 fine_tuning.py): PaliGemma-2-3B-LoRA / Florence-2 Specialist on L4 GPU",
+                    "detector": "SKU-110k/RT-DETR + Depth-NMS",
+                    "glare_solver": "LoRA Fine-Tuned <OD>+<OCR>+<7-Dim> Specialist (0 API Token Cost)",
+                },
             ),
         ]
         records = []

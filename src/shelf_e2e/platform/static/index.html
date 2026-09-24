@@ -33,11 +33,14 @@
       <div class="run-trigger-group">
         <label for="track-selector" class="section-subtitle">Track:</label>
         <select id="track-selector" class="select-input">
-          <option value="track_d_jev_routing">Track D1: Jev State Machine + ScaNN</option>
-          <option value="track_d_gemini_diffusion_as_jev">Track D2: GeminiDiffusion-as-Jev</option>
-          <option value="track_c_tiered_hybrid">Track C: Tiered Hybrid Engine (FDE)</option>
-          <option value="track_a_cascading_vit">Track A: 13-Model Cascading ViT</option>
-          <option value="track_b_e2e_vlm">Track B: End-to-End Gemini 2.5 VLM</option>
+          <option value="track_d_gemini_diffusion_as_jev">Track D2: mmastrac/djev (/v1/systemone DiffusionGemma-26B)</option>
+          <option value="track_e_ijepa_world_model">Track E: I-JEPA Latent World-Model + DINOv2-reg4 + ScaNN</option>
+          <option value="track_f_paligemma2_lora">Track F: Fine-Tuned PaliGemma-2-3B-LoRA Specialist</option>
+          <option value="track_d_jev_routing">Track D1: Jev 7-Dim State Machine + ScaNN</option>
+          <option value="track_c_tiered_hybrid">Track C: DINOv2-reg4 / SigLIP + ScaNN Hybrid</option>
+          <option value="track_b2_two_stage_crop_vlm">Track B2: Riley 2-Stage PIL Crop + Gemini 2.5 Flash-Lite</option>
+          <option value="track_b_e2e_vlm">Track B1: 1-Pass Full-Shelf Gemini 2.5 Flash VLM</option>
+          <option value="track_a_cascading_vit">Track A: Legacy 8-Model Supervised Cascade</option>
         </select>
         <input type="text" id="engineer-ldap-input" class="text-input" value="jjuneja" aria-label="Engineer LDAP" />
         <button type="button" id="trigger-run-btn" class="primary-btn">Run &amp; Submit to Arena</button>
