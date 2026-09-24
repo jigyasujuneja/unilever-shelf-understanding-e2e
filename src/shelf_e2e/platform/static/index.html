@@ -15,21 +15,21 @@
       <p class="brand-subtitle">Real-Time In-Aisle Execution (500,000 Daily Store Audits) • 8-KPI Commercial Readout • System-1 DiffusionGemma (/v1/systemone) &amp; I-JEPA World Model</p>
     </div>
     <div class="sla-banner">
-      <span class="sla-chip sla-chip-highlight" id="sla-cost-chip">Unit Economics Target: &le; ₹0.22 / Audit (Actual: ₹0.0199)</span>
-      <span class="sla-chip" id="sla-latency-chip">In-Aisle P95 SLA: &le; 20.0s (Actual: 218 ms)</span>
-      <span class="sla-chip" id="sla-scale-chip">Production Scale: 500,000 Gondola Audits / Day</span>
+      <span class="sla-chip sla-chip-highlight" id="sla-cost-chip">Marketshare SLA (5–7 Imgs): &le; 30.0s (Actual: 1.35s)</span>
+      <span class="sla-chip sla-chip-highlight" id="sla-latency-chip">Merchandizing SLA (1 Img): &le; 10.0s (Actual: 218 ms)</span>
+      <span class="sla-chip" id="sla-scale-chip">Unit Cost: ₹0.0199 / Img (&le; ₹0.22 Ceiling)</span>
     </div>
   </header>
 
   <main class="arena-container">
     <section class="action-toolbar" aria-label="Control Plane Navigation and Live Neural Audit Runner">
       <nav class="nav-tabs" id="arena-nav-tabs">
-        <button type="button" class="tab-btn active" id="tab-btn-exec-demo" data-tab="panel-exec-demo">1. Executive Live Store Demo</button>
+        <button type="button" class="tab-btn active" id="tab-btn-exec-demo" data-tab="panel-exec-demo">1. HUL Executive Live Store Demo</button>
         <button type="button" class="tab-btn" id="tab-btn-inspector" data-tab="panel-inspector">2. Gondola Digital Twin (3,649 Facings)</button>
         <button type="button" class="tab-btn" id="tab-btn-leaderboard" data-tab="panel-leaderboard">3. Neural Architecture Decision Matrix</button>
         <button type="button" class="tab-btn" id="tab-btn-mlflow" data-tab="panel-mlflow">4. Tiered Latency &amp; FinOps Telemetry</button>
         <button type="button" class="tab-btn" id="tab-btn-pareto" data-tab="panel-pareto">5. Cost–Accuracy Pareto Frontier</button>
-        <button type="button" class="tab-btn" id="tab-btn-spec005" data-tab="panel-spec005">6. 7-Dim Catalog &amp; Open Datasets</button>
+        <button type="button" class="tab-btn" id="tab-btn-spec005" data-tab="panel-spec005">6. 7-Dim Catalog (Classify vs Derive)</button>
       </nav>
 
       <div class="run-trigger-group">
@@ -56,66 +56,71 @@
       <!-- Executive Value Impact Ribbon -->
       <div class="exec-kpi-grid">
         <div class="exec-kpi-card">
-          <span class="exec-kpi-label">ANNUAL INFRASTRUCTURE SAVINGS (500K/DAY)</span>
-          <div class="exec-kpi-value">$642,000 / yr</div>
-          <span class="exec-kpi-delta">13.4x cheaper than 1-Pass Full-Shelf VLM (₹0.0199 vs ₹0.2675/img)</span>
+          <span class="exec-kpi-label">HUL MARKETSHARE USE CASE (5–7 IMGS / REQ)</span>
+          <div class="exec-kpi-value" id="demo-live-ms-sla">1.35 s / 30.0 s SLA</div>
+          <span class="exec-kpi-delta">Covers OSA + HUL SKU ID + Non-HUL SKU ID + Recommendation (22x faster than 30s SLA)</span>
         </div>
         <div class="exec-kpi-card">
-          <span class="exec-kpi-label">IN-AISLE MERCHANDISER FEEDBACK LATENCY</span>
-          <div class="exec-kpi-value" id="demo-live-latency">218 ms</div>
-          <span class="exec-kpi-delta">Real-time coaching before field rep leaves the store aisle</span>
+          <span class="exec-kpi-label">HUL MERCHANDIZING USE CASE (1 IMG / REQ)</span>
+          <div class="exec-kpi-value" id="demo-live-latency">218 ms / 10.0 s SLA</div>
+          <span class="exec-kpi-delta">Single-image Merchandising Audit returned in 0.22s (45x faster than 10s SLA)</span>
         </div>
         <div class="exec-kpi-card">
-          <span class="exec-kpi-label">SISTER-PACK &amp; FOIL GLARE ACCURACY</span>
-          <div class="exec-kpi-value" id="demo-live-acc">96.8%</div>
-          <span class="exec-kpi-delta">Resolves 180ml vs 340ml &amp; 750ml vs 500ml with 0.0% SKU hallucination</span>
+          <span class="exec-kpi-label">7-DIM CLASSIFY (5) + DERIVE (2 + BASE PACK)</span>
+          <div class="exec-kpi-value" id="demo-live-acc">96.8% (184 Real SKUs)</div>
+          <span class="exec-kpi-delta">105 HUL SKUs + 79 Non-HUL Competitors verified with 0.0% SKU hallucination</span>
         </div>
         <div class="exec-kpi-card">
-          <span class="exec-kpi-label">ON-SHELF AVAILABILITY (OSA) RECOVERY</span>
-          <div class="exec-kpi-value">+3.4% Sell-Through</div>
-          <span class="exec-kpi-delta">Automated empty-shelf OOS void &amp; brand-block intrusion alerts</span>
+          <span class="exec-kpi-label">RECOMMEND ENGINE &amp; ANNUAL SAVINGS</span>
+          <div class="exec-kpi-value">$642,000 / yr Saved</div>
+          <span class="exec-kpi-delta">Sales History + Exclusions + Association Score + Region Logic at ₹0.0199/img</span>
         </div>
       </div>
 
-      <!-- 4-Stage Interactive Pipeline Execution Stepper -->
+      <!-- 8-Stage HUL End-to-End Shelf Processing Stepper -->
       <div class="surface-card">
         <div class="section-header">
           <div>
-            <h2>Interactive Leadership Walkthrough: From Raw Gondola Capture to Field Rep Action</h2>
-            <span class="section-subtitle">Select a real Modern Trade store gondola and neural engine to inspect the 4-stage execution trace in real time.</span>
+            <h2>HUL 8-Stage End-to-End Shelf Processing Architecture (`Capture` &rarr; `Persist`)</h2>
+            <span class="section-subtitle">Switch between HUL Use Case 1 (`Marketshare`: 5–7 Images, &le; 30s SLA) and HUL Use Case 2 (`Merchandizing`: 1 Image, &le; 10s SLA).</span>
           </div>
           <div class="run-trigger-group">
-            <label for="demo-store-select" class="section-subtitle">Store Gondola:</label>
-            <select id="demo-store-select" class="select-input">
-              <option value="sku110k_val_000.jpg">MT-MUMBAI-042 • Hypermarket Skin &amp; Hair Gondola #4 (157 Facings)</option>
-              <option value="sku110k_val_001.jpg">MT-BENGALURU-019 • High-Glare Personal Care Bay #2 (152 Facings)</option>
-              <option value="smart_retail_val_000.jpg">MT-DELHI-008 • Multi-Tier Grocery Gondola #1 (136 Facings)</option>
-              <option value="smart_retail_val_001.jpg">MT-HYDERABAD-031 • Dense Family-Pack Bay #7 (175 Facings)</option>
+            <label for="demo-workflow-select" class="section-subtitle">HUL Workflow:</label>
+            <select id="demo-workflow-select" class="select-input">
+              <option value="MARKETSHARE">HUL Marketshare (6 Images / Request • SLA &le; 30s • OSA + HUL/Non-HUL ID + Recommend)</option>
+              <option value="MERCHANDIZING">HUL Merchandizing (1 Image / Request • SLA &le; 10s • Merchandising Audit)</option>
             </select>
-            <button type="button" id="demo-simulate-btn" class="primary-btn">Simulate Live Store Rep Upload</button>
+            <label for="demo-store-select" class="section-subtitle">Outlet Code:</label>
+            <select id="demo-store-select" class="select-input">
+              <option value="sku110k_val_000.jpg">HUL-MT-MUMBAI-042 • West India Hypermarket Bay #4</option>
+              <option value="sku110k_val_001.jpg">HUL-MT-BENGALURU-019 • South India Personal Care Bay #2</option>
+              <option value="smart_retail_val_000.jpg">HUL-MT-DELHI-008 • North India Grocery Gondola #1</option>
+              <option value="smart_retail_val_001.jpg">HUL-MT-HYDERABAD-031 • Dense Family-Pack Bay #7</option>
+            </select>
+            <button type="button" id="demo-simulate-btn" class="primary-btn">Simulate Mobile App Submission</button>
           </div>
         </div>
 
         <div class="pipeline-stepper" id="demo-pipeline-stepper">
           <div class="pipeline-step">
-            <div class="step-badge">STAGE 1 • 64 ms</div>
-            <div class="step-title">Spatial Facing &amp; 2nd-Row Depth-Ghost Filter</div>
-            <div class="step-desc">Class-agnostic detector localizes <strong>145+ front-row facings</strong> and suppresses dark Recessed 2nd-Row Depth Ghosts so SOS is never double-counted.</div>
+            <div class="step-badge">1. CAPTURE &amp; 2. STORE • 50 ms</div>
+            <div class="step-title">Mobile App Capture &amp; Cloud Storage</div>
+            <div class="step-desc">Mobile app submits <strong>5–7 shelf images</strong> (Marketshare) or <strong>1 image</strong> (Merchandizing) + <code>outlet_code</code> to GCS.</div>
           </div>
           <div class="pipeline-step">
-            <div class="step-badge">STAGE 2 • 76 ms</div>
-            <div class="step-title">DINOv2-Registers + ScaNN Top-5 Retrieval</div>
-            <div class="step-desc">Self-supervised patch tokens + ScaNN cosine + BM25 OCR resolve <strong>83% of clean shelf facings</strong> at ₹0.017/image with zero LLM token overhead.</div>
+            <div class="step-badge">3. DETECT &amp; 4. CLASSIFY • 122 ms</div>
+            <div class="step-title">ROI Detection + 5-Dim Classification</div>
+            <div class="step-desc">Identifies SKU ROIs (suppressing 2nd-row ghosts) and classifies <strong>Category, Subcategory, Brand, Variant &amp; Packaging type</strong>.</div>
           </div>
           <div class="pipeline-step pipeline-step-highlight">
-            <div class="step-badge">STAGE 2.5 • 48 ms (AMBIGUOUS CROPS ONLY)</div>
-            <div class="step-title">System-1 DiffusionGemma (/v1/systemone) &amp; I-JEPA</div>
-            <div class="step-desc">Routes only glared or sister-pack ties (<code>180ml vs 340ml</code>) to a <strong>64-token Pinned/Constrained Diffusion Canvas</strong> (<code>vllm#58216</code>) or <strong>I-JEPA Latent Predictor</strong>.</div>
+            <div class="step-badge">5. DERIVE • 38 ms (/v1/systemone + MASTER)</div>
+            <div class="step-title">Derive Pack Type, Size &amp; Base Pack Code</div>
+            <div class="step-desc">Derives <strong>Pack type, Size &amp; canonical Base Pack code</strong> (<code>HUL</code> vs <code>Non-HUL</code>) via <code>System-1 DiffusionGemma</code> + Product-Master logic.</div>
           </div>
           <div class="pipeline-step">
-            <div class="step-badge">STAGE 3 • 30 ms</div>
-            <div class="step-title">8-KPI Gondola Audit &amp; Handheld Rep Coaching</div>
-            <div class="step-desc">Computes Linear &amp; Area SOS %, localizes Empty-Shelf OOS Voids, checks Brand-Block Purity, and dispatches instant corrective tasks to the rep.</div>
+            <div class="step-badge">6. RECOMMEND • 7. RESPOND • 8. PERSIST • 84 ms</div>
+            <div class="step-title">Sales/Association Recommend &amp; Respond</div>
+            <div class="step-desc">Applies <strong>Sales history, Exclusions, Association score &amp; Region logic</strong>, returns flags to mobile app, and persists to BigQuery.</div>
           </div>
         </div>
 

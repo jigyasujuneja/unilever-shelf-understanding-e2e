@@ -30,6 +30,7 @@ from scripts.stream_open_retail_benchmarks import (
     export_open_retail_datasets_manifest,
 )
 from shelf_e2e.djev_client import DjevSystemOneClient
+from shelf_e2e.hul_e2e_pipeline import HULEndToEndShelfProcessor
 from shelf_e2e.platform.leaderboard import KaggleLeaderboardEngine
 from shelf_e2e.pricing import compute_five_bucket_gcp_billing
 from shelf_e2e.taxonomy import enrich_with_7dim_taxonomy
@@ -148,6 +149,10 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
                 glare_intensity=0.38,
             )
 
+            hul_processor = HULEndToEndShelfProcessor(REPO_ROOT)
+            hul_marketshare = hul_processor.execute_workflow("MARKETSHARE", image_count=6)
+            hul_merchandizing = hul_processor.execute_workflow("MERCHANDIZING", image_count=1)
+
             self._send_json(
                 {
                     "csrf_token": CSRF_TOKEN,
@@ -155,6 +160,8 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
                     "sla_targets": {
                         "max_cost_inr": 0.22,
                         "max_p95_latency_ms": 20000.0,
+                        "marketshare_5_to_7_imgs_sla_ms": 30000.0,
+                        "merchandizing_1_img_sla_ms": 10000.0,
                         "concurrency_workers": 525,
                         "daily_volume": 500000,
                     },
@@ -171,6 +178,10 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
                         "track_b_billing": asdict(billing_b),
                     },
                     "spec006_djev_systemone": sample_canvas.to_dict(),
+                    "hul_workflows": {
+                        "MARKETSHARE": hul_marketshare.to_dict(),
+                        "MERCHANDIZING": hul_merchandizing.to_dict(),
+                    },
                     "open_retail_datasets": [asdict(d) for d in OPEN_RETAIL_DATASETS_CATALOG],
                     "runs": runs,
                 }

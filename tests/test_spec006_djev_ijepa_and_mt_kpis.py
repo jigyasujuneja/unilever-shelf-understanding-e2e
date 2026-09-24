@@ -167,6 +167,31 @@ class TestSpec006DjevIjepaAndMTKPIs(unittest.TestCase):
         self.assertTrue(manifest_path.exists())
         self.assertEqual(len(OPEN_RETAIL_DATASETS_CATALOG), 7)
 
+    def test_hul_8stage_e2e_and_dual_slas_marketshare_30s_merchandizing_10s(self) -> None:
+        from shelf_e2e.hul_e2e_pipeline import HULEndToEndShelfProcessor
+
+        processor = HULEndToEndShelfProcessor(self.repo_root)
+        # 1. HUL Marketshare Workflow: 5-7 images per request, Response time <= 30,000 ms (30s)
+        ms_res = processor.execute_workflow("MARKETSHARE", image_count=6)
+        self.assertEqual(ms_res.image_count, 6)
+        self.assertEqual(ms_res.sla_limit_ms, 30000.0)
+        self.assertTrue(ms_res.within_sla)
+        self.assertLessEqual(ms_res.actual_total_ms, 30000.0)
+        self.assertGreater(ms_res.hul_skus_identified_count, 0)
+        self.assertGreater(ms_res.non_hul_competitor_skus_count, 0)
+        self.assertGreaterEqual(len(ms_res.recommendations), 3)
+        # Verify Classify (5 dims) + Derive (Pack type, Size, Base Pack code)
+        first_roi = ms_res.sample_resolved_rois[0]
+        self.assertTrue(bool(first_roi.category and first_roi.subcategory and first_roi.brand and first_roi.variant and first_roi.packaging_type))
+        self.assertTrue(bool(first_roi.pack_type and first_roi.size and first_roi.base_pack_code))
+
+        # 2. HUL Merchandizing Workflow: 1 image per request, Response time <= 10,000 ms (10s)
+        merch_res = processor.execute_workflow("MERCHANDIZING", image_count=1)
+        self.assertEqual(merch_res.image_count, 1)
+        self.assertEqual(merch_res.sla_limit_ms, 10000.0)
+        self.assertTrue(merch_res.within_sla)
+        self.assertLessEqual(merch_res.actual_total_ms, 10000.0)
+
 
 if __name__ == "__main__":
     unittest.main()

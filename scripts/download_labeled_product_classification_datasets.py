@@ -125,10 +125,10 @@ def download_labeled_classification_benchmark() -> Path:
         bboxes = objs.get("bbox", [])
         categories = objs.get("category", [])
         img_obj = row.get("image")
-        img_src = img_obj.get("src") if isinstance(img_obj, dict) else str(img_obj)
+        img_src = str(img_obj.get("src") or "") if isinstance(img_obj, dict) else str(img_obj or "")
         fname = f"rpc_val_multibox_{idx:03d}.jpg"
         fpath = img_dir / fname
-        if img_src.startswith("http") and not fpath.exists():
+        if img_src and img_src.startswith("http") and not fpath.exists():
             try:
                 req = urllib.request.Request(img_src, headers={"User-Agent": "Mozilla/5.0"})
                 fpath.write_bytes(urllib.request.urlopen(req, timeout=12).read())
