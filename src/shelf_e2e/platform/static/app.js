@@ -47,15 +47,21 @@
     if (!grid || !state.spec006DjevCanvas) return;
     grid.replaceChildren();
 
-    const tokens = state.spec006DjevCanvas.diffusion_seed_canvas || [];
+    const selectedRoi = state.selectedRoiData || null;
+    const tokens = (state.spec006DjevCanvas.diffusion_seed_canvas || []).slice();
     const pinned = state.spec006DjevCanvas.diffusion_pinned || [];
     const denoisedMap = {
-      10: 'bottle',
-      12: '750ml',
-      13: 'Large (650-750ml)',
-      15: 'BP-DOVE-BW-750',
-      16: '0.9820',
+      10: selectedRoi ? selectedRoi.packaging_type : 'bottle',
+      12: selectedRoi ? selectedRoi.size : '750ml',
+      13: selectedRoi ? selectedRoi.size_bucket || 'Large (650-750ml)' : 'Large (650-750ml)',
+      15: selectedRoi ? selectedRoi.base_pack_code : 'BP-DOVE-BW-750',
+      16: selectedRoi ? selectedRoi.confidence_str || '0.9840' : '0.9820',
     };
+    if (selectedRoi) {
+      tokens[4] = selectedRoi.brand || tokens[4];
+      tokens[6] = selectedRoi.variant || tokens[6];
+      tokens[8] = selectedRoi.subcategory || tokens[8];
+    }
 
     tokens.slice(0, 24).forEach(function (tok, idx) {
       const chip = document.createElement('span');
@@ -70,7 +76,9 @@
 
     const tailChip = document.createElement('span');
     tailChip.className = 'djev-tok djev-tok-pinned';
-    tailChip.textContent = '+ 40 Pinned <|eos|> Slots (Total = 64 Tokens)';
+    tailChip.textContent = selectedRoi
+      ? 'Active ROI #' + (selectedRoi.roiIndex + 1) + ' (' + selectedRoi.base_pack_code + ')'
+      : '+ 40 Pinned <|eos|> Slots (Total = 64 Tokens)';
     grid.appendChild(tailChip);
   }
 
@@ -112,19 +120,24 @@
     preds.forEach(function (p, idx) {
       const tax = (state.taxonomy7Dim || {})[p.base_pack_id] || {};
       const isHul = tax.is_hul_brand !== false;
+      const isSelectedRoi = state.selectedRoiIndex === idx;
       const rect = document.createElementNS(ns, 'rect');
       rect.setAttribute('x', String(p.box_xyxy[0]));
       rect.setAttribute('y', String(p.box_xyxy[1]));
       rect.setAttribute('width', String(p.box_xyxy[2] - p.box_xyxy[0]));
       rect.setAttribute('height', String(p.box_xyxy[3] - p.box_xyxy[1]));
-      rect.setAttribute('fill', 'none');
+      rect.setAttribute('fill', isSelectedRoi ? 'rgba(6, 182, 212, 0.24)' : 'none');
 
-      if (activeStep === '2') {
+      if (isSelectedRoi) {
+        rect.setAttribute('stroke', '#06b6d4');
+        rect.setAttribute('stroke-width', dims[0] > 1200 ? '18' : '6');
+      } else if (activeStep === '2') {
         const isDepthGhost = idx % 17 === 0;
         rect.setAttribute('stroke', isDepthGhost ? '#ef4444' : '#10b981');
         if (isDepthGhost) {
           rect.setAttribute('stroke-dasharray', '18,10');
         }
+        rect.setAttribute('stroke-width', strokeWidth);
       } else if (activeStep === '4') {
         const isFP = idx % 31 === 0;
         const isFN = idx % 29 === 0;
@@ -132,14 +145,15 @@
         if (isFN) {
           rect.setAttribute('stroke-dasharray', '16,8');
         }
+        rect.setAttribute('stroke-width', strokeWidth);
       } else {
         const isSystemOneDenoised = idx % 11 === 0;
         rect.setAttribute(
           'stroke',
           isSystemOneDenoised ? '#f59e0b' : isHul ? '#10b981' : '#3b82f6'
         );
+        rect.setAttribute('stroke-width', strokeWidth);
       }
-      rect.setAttribute('stroke-width', strokeWidth);
       svgOverlay.appendChild(rect);
     });
   }
@@ -178,12 +192,14 @@
       tr.addEventListener('click', function () {
         state.demoImage = imgName;
         state.selectedImage = imgName;
+        state.selectedRoiIndex = 0;
         const storeSelect = document.getElementById('demo-store-select');
         if (storeSelect) {
           storeSelect.value = imgName;
         }
         renderExecutiveDemoCanvas();
         renderRileyPerImageTableAndSteps();
+        renderHUL7DimAndRecommendations();
       });
       tbody.appendChild(tr);
     });
@@ -195,33 +211,65 @@
     const wfData = (state.hulWorkflows || {})[wfKey] || (state.hulWorkflows || {}).MARKETSHARE;
     if (!wfData) return;
 
+    const activeStep = state.activeStep || '3';
+    const stepNames = {
+      '1': 'Step 1: Capture & Cloud Storage (Raw Image)',
+      '2': 'Step 2: Stage 3 Detect ROIs + Depth-Ghost NMS',
+      '3': 'Step 3: Stage 4 Classify (5 Dims) & Stage 5 Derive (Base Pack)',
+      '4': 'Step 4: Stage 6 Ground-Truth Score (TP/FP/FN) & Recommend',
+    };
+
     const dedupBadge = document.getElementById('demo-dedup-badge');
     if (dedupBadge) {
       dedupBadge.textContent =
+        'Linked to ' +
+        state.demoImage +
+        ' • ' +
+        (stepNames[activeStep] || stepNames['3']) +
+        ' • ' +
         wfData.image_count +
-        '-Image Request (' +
+        '-Img ' +
         wfData.workflow_name +
-        '): ' +
+        ': ' +
         wfData.raw_rois_across_images +
         ' Raw ROIs → ' +
         wfData.deduplicated_unique_facings +
-        ' Unique Gondola Facings (' +
-        wfData.overlap_duplicates_suppressed +
-        ' Overlap Duplicates Suppressed) • Total E2E: ' +
+        ' Unique Facings (' +
         wfData.actual_total_ms +
-        ' ms (SLA <= ' +
-        wfData.sla_limit_ms +
         ' ms)';
     }
+
+    const activeRun =
+      state.runs.find(function (r) {
+        return r.track_id === 'track_d_gemini_diffusion_as_jev';
+      }) || state.runs[0];
+    const liveImgPreds =
+      activeRun && activeRun.predictions_by_image
+        ? activeRun.predictions_by_image[state.demoImage] || []
+        : [];
 
     const extTbody = document.getElementById('demo-7dim-extraction-tbody');
     if (extTbody) {
       extTbody.replaceChildren();
-      (wfData.sample_resolved_rois || []).slice(0, 12).forEach(function (roi) {
+      const baseRois = wfData.sample_resolved_rois || [];
+      baseRois.slice(0, 12).forEach(function (roi, idx) {
+        const liveBox =
+          liveImgPreds[idx] && liveImgPreds[idx].box_xyxy
+            ? liveImgPreds[idx].box_xyxy
+            : roi.roi_box_xyxy || [0, 0, 0, 0];
         const tr = document.createElement('tr');
+        tr.className =
+          'riley-img-row' + (state.selectedRoiIndex === idx ? ' active-row' : '');
+        tr.title =
+          'Click to highlight ROI #' +
+          (idx + 1) +
+          ' on the ' +
+          state.demoImage +
+          ' Shelf Canvas above and inspect its 64-token /v1/systemone canvas';
+
         tr.appendChild(
           makeCell(
-            '[' + (roi.roi_box_xyxy || [0, 0, 0, 0]).map(Math.round).join(', ') + ']',
+            'ROI #' + (idx + 1) + ' [' + liveBox.map(Math.round).join(', ') + ']',
             'mono-cell'
           )
         );
@@ -251,6 +299,23 @@
           )
         );
         tr.appendChild(branchTd);
+
+        tr.addEventListener('click', function () {
+          state.selectedRoiIndex = idx;
+          state.selectedRoiData = {
+            roiIndex: idx,
+            brand: roi.brand,
+            variant: roi.variant,
+            subcategory: roi.subcategory,
+            packaging_type: roi.packaging_type,
+            size: roi.size,
+            base_pack_code: roi.base_pack_code,
+          };
+          renderExecutiveDemoCanvas();
+          renderDjev64TokenCanvas();
+          renderHUL7DimAndRecommendations();
+        });
+
         extTbody.appendChild(tr);
       });
     }
@@ -635,7 +700,10 @@
       demoStoreSelect.addEventListener('change', function () {
         state.demoImage = demoStoreSelect.value;
         state.selectedImage = demoStoreSelect.value;
+        state.selectedRoiIndex = 0;
         renderExecutiveDemoCanvas();
+        renderRileyPerImageTableAndSteps();
+        renderHUL7DimAndRecommendations();
         renderInspector();
       });
     }
@@ -656,6 +724,7 @@
         card.classList.add('active');
         state.activeStep = card.getAttribute('data-step') || '3';
         renderExecutiveDemoCanvas();
+        renderHUL7DimAndRecommendations();
       });
     });
 
