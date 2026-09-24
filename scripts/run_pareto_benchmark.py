@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Goldfish 3 Pareto Matrix comparing Tracks A, B, C, and D (+ GeminiDiffusion-as-Jev)."""
+"""Generate the Goldfish 3 Pareto Matrix across SKU-110k + RPC Open-Source Benchmark Images."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.download_open_datasets import build_sku110k_rpc_benchmark_slice
 from shelf_e2e.datasets import RPCCatalogAdapter
 from shelf_e2e.schemas import InputContract, PlanogramContract, PromoRules, StoreMetadata
 from shelf_e2e.tracks import (
@@ -28,9 +29,13 @@ from tests.benchmark_harness import (
 
 
 def main() -> None:
+    slice_path = build_sku110k_rpc_benchmark_slice()
+    slice_data = json.loads(slice_path.read_text(encoding="utf-8"))
     catalog = RPCCatalogAdapter.from_json(REPO_ROOT / "configs" / "mock_rpc_catalog.json")
+
+    image_file = REPO_ROOT / "data" / "sku110k" / "images" / "sku110k_val_001.png"
     sample_input = InputContract(
-        image_path="gs://unilever-shelf-images/mt_shelf_4k_01.png",
+        image_path=str(image_file),
         store_metadata=StoreMetadata(
             store_id="MT-MUMBAI-042",
             channel="MODERN_TRADE",
@@ -42,21 +47,21 @@ def main() -> None:
         ),
     )
 
-    gt_boxes = [
-        [40.0, 80.0, 120.0, 290.0],
-        [125.0, 80.0, 205.0, 290.0],
-        [215.0, 75.0, 295.0, 295.0],
-        [310.0, 90.0, 385.0, 290.0],
-    ]
-    gt_ids = ["BP-DOVE-BW-750", "BP-DOVE-BW-750", "BP-TRES-SH-750", "BP-COMP-SH-650"]
-    gt_cats = ["Skin Cleansing", "Skin Cleansing", "Hair Care", "Hair Care"]
+    gt_records = slice_data["images"]["sku110k_val_001.png"]
+    gt_boxes = [r["box_xyxy"] for r in gt_records]
+    gt_ids = [r["gt_base_pack_id"] for r in gt_records]
+    gt_cats = [r["category"] for r in gt_records]
 
     tracks = [
         TrackACascadingViTPipeline(catalog),
         TrackBEndToEndVLMPipeline(catalog),
-        TrackCTieredHybridPipeline(catalog),
-        TrackDJevRoutingPipeline(catalog, use_gemini_diffusion_as_jev=False),
-        TrackDJevRoutingPipeline(catalog, use_gemini_diffusion_as_jev=True),
+        TrackCTieredHybridPipeline(catalog, sku110k_slice_path=slice_path),
+        TrackDJevRoutingPipeline(
+            catalog, use_gemini_diffusion_as_jev=False, sku110k_slice_path=slice_path
+        ),
+        TrackDJevRoutingPipeline(
+            catalog, use_gemini_diffusion_as_jev=True, sku110k_slice_path=slice_path
+        ),
     ]
 
     rows = []
@@ -79,6 +84,7 @@ def main() -> None:
             {
                 "track_id": track.track_id,
                 "track_name": track.track_name,
+                "dataset_image": image_file.name,
                 "map_50": det.map_50,
                 "map_50_95": det.map_50_95,
                 "top1_acc": ret.top1_accuracy,
@@ -100,9 +106,9 @@ def main() -> None:
     report_json = reports_dir / "pareto_matrix.json"
     report_json.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
-    print("\n=== SPEC-001 & SPEC-002 PARETO BENCHMARK MATRIX (500K IMAGES/DAY) ===")
+    print("\n=== SPEC-001 & SPEC-002 PARETO MATRIX ON SKU-110K + RPC OPEN-SOURCE SLICE ===")
     header = (
-        f"{'Track ID':<33} | {'mAP@50:95':<9} | {'Top-1':<6} | {'MRR':<6} | "
+        f"{'Track ID':<33} | {'mAP@50:95':<9} | {'Top-1':<6} | {'Top-5':<6} | {'MRR':<6} | "
         f"{'P95 (ms)':<8} | {'Cost (₹)':<10} | {'SLA <= ₹0.22'}"
     )
     print(header)
@@ -111,7 +117,8 @@ def main() -> None:
         sla_badge = "PASS" if r["meets_cost_sla_0_22_inr"] else "EXCEEDS"
         print(
             f"{r['track_id']:<33} | {r['map_50_95']:<9.4f} | {r['top1_acc']:<6.2f} | "
-            f"{r['mrr']:<6.2f} | {r['p95_latency_ms']:<8.1f} | ₹{r['cost_inr']:<9.4f} | {sla_badge}"
+            f"{r['top5_recall']:<6.2f} | {r['mrr']:<6.2f} | {r['p95_latency_ms']:<8.1f} | "
+            f"₹{r['cost_inr']:<9.4f} | {sla_badge}"
         )
     print(f"\nSaved JSON Pareto report to: {report_json}")
 

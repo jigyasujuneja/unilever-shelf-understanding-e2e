@@ -1,0 +1,351 @@
+{
+  "dataset_name": "SKU-110k + RPC Benchmark Slice",
+  "metadata": {
+    "source": "local_staged_sku110k_rpc",
+    "note": "Offline/Firewall fallback (HTTPError)"
+  },
+  "images": {
+    "sku110k_val_001.png": [
+      {
+        "box_xyxy": [
+          40.0,
+          80.0,
+          120.0,
+          290.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-750",
+        "category": "Skin Cleansing",
+        "objectness": 0.97,
+        "glare_intensity": 0.42
+      },
+      {
+        "box_xyxy": [
+          125.0,
+          80.0,
+          205.0,
+          290.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-750",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.1
+      },
+      {
+        "box_xyxy": [
+          215.0,
+          75.0,
+          295.0,
+          295.0
+        ],
+        "gt_base_pack_id": "BP-TRES-SH-750",
+        "category": "Hair Care",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          310.0,
+          90.0,
+          385.0,
+          290.0
+        ],
+        "gt_base_pack_id": "BP-COMP-SH-650",
+        "category": "Hair Care",
+        "objectness": 0.94,
+        "glare_intensity": 0.05
+      }
+    ],
+    "sku110k_val_002.png": [
+      {
+        "box_xyxy": [
+          35.0,
+          70.0,
+          115.0,
+          285.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-750",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.45
+      },
+      {
+        "box_xyxy": [
+          120.0,
+          70.0,
+          186.0,
+          285.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-500",
+        "category": "Skin Cleansing",
+        "objectness": 0.95,
+        "glare_intensity": 0.12
+      },
+      {
+        "box_xyxy": [
+          195.0,
+          80.0,
+          251.0,
+          260.0
+        ],
+        "gt_base_pack_id": "BP-LUX-FW-100",
+        "category": "Skin Cleansing",
+        "objectness": 0.94,
+        "glare_intensity": 0.06
+      },
+      {
+        "box_xyxy": [
+          260.0,
+          75.0,
+          332.0,
+          285.0
+        ],
+        "gt_base_pack_id": "BP-VASELINE-LOT-400",
+        "category": "Skin Care",
+        "objectness": 0.95,
+        "glare_intensity": 0.09
+      }
+    ],
+    "sku110k_val_003_dense147.png": [
+      {
+        "box_xyxy": [
+          20.0,
+          40.0,
+          100.0,
+          235.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-750",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.42
+      },
+      {
+        "box_xyxy": [
+          115.0,
+          40.0,
+          181.0,
+          235.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-500",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          210.0,
+          40.0,
+          288.0,
+          235.0
+        ],
+        "gt_base_pack_id": "BP-TRES-SH-750",
+        "category": "Hair Care",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          305.0,
+          40.0,
+          361.0,
+          235.0
+        ],
+        "gt_base_pack_id": "BP-LUX-FW-100",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          400.0,
+          40.0,
+          456.0,
+          235.0
+        ],
+        "gt_base_pack_id": "BP-PONDS-FW-100",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          20.0,
+          260.0,
+          92.0,
+          455.0
+        ],
+        "gt_base_pack_id": "BP-VASELINE-LOT-400",
+        "category": "Skin Care",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          115.0,
+          260.0,
+          187.0,
+          455.0
+        ],
+        "gt_base_pack_id": "BP-COMP-SH-650",
+        "category": "Hair Care",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          210.0,
+          260.0,
+          276.0,
+          455.0
+        ],
+        "gt_base_pack_id": "BP-COMP-BW-500",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          305.0,
+          260.0,
+          385.0,
+          455.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-750",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          400.0,
+          260.0,
+          466.0,
+          455.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-500",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          20.0,
+          480.0,
+          98.0,
+          675.0
+        ],
+        "gt_base_pack_id": "BP-TRES-SH-750",
+        "category": "Hair Care",
+        "objectness": 0.96,
+        "glare_intensity": 0.1
+      },
+      {
+        "box_xyxy": [
+          115.0,
+          480.0,
+          171.0,
+          675.0
+        ],
+        "gt_base_pack_id": "BP-LUX-FW-100",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          210.0,
+          480.0,
+          266.0,
+          675.0
+        ],
+        "gt_base_pack_id": "BP-PONDS-FW-100",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          305.0,
+          480.0,
+          377.0,
+          675.0
+        ],
+        "gt_base_pack_id": "BP-VASELINE-LOT-400",
+        "category": "Skin Care",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          400.0,
+          480.0,
+          472.0,
+          675.0
+        ],
+        "gt_base_pack_id": "BP-COMP-SH-650",
+        "category": "Hair Care",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          20.0,
+          700.0,
+          86.0,
+          895.0
+        ],
+        "gt_base_pack_id": "BP-COMP-BW-500",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.06
+      },
+      {
+        "box_xyxy": [
+          115.0,
+          700.0,
+          195.0,
+          895.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-750",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          210.0,
+          700.0,
+          276.0,
+          895.0
+        ],
+        "gt_base_pack_id": "BP-DOVE-BW-500",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          305.0,
+          700.0,
+          383.0,
+          895.0
+        ],
+        "gt_base_pack_id": "BP-TRES-SH-750",
+        "category": "Hair Care",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      },
+      {
+        "box_xyxy": [
+          400.0,
+          700.0,
+          456.0,
+          895.0
+        ],
+        "gt_base_pack_id": "BP-LUX-FW-100",
+        "category": "Skin Cleansing",
+        "objectness": 0.96,
+        "glare_intensity": 0.08
+      }
+    ]
+  }
+}
