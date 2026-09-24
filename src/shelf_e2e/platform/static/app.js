@@ -109,6 +109,95 @@
     });
   }
 
+  function renderHUL7DimAndRecommendations() {
+    const wfSelect = document.getElementById('demo-workflow-select');
+    const wfKey = wfSelect ? wfSelect.value : 'MARKETSHARE';
+    const wfData = (state.hulWorkflows || {})[wfKey] || (state.hulWorkflows || {}).MARKETSHARE;
+    if (!wfData) return;
+
+    const dedupBadge = document.getElementById('demo-dedup-badge');
+    if (dedupBadge) {
+      dedupBadge.textContent =
+        wfData.image_count +
+        '-Image Request (' +
+        wfData.workflow_name +
+        '): ' +
+        wfData.raw_rois_across_images +
+        ' Raw ROIs → ' +
+        wfData.deduplicated_unique_facings +
+        ' Unique Gondola Facings (' +
+        wfData.overlap_duplicates_suppressed +
+        ' Overlap Duplicates Suppressed) • Total E2E: ' +
+        wfData.actual_total_ms +
+        ' ms (SLA <= ' +
+        wfData.sla_limit_ms +
+        ' ms)';
+    }
+
+    const extTbody = document.getElementById('demo-7dim-extraction-tbody');
+    if (extTbody) {
+      extTbody.replaceChildren();
+      (wfData.sample_resolved_rois || []).slice(0, 12).forEach(function (roi) {
+        const tr = document.createElement('tr');
+        tr.appendChild(
+          makeCell(
+            '[' + (roi.roi_box_xyxy || [0, 0, 0, 0]).map(Math.round).join(', ') + ']',
+            'mono-cell'
+          )
+        );
+        const ownTd = document.createElement('td');
+        ownTd.appendChild(
+          makeBadge(
+            roi.is_hul_sku ? 'HUL SKU' : 'NON-HUL COMPETITOR',
+            roi.is_hul_sku ? 'badge-pass' : 'badge-silver'
+          )
+        );
+        tr.appendChild(ownTd);
+        tr.appendChild(makeCell(roi.category));
+        tr.appendChild(makeCell(roi.subcategory));
+        tr.appendChild(makeCell(roi.brand));
+        tr.appendChild(makeCell(roi.variant));
+        tr.appendChild(makeCell(roi.packaging_type, 'mono-cell'));
+        tr.appendChild(makeCell(roi.pack_type, 'mono-cell'));
+        tr.appendChild(makeCell(roi.size, 'mono-cell'));
+        tr.appendChild(makeCell(roi.base_pack_code, 'mono-cell'));
+        const branchTd = document.createElement('td');
+        branchTd.appendChild(
+          makeBadge(
+            roi.routing_branch === 'CLOSED_SET_HUL_PRODUCT_MASTER'
+              ? 'ScaNN + /v1/systemone Master'
+              : 'Open-Set 5-Dim Classifier',
+            roi.routing_branch === 'CLOSED_SET_HUL_PRODUCT_MASTER' ? 'badge-gold' : 'badge-silver'
+          )
+        );
+        tr.appendChild(branchTd);
+        extTbody.appendChild(tr);
+      });
+    }
+
+    const recTbody = document.getElementById('demo-recommend-tbody');
+    if (recTbody) {
+      recTbody.replaceChildren();
+      (wfData.recommendations || []).forEach(function (rec) {
+        const tr = document.createElement('tr');
+        tr.appendChild(makeCell(rec.recommended_base_pack_code, 'mono-cell'));
+        tr.appendChild(makeCell(rec.product_name));
+        const typeTd = document.createElement('td');
+        typeTd.appendChild(makeBadge(rec.recommendation_type, 'badge-gold'));
+        tr.appendChild(typeTd);
+        tr.appendChild(makeCell(rec.sales_velocity_percentile.toFixed(1) + 'th %ile', 'mono-cell'));
+        tr.appendChild(makeCell(rec.association_score.toFixed(2), 'mono-cell'));
+        tr.appendChild(makeCell(rec.region_match));
+        const exTd = document.createElement('td');
+        exTd.appendChild(makeBadge(rec.exclusion_check, 'badge-pass'));
+        tr.appendChild(exTd);
+        tr.appendChild(makeCell(rec.composite_recommendation_score.toFixed(4), 'mono-cell'));
+        tr.appendChild(makeCell('+₹' + rec.expected_weekly_uplift_inr.toLocaleString() + '/wk', 'mono-cell'));
+        recTbody.appendChild(tr);
+      });
+    }
+  }
+
   function renderLeaderboard() {
     const tbody = document.getElementById('leaderboard-tbody');
     if (!tbody) return;
@@ -366,6 +455,7 @@
   function refreshAllViews() {
     renderExecutiveDemoCanvas();
     renderDjev64TokenCanvas();
+    renderHUL7DimAndRecommendations();
     renderLeaderboard();
     renderMLflowTable();
     renderParetoSVG();
@@ -387,6 +477,7 @@
         state.taxonomy7Dim = data.taxonomy_7dim || {};
         state.spec005Summary = data.spec005_summary || {};
         state.spec006DjevCanvas = data.spec006_djev_systemone || null;
+        state.hulWorkflows = data.hul_workflows || {};
         refreshAllViews();
       });
   }
@@ -465,6 +556,13 @@
         state.selectedImage = demoStoreSelect.value;
         renderExecutiveDemoCanvas();
         renderInspector();
+      });
+    }
+
+    const demoWorkflowSelect = document.getElementById('demo-workflow-select');
+    if (demoWorkflowSelect) {
+      demoWorkflowSelect.addEventListener('change', function () {
+        renderHUL7DimAndRecommendations();
       });
     }
 

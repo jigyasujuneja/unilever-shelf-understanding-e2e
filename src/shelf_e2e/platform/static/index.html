@@ -197,6 +197,65 @@
             </div>
           </div>
         </div>
+
+        <!-- FULL-FIDELITY EXTRACTED PAYLOAD ACROSS ALL 7 DIMENSIONS (CLASSIFY VS DERIVE) & ALL 5 HUL USE CASES -->
+        <div class="surface-card" style="margin-top: 1.25rem; margin-bottom: 0;">
+          <div class="section-header">
+            <div>
+              <h2>Live Image Extraction Matrix — Separated by HUL Stage 4 (`Classify`: 5 Dims) vs. Stage 5 (`Derive`: 2 Dims + Base Pack)</h2>
+              <span class="section-subtitle">Shows every attribute extracted from the shelf ROIs across both <strong>HUL SKU Identification</strong> (Closed-Set Product Master) and <strong>Non-HUL Competitor Identification</strong> (Open-Set 5-Dim Classifier).</span>
+            </div>
+            <span class="badge badge-pass" id="demo-dedup-badge">6-Frame Panorama Dedup: 1,104 Raw ROIs &rarr; 902 Unique Facings (202 Overlap Seam Duplicates Suppressed)</span>
+          </div>
+          <div class="table-wrapper">
+            <table class="arena-table" id="demo-7dim-extraction-table">
+              <thead>
+                <tr>
+                  <th>Crop ROI</th>
+                  <th>HUL vs Non-HUL</th>
+                  <th>[Classify 1] Category</th>
+                  <th>[Classify 2] Subcategory</th>
+                  <th>[Classify 3] Brand</th>
+                  <th>[Classify 4] Variant</th>
+                  <th>[Classify 5] Packaging Type</th>
+                  <th>[Derive 6] Pack Type</th>
+                  <th>[Derive 7] Size</th>
+                  <th>[Derive] Canonical Base Pack Code</th>
+                  <th>Neural Routing Branch</th>
+                </tr>
+              </thead>
+              <tbody id="demo-7dim-extraction-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- STAGE 6: RECOMMEND ENGINE MATRIX (SALES HISTORY + EXCLUSIONS + ASSOCIATION SCORE + REGION LOGIC) -->
+        <div class="surface-card" style="margin-top: 1.25rem; margin-bottom: 0;">
+          <div class="section-header">
+            <div>
+              <h2>Stage 6 (`Recommend`) — 4-Factor Assortment &amp; Replenishment Engine (`Marketshare` Use Case)</h2>
+              <span class="section-subtitle">Combines <strong>1) Outlet Sales History</strong>, <strong>2) Outlet Exclusions</strong>, <strong>3) Shelf Neighbor Association Score</strong>, and <strong>4) Region Logic</strong> to generate actionable order recommendations.</span>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="arena-table" id="demo-recommend-table">
+              <thead>
+                <tr>
+                  <th>Recommended Base Pack Code</th>
+                  <th>Product Name</th>
+                  <th>Trigger Use Case</th>
+                  <th>Sales History %ile</th>
+                  <th>Association Score (Anchor Boosted)</th>
+                  <th>Region Logic &amp; Affinity</th>
+                  <th>Outlet Exclusion Gate</th>
+                  <th>Composite Score</th>
+                  <th>Est. Weekly Uplift</th>
+                </tr>
+              </thead>
+              <tbody id="demo-recommend-tbody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 

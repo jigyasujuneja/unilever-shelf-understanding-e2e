@@ -46,6 +46,7 @@ from shelf_e2e.tracks import (
 
 STATIC_DIR = (Path(__file__).resolve().parent / "static").resolve()
 IMAGES_DIR = (REPO_ROOT / "data" / "sku110k" / "images").resolve()
+LABELED_IMAGES_DIR = (REPO_ROOT / "data" / "labeled_retail_benchmarks" / "images").resolve()
 ALLOWED_IMAGES = (
     {f"sku110k_val_{i:03d}.jpg" for i in range(20)}
     | {f"smart_retail_val_{i:03d}.jpg" for i in range(5)}
@@ -90,6 +91,19 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
             return
         if route == "/app.js":
             self._serve_static_file("app.js", "application/javascript; charset=utf-8")
+            return
+        if route.startswith("/labeled-images/"):
+            img_name = Path(route).name
+            candidate = (LABELED_IMAGES_DIR / img_name).resolve()
+            if (
+                not str(candidate).startswith(str(LABELED_IMAGES_DIR) + "/")
+                or not candidate.is_file()
+                or not img_name.endswith(".jpg")
+            ):
+                self._send_json({"error": "Labeled crop not found"}, status_code=404)
+                return
+            self._send_security_headers("image/jpeg", status_code=200)
+            self.wfile.write(candidate.read_bytes())
             return
         if route.startswith("/images/"):
             img_name = Path(route).name
