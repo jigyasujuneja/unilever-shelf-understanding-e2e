@@ -269,16 +269,20 @@ def load_dashboard_payload() -> Dict[str, Any]:
 
     # Collect all distinct shelf images across summary, row_level_report, and configured associations
     available_images: List[str] = []
+    shelf_img_default = "gs://unilever-shelf-understanding-shelf-images/shelf-image.png"
+    if (REPO_ROOT / "shelf-image.png").exists():
+        available_images.append(shelf_img_default)
+
     for s_rec in summary_records_enriched:
         u = s_rec.get("shelf_image_uri")
-        if u and u not in available_images:
+        if u and "shelf_sample_01" not in str(u) and str(u) not in available_images:
             available_images.append(str(u))
     for r_rec in rows_data:
         u = r_rec.get("shelf_image_uri")
-        if u and u not in available_images:
+        if u and "shelf_sample_01" not in str(u) and str(u) not in available_images:
             available_images.append(str(u))
     if not available_images:
-        available_images.append("gs://unilever-shelf-understanding-shelf-images/shelf-image.png")
+        available_images.append(shelf_img_default)
 
     # Load any configured or sample Ground Truth records keyed by shelf_image_uri / ground_truth_id
     ground_truth_by_image: Dict[str, Any] = {}
@@ -598,66 +602,80 @@ def execute_live_benchmark_task(
         import google.auth
         import google.auth.transport.requests
 
-        creds, _ = google.auth.default(quota_project_id=cfg.gcp.project_id)
-        creds.refresh(google.auth.transport.requests.Request())
-        id_token = getattr(creds, "id_token", None)
-        remote_url = os.environ.get(
-            "CLOUD_RUN_BENCHMARK_URL",
-            "https://unilever-shelf-benchmark-service-bn5kckoghq-uc.a.run.app",
-        ).rstrip("/")
-        remote_payload = {
-            "task_type": task_type,
-            "model_name": model_name,
-            "separation_approach": separation_approach,
-            "mode": "live",
-            "connect_sample_gt": bool(connect_sample_gt),
-            "brand_mode": brand_mode,
-            "attribute_call_mode": attribute_call_mode,
-            "vcpu_count": vcpu_count,
-            "memory_gib": memory_gib,
-            "accelerator": accelerator,
-            "concurrency": concurrency,
-            "shelf_image_uri": shelf_image_uri or "gs://unilever-shelf-understanding-shelf-images/shelf-image.png",
-        }
-        req = urllib.request.Request(
-            f"{remote_url}/api/run-live",
-            data=json.dumps(remote_payload).encode("utf-8"),
-            headers={"Authorization": f"Bearer {id_token}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=240) as resp:
-            remote_out = json.loads(resp.read().decode("utf-8"))
-        remote_out["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
-        if isinstance(remote_out.get("execution_trace"), dict):
-            remote_out["execution_trace"]["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
-        if isinstance(remote_out.get("summary_record"), dict):
-            remote_out["summary_record"]["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
-            if isinstance(remote_out["summary_record"].get("execution_trace"), dict):
-                remote_out["summary_record"]["execution_trace"]["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
-        # Backfill Stage-1 detected boxes if the remote container returned [0,0,0,0] on 2-stage crop classification
-        kept_boxes = [
-            k.get("bbox_2d")
-            for k in (remote_out.get("depth_demo") or {}).get("kept_front_facings", [])
-            if isinstance(k, dict) and isinstance(k.get("bbox_2d"), list) and len(k.get("bbox_2d")) == 4
-        ]
-        if not kept_boxes:
-            dash = load_dashboard_payload()
+        try:
+            creds, _ = google.auth.default(quota_project_id=cfg.gcp.project_id)
+            creds.refresh(google.auth.transport.requests.Request())
+            id_token = getattr(creds, "id_token", None)
+            remote_url = os.environ.get(
+                "CLOUD_RUN_BENCHMARK_URL",
+                "https://unilever-shelf-benchmark-service-bn5kckoghq-uc.a.run.app",
+            ).rstrip("/")
+            remote_payload = {
+                "task_type": task_type,
+                "model_name": model_name,
+                "separation_approach": separation_approach,
+                "mode": "live",
+                "connect_sample_gt": bool(connect_sample_gt),
+                "brand_mode": brand_mode,
+                "attribute_call_mode": attribute_call_mode,
+                "vcpu_count": vcpu_count,
+                "memory_gib": memory_gib,
+                "accelerator": accelerator,
+                "concurrency": concurrency,
+                "shelf_image_uri": shelf_image_uri or "gs://unilever-shelf-understanding-shelf-images/shelf-image.png",
+            }
+            req = urllib.request.Request(
+                f"{remote_url}/api/run-live",
+                data=json.dumps(remote_payload).encode("utf-8"),
+                headers={"Authorization": f"Bearer {id_token}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=240) as resp:
+                remote_out = json.loads(resp.read().decode("utf-8"))
+            remote_out["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
+            if isinstance(remote_out.get("execution_trace"), dict):
+                remote_out["execution_trace"]["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
+            if isinstance(remote_out.get("summary_record"), dict):
+                remote_out["summary_record"]["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
+                if isinstance(remote_out["summary_record"].get("execution_trace"), dict):
+                    remote_out["summary_record"]["execution_trace"]["execution_environment"] = "gcp_cloud_run_live_vertex_ai"
+            # Backfill Stage-1 detected boxes if the remote container returned [0,0,0,0] on 2-stage crop classification
             kept_boxes = [
-                [r["bbox_ymin"], r["bbox_xmin"], r["bbox_ymax"], r["bbox_xmax"]]
-                for r in (dash.get("rows") or [])
-                if r.get("model_name") == model_name and (r.get("bbox_ymax", 0) > r.get("bbox_ymin", 0))
+                k.get("bbox_2d")
+                for k in (remote_out.get("depth_demo") or {}).get("kept_front_facings", [])
+                if isinstance(k, dict) and isinstance(k.get("bbox_2d"), list) and len(k.get("bbox_2d")) == 4
             ]
-        if kept_boxes:
-            for idx_r, r in enumerate(remote_out.get("rows") or []):
-                if int(r.get("bbox_ymax", 0)) <= int(r.get("bbox_ymin", 0)) or int(r.get("bbox_xmax", 0)) <= int(r.get("bbox_xmin", 0)):
-                    b_cand = kept_boxes[idx_r] if idx_r < len(kept_boxes) else kept_boxes[-1]
-                    r["bbox_ymin"], r["bbox_xmin"], r["bbox_ymax"], r["bbox_xmax"] = (
-                        int(b_cand[0]),
-                        int(b_cand[1]),
-                        int(b_cand[2]),
-                        int(b_cand[3]),
-                    )
-        return remote_out
+            if not kept_boxes:
+                dash = load_dashboard_payload()
+                kept_boxes = [
+                    [r["bbox_ymin"], r["bbox_xmin"], r["bbox_ymax"], r["bbox_xmax"]]
+                    for r in (dash.get("rows") or [])
+                    if r.get("model_name") == model_name and (r.get("bbox_ymax", 0) > r.get("bbox_ymin", 0))
+                ]
+            if kept_boxes:
+                for idx_r, r in enumerate(remote_out.get("rows") or []):
+                    if int(r.get("bbox_ymax", 0)) <= int(r.get("bbox_ymin", 0)) or int(r.get("bbox_xmax", 0)) <= int(r.get("bbox_xmin", 0)):
+                        b_cand = kept_boxes[idx_r] if idx_r < len(kept_boxes) else kept_boxes[-1]
+                        r["bbox_ymin"], r["bbox_xmin"], r["bbox_ymax"], r["bbox_xmax"] = (
+                            int(b_cand[0]),
+                            int(b_cand[1]),
+                            int(b_cand[2]),
+                            int(b_cand[3]),
+                        )
+            return remote_out
+        except Exception as exc:
+            return {
+                "task_type": task_type,
+                "separation_approach": separation_approach,
+                "model_name": model_name,
+                "status": "ERROR",
+                "error": f"Cloud Run execution failed: {exc}",
+                "error_message": f"Cloud Run execution failed: {exc}. Please verify GCP authentication (`gcloud auth application-default login`) or use Local / Offline mode.",
+                "execution_mode": "cloud_run",
+                "execution_environment": "gcp_cloud_run_live_vertex_ai",
+                "front_facings_count": 0,
+                "rows": [],
+            }
 
     if is_offline:
         cfg.offline.enabled = True
@@ -677,13 +695,26 @@ def execute_live_benchmark_task(
     record = records[0]
     if shelf_image_uri:
         record.shelf_image_uri = str(shelf_image_uri)
-    if is_local_live and record.shelf_image_uri.startswith("gs://") and (REPO_ROOT / "shelf-image.png").exists():
-        record.shelf_image_uri = str(REPO_ROOT / "shelf-image.png")
-        record.local_shelf_image_path = str(REPO_ROOT / "shelf-image.png")
+    if (REPO_ROOT / "shelf-image.png").exists():
+        if (
+            not shelf_image_uri
+            or record.shelf_image_uri.startswith("gs://")
+            or "shelf-image.png" in record.shelf_image_uri
+            or "shelf_sample_01" in record.shelf_image_uri
+        ):
+            record.local_shelf_image_path = str((REPO_ROOT / "shelf-image.png").resolve())
+            if is_local_live or is_offline:
+                record.shelf_image_uri = str((REPO_ROOT / "shelf-image.png").resolve())
     gt_record = sample_ground_truth(record.shelf_image_uri) if connect_sample_gt else None
 
+    model_client = runner._get_client_for_model(model_name)
+
     if task_type == "detection":
-        res: TaskExecutionResult = runner.detection_task.execute(
+        from shelf_benchmark.tasks.detection import ProductDetectionTask
+        det_task = ProductDetectionTask(
+            cfg, runner.storage, runner.telemetry, genai_client=model_client
+        )
+        res: TaskExecutionResult = det_task.execute(
             model_name=model_name,
             shelf_image_uri=record.shelf_image_uri,
             run_id=f"{mode}-det-{model_name}",
@@ -697,7 +728,7 @@ def execute_live_benchmark_task(
             storage=runner.storage,
             telemetry=runner.telemetry,
             reports_dir=REPORTS_DIR,
-            genai_client=runner._genai_client,
+            genai_client=model_client,
         )
         res = plugin.execute(
             ctx=ctx,
@@ -706,7 +737,11 @@ def execute_live_benchmark_task(
             gt_record=gt_record,
         )
     elif task_type == "matching":
-        res = runner.matching_task.execute(
+        from shelf_benchmark.tasks.matching import ProductMatchingTask
+        mat_task = ProductMatchingTask(
+            cfg, runner.storage, runner.telemetry, genai_client=model_client
+        )
+        res = mat_task.execute(
             model_name=model_name,
             shelf_image_uri=record.shelf_image_uri,
             run_id=f"{mode}-mat-{model_name}",
@@ -769,6 +804,7 @@ def execute_live_benchmark_task(
         "gcp_runtime_proof": gcp_proof,
         "execution_trace": res.execution_trace,
     }
+    err_msg = res.error_message if res.status == "ERROR" else None
     return {
         "run_id": res.run_id,
         "trace_id": res.trace_id,
@@ -779,6 +815,8 @@ def execute_live_benchmark_task(
         "separation_approach": res.separation_approach,
         "model_name": res.model_name,
         "status": res.status,
+        "error": err_msg,
+        "error_message": err_msg,
         "execution_mode": summary_record["execution_mode"],
         "execution_environment": exec_env,
         "latency_ms": round(res.latency_ms, 2),
@@ -950,7 +988,12 @@ class BenchmarkUIRequestHandler(BaseHTTPRequestHandler):
             from urllib.parse import parse_qs
             qs = parse_qs(parsed.query)
             uri = (qs.get("uri") or [""])[0].strip()
-            if (not uri or uri.endswith("/shelf-image.png") or uri == "shelf-image.png") and (REPO_ROOT / "shelf-image.png").exists():
+            if (
+                not uri
+                or uri.endswith("/shelf-image.png")
+                or uri == "shelf-image.png"
+                or "shelf_sample_01" in uri
+            ) and (REPO_ROOT / "shelf-image.png").exists():
                 self._serve_file(REPO_ROOT / "shelf-image.png")
                 return
             # Check local path within repo or reports
@@ -1075,9 +1118,17 @@ class BenchmarkUIRequestHandler(BaseHTTPRequestHandler):
                     shelf_image_uri=shelf_image_uri,
                 )
                 result.pop("_task_execution_result_obj", None)
+                if result.get("status") == "ERROR" and not result.get("error"):
+                    result["error"] = result.get("error_message") or "Live benchmark execution failed"
                 self._send_json(result)
             except Exception as exc:
-                self._send_json({"error": str(exc)}, status=500)
+                self._send_json({
+                    "error": str(exc),
+                    "error_message": str(exc),
+                    "status": "ERROR",
+                    "front_facings_count": 0,
+                    "rows": [],
+                }, status=200)
             return
 
         self.send_error(404, "Unknown API endpoint")

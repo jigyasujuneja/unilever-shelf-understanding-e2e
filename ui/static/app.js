@@ -459,7 +459,13 @@ async function loadShelfImage(uri = "/shelf-image.png") {
       SHELF_IMAGE_OBJ = img;
       resolve(img);
     };
-    img.onerror = () => resolve(SHELF_IMAGE_OBJ);
+    img.onerror = () => {
+      if (key !== "/shelf-image.png") {
+        loadShelfImage("/shelf-image.png").then(resolve);
+      } else {
+        resolve(SHELF_IMAGE_OBJ);
+      }
+    };
     img.src = fetchUrl;
   });
 }
@@ -638,7 +644,7 @@ function renderOverviewTab() {
     const filtered = summary.filter((r) => {
       if (pVal !== "ALL" && r.separation_approach !== pVal) return false;
       if (mVal !== "ALL" && r.model_name !== mVal) return false;
-      if (iVal !== "ALL" && r.shelf_image_uri && r.shelf_image_uri !== iVal) return false;
+      if (iVal !== "ALL" && r.shelf_image_uri && r.shelf_image_uri !== iVal && r.shelf_image_uri.split("/").pop() !== iVal.split("/").pop()) return false;
       return true;
     });
     tbody.innerHTML = filtered.map((r) => {
@@ -686,6 +692,7 @@ window.openInLiveStudio = function (approachId, modelName) {
   CONTAINER_STATE["pipeline-container-live"].approachId = approachId;
   CONTAINER_STATE["pipeline-container-live"].model = modelName;
   CONTAINER_STATE["pipeline-container-live"].selectedIdx = 0;
+  CONTAINER_STATE["pipeline-container-live"].livePayload = null;
   switchToTab("tab-run-live");
 };
 
@@ -706,7 +713,8 @@ function getPipelineRunData(approachId, modelName, livePayload, imageUri = "") {
   let depthDemo = {};
   let isLiveRun = false;
 
-  const matchImg = (rec) => !imageUri || !rec.shelf_image_uri || rec.shelf_image_uri === imageUri;
+  const normImg = (u) => (u || "").split("/").pop();
+  const matchImg = (rec) => !imageUri || !rec.shelf_image_uri || rec.shelf_image_uri === imageUri || normImg(rec.shelf_image_uri) === normImg(imageUri);
 
   if (livePayload && livePayload.separation_approach === approachId && livePayload.model_name === modelName) {
     isLiveRun = true;
@@ -780,6 +788,27 @@ function renderUseCasePipeline(containerId) {
   const pathMeta = USE_CASE_PATHS[approachId];
   const container = document.getElementById(containerId);
   if (!container || !pathMeta) return;
+
+  // On the Live API tab, display a clean empty section until the user actually runs it live
+  if (containerId === "pipeline-container-live" && !state.livePayload) {
+    container.innerHTML = `
+      <div class="card" style="text-align:center; padding:52px 24px; background:#f8fafc; border:2px dashed #cbd5e1; border-radius:12px; margin-top:14px;">
+        <div style="font-size:42px; margin-bottom:12px;">⚡</div>
+        <h3 style="font-size:20px; font-weight:700; color:#1e293b; margin-bottom:8px;">
+          Live Pipeline Awaiting Execution
+        </h3>
+        <p class="muted" style="max-width:620px; margin:0 auto 20px auto; font-size:14px; line-height:1.6;">
+          Selected Approach: <strong>${esc(pathMeta.title)}</strong><br/>
+          Click <strong>&ldquo;&#9654; Execute Selected Approach &amp; Trace&rdquo;</strong> above to execute the pipeline live. Real-time front-facing bounding boxes on <code>shelf-image.png</code>, 7-dimension taxonomy attributes, PIL crops, and live latency trace will render here once executed.
+        </p>
+        <div style="display:inline-flex; align-items:center; gap:8px; font-size:12.5px; background:#e2e8f0; padding:6px 16px; border-radius:9999px; color:#475569; font-weight:600;">
+          <span style="background:#94a3b8; width:8px; height:8px; display:inline-block; border-radius:50%;"></span>
+          Awaiting Live Execution &bull; Clean Workspace (No Pre-Ran Data Shown)
+        </div>
+      </div>
+    `;
+    return;
+  }
 
   const availImages = DASHBOARD_DATA.available_images || (DASHBOARD_DATA.project_info && DASHBOARD_DATA.project_info.available_images) || ["gs://unilever-shelf-understanding-shelf-images/shelf-image.png"];
   const activeImgUri = state.imageUri || availImages[0] || "";
@@ -1578,6 +1607,16 @@ function initLiveStudioTab() {
     CONTAINER_STATE["pipeline-container-live"].approachId = appId;
     CONTAINER_STATE["pipeline-container-live"].model = modName;
     CONTAINER_STATE["pipeline-container-live"].selectedIdx = 0;
+    CONTAINER_STATE["pipeline-container-live"].livePayload = null;
+    document.getElementById("live-error-card")?.remove();
+    const statusPill = document.getElementById("live-status-pill");
+    if (statusPill) {
+      statusPill.style.background = "";
+      statusPill.style.color = "";
+      statusPill.style.borderColor = "";
+      statusPill.className = "status-pill status-idle";
+      statusPill.textContent = "READY FOR LIVE EXECUTION";
+    }
     renderLiveProgressStepper(appId, -1, true);
     renderUseCasePipeline("pipeline-container-live");
   };
@@ -1648,10 +1687,43 @@ function initLiveStudioTab() {
       const liveResult = await response.json();
       clearInterval(timerInterval);
 
-      if (liveResult.error) {
+      if (liveResult.error || liveResult.status === "ERROR") {
+        const errMsg = liveResult.error || liveResult.error_message || "Execution failed with status ERROR";
         statusPill.className = "status-pill status-idle";
-        statusPill.textContent = `ERROR: ${liveResult.error}`;
+        statusPill.style.background = "#fee2e2";
+        statusPill.style.color = "#991b1b";
+        statusPill.style.borderColor = "#f87171";
+        statusPill.textContent = `FAILED: ${errMsg}`;
+
+        renderLiveProgressStepper(appId, -1, false);
+
+        const container = document.getElementById("pipeline-container-live");
+        if (container) {
+          const authHint = (errMsg.includes("Reauthentication") || errMsg.includes("auth") || errMsg.includes("403"))
+            ? `<div style="margin-top:10px; padding:10px; background:#fff; border-radius:6px; font-size:12px; color:#374151; border:1px solid #fca5a5;">
+                <strong>How to resolve:</strong><br/>
+                &bull; In your terminal, authenticate with GCP: <code>gcloud auth application-default login</code><br/>
+                &bull; Or set your Gemini API key in your environment: <code>export GEMINI_API_KEY="your-api-key"</code><br/>
+                &bull; Or switch <strong>Execution Environment</strong> above to <code>Offline Unit-Test Stub</code> to run without GCP credentials.
+               </div>`
+            : "";
+          document.getElementById("live-error-card")?.remove();
+          container.insertAdjacentHTML("afterbegin", `
+            <div class="card" style="border-left: 4px solid #ef4444; background: #fef2f2; margin-bottom: 20px;" id="live-error-card">
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <h3 style="color:#991b1b; margin:0;">&#9888;&#65039; Execution Failed (${esc(envLabel)})</h3>
+                <button onclick="document.getElementById('live-error-card')?.remove()" style="background:none; border:none; font-size:18px; cursor:pointer; color:#991b1b;">&times;</button>
+              </div>
+              <p style="color:#b91c1c; margin:8px 0 0 0; font-family:monospace; font-size:12.5px;">${esc(errMsg)}</p>
+              ${authHint}
+            </div>
+          `);
+        }
       } else {
+        statusPill.style.background = "";
+        statusPill.style.color = "";
+        statusPill.style.borderColor = "";
+        document.getElementById("live-error-card")?.remove();
         const modeTag = `${envLabel} COMPLETE`;
         const f1 = reportedNumber(liveResult.accuracy?.detection_f1);
         const gtTag = connectGt

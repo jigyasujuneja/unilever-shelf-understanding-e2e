@@ -102,12 +102,25 @@ class BenchmarkRunner:
 
         spec = self._model_specs.get(model_name)
         if spec is None:
+            for s in self._model_specs.values():
+                if s.model_id == model_name:
+                    spec = s
+                    break
+        if spec is None:
             lower = model_name.lower()
             if model_name.startswith("projects/") and "/endpoints/" in model_name:
                 spec = UniversalModelSpec(
                     model_id=model_name,
                     provider_family="vertex_tuned_endpoint",
                     endpoint_uri=model_name,
+                )
+            elif "gemma-4" in lower or "gemma_4" in lower:
+                spec = UniversalModelSpec(
+                    model_id="google/gemma-4-26b-a4b-it-maas",
+                    display_name="gemma-4-26b-a4b-it",
+                    provider_family="vertex_gemma_maas",
+                    location="global",
+                    endpoint_uri=f"https://aiplatform.googleapis.com/v1/projects/{self.config.gcp.project_id}/locations/global/endpoints/openapi/chat/completions",
                 )
             elif "gemma" in lower:
                 spec = UniversalModelSpec(

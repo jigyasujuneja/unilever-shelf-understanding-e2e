@@ -618,7 +618,7 @@ class FineTuningConfig(BaseModel):
 class ModelEndpointYamlConfig(BaseModel):
     """YAML-configurable routing for GEAP, Gemma, or Fine-Tuned Vertex AI Endpoints."""
 
-    provider_family: str = "vertex_gemini"  # "vertex_gemini", "vertex_geap", "vertex_gemma", "vertex_tuned_endpoint"
+    provider_family: str = "vertex_gemini"  # "vertex_gemini", "vertex_geap", "vertex_gemma", "vertex_gemma_maas", "vertex_tuned_endpoint"
     model_id: Optional[str] = None
     endpoint_uri: Optional[str] = None
     api_version: Optional[str] = None
@@ -682,6 +682,8 @@ class BenchmarkConfig(BaseModel):
             "gemini-3.7-flash": ModelPricing(input=0.25, thinking=0.25, output=2.00),
             "gemini-3.5-flash-lite": ModelPricing(input=0.10, thinking=0.10, output=0.40),
             "gemma-3-27b-it": ModelPricing(input=0.08, thinking=0.00, output=0.24),
+            "gemma-4-26b-a4b-it": ModelPricing(input=0.10, thinking=0.10, output=0.40),
+            "google/gemma-4-26b-a4b-it-maas": ModelPricing(input=0.10, thinking=0.10, output=0.40),
             "default": ModelPricing(input=0.30, thinking=0.30, output=2.50),
         }
     )

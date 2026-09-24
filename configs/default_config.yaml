@@ -25,8 +25,13 @@ models:
   - "gemini-3.7-flash"
   - "gemini-3.5-flash-lite"
 
-# Optional per-model endpoint & provider routing (for GEAP v1beta1, Gemma Model Garden, or Fine-Tuned Endpoints)
+# Optional per-model endpoint & provider routing (for GEAP v1beta1, Gemma Model Garden / MaaS, or Fine-Tuned Endpoints)
 model_endpoints:
+  gemma-4-26b-a4b-it:
+    provider_family: "vertex_gemma_maas"
+    model_id: "google/gemma-4-26b-a4b-it-maas"
+    location: "global"
+    endpoint_uri: "https://aiplatform.googleapis.com/v1/projects/unilever-shelf-understanding/locations/global/endpoints/openapi/chat/completions"
   geap-gemini-preview-example:
     provider_family: "vertex_geap"
     model_id: "gemini-3-flash-preview"
@@ -226,6 +231,14 @@ pricing_per_million_tokens:
     input: 0.08
     thinking: 0.00
     output: 0.24
+  gemma-4-26b-a4b-it:
+    input: 0.10
+    thinking: 0.10
+    output: 0.40
+  google/gemma-4-26b-a4b-it-maas:
+    input: 0.10
+    thinking: 0.10
+    output: 0.40
   default:
     input: 0.30
     thinking: 0.30

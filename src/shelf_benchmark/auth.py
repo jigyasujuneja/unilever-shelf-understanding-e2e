@@ -44,8 +44,9 @@ def get_gcp_credentials(project_id: str = "unilever-shelf-understanding") -> goo
     try:
         token = subprocess.check_output(
             ["gcloud", "auth", "print-access-token"],
+            stdin=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=10,
+            timeout=5,
         ).decode().strip()
         if token:
             return credentials.Credentials(token=token, quota_project_id=project_id)
@@ -63,6 +64,9 @@ def create_genai_client(
 ) -> genai.Client:
     """Create a Vertex AI google-genai Client."""
     ensure_gcp_env()
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if api_key:
+        return genai.Client(api_key=api_key)
     active_creds = creds or get_gcp_credentials(project_id)
     return genai.Client(
         vertexai=True,

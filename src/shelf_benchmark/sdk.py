@@ -48,6 +48,7 @@ ModelProviderFamily = Literal[
     "vertex_gemini",
     "vertex_geap",
     "vertex_gemma",
+    "vertex_gemma_maas",
     "vertex_tuned_endpoint",
     "custom_callable",
 ]
@@ -212,12 +213,159 @@ class UniversalGenAIClientAdapter:
                 config=gemma_cfg,
             )
 
-        # 3. Standard Vertex AI Gemini, GEAP (v1beta1/v1alpha), or Vertex AI Fine-Tuned Endpoint (`projects/.../endpoints/...`)
+        # 3. Gemma 4 MaaS or OpenAPI chat completions endpoint
+        if self.spec.provider_family == "vertex_gemma_maas" or (
+            self.spec.endpoint_uri and "/endpoints/openapi/chat/completions" in self.spec.endpoint_uri
+        ):
+            return self._invoke_openapi_chat_completions(target_model, contents, config)
+
+        # 4. Standard Vertex AI Gemini, GEAP (v1beta1/v1alpha), or Vertex AI Fine-Tuned Endpoint (`projects/.../endpoints/...`)
         assert self._underlying_client is not None
         return self._underlying_client.models.generate_content(
             model=target_model,
             contents=contents,
             config=config,
+        )
+
+    def _invoke_openapi_chat_completions(
+        self,
+        model: str,
+        contents: Any,
+        config: Optional[types.GenerateContentConfig] = None,
+    ) -> _NormalizedModelResponse:
+        import base64
+        import urllib.request
+        from shelf_benchmark.auth import get_gcp_credentials
+
+        token = None
+        try:
+            creds = get_gcp_credentials(self.project_id)
+            token = getattr(creds, "token", None)
+        except Exception:
+            pass
+        if not token:
+            try:
+                import subprocess
+
+                token = (
+                    subprocess.check_output(
+                        ["gcloud", "auth", "print-access-token"],
+                        stdin=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                    )
+                    .decode()
+                    .strip()
+                )
+            except Exception:
+                pass
+
+        if not token:
+            raise PermissionError(
+                "Gemma 4 MaaS API requires GCP authentication token. Run `gcloud auth application-default login`."
+            )
+
+        endpoint_url = self.spec.endpoint_uri or (
+            f"https://aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.location}/endpoints/openapi/chat/completions"
+        )
+
+        message_content: List[Dict[str, Any]] = []
+        for item in (contents if isinstance(contents, list) else [contents]):
+            if isinstance(item, str):
+                message_content.append({"type": "text", "text": item})
+            elif hasattr(item, "inline_data") and item.inline_data:
+                mime = getattr(item.inline_data, "mime_type", "image/png")
+                raw_b = getattr(item.inline_data, "data", b"")
+                b64_str = (
+                    base64.b64encode(raw_b).decode("ascii")
+                    if isinstance(raw_b, bytes)
+                    else str(raw_b)
+                )
+                message_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64_str}"},
+                    }
+                )
+            elif hasattr(item, "file_data") and item.file_data:
+                file_uri = getattr(item.file_data, "file_uri", "")
+                if file_uri:
+                    message_content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": file_uri},
+                        }
+                    )
+            elif hasattr(item, "save"):  # PIL Image
+                import io
+
+                buf = io.BytesIO()
+                item.save(buf, format="PNG")
+                b64_str = base64.b64encode(buf.getvalue()).decode("ascii")
+                message_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{b64_str}"},
+                    }
+                )
+
+        schema = getattr(config, "response_schema", None)
+        if schema is not None and hasattr(schema, "model_json_schema"):
+            schema_json = json.dumps(schema.model_json_schema())
+            message_content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        "\n\nIMPORTANT: Return ONLY valid JSON matching this schema:\n"
+                        + schema_json
+                    ),
+                }
+            )
+
+        req_payload = {
+            "model": self.spec.model_id or model or "google/gemma-4-26b-a4b-it-maas",
+            "stream": False,
+            "max_tokens": 128000,
+            "messages": [{"role": "user", "content": message_content}],
+            "chat_template_kwargs": {"enable_thinking": True},
+        }
+
+        req = urllib.request.Request(
+            endpoint_url,
+            data=json.dumps(req_payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            resp_data = json.loads(resp.read().decode("utf-8"))
+
+        content_text = ""
+        choices = resp_data.get("choices", [])
+        if choices:
+            content_text = choices[0].get("message", {}).get("content", "")
+
+        if "```json" in content_text:
+            content_text = content_text.split("```json", 1)[1].split("```", 1)[0].strip()
+        elif "```" in content_text:
+            content_text = content_text.split("```", 1)[1].split("```", 1)[0].strip()
+
+        usage = resp_data.get("usage", {})
+        input_tokens = int(usage.get("prompt_tokens", 0) or 0)
+        output_tokens = int(usage.get("completion_tokens", 0) or 0)
+        thinking_tokens = int(
+            usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0) or 0
+        )
+
+        return _NormalizedModelResponse(
+            text=content_text,
+            input_tokens=input_tokens,
+            thinking_tokens=thinking_tokens,
+            output_tokens=output_tokens,
+            usage_reported=True,
         )
 
 
