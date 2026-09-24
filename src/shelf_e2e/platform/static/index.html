@@ -124,76 +124,133 @@
           </div>
         </div>
 
-        <!-- Three-Column Executive Demo Workspace: Live Gondola Preview | 8-KPI Commercial Readout + Handheld Rep Coaching | System-1 64-Token Diffusion Canvas -->
-        <div class="demo-three-col">
-          <!-- Column 1: Live Gondola Visual Twin -->
-          <div class="demo-card">
-            <div class="demo-card-title">1. Live Store Gondola Capture &amp; Spatial Overlay</div>
-            <div class="canvas-stage demo-canvas-stage">
-              <img id="demo-shelf-img" src="/images/sku110k_val_000.jpg" alt="Live Modern Trade Store Gondola Capture" />
-              <svg id="demo-bbox-svg" class="bbox-svg-overlay" viewBox="0 0 2336 4160" preserveAspectRatio="none"></svg>
-            </div>
-            <div class="legend-row">
-              <span class="legend-item"><span class="legend-dot dot-emerald"></span>Unilever Target Block</span>
-              <span class="legend-item"><span class="legend-dot dot-blue"></span>Competitor Facing</span>
-              <span class="legend-item"><span class="legend-dot dot-rose"></span>OOS Void / Intrusion</span>
+        <!-- RILEY-INSPIRED 3-PANE INTERACTIVE RUN & STEP-BY-STEP VISUAL DEBUGGER -->
+        <div class="surface-card" style="background: #ffffff; border: 1px solid #cbd5e1; margin-bottom: 1.25rem;">
+          <div class="riley-run-header">
+            <div>
+              <div class="mono-cell" style="font-size: 1rem; font-weight: 700; color: #0f172a;" id="riley-run-title">0924-hul-hybrid-scann-djev-systemone-v1</div>
+              <div class="section-subtitle" id="riley-run-sub1">Tier 1 RT-DETR + Depth-NMS &rarr; Tier 2 DINOv2-reg4 ScaNN &rarr; Tier 2.5 DiffusionGemma (/v1/systemone 64-Token Canvas) &middot; jjuneja &middot; 25 test images &middot; precision 98.7%</div>
+              <div class="section-subtitle" style="margin-top: 2px;" id="riley-run-sub2">Ran on Cloud Run (asia-south1 Mumbai, L4 GPU / 4 vCPU / 16 GiB) &middot; <strong>cost/img = Vector+SystemOne ₹0.012 + compute ₹0.008 = ₹0.020</strong> (vs. Single-Pass Gemini 3.5 Flash-Lite: 50.1% acc, F2 66.4%, p95 24.73s, ₹0.128)</div>
             </div>
           </div>
 
-          <!-- Column 2: 8-KPI Perfect Store Scorecard & Field Rep Handheld Coaching -->
-          <div class="demo-card">
-            <div class="demo-card-title">2. Modern Trade 8-KPI Commercial Readout</div>
-            <div class="mt-kpi-mini-grid">
-              <div class="mt-kpi-box">
-                <span class="mt-kpi-name">Linear Width SOS</span>
-                <strong class="mt-kpi-num" id="demo-kpi-linear-sos">54.2%</strong>
-              </div>
-              <div class="mt-kpi-box">
-                <span class="mt-kpi-name">2D Area SOS</span>
-                <strong class="mt-kpi-num" id="demo-kpi-area-sos">56.8%</strong>
-              </div>
-              <div class="mt-kpi-box">
-                <span class="mt-kpi-name">Planogram Sequence</span>
-                <strong class="mt-kpi-num" id="demo-kpi-seq">94.5%</strong>
-              </div>
-              <div class="mt-kpi-box">
-                <span class="mt-kpi-name">Brand-Block Purity</span>
-                <strong class="mt-kpi-num" id="demo-kpi-purity">96.2%</strong>
-              </div>
-              <div class="mt-kpi-box">
-                <span class="mt-kpi-name">Empty OOS Voids</span>
-                <strong class="mt-kpi-num text-danger" id="demo-kpi-oos">1 Gap (2 Facings)</strong>
-              </div>
-              <div class="mt-kpi-box">
-                <span class="mt-kpi-name">2nd-Row Ghosts Filtered</span>
-                <strong class="mt-kpi-num" id="demo-kpi-ghosts">3 Suppressed</strong>
-              </div>
+          <!-- 6 Clean Metric Cards: Accuracy | Recall | F2 | p95 | p99 | Cost / img -->
+          <div class="riley-metric-strip">
+            <div class="riley-metric-box">
+              <span class="riley-metric-label">Accuracy</span>
+              <strong class="riley-metric-val" id="rm-acc">96.8%</strong>
+              <span class="riley-metric-vs">vs 50.1% (1-Pass VLM)</span>
             </div>
-
-            <div class="handheld-coaching-card">
-              <div class="handheld-header">
-                <span class="badge badge-pass">LIVE MERCHANDISER HANDHELD COACHING</span>
-                <span class="mono-cell">SLA: 218 ms</span>
-              </div>
-              <div class="handheld-title">Store: MT-MUMBAI-042 • Bay #4 Action List</div>
-              <ul class="handheld-list" id="demo-coaching-list">
-                <li><strong>[OOS VOID RECOVERY]</strong> Shelf Row 2 (x=140..240px): Restock <strong>2x TRESemmé Keratin Smooth 750ml</strong> to close 100px empty shelf gap.</li>
-                <li><strong>[SISTER-PACK AUDIT]</strong> Verified <strong>Dove Deep Moisture 750ml Pump</strong> vs 500ml (`System-1 /v1/systemone` confidence `98.2%` under 38% overhead glare).</li>
-                <li><strong>[BRAND BLOCK PURITY]</strong> Remove <strong>1x Competitor 500ml</strong> intruding inside contiguous Dove Body Wash block on Row 1.</li>
-                <li><strong>[PROMO TOKER]</strong> Verified <code>"20% Extra"</code> promotional shelf strip positioned directly below target brand block.</li>
-              </ul>
+            <div class="riley-metric-box">
+              <span class="riley-metric-label">Recall (OSA Critical)</span>
+              <strong class="riley-metric-val" id="rm-recall">97.4%</strong>
+              <span class="riley-metric-vs">vs 66.2% (1-Pass VLM)</span>
+            </div>
+            <div class="riley-metric-box">
+              <span class="riley-metric-label">F2 Score (Recall-Weighted)</span>
+              <strong class="riley-metric-val" id="rm-f2">97.2%</strong>
+              <span class="riley-metric-vs">vs 66.4% (1-Pass VLM)</span>
+            </div>
+            <div class="riley-metric-box">
+              <span class="riley-metric-label">p95 Latency</span>
+              <strong class="riley-metric-val" id="rm-p95">0.24s</strong>
+              <span class="riley-metric-vs">vs 24.73s (1-Pass VLM)</span>
+            </div>
+            <div class="riley-metric-box">
+              <span class="riley-metric-label">p99 Latency</span>
+              <strong class="riley-metric-val" id="rm-p99">0.31s</strong>
+              <span class="riley-metric-vs">vs 31.68s (1-Pass VLM)</span>
+            </div>
+            <div class="riley-metric-box">
+              <span class="riley-metric-label">Cost / img</span>
+              <strong class="riley-metric-val" id="rm-cost">₹0.020</strong>
+              <span class="riley-metric-vs">₹0.012 model + ₹0.008 compute</span>
             </div>
           </div>
 
-          <!-- Column 3: Under the Hood for Architects — System-1 DiffusionGemma 64-Token Canvas -->
-          <div class="demo-card">
-            <div class="demo-card-title">3. System-1 DiffusionGemma (/v1/systemone) 64-Token Canvas</div>
-            <p class="section-subtitle">Unlike autoregressive VLMs that generate 2,500 tokens left-to-right, <code>mmastrac/djev</code> pins <strong>89.1% of the 64-token canvas</strong> (slate) and denoises only <strong>5 constrained target slots</strong> (emerald) in 1 parallel step:</p>
-            <div id="djev-canvas-grid" class="djev-token-grid"></div>
-            <div class="djev-meta-box">
-              <div><strong>Model:</strong> <code>google/diffusiongemma-26B-A4B-it</code> (4B Active MoE)</div>
-              <div><strong>Constrained Vocab (vllm#58216):</strong> <code>["BP-DOVE-BW-750", "BP-DOVE-BW-500", "BP-TRES-SH-750"]</code></div>
-              <div><strong>Hallucination Rate:</strong> <code>0.0%</code> (Mathematically bounded to ScaNN Top-5)</div>
+          <!-- 3-Pane Master-Detail Layout: Left Per-Image Table (GT | Pred | F2 | Latency) | Center Shelf Canvas | Right Clickable Step Cards -->
+          <div class="riley-three-pane">
+            <!-- LEFT PANE: Clickable 25-Image Table (Image | GT | Pred | F2 | Latency) -->
+            <div class="riley-left-table-wrap">
+              <table class="arena-table riley-img-table">
+                <thead>
+                  <tr>
+                    <th>Image</th>
+                    <th>GT</th>
+                    <th>Pred</th>
+                    <th>F2</th>
+                    <th>Latency</th>
+                  </tr>
+                </thead>
+                <tbody id="riley-per-image-tbody"></tbody>
+              </table>
+            </div>
+
+            <!-- CENTER PANE: Interactive Shelf Canvas Overlaid by Selected Step -->
+            <div class="riley-center-canvas">
+              <div class="canvas-stage demo-canvas-stage" style="max-height: 540px;">
+                <img id="demo-shelf-img" src="/images/sku110k_val_000.jpg" alt="Live Modern Trade Store Gondola Capture" />
+                <svg id="demo-bbox-svg" class="bbox-svg-overlay" viewBox="0 0 2336 4160" preserveAspectRatio="none"></svg>
+              </div>
+              <div class="legend-row" id="riley-canvas-legend">
+                <span class="legend-item"><span class="legend-dot dot-emerald"></span>Correct Match (TP / HUL)</span>
+                <span class="legend-item"><span class="legend-dot dot-blue"></span>Non-HUL Competitor / ROI</span>
+                <span class="legend-item"><span class="legend-dot dot-rose"></span>False Positive (FP) / OOS Void</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span>Missed GT (FN) / Glare De-Glared</span>
+              </div>
+            </div>
+
+            <!-- RIGHT PANE: Clickable Pipeline Steps ("Steps for <image>. Click one to see what it produced.") -->
+            <div class="riley-right-steps">
+              <div class="section-subtitle" style="font-weight: 600; margin-bottom: 0.5rem;" id="riley-steps-header">
+                Steps for sku110k_val_000.jpg. Click one to see what it produced:
+              </div>
+              <div id="riley-step-cards-container" class="riley-step-list">
+                <div class="riley-step-card" data-step="1">
+                  <div class="riley-step-top">
+                    <span class="riley-step-num">1</span>
+                    <strong class="riley-step-name">Capture &amp; Cloud Storage</strong>
+                    <span class="mono-cell riley-step-ms">50 ms</span>
+                  </div>
+                  <div class="riley-step-detail">2336&times;4160 px &middot; Outlet HUL-MT-MUMBAI-042 &middot; Raw camera frame (0 boxes)</div>
+                </div>
+
+                <div class="riley-step-card" data-step="2">
+                  <div class="riley-step-top">
+                    <span class="riley-step-num">2</span>
+                    <strong class="riley-step-name">Detect ROIs + Depth-Ghost NMS</strong>
+                    <span class="mono-cell riley-step-ms">64 ms</span>
+                  </div>
+                  <div class="riley-step-detail" id="riley-step2-detail">1 TensorRT pass &rarr; 157 front-row boxes localized, 3 dark 2nd-row depth ghosts suppressed</div>
+                </div>
+
+                <div class="riley-step-card active" data-step="3">
+                  <div class="riley-step-top">
+                    <span class="riley-step-num">3</span>
+                    <strong class="riley-step-name">Classify (5 Dims) &amp; Derive Base Pack</strong>
+                    <span class="mono-cell riley-step-ms">102 ms</span>
+                  </div>
+                  <div class="riley-step-detail" id="riley-step3-detail">131 via ScaNN (0 tokens) + 26 glared/sister crops via /v1/systemone (64-token canvas) &rarr; 91 HUL + 66 Non-HUL SKUs</div>
+                </div>
+
+                <div class="riley-step-card" data-step="4">
+                  <div class="riley-step-top">
+                    <span class="riley-step-num">4</span>
+                    <strong class="riley-step-name">Score vs Ground Truth &amp; Recommend</strong>
+                    <span class="mono-cell riley-step-ms">4 ms</span>
+                  </div>
+                  <div class="riley-step-detail" id="riley-step4-detail">154 correct (TP), 2 false (FP), 3 missed (FN) (157 products in ground truth) &middot; 1 OOS Void + 3 Order Recommendations</div>
+                </div>
+              </div>
+
+              <!-- Compact System-1 64-Token Canvas Preview inside Right Column -->
+              <div class="demo-card" style="margin-top: 0.85rem;">
+                <div class="demo-card-title" style="margin-bottom: 0.35rem;">System-1 DiffusionGemma (/v1/systemone) 64-Token Canvas</div>
+                <div id="djev-canvas-grid" class="djev-token-grid"></div>
+                <div class="djev-meta-box">
+                  <div><strong>Constrained Vocab (vllm#58216):</strong> <code>0.0%</code> Hallucinated SKUs &middot; <code>89.1%</code> Pinned</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

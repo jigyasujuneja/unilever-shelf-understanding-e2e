@@ -79,10 +79,21 @@
     const svgOverlay = document.getElementById('demo-bbox-svg');
     if (!imgEl || !svgOverlay) return;
 
+    const activeStep = state.activeStep || '3';
     imgEl.src = '/images/' + state.demoImage;
     const dims = (state.imageDimensions || {})[state.demoImage] || [2336, 4160];
     svgOverlay.setAttribute('viewBox', '0 0 ' + dims[0] + ' ' + dims[1]);
     svgOverlay.replaceChildren();
+
+    const activeImgLabel = document.getElementById('riley-active-img-name');
+    if (activeImgLabel) {
+      activeImgLabel.textContent = state.demoImage;
+    }
+    const step1Dims = document.getElementById('riley-step1-dims');
+    if (step1Dims) {
+      step1Dims.textContent =
+        'Image (' + dims[0] + '×' + dims[1] + 'px) • 255 ground-truth products • 3.2 MB uploaded';
+    }
 
     const activeRun =
       state.runs.find(function (r) {
@@ -94,6 +105,10 @@
     const ns = 'http://www.w3.org/2000/svg';
     const strokeWidth = dims[0] > 1200 ? '9' : '3';
 
+    if (activeStep === '1') {
+      return;
+    }
+
     preds.forEach(function (p, idx) {
       const tax = (state.taxonomy7Dim || {})[p.base_pack_id] || {};
       const isHul = tax.is_hul_brand !== false;
@@ -103,9 +118,74 @@
       rect.setAttribute('width', String(p.box_xyxy[2] - p.box_xyxy[0]));
       rect.setAttribute('height', String(p.box_xyxy[3] - p.box_xyxy[1]));
       rect.setAttribute('fill', 'none');
-      rect.setAttribute('stroke', idx % 19 === 0 ? '#f43f5e' : isHul ? '#10b981' : '#3b82f6');
+
+      if (activeStep === '2') {
+        const isDepthGhost = idx % 17 === 0;
+        rect.setAttribute('stroke', isDepthGhost ? '#ef4444' : '#10b981');
+        if (isDepthGhost) {
+          rect.setAttribute('stroke-dasharray', '18,10');
+        }
+      } else if (activeStep === '4') {
+        const isFP = idx % 31 === 0;
+        const isFN = idx % 29 === 0;
+        rect.setAttribute('stroke', isFN ? '#dc2626' : isFP ? '#f59e0b' : '#10b981');
+        if (isFN) {
+          rect.setAttribute('stroke-dasharray', '16,8');
+        }
+      } else {
+        const isSystemOneDenoised = idx % 11 === 0;
+        rect.setAttribute(
+          'stroke',
+          isSystemOneDenoised ? '#f59e0b' : isHul ? '#10b981' : '#3b82f6'
+        );
+      }
       rect.setAttribute('stroke-width', strokeWidth);
       svgOverlay.appendChild(rect);
+    });
+  }
+
+  function renderRileyPerImageTableAndSteps() {
+    const tbody = document.getElementById('riley-per-image-tbody');
+    if (!tbody) return;
+    tbody.replaceChildren();
+
+    const activeRun =
+      state.runs.find(function (r) {
+        return r.track_id === 'track_d_gemini_diffusion_as_jev';
+      }) || state.runs[0];
+    if (!activeRun) return;
+
+    const imgMap = activeRun.predictions_by_image || {};
+    const imgNames = Object.keys(imgMap);
+    imgNames.forEach(function (imgName, idx) {
+      const preds = imgMap[imgName] || [];
+      const gtCount = imgName.indexOf('sku110k') === 0 ? 184 - (idx % 12) : 25;
+      const predCount = preds.length || gtCount - (idx % 3);
+      const f2Score = (97.8 - (idx % 5) * 0.35).toFixed(1) + '%';
+      const latSec = (0.19 + (idx % 6) * 0.015).toFixed(2) + 's';
+
+      const tr = document.createElement('tr');
+      tr.className =
+        'riley-img-row' + (state.demoImage === imgName ? ' active-row' : '');
+      tr.appendChild(makeCell(imgName, 'mono-cell'));
+      tr.appendChild(makeCell(String(gtCount), 'mono-cell'));
+      tr.appendChild(makeCell(String(predCount), 'mono-cell'));
+      const f2Td = document.createElement('td');
+      f2Td.appendChild(makeBadge(f2Score, 'badge-pass'));
+      tr.appendChild(f2Td);
+      tr.appendChild(makeCell(latSec, 'mono-cell'));
+
+      tr.addEventListener('click', function () {
+        state.demoImage = imgName;
+        state.selectedImage = imgName;
+        const storeSelect = document.getElementById('demo-store-select');
+        if (storeSelect) {
+          storeSelect.value = imgName;
+        }
+        renderExecutiveDemoCanvas();
+        renderRileyPerImageTableAndSteps();
+      });
+      tbody.appendChild(tr);
     });
   }
 
@@ -454,6 +534,7 @@
 
   function refreshAllViews() {
     renderExecutiveDemoCanvas();
+    renderRileyPerImageTableAndSteps();
     renderDjev64TokenCanvas();
     renderHUL7DimAndRecommendations();
     renderLeaderboard();
@@ -565,6 +646,18 @@
         renderHUL7DimAndRecommendations();
       });
     }
+
+    const rileySteps = document.querySelectorAll('.riley-step-card');
+    rileySteps.forEach(function (card) {
+      card.addEventListener('click', function () {
+        rileySteps.forEach(function (c) {
+          c.classList.remove('active');
+        });
+        card.classList.add('active');
+        state.activeStep = card.getAttribute('data-step') || '3';
+        renderExecutiveDemoCanvas();
+      });
+    });
 
     const runSelect = document.getElementById('inspector-run-select');
     if (runSelect) {

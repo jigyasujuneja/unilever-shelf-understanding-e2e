@@ -540,3 +540,118 @@ body {
   line-height: 1.5;
 }
 
+.riley-metric-strip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.riley-metric-card {
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.75rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.riley-val {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--unilever-navy);
+}
+
+.riley-lbl {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+.riley-sub {
+  font-size: 0.68rem;
+  color: #64748b;
+  margin-top: 0.2rem;
+}
+
+.riley-three-pane {
+  display: grid;
+  grid-template-columns: 310px 1fr 330px;
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.riley-left-pane,
+.riley-center-pane,
+.riley-right-pane {
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.riley-img-row {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.riley-img-row:hover {
+  background: #f1f5f9;
+}
+
+.riley-img-row.active-row {
+  background: #eff6ff;
+  font-weight: 700;
+}
+
+.riley-step-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.55rem;
+  cursor: pointer;
+  background: #f8fafc;
+  transition: all 0.14s ease;
+}
+
+.riley-step-card:hover {
+  border-color: var(--unilever-blue);
+  background: #f0f9ff;
+}
+
+.riley-step-card.active {
+  border: 2px solid var(--unilever-blue);
+  background: #eff6ff;
+  box-shadow: 0 2px 8px rgba(0, 87, 184, 0.12);
+}
+
+.riley-step-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.riley-step-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--unilever-navy);
+}
+
+.riley-step-time {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #059669;
+}
+
+.riley-step-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
