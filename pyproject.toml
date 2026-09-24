@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unilever-shelf-e2e-benchmark"
+version = "0.1.0"
+description = "End-to-End Retail Shelf Understanding Benchmark & Evaluation Harness (SPEC-001 & SPEC-002)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Jigyasu Juneja", email = "jjuneja@google.com" }
+]
+dependencies = [
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]

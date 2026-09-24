@@ -1,0 +1,102 @@
+{
+  "catalog_version": "rpc-unilever-v1",
+  "total_skus": 8,
+  "skus": [
+    {
+      "base_pack_id": "BP-DOVE-BW-750",
+      "brand": "Dove",
+      "category": "Skin Cleansing",
+      "subcategory": "Body Wash",
+      "variant": "Deep Moisture Pump",
+      "packaging_type": "bottle",
+      "pack_type": "Single",
+      "size": "750ml",
+      "expected_min_width_px": 75.0,
+      "is_hul": true
+    },
+    {
+      "base_pack_id": "BP-DOVE-BW-500",
+      "brand": "Dove",
+      "category": "Skin Cleansing",
+      "subcategory": "Body Wash",
+      "variant": "Deep Moisture",
+      "packaging_type": "bottle",
+      "pack_type": "Single",
+      "size": "500ml",
+      "expected_min_width_px": 65.0,
+      "is_hul": true
+    },
+    {
+      "base_pack_id": "BP-TRES-SH-750",
+      "brand": "TRESemme",
+      "category": "Hair Care",
+      "subcategory": "Shampoo",
+      "variant": "Keratin Smooth",
+      "packaging_type": "bottle",
+      "pack_type": "Single",
+      "size": "750ml",
+      "expected_min_width_px": 78.0,
+      "is_hul": true
+    },
+    {
+      "base_pack_id": "BP-LUX-FW-100",
+      "brand": "Lux",
+      "category": "Skin Cleansing",
+      "subcategory": "Face Wash",
+      "variant": "Botanicals Bright",
+      "packaging_type": "tube",
+      "pack_type": "Single",
+      "size": "100g",
+      "expected_min_width_px": 55.0,
+      "is_hul": true
+    },
+    {
+      "base_pack_id": "BP-PONDS-FW-100",
+      "brand": "Ponds",
+      "category": "Skin Cleansing",
+      "subcategory": "Face Wash",
+      "variant": "Bright Beauty",
+      "packaging_type": "tube",
+      "pack_type": "Single",
+      "size": "100g",
+      "expected_min_width_px": 55.0,
+      "is_hul": true
+    },
+    {
+      "base_pack_id": "BP-VASELINE-LOT-400",
+      "brand": "Vaseline",
+      "category": "Skin Care",
+      "subcategory": "Body Lotion",
+      "variant": "Intensive Care Cocoa",
+      "packaging_type": "bottle",
+      "pack_type": "Single",
+      "size": "400ml",
+      "expected_min_width_px": 70.0,
+      "is_hul": true
+    },
+    {
+      "base_pack_id": "BP-COMP-SH-650",
+      "brand": "CompetitorX",
+      "category": "Hair Care",
+      "subcategory": "Shampoo",
+      "variant": "Pro-V Repair",
+      "packaging_type": "bottle",
+      "pack_type": "Single",
+      "size": "650ml",
+      "expected_min_width_px": 72.0,
+      "is_hul": false
+    },
+    {
+      "base_pack_id": "BP-COMP-BW-500",
+      "brand": "CompetitorY",
+      "category": "Skin Cleansing",
+      "subcategory": "Body Wash",
+      "variant": "Fresh Aloe",
+      "packaging_type": "bottle",
+      "pack_type": "Single",
+      "size": "500ml",
+      "expected_min_width_px": 65.0,
+      "is_hul": false
+    }
+  ]
+}
