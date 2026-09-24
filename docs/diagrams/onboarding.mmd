@@ -1,0 +1,21 @@
+flowchart TD
+  classDef step fill:#e8f0fe,stroke:#1a73e8,color:#174ea6
+  classDef check fill:#e6f4ea,stroke:#188038,color:#0d652d
+  classDef opt fill:#fff,stroke:#9aa0a6,color:#5f6368,stroke-dasharray: 5 5
+
+  A["1. Set up<br/>git clone, then: make setup"]:::step
+  B["2. Authenticate<br/>gcloud auth application-default login"]:::step
+  C["3. Offline tests<br/>make test (no GCP needed)"]:::check
+  D["4. Explore the leaderboard<br/>make ui, open http://localhost:8080"]:::step
+  E["5. Add an approach<br/>src/approaches/my_approach.py<br/>@register class with detect(image, ctx)"]:::step
+  F["6. Iterate on val<br/>shelf-bench run -a my_approach<br/>-m gemini-3.5-flash-lite --split val --limit 5"]:::step
+  G{"Steps look right<br/>in the UI?"}:::check
+  H["7. Add an offline test<br/>copy test_run_single_pass_end_to_end, make test"]:::check
+  I["8. Benchmark on Cloud Run<br/>make cloud A=my_approach"]:::step
+  J["9. On the leaderboard<br/>results pulled into results/, commit them"]:::check
+  R["Optional: match specific products<br/>copy _detect_retrieve_template.py,<br/>pick embedder + DB + SQL in the approach"]:::opt
+
+  A --> B --> C --> D --> E --> F --> G
+  G -- "no: tweak prompt / pipeline" --> F
+  G -- yes --> H --> I --> J
+  E -.-> R -.-> F

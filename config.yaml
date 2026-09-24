@@ -1,0 +1,55 @@
+# shelf-bench configuration. This is the only config file.
+
+gcp:
+  project: unilever-shelf-understanding
+  location: global                 # Vertex AI Gemini endpoint
+  region: us-central1              # Cloud Run + Cloud Build + bucket region
+  data: gs://unilever-shelf-understanding-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
+  results: gs://unilever-shelf-understanding-shelf-images/results        # run outputs from Cloud Run
+
+# Cloud Run job that executes benchmark runs (shelf-bench cloud-run). One task per
+# approach x tier x model. Its compute is priced from the Billing Catalog API (Jobs CPU/Memory
+# SKUs for the region) and the task's real duration from the Cloud Run Admin API.
+cloud_run:
+  job: shelf-bench
+  cpu: 2
+  memory_gib: 4
+  parallelism: 2    # tasks at once (default: number of models) - concurrent tasks use different models
+  # Direct VPC egress, needed to reach a private-IP AlloyDB instance. Leave unset otherwise.
+  # network: default
+  # subnet: default
+
+# Defaults for `shelf-bench run` (all overridable on the command line).
+defaults:
+  split: test      # leaderboard split
+  limit: 50        # images per run (0 = entire split: 2,936 test images). Only runs with this
+                   # limit + seed on the test split, from Cloud Run, are ranked.
+  seed: 0          # same seed + limit => identical image set for every run
+  workers: 4       # images processed concurrently
+  tier: [standard] # Gemini PayGo tier(s) to run: standard and/or priority (-t on the CLI)
+
+# Models offered by `shelf-bench list`. Any Vertex Gemini model id works with -m.
+models:
+  - gemini-3.8-flash
+  - gemini-3.5-flash-lite
+
+# AlloyDB, for approaches that identify products by vector lookup (utils/alloydb.py has the
+# setup SQL and IAM). Approaches read this in setup(): AlloyDB(**config["alloydb"]).
+alloydb:
+  instance: projects/unilever-shelf-understanding/locations/us-central1/clusters/CLUSTER/instances/INSTANCE
+  database: postgres
+  ip_type: PRIVATE       # PRIVATE (needs cloud_run.network) | PUBLIC | PSC
+  # user: defaults to the IAM user of the current credentials
+
+# Prices are NOT configured here: every run fetches current list prices from GCP's Cloud
+# Billing Catalog API (Gemini SKUs per traffic type, Cloud Run, Cloud Storage) and GCP's own
+# USD->INR rate, and stores that price sheet in its summary. See src/utils/pricing.py.
+#
+# Promotions GCP pays back as billing credits are not in the catalog, so they are listed here.
+# Applied only to runs on or before `until`, and shown as a separate credit line.
+promotions:
+  - name: Gemini 3.x Flash introductory pricing (50% credit back on net spend)
+    models: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash]
+    credit_share: 0.5
+    until: 2026-12-31
+    source: https://cloud.google.com/vertex-ai/generative-ai/pricing
