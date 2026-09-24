@@ -351,8 +351,17 @@ class HULEndToEndShelfProcessor:
             ]
         )
 
+        hul_items = [x for x in catalog_slice if x.get("is_unilever")]
+        comp_items = [x for x in catalog_slice if not x.get("is_unilever")]
+        interleaved: List[Dict[str, Any]] = []
+        for idx_pair in range(max(len(hul_items), len(comp_items))):
+            if idx_pair < len(hul_items):
+                interleaved.append(hul_items[idx_pair])
+            if idx_pair < len(comp_items):
+                interleaved.append(comp_items[idx_pair])
+
         sample_rois: List[HULSevenDimSKU] = []
-        for idx, item in enumerate(catalog_slice[:24]):
+        for idx, item in enumerate(interleaved[:24]):
             x1 = 40.0 + (idx % 6) * 140.0
             y1 = 80.0 + (idx // 6) * 210.0
             sample_rois.append(
