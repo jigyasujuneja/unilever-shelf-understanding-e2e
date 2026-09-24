@@ -1,5 +1,571 @@
 [
   {
+    "run_id": "run-track_d_gemini-ce79ef",
+    "experiment_name": "unilever-mt-500k-daily-arena",
+    "track_id": "track_d_gemini_diffusion_as_jev",
+    "track_name": "Track D2: GeminiDiffusion-as-Jev (Latent De-Glare + Jev State Machine + Promo Verifier)",
+    "engineer_ldap": "jjuneja",
+    "timestamp_utc": "2026-09-24T14:43:36Z",
+    "hyperparameters": {
+      "concurrency_workers": 525,
+      "iou_threshold": 0.5,
+      "vector_top_k": 5,
+      "cost_ceiling_inr": 0.22,
+      "usd_to_inr_rate": 84.0,
+      "triggered_from": "ShelfBench Arena Web UI"
+    },
+    "public_metrics": {
+      "map_50": 1.0,
+      "map_50_95": 1.0,
+      "top1_acc": 1.0,
+      "top5_recall": 1.0,
+      "mrr": 1.0,
+      "f1_score": 1.0,
+      "hallucination_rate": 0.0,
+      "schema_adherence": 1.0,
+      "sos_pct": 88.09
+    },
+    "private_metrics": {
+      "map_50": 1.0,
+      "map_50_95": 1.0,
+      "top1_acc": 1.0,
+      "top5_recall": 1.0,
+      "mrr": 1.0,
+      "f1_score": 1.0,
+      "hallucination_rate": 0.0,
+      "schema_adherence": 1.0,
+      "sos_pct": 79.88
+    },
+    "latency_tiers_ms": {
+      "tier1_detection": 194.0,
+      "tier2_catalog_match": 168.0,
+      "tier3_compliance": 640.0,
+      "total_e2e": 1002.0,
+      "p95_525_workers_ms": 1002.0
+    },
+    "cost_breakdown": {
+      "cost_per_image_inr": 0.0126,
+      "cost_per_image_usd": 0.00015,
+      "daily_500k_cost_inr": 6300.0,
+      "private_dense_cost_inr": 0.013
+    },
+    "pareto_score": 100.0,
+    "medal_tier": "GOLD",
+    "meets_all_slas": true,
+    "predictions_by_image": {
+      "sku110k_val_001.png": [
+        {
+          "box_xyxy": [
+            40.0,
+            80.0,
+            120.0,
+            290.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-750",
+            "BP-DOVE-BW-500",
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            125.0,
+            80.0,
+            205.0,
+            290.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-750",
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100",
+            "BP-TRES-SH-750"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            215.0,
+            75.0,
+            295.0,
+            295.0
+          ],
+          "base_pack_id": "BP-TRES-SH-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-TRES-SH-750",
+            "BP-COMP-SH-650",
+            "BP-LUX-FW-100",
+            "BP-COMP-BW-500",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Hair Care"
+        },
+        {
+          "box_xyxy": [
+            310.0,
+            90.0,
+            385.0,
+            290.0
+          ],
+          "base_pack_id": "BP-COMP-SH-650",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-COMP-SH-650",
+            "BP-VASELINE-LOT-400",
+            "BP-TRES-SH-750",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100"
+          ],
+          "category": "Hair Care"
+        }
+      ],
+      "sku110k_val_002.png": [
+        {
+          "box_xyxy": [
+            35.0,
+            70.0,
+            115.0,
+            285.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-750",
+            "BP-DOVE-BW-500",
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            120.0,
+            70.0,
+            186.0,
+            285.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-500",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-500",
+            "BP-COMP-BW-500",
+            "BP-PONDS-FW-100",
+            "BP-LUX-FW-100",
+            "BP-VASELINE-LOT-400"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            195.0,
+            80.0,
+            251.0,
+            260.0
+          ],
+          "base_pack_id": "BP-LUX-FW-100",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-LUX-FW-100",
+            "BP-COMP-BW-500",
+            "BP-TRES-SH-750",
+            "BP-DOVE-BW-500",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            260.0,
+            75.0,
+            332.0,
+            285.0
+          ],
+          "base_pack_id": "BP-VASELINE-LOT-400",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-SH-650",
+            "BP-DOVE-BW-750",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100"
+          ],
+          "category": "Skin Care"
+        }
+      ],
+      "sku110k_val_003_dense147.png": [
+        {
+          "box_xyxy": [
+            20.0,
+            40.0,
+            100.0,
+            235.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-750",
+            "BP-DOVE-BW-500",
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            115.0,
+            40.0,
+            181.0,
+            235.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-500",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-500",
+            "BP-COMP-BW-500",
+            "BP-PONDS-FW-100",
+            "BP-LUX-FW-100",
+            "BP-VASELINE-LOT-400"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            210.0,
+            40.0,
+            288.0,
+            235.0
+          ],
+          "base_pack_id": "BP-TRES-SH-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-TRES-SH-750",
+            "BP-COMP-SH-650",
+            "BP-LUX-FW-100",
+            "BP-COMP-BW-500",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Hair Care"
+        },
+        {
+          "box_xyxy": [
+            305.0,
+            40.0,
+            361.0,
+            235.0
+          ],
+          "base_pack_id": "BP-LUX-FW-100",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-LUX-FW-100",
+            "BP-COMP-BW-500",
+            "BP-TRES-SH-750",
+            "BP-DOVE-BW-500",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            400.0,
+            40.0,
+            456.0,
+            235.0
+          ],
+          "base_pack_id": "BP-PONDS-FW-100",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-PONDS-FW-100",
+            "BP-DOVE-BW-500",
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-SH-650",
+            "BP-COMP-BW-500"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            20.0,
+            260.0,
+            92.0,
+            455.0
+          ],
+          "base_pack_id": "BP-VASELINE-LOT-400",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-SH-650",
+            "BP-DOVE-BW-750",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100"
+          ],
+          "category": "Skin Care"
+        },
+        {
+          "box_xyxy": [
+            115.0,
+            260.0,
+            187.0,
+            455.0
+          ],
+          "base_pack_id": "BP-COMP-SH-650",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-COMP-SH-650",
+            "BP-VASELINE-LOT-400",
+            "BP-TRES-SH-750",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100"
+          ],
+          "category": "Hair Care"
+        },
+        {
+          "box_xyxy": [
+            210.0,
+            260.0,
+            276.0,
+            455.0
+          ],
+          "base_pack_id": "BP-COMP-BW-500",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100",
+            "BP-DOVE-BW-500",
+            "BP-TRES-SH-750",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            305.0,
+            260.0,
+            385.0,
+            455.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-750",
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100",
+            "BP-TRES-SH-750"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            400.0,
+            260.0,
+            466.0,
+            455.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-500",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-500",
+            "BP-COMP-BW-500",
+            "BP-PONDS-FW-100",
+            "BP-LUX-FW-100",
+            "BP-VASELINE-LOT-400"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            20.0,
+            480.0,
+            98.0,
+            675.0
+          ],
+          "base_pack_id": "BP-TRES-SH-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-TRES-SH-750",
+            "BP-COMP-SH-650",
+            "BP-LUX-FW-100",
+            "BP-COMP-BW-500",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Hair Care"
+        },
+        {
+          "box_xyxy": [
+            115.0,
+            480.0,
+            171.0,
+            675.0
+          ],
+          "base_pack_id": "BP-LUX-FW-100",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-LUX-FW-100",
+            "BP-COMP-BW-500",
+            "BP-TRES-SH-750",
+            "BP-DOVE-BW-500",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            210.0,
+            480.0,
+            266.0,
+            675.0
+          ],
+          "base_pack_id": "BP-PONDS-FW-100",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-PONDS-FW-100",
+            "BP-DOVE-BW-500",
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-SH-650",
+            "BP-COMP-BW-500"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            305.0,
+            480.0,
+            377.0,
+            675.0
+          ],
+          "base_pack_id": "BP-VASELINE-LOT-400",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-SH-650",
+            "BP-DOVE-BW-750",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100"
+          ],
+          "category": "Skin Care"
+        },
+        {
+          "box_xyxy": [
+            400.0,
+            480.0,
+            472.0,
+            675.0
+          ],
+          "base_pack_id": "BP-COMP-SH-650",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-COMP-SH-650",
+            "BP-VASELINE-LOT-400",
+            "BP-TRES-SH-750",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100"
+          ],
+          "category": "Hair Care"
+        },
+        {
+          "box_xyxy": [
+            20.0,
+            700.0,
+            86.0,
+            895.0
+          ],
+          "base_pack_id": "BP-COMP-BW-500",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100",
+            "BP-DOVE-BW-500",
+            "BP-TRES-SH-750",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            115.0,
+            700.0,
+            195.0,
+            895.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-750",
+            "BP-VASELINE-LOT-400",
+            "BP-COMP-BW-500",
+            "BP-LUX-FW-100",
+            "BP-TRES-SH-750"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            210.0,
+            700.0,
+            276.0,
+            895.0
+          ],
+          "base_pack_id": "BP-DOVE-BW-500",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-DOVE-BW-500",
+            "BP-COMP-BW-500",
+            "BP-PONDS-FW-100",
+            "BP-LUX-FW-100",
+            "BP-VASELINE-LOT-400"
+          ],
+          "category": "Skin Cleansing"
+        },
+        {
+          "box_xyxy": [
+            305.0,
+            700.0,
+            383.0,
+            895.0
+          ],
+          "base_pack_id": "BP-TRES-SH-750",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-TRES-SH-750",
+            "BP-COMP-SH-650",
+            "BP-LUX-FW-100",
+            "BP-COMP-BW-500",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Hair Care"
+        },
+        {
+          "box_xyxy": [
+            400.0,
+            700.0,
+            456.0,
+            895.0
+          ],
+          "base_pack_id": "BP-LUX-FW-100",
+          "confidence": 0.99,
+          "candidates": [
+            "BP-LUX-FW-100",
+            "BP-COMP-BW-500",
+            "BP-TRES-SH-750",
+            "BP-DOVE-BW-500",
+            "BP-DOVE-BW-750"
+          ],
+          "category": "Skin Cleansing"
+        }
+      ]
+    }
+  },
+  {
     "run_id": "run-track_d_gemini-5c29a9",
     "experiment_name": "unilever-mt-500k-daily-arena",
     "track_id": "track_d_gemini_diffusion_as_jev",
