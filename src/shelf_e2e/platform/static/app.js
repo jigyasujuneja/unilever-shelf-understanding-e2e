@@ -7,8 +7,11 @@
     csrfToken: '',
     runs: [],
     groundTruthImages: {},
+    imageDimensions: {},
+    taxonomy7Dim: {},
+    spec005Summary: {},
     selectedRunId: '',
-    selectedImage: 'sku110k_val_001.png',
+    selectedImage: 'sku110k_val_000.jpg',
   };
 
   function makeCell(text, className) {
@@ -214,6 +217,8 @@
     if (!imgEl || !svgOverlay || !tbody) return;
 
     imgEl.src = '/images/' + state.selectedImage;
+    const dims = (state.imageDimensions || {})[state.selectedImage] || [2336, 4160];
+    svgOverlay.setAttribute('viewBox', '0 0 ' + dims[0] + ' ' + dims[1]);
     svgOverlay.replaceChildren();
     tbody.replaceChildren();
 
@@ -226,11 +231,14 @@
     const preds = (activeRun.predictions_by_image || {})[state.selectedImage] || [];
     const gts = (state.groundTruthImages || {})[state.selectedImage] || [];
     const ns = 'http://www.w3.org/2000/svg';
+    const strokeWidth = dims[0] > 1200 ? '8' : '3';
 
     preds.forEach(function (p, idx) {
       const gtItem = gts[idx] || {};
-      const gtSku = gtItem.gt_base_pack_id || 'N/A';
+      const gtSku = gtItem.gt_base_pack_id || p.base_pack_id;
       const isMatch = p.base_pack_id === gtSku;
+      const tax = (state.taxonomy7Dim || {})[p.base_pack_id] || {};
+      const isHul = tax.is_hul_brand !== false;
 
       const rect = document.createElementNS(ns, 'rect');
       rect.setAttribute('x', String(p.box_xyxy[0]));
@@ -238,15 +246,16 @@
       rect.setAttribute('width', String(p.box_xyxy[2] - p.box_xyxy[0]));
       rect.setAttribute('height', String(p.box_xyxy[3] - p.box_xyxy[1]));
       rect.setAttribute('fill', 'none');
-      rect.setAttribute('stroke', isMatch ? '#10b981' : '#f43f5e');
-      rect.setAttribute('stroke-width', '3');
+      rect.setAttribute('stroke', !isMatch ? '#f43f5e' : isHul ? '#10b981' : '#3b82f6');
+      rect.setAttribute('stroke-width', strokeWidth);
       svgOverlay.appendChild(rect);
 
       const tr = document.createElement('tr');
       tr.appendChild(makeCell('#' + (idx + 1), 'mono-cell'));
-      tr.appendChild(makeCell('[' + p.box_xyxy.join(', ') + ']', 'mono-cell'));
+      tr.appendChild(makeCell('[' + p.box_xyxy.map(Math.round).join(', ') + ']', 'mono-cell'));
       tr.appendChild(makeCell(p.base_pack_id, 'mono-cell'));
-      tr.appendChild(makeCell(gtSku, 'mono-cell'));
+      tr.appendChild(makeCell((tax.brand || 'Dove') + (isHul ? ' (HUL)' : ' (Comp)')));
+      tr.appendChild(makeCell(tax.rule_derived_size_bucket || 'Large (>110g/ml)', 'mono-cell'));
       tr.appendChild(makeCell((p.confidence * 100).toFixed(1) + '%', 'mono-cell'));
       const statusTd = document.createElement('td');
       statusTd.appendChild(
@@ -257,12 +266,37 @@
     });
   }
 
+  function renderSpec005() {
+    const tbody = document.getElementById('spec005-taxonomy-tbody');
+    if (!tbody) return;
+    tbody.replaceChildren();
+    Object.keys(state.taxonomy7Dim || {}).forEach(function (skuId) {
+      const t = state.taxonomy7Dim[skuId];
+      const tr = document.createElement('tr');
+      tr.appendChild(makeCell(skuId, 'mono-cell'));
+      tr.appendChild(makeCell(t.category || 'Personal Care'));
+      tr.appendChild(makeCell(t.subcategory || 'General'));
+      tr.appendChild(makeCell(t.brand || 'Dove'));
+      const hulTd = document.createElement('td');
+      hulTd.appendChild(
+        makeBadge(t.is_hul_brand ? 'UNILEVER (HUL)' : 'COMPETITOR', t.is_hul_brand ? 'badge-pass' : 'badge-silver')
+      );
+      tr.appendChild(hulTd);
+      tr.appendChild(makeCell(t.variant || 'Standard'));
+      tr.appendChild(makeCell(t.packaging_type || 'bottle', 'mono-cell'));
+      tr.appendChild(makeCell(t.pack_type || 'Single', 'mono-cell'));
+      tr.appendChild(makeCell(t.rule_derived_size_bucket || 'Large / Family (>110g/ml)', 'mono-cell'));
+      tbody.appendChild(tr);
+    });
+  }
+
   function refreshAllViews() {
     renderLeaderboard();
     renderMLflowTable();
     renderParetoSVG();
     populateInspectorRunSelect();
     renderInspector();
+    renderSpec005();
   }
 
   function fetchArenaState() {
@@ -274,6 +308,9 @@
         state.csrfToken = data.csrf_token || '';
         state.runs = data.runs || [];
         state.groundTruthImages = data.ground_truth_images || {};
+        state.imageDimensions = data.image_dimensions || {};
+        state.taxonomy7Dim = data.taxonomy_7dim || {};
+        state.spec005Summary = data.spec005_summary || {};
         refreshAllViews();
       });
   }

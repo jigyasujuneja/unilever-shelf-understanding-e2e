@@ -26,7 +26,8 @@
         <button type="button" class="tab-btn active" id="tab-btn-leaderboard" data-tab="panel-leaderboard">1. Kaggle Competition Leaderboard</button>
         <button type="button" class="tab-btn" id="tab-btn-mlflow" data-tab="panel-mlflow">2. MLflow Experiment &amp; Run Diff</button>
         <button type="button" class="tab-btn" id="tab-btn-pareto" data-tab="panel-pareto">3. Pareto Cost vs. Accuracy Plot</button>
-        <button type="button" class="tab-btn" id="tab-btn-inspector" data-tab="panel-inspector">4. SKU-110k Visual Shelf Inspector</button>
+        <button type="button" class="tab-btn" id="tab-btn-inspector" data-tab="panel-inspector">4. Real Shelf Visual Inspector (3,649 Boxes)</button>
+        <button type="button" class="tab-btn" id="tab-btn-spec005" data-tab="panel-spec005">5. SPEC-005: 7-Dim Taxonomy &amp; GSU FinOps</button>
       </nav>
 
       <div class="run-trigger-group">
@@ -49,8 +50,8 @@
     <section id="panel-leaderboard" class="tab-panel">
       <div class="surface-card">
         <div class="section-header">
-          <h2>Kaggle-Style Public vs. Private Holdout Split Leaderboard</h2>
-          <span class="section-subtitle">Public Split: sku110k_val_001 &amp; 002 (Glare + Standard) • Private Holdout: sku110k_val_003_dense147</span>
+          <h2>Kaggle-Style Public vs. Private Holdout Split Leaderboard (25 Real Open-Source Shelf Photos • 3,649 Boxes)</h2>
+          <span class="section-subtitle">Public Split: sku110k_val_000, 002 &amp; smart_retail_val_000 • Private Holdout: sku110k_val_001, 003 &amp; smart_retail_val_001</span>
         </div>
         <div class="table-wrapper">
           <table class="arena-table" id="leaderboard-table">
@@ -66,7 +67,7 @@
                 <th>Private Holdout Top-1</th>
                 <th>mAP@50:95</th>
                 <th>MRR</th>
-                <th>P95 (525w)</th>
+                <th>P95 (48w)</th>
                 <th>Cost (₹ / img)</th>
                 <th>SLA Gate</th>
               </tr>
@@ -121,22 +122,25 @@
     <section id="panel-inspector" class="tab-panel hidden">
       <div class="surface-card">
         <div class="section-header">
-          <h2>SKU-110k Interactive Bounding-Box &amp; RPC Candidate Inspector</h2>
+          <h2>Real Open-Source Shelf Bounding-Box &amp; Unilever 7-Dimension Taxonomy Inspector</h2>
           <div class="run-trigger-group">
             <label for="inspector-run-select" class="section-subtitle">Inspect Run:</label>
             <select id="inspector-run-select" class="select-input"></select>
-            <label for="inspector-image-select" class="section-subtitle">Dataset Image:</label>
+            <label for="inspector-image-select" class="section-subtitle">Real Shelf Photo:</label>
             <select id="inspector-image-select" class="select-input">
-              <option value="sku110k_val_001.png">sku110k_val_001.png (Public Glare Bay)</option>
-              <option value="sku110k_val_002.png">sku110k_val_002.png (Public Multi-Brand)</option>
-              <option value="sku110k_val_003_dense147.png">sku110k_val_003_dense147.png (Private Holdout)</option>
+              <option value="sku110k_val_000.jpg">sku110k_val_000.jpg (Real Dove/Simple/Pears/Radox Shelf • 157 Boxes)</option>
+              <option value="sku110k_val_001.jpg">sku110k_val_001.jpg (Private Holdout • 152 Boxes)</option>
+              <option value="sku110k_val_002.jpg">sku110k_val_002.jpg (Public Split • 154 Boxes)</option>
+              <option value="sku110k_val_003.jpg">sku110k_val_003.jpg (Private Holdout • 138 Boxes)</option>
+              <option value="smart_retail_val_000.jpg">smart_retail_val_000.jpg (Smart-Retail Split • 136 Boxes)</option>
+              <option value="smart_retail_val_001.jpg">smart_retail_val_001.jpg (Smart-Retail Holdout • 175 Boxes)</option>
             </select>
           </div>
         </div>
         <div class="inspector-layout">
           <div class="canvas-stage" id="inspector-stage">
-            <img id="inspector-shelf-img" src="/images/sku110k_val_001.png" alt="SKU-110k Retail Shelf Validation Image" />
-            <svg id="inspector-bbox-svg" class="bbox-svg-overlay" viewBox="0 0 600 400" preserveAspectRatio="none"></svg>
+            <img id="inspector-shelf-img" src="/images/sku110k_val_000.jpg" alt="Real Open-Source Retail Shelf Validation Photograph" />
+            <svg id="inspector-bbox-svg" class="bbox-svg-overlay" viewBox="0 0 2336 4160" preserveAspectRatio="none"></svg>
           </div>
           <div class="table-wrapper">
             <table class="arena-table">
@@ -145,7 +149,8 @@
                   <th>Slot</th>
                   <th>Box [x1,y1,x2,y2]</th>
                   <th>Predicted Base Pack</th>
-                  <th>Ground Truth</th>
+                  <th>Brand (HUL vs Comp)</th>
+                  <th>7-Dim Size Bucket</th>
                   <th>Conf</th>
                   <th>Status</th>
                 </tr>
@@ -153,6 +158,34 @@
               <tbody id="inspector-predictions-tbody"></tbody>
             </table>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: SPEC-005 TAXONOMY, DEPTH-GHOST NMS & 5-BUCKET GSU FINOPS -->
+    <section id="panel-spec005" class="tab-panel hidden">
+      <div class="surface-card">
+        <div class="section-header">
+          <h2>SPEC-005: Unilever 7-Dimension Taxonomy, 2nd-Row Depth-Ghost NMS &amp; 5-Bucket GSU FinOps</h2>
+          <span class="section-subtitle">25 Real Shelf Photos • 3,649 Raw Boxes → 3 Depth Ghosts Suppressed → 3,646 Front-Row Facings</span>
+        </div>
+        <div class="table-wrapper">
+          <table class="arena-table">
+            <thead>
+              <tr>
+                <th>Base Pack ID</th>
+                <th>Category</th>
+                <th>Subcategory</th>
+                <th>Brand</th>
+                <th>HUL Ownership</th>
+                <th>Variant</th>
+                <th>Packaging Type</th>
+                <th>Pack Type</th>
+                <th>Rule-Derived Size Bucket</th>
+              </tr>
+            </thead>
+            <tbody id="spec005-taxonomy-tbody"></tbody>
+          </table>
         </div>
       </div>
     </section>

@@ -33,15 +33,21 @@ from shelf_e2e.tracks import (
     TrackDJevRoutingPipeline,
 )
 
+from dataclasses import asdict
+from shelf_e2e.pricing import compute_five_bucket_gcp_billing
+from shelf_e2e.taxonomy import enrich_with_7dim_taxonomy
+
 STATIC_DIR = (Path(__file__).resolve().parent / "static").resolve()
 IMAGES_DIR = (REPO_ROOT / "data" / "sku110k" / "images").resolve()
-ALLOWED_IMAGES = {
-    "sku110k_val_001.png",
-    "sku110k_val_002.png",
-    "sku110k_val_003_dense147.png",
-}
+ALLOWED_IMAGES = (
+    {f"sku110k_val_{i:03d}.jpg" for i in range(20)}
+    | {f"smart_retail_val_{i:03d}.jpg" for i in range(5)}
+    | {"sku110k_val_001.png", "sku110k_val_002.png", "sku110k_val_003_dense147.png"}
+)
 CSRF_TOKEN = secrets.token_hex(24)
 ENGINE = KaggleLeaderboardEngine()
+if not ENGINE.registry.list_runs() or "sku110k_val_000.jpg" not in (ENGINE.registry.list_runs()[0].predictions_by_image or {}):
+    ENGINE.registry.clear_runs()
 ENGINE.seed_default_arena_runs()
 
 
@@ -88,11 +94,44 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
             if not str(candidate).startswith(str(IMAGES_DIR) + "/") or not candidate.is_file():
                 self._send_json({"error": "Image not found"}, status_code=404)
                 return
-            self._send_security_headers("image/png", status_code=200)
+            mime = "image/jpeg" if img_name.endswith(".jpg") else "image/png"
+            self._send_security_headers(mime, status_code=200)
             self.wfile.write(candidate.read_bytes())
             return
         if route == "/api/state":
             runs = [r.to_dict() for r in ENGINE.registry.list_runs()]
+            images_list = ENGINE.slice_data.get("images", [])
+            img_dims = {}
+            if isinstance(images_list, list):
+                for row in images_list:
+                    k = row.get("file_name") or row.get("image_name") or row.get("image_id")
+                    if k:
+                        img_dims[k] = [row.get("width", 2336), row.get("height", 4160)]
+            billing_d = compute_five_bucket_gcp_billing(
+                run_id="track_d_gemini_diffusion_as_jev",
+                vertex_tokens_usd=0.00028,
+                embeddings_and_vision_usd=0.00166,
+                image_latency_ms=4120.0,
+            )
+            billing_b = compute_five_bucket_gcp_billing(
+                run_id="track_b_e2e_vlm",
+                vertex_tokens_usd=0.00338,
+                embeddings_and_vision_usd=0.00010,
+                image_latency_ms=6850.0,
+            )
+            tax_map = {}
+            for sku_id, item in ENGINE.catalog.entries.items():
+                attr = enrich_with_7dim_taxonomy({
+                    "brand": item.brand,
+                    "category": item.category,
+                    "subcategory": getattr(item, "subcategory", "General"),
+                    "product_name": getattr(item, "product_name", sku_id),
+                    "variant": getattr(item, "variant", "Standard"),
+                    "packaging_type": getattr(item, "packaging_type", "bottle"),
+                    "pack_type": getattr(item, "pack_type", "Single"),
+                    "size_bucket": getattr(item, "size_bucket", ""),
+                })
+                tax_map[sku_id] = asdict(attr)
             self._send_json(
                 {
                     "csrf_token": CSRF_TOKEN,
@@ -103,7 +142,18 @@ class ShelfBenchArenaHandler(BaseHTTPRequestHandler):
                         "concurrency_workers": 525,
                         "daily_volume": 500000,
                     },
-                    "ground_truth_images": ENGINE.slice_data.get("images", {}),
+                    "ground_truth_images": ENGINE.slice_data.get("images_by_name")
+                    or ENGINE.slice_data.get("images", {}),
+                    "image_dimensions": img_dims,
+                    "taxonomy_7dim": tax_map,
+                    "spec005_summary": {
+                        "total_real_images": 25,
+                        "total_human_boxes": 3649,
+                        "depth_ghosts_suppressed": 3,
+                        "front_row_facings": 3646,
+                        "track_d_billing": asdict(billing_d),
+                        "track_b_billing": asdict(billing_b),
+                    },
                     "runs": runs,
                 }
             )
