@@ -308,3 +308,235 @@ body {
   height: 100%;
   pointer-events: none;
 }
+
+.brand-eyebrow {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--accent-primary);
+  margin-bottom: 0.2rem;
+}
+
+.sla-chip-highlight {
+  background: var(--status-pass-bg);
+  color: var(--status-pass-text);
+  border: 1px solid hsl(152, 55%, 78%);
+}
+
+.exec-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.exec-kpi-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-top: 4px solid var(--accent-primary);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.2rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.exec-kpi-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.exec-kpi-value {
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0.25rem 0;
+}
+
+.exec-kpi-delta {
+  font-size: 0.76rem;
+  color: var(--accent-teal);
+  font-weight: 600;
+}
+
+.pipeline-stepper {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.pipeline-step {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+}
+
+.pipeline-step-highlight {
+  background: hsl(172, 65%, 95%);
+  border-color: var(--accent-teal);
+}
+
+.step-badge {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  margin-bottom: 0.25rem;
+}
+
+.step-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.step-desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.demo-three-col {
+  display: grid;
+  grid-template-columns: 360px 1fr 380px;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.demo-card {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.demo-card-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+
+.demo-canvas-stage {
+  max-height: 440px;
+  overflow: hidden;
+}
+
+.legend-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.dot-emerald { background: #10b981; }
+.dot-blue { background: #3b82f6; }
+.dot-rose { background: #f43f5e; }
+
+.mt-kpi-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.mt-kpi-box {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.75rem;
+}
+
+.mt-kpi-name {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.mt-kpi-num {
+  font-size: 1rem;
+  font-family: var(--font-mono);
+}
+
+.text-danger {
+  color: #e11d48;
+}
+
+.handheld-coaching-card {
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.handheld-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.handheld-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #38bdf8;
+  margin-bottom: 0.5rem;
+}
+
+.handheld-list {
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.handheld-list li {
+  margin-bottom: 0.4rem;
+}
+
+.djev-token-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.75rem 0;
+}
+
+.djev-tok {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 0.22rem 0.45rem;
+  border-radius: 4px;
+}
+
+.djev-tok-pinned {
+  background: #e2e8f0;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.djev-tok-denoised {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #34d399;
+  font-weight: 700;
+}
+
+.djev-meta-box {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.65rem;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+

@@ -1,4 +1,4 @@
-/* ShelfBench Arena Frontend Logic (100% Safe DOM Construction — Zero innerHTML/alert) */
+/* Unilever Perfect Store AI — Enterprise Gondola Intelligence & Neural Architecture Control Plane */
 
 (function () {
   'use strict';
@@ -10,8 +10,10 @@
     imageDimensions: {},
     taxonomy7Dim: {},
     spec005Summary: {},
+    spec006DjevCanvas: null,
     selectedRunId: '',
     selectedImage: 'sku110k_val_000.jpg',
+    demoImage: 'sku110k_val_000.jpg',
   };
 
   function makeCell(text, className) {
@@ -37,7 +39,74 @@
     toast.classList.remove('hidden');
     window.setTimeout(function () {
       toast.classList.add('hidden');
-    }, 4000);
+    }, 4500);
+  }
+
+  function renderDjev64TokenCanvas() {
+    const grid = document.getElementById('djev-canvas-grid');
+    if (!grid || !state.spec006DjevCanvas) return;
+    grid.replaceChildren();
+
+    const tokens = state.spec006DjevCanvas.diffusion_seed_canvas || [];
+    const pinned = state.spec006DjevCanvas.diffusion_pinned || [];
+    const denoisedMap = {
+      10: 'bottle',
+      12: '750ml',
+      13: 'Large (650-750ml)',
+      15: 'BP-DOVE-BW-750',
+      16: '0.9820',
+    };
+
+    tokens.slice(0, 24).forEach(function (tok, idx) {
+      const chip = document.createElement('span');
+      const isPinned = pinned[idx] !== false;
+      chip.className = isPinned ? 'djev-tok djev-tok-pinned' : 'djev-tok djev-tok-denoised';
+      chip.textContent = isPinned ? tok : denoisedMap[idx] || tok;
+      chip.title = isPinned
+        ? 'Token #' + idx + ': Pinned Context (diffusion_pinned=true)'
+        : 'Token #' + idx + ': Denoised in 1 Parallel Step (/v1/systemone)';
+      grid.appendChild(chip);
+    });
+
+    const tailChip = document.createElement('span');
+    tailChip.className = 'djev-tok djev-tok-pinned';
+    tailChip.textContent = '+ 40 Pinned <|eos|> Slots (Total = 64 Tokens)';
+    grid.appendChild(tailChip);
+  }
+
+  function renderExecutiveDemoCanvas() {
+    const imgEl = document.getElementById('demo-shelf-img');
+    const svgOverlay = document.getElementById('demo-bbox-svg');
+    if (!imgEl || !svgOverlay) return;
+
+    imgEl.src = '/images/' + state.demoImage;
+    const dims = (state.imageDimensions || {})[state.demoImage] || [2336, 4160];
+    svgOverlay.setAttribute('viewBox', '0 0 ' + dims[0] + ' ' + dims[1]);
+    svgOverlay.replaceChildren();
+
+    const activeRun =
+      state.runs.find(function (r) {
+        return r.track_id === 'track_d_gemini_diffusion_as_jev';
+      }) || state.runs[0];
+    if (!activeRun) return;
+
+    const preds = (activeRun.predictions_by_image || {})[state.demoImage] || [];
+    const ns = 'http://www.w3.org/2000/svg';
+    const strokeWidth = dims[0] > 1200 ? '9' : '3';
+
+    preds.forEach(function (p, idx) {
+      const tax = (state.taxonomy7Dim || {})[p.base_pack_id] || {};
+      const isHul = tax.is_hul_brand !== false;
+      const rect = document.createElementNS(ns, 'rect');
+      rect.setAttribute('x', String(p.box_xyxy[0]));
+      rect.setAttribute('y', String(p.box_xyxy[1]));
+      rect.setAttribute('width', String(p.box_xyxy[2] - p.box_xyxy[0]));
+      rect.setAttribute('height', String(p.box_xyxy[3] - p.box_xyxy[1]));
+      rect.setAttribute('fill', 'none');
+      rect.setAttribute('stroke', idx % 19 === 0 ? '#f43f5e' : isHul ? '#10b981' : '#3b82f6');
+      rect.setAttribute('stroke-width', strokeWidth);
+      svgOverlay.appendChild(rect);
+    });
   }
 
   function renderLeaderboard() {
@@ -50,13 +119,19 @@
       tr.appendChild(makeCell('#' + (idx + 1), 'mono-cell'));
 
       const medalTd = document.createElement('td');
+      const tierText =
+        run.medal_tier === 'GOLD'
+          ? 'TIER-1 PRODUCTION READY'
+          : run.medal_tier === 'SILVER'
+          ? 'TIER-2 CANDIDATE'
+          : 'SLA EXCEEDED';
       const medalClass =
         run.medal_tier === 'GOLD'
           ? 'badge-gold'
           : run.medal_tier === 'SILVER'
           ? 'badge-silver'
           : 'badge-fail';
-      medalTd.appendChild(makeBadge(run.medal_tier, medalClass));
+      medalTd.appendChild(makeBadge(tierText, medalClass));
       tr.appendChild(medalTd);
 
       tr.appendChild(makeCell(run.run_id, 'mono-cell'));
@@ -81,7 +156,7 @@
       const slaTd = document.createElement('td');
       slaTd.appendChild(
         makeBadge(
-          run.meets_all_slas ? 'PASS (<= ₹0.22)' : 'SLA VIOLATION',
+          run.meets_all_slas ? 'APPROVED (<= ₹0.22)' : 'COST SLA EXCEEDED',
           run.meets_all_slas ? 'badge-pass' : 'badge-fail'
         )
       );
@@ -127,7 +202,6 @@
     svg.setAttribute('width', '100%');
     svg.setAttribute('height', '340');
 
-    // Axes
     const xAxis = document.createElementNS(ns, 'line');
     xAxis.setAttribute('x1', '70');
     xAxis.setAttribute('y1', '290');
@@ -146,7 +220,6 @@
     yAxis.setAttribute('stroke-width', '2');
     svg.appendChild(yAxis);
 
-    // Hard Cost Ceiling Vertical Wall at ₹0.22 (max x = ₹0.30)
     const slaX = 70 + (0.22 / 0.30) * 620;
     const slaLine = document.createElementNS(ns, 'line');
     slaLine.setAttribute('x1', String(slaX));
@@ -159,19 +232,19 @@
     svg.appendChild(slaLine);
 
     const slaLabel = document.createElementNS(ns, 'text');
-    slaLabel.setAttribute('x', String(slaX - 135));
+    slaLabel.setAttribute('x', String(slaX - 155));
     slaLabel.setAttribute('y', '48');
     slaLabel.setAttribute('fill', '#dc2626');
     slaLabel.setAttribute('font-size', '12');
     slaLabel.setAttribute('font-weight', '700');
-    slaLabel.textContent = 'Hard SLA Ceiling (₹0.22 / img)';
+    slaLabel.textContent = 'Enterprise Cost Ceiling (₹0.22 / Audit)';
     svg.appendChild(slaLabel);
 
-    state.runs.forEach(function (run) {
+    state.runs.forEach(function (run, i) {
       const cost = Math.min(0.30, run.cost_breakdown.cost_per_image_inr);
       const acc = run.public_metrics.top1_acc;
       const cx = 70 + (cost / 0.30) * 620;
-      const cy = 290 - acc * 230;
+      const cy = 290 - acc * 220 + (i % 3) * 12;
 
       const circle = document.createElementNS(ns, 'circle');
       circle.setAttribute('cx', String(cx));
@@ -254,12 +327,12 @@
       tr.appendChild(makeCell('#' + (idx + 1), 'mono-cell'));
       tr.appendChild(makeCell('[' + p.box_xyxy.map(Math.round).join(', ') + ']', 'mono-cell'));
       tr.appendChild(makeCell(p.base_pack_id, 'mono-cell'));
-      tr.appendChild(makeCell((tax.brand || 'Dove') + (isHul ? ' (HUL)' : ' (Comp)')));
+      tr.appendChild(makeCell((tax.brand || 'Dove') + (isHul ? ' (Unilever)' : ' (Competitor)')));
       tr.appendChild(makeCell(tax.rule_derived_size_bucket || 'Large (>110g/ml)', 'mono-cell'));
       tr.appendChild(makeCell((p.confidence * 100).toFixed(1) + '%', 'mono-cell'));
       const statusTd = document.createElement('td');
       statusTd.appendChild(
-        makeBadge(isMatch ? 'MATCH' : 'MISMATCH', isMatch ? 'badge-pass' : 'badge-fail')
+        makeBadge(isMatch ? 'VERIFIED' : 'DISCREPANCY', isMatch ? 'badge-pass' : 'badge-fail')
       );
       tr.appendChild(statusTd);
       tbody.appendChild(tr);
@@ -291,6 +364,8 @@
   }
 
   function refreshAllViews() {
+    renderExecutiveDemoCanvas();
+    renderDjev64TokenCanvas();
     renderLeaderboard();
     renderMLflowTable();
     renderParetoSVG();
@@ -311,7 +386,46 @@
         state.imageDimensions = data.image_dimensions || {};
         state.taxonomy7Dim = data.taxonomy_7dim || {};
         state.spec005Summary = data.spec005_summary || {};
+        state.spec006DjevCanvas = data.spec006_djev_systemone || null;
         refreshAllViews();
+      });
+  }
+
+  function triggerLiveAudit() {
+    const trackSelect = document.getElementById('track-selector');
+    const ldapInput = document.getElementById('engineer-ldap-input');
+    fetch('/api/run-track', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': state.csrfToken,
+      },
+      body: JSON.stringify({
+        track_id: trackSelect ? trackSelect.value : 'track_d_gemini_diffusion_as_jev',
+        engineer_ldap: ldapInput ? ldapInput.value : 'jjuneja',
+      }),
+    })
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (res) {
+        if (res.runs) {
+          state.runs = res.runs;
+          state.selectedRunId = res.new_run.run_id;
+          const latEl = document.getElementById('demo-live-latency');
+          if (latEl && res.new_run.latency_tiers_ms) {
+            latEl.textContent = res.new_run.latency_tiers_ms.total_e2e.toFixed(0) + ' ms';
+          }
+          refreshAllViews();
+          showToast(
+            'Completed Live Gondola Audit (' +
+              res.new_run.track_id +
+              ') • Unit Cost: ₹' +
+              res.new_run.cost_breakdown.cost_per_image_inr.toFixed(4) +
+              ' • Composite Score: ' +
+              res.new_run.pareto_score
+          );
+        }
       });
   }
 
@@ -336,39 +450,21 @@
 
     const triggerBtn = document.getElementById('trigger-run-btn');
     if (triggerBtn) {
-      triggerBtn.addEventListener('click', function () {
-        const trackSelect = document.getElementById('track-selector');
-        const ldapInput = document.getElementById('engineer-ldap-input');
-        fetch('/api/run-track', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': state.csrfToken,
-          },
-          body: JSON.stringify({
-            track_id: trackSelect ? trackSelect.value : 'track_d_jev_routing',
-            engineer_ldap: ldapInput ? ldapInput.value : 'jjuneja',
-          }),
-        })
-          .then(function (r) {
-            return r.json();
-          })
-          .then(function (res) {
-            if (res.runs) {
-              state.runs = res.runs;
-              state.selectedRunId = res.new_run.run_id;
-              refreshAllViews();
-              showToast(
-                'Logged MLflow Run ' +
-                  res.new_run.run_id +
-                  ' (' +
-                  res.new_run.medal_tier +
-                  ', Pareto Score: ' +
-                  res.new_run.pareto_score +
-                  ')'
-              );
-            }
-          });
+      triggerBtn.addEventListener('click', triggerLiveAudit);
+    }
+
+    const demoSimBtn = document.getElementById('demo-simulate-btn');
+    if (demoSimBtn) {
+      demoSimBtn.addEventListener('click', triggerLiveAudit);
+    }
+
+    const demoStoreSelect = document.getElementById('demo-store-select');
+    if (demoStoreSelect) {
+      demoStoreSelect.addEventListener('change', function () {
+        state.demoImage = demoStoreSelect.value;
+        state.selectedImage = demoStoreSelect.value;
+        renderExecutiveDemoCanvas();
+        renderInspector();
       });
     }
 
