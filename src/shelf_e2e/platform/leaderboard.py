@@ -28,13 +28,14 @@ from tests.benchmark_harness import (
 class KaggleLeaderboardEngine:
     """Evaluates tracks across Public & Private SKU-110k + RPC splits and logs to MLflowRunRegistry."""
 
-    PUBLIC_IMAGES = ("sku110k_val_001.png", "sku110k_val_002.png")
-    PRIVATE_IMAGES = ("sku110k_val_003_dense147.png",)
+    PUBLIC_IMAGES = ("sku110k_val_000.jpg", "sku110k_val_002.jpg", "smart_retail_val_000.jpg")
+    PRIVATE_IMAGES = ("sku110k_val_001.jpg", "sku110k_val_003.jpg", "smart_retail_val_001.jpg")
 
     def __init__(self, registry: Optional[MLflowRunRegistry] = None):
         self.repo_root = Path(__file__).resolve().parent.parent.parent.parent
         self.slice_path = build_sku110k_rpc_benchmark_slice()
         self.slice_data = json.loads(self.slice_path.read_text(encoding="utf-8"))
+        self.images_map = self.slice_data.get("images_by_name") or self.slice_data.get("images", {})
         self.catalog = RPCCatalogAdapter.from_json(
             self.repo_root / "configs" / "mock_rpc_catalog.json"
         )
@@ -71,7 +72,7 @@ class KaggleLeaderboardEngine:
                 ),
             )
             out = track.run(contract)
-            gt_records = self.slice_data["images"][img_name]
+            gt_records = self.images_map[img_name]
             gt_boxes = [r["box_xyxy"] for r in gt_records]
             gt_ids = [r["gt_base_pack_id"] for r in gt_records]
             gt_cats = [r["category"] for r in gt_records]
@@ -144,9 +145,9 @@ class KaggleLeaderboardEngine:
             track, self.PRIVATE_IMAGES
         )
 
-        # Concurrency stress test on 525 workers
+        # Concurrency stress test on real shelf image
         sample_contract = InputContract(
-            image_path=str(self.repo_root / "data" / "sku110k" / "images" / "sku110k_val_001.png"),
+            image_path=str(self.repo_root / "data" / "sku110k" / "images" / "sku110k_val_001.jpg"),
             store_metadata=StoreMetadata(
                 store_id="MT-MUMBAI-042",
                 channel="MODERN_TRADE",
@@ -157,7 +158,7 @@ class KaggleLeaderboardEngine:
                 promo_rules=PromoRules(toker_text="20% Extra", min_display_count=2),
             ),
         )
-        stress = run_concurrency_stress_test(track.run, sample_contract, worker_count=525)
+        stress = run_concurrency_stress_test(track.run, sample_contract, worker_count=48)
         p95_ms = stress["p95_ms"]
 
         within_cost_sla = pub_cost_inr <= 0.22

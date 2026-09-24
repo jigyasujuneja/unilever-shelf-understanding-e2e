@@ -47,7 +47,8 @@ class MLflowRunRegistry:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        from contextlib import closing
+        with closing(sqlite3.connect(str(self.db_path))) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS experiment_runs (
@@ -67,8 +68,9 @@ class MLflowRunRegistry:
             conn.commit()
 
     def log_run(self, record: ExperimentRunRecord) -> ExperimentRunRecord:
+        from contextlib import closing
         payload_str = json.dumps(record.to_dict())
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with closing(sqlite3.connect(str(self.db_path))) as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO experiment_runs (
@@ -94,7 +96,8 @@ class MLflowRunRegistry:
         return record
 
     def list_runs(self, experiment_name: Optional[str] = None) -> List[ExperimentRunRecord]:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        from contextlib import closing
+        with closing(sqlite3.connect(str(self.db_path))) as conn:
             if experiment_name:
                 cursor = conn.execute(
                     "SELECT payload_json FROM experiment_runs WHERE experiment_name = ? ORDER BY pareto_score DESC, timestamp_utc DESC",
@@ -108,7 +111,8 @@ class MLflowRunRegistry:
         return [ExperimentRunRecord(**json.loads(r[0])) for r in rows]
 
     def get_run(self, run_id: str) -> Optional[ExperimentRunRecord]:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        from contextlib import closing
+        with closing(sqlite3.connect(str(self.db_path))) as conn:
             cursor = conn.execute(
                 "SELECT payload_json FROM experiment_runs WHERE run_id = ?", (run_id,)
             )
@@ -116,7 +120,8 @@ class MLflowRunRegistry:
         return ExperimentRunRecord(**json.loads(row[0])) if row else None
 
     def clear_runs(self) -> None:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        from contextlib import closing
+        with closing(sqlite3.connect(str(self.db_path))) as conn:
             conn.execute("DELETE FROM experiment_runs")
             conn.commit()
         self._export_json_snapshot()

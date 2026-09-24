@@ -49,7 +49,28 @@ class RPCCatalogAdapter:
     def from_json(cls, json_path: str | Path) -> "RPCCatalogAdapter":
         resolved = Path(json_path).resolve()
         data = json.loads(resolved.read_text(encoding="utf-8"))
-        entries = [CatalogSKUEntry(**item) for item in data.get("skus", [])]
+        entries: List[CatalogSKUEntry] = []
+        for item in data.get("skus", []):
+            entries.append(CatalogSKUEntry(**item))
+        existing_ids = {e.base_pack_id for e in entries}
+        for item in data.get("items", []):
+            bp_id = item.get("base_pack_id") or item.get("base_pack_code")
+            if bp_id and bp_id not in existing_ids:
+                existing_ids.add(bp_id)
+                entries.append(
+                    CatalogSKUEntry(
+                        base_pack_id=str(bp_id),
+                        brand=str(item.get("brand", "Dove")),
+                        category=str(item.get("category", "Personal Care")),
+                        subcategory=str(item.get("subcategory", "General")),
+                        variant=str(item.get("variant", "Standard")),
+                        packaging_type=str(item.get("packaging_type", "bottle")),
+                        pack_type=str(item.get("pack_type", "Single")),
+                        size=str(item.get("size") or item.get("size_bucket") or "500ml"),
+                        expected_min_width_px=float(item.get("expected_min_width_px", 55.0)),
+                        is_hul=bool(item.get("is_hul", item.get("is_hul_brand", False))),
+                    )
+                )
         return cls(entries)
 
     def valid_base_pack_ids(self) -> Set[str]:

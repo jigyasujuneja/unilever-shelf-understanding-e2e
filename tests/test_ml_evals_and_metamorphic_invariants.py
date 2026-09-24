@@ -70,7 +70,7 @@ class TestMLEvalsAndMetamorphicInvariants(unittest.TestCase):
         self.assertTrue(sig["statistically_significant_at_0_05"])
 
     def test_03_slice_based_error_analysis_high_glare_vs_low_glare(self) -> None:
-        img_path = REPO_ROOT / "data" / "sku110k" / "images" / "sku110k_val_001.png"
+        img_path = REPO_ROOT / "data" / "sku110k" / "images" / "sku110k_val_001.jpg"
         contract = InputContract(
             image_path=str(img_path),
             store_metadata=StoreMetadata(
@@ -83,7 +83,8 @@ class TestMLEvalsAndMetamorphicInvariants(unittest.TestCase):
                 promo_rules=PromoRules(toker_text="20% Extra", min_display_count=2),
             ),
         )
-        gt_records = self.slice_data["images"]["sku110k_val_001.png"]
+        images_by_name = self.slice_data.get("images_by_name") or self.slice_data["images"]
+        gt_records = images_by_name["sku110k_val_001.jpg"]
 
         track_c = TrackCTieredHybridPipeline(self.catalog, sku110k_slice_path=self.slice_path)
         track_d = TrackDJevRoutingPipeline(
@@ -104,7 +105,7 @@ class TestMLEvalsAndMetamorphicInvariants(unittest.TestCase):
         self.assertEqual(slices_d["low_glare"]["top1_accuracy"], 1.0)
 
     def test_04_calibration_ece_brier_and_confusion_matrix(self) -> None:
-        img_path = REPO_ROOT / "data" / "sku110k" / "images" / "sku110k_val_001.png"
+        img_path = REPO_ROOT / "data" / "sku110k" / "images" / "sku110k_val_001.jpg"
         contract = InputContract(
             image_path=str(img_path),
             store_metadata=StoreMetadata(
@@ -117,11 +118,12 @@ class TestMLEvalsAndMetamorphicInvariants(unittest.TestCase):
                 promo_rules=PromoRules(toker_text="20% Extra", min_display_count=2),
             ),
         )
-        gt_records = self.slice_data["images"]["sku110k_val_001.png"]
+        images_by_name = self.slice_data.get("images_by_name") or self.slice_data["images"]
+        gt_records = images_by_name["sku110k_val_001.jpg"]
         gt_boxes = [r["box_xyxy"] for r in gt_records]
         gt_ids = [r["gt_base_pack_id"] for r in gt_records]
 
-        track_a = TrackACascadingViTPipeline(self.catalog)
+        track_a = TrackACascadingViTPipeline(self.catalog, sku110k_slice_path=self.slice_path)
         track_d = TrackDJevRoutingPipeline(
             self.catalog, use_gemini_diffusion_as_jev=True, sku110k_slice_path=self.slice_path
         )

@@ -255,7 +255,9 @@ def profile_dataset_and_check_leakage(
     catalog: RPCCatalogAdapter,
 ) -> DatasetQualityProfile:
     """Verify 0% split contamination, 0 null SKUs, 0 degenerate boxes, and 100% catalog integrity."""
-    images_map: Dict[str, List[Dict[str, Any]]] = slice_data.get("images", {})
+    images_map: Dict[str, List[Dict[str, Any]]] = (
+        slice_data.get("images_by_name") or slice_data.get("images", {})
+    )
     valid_skus: Set[str] = catalog.valid_base_pack_ids()
 
     null_sku = 0

@@ -53,6 +53,9 @@ def compute_iou_xyxy(box_a: Sequence[float], box_b: Sequence[float]) -> float:
     ax1, ay1, ax2, ay2 = float(box_a[0]), float(box_a[1]), float(box_a[2]), float(box_a[3])
     bx1, by1, bx2, by2 = float(box_b[0]), float(box_b[1]), float(box_b[2]), float(box_b[3])
 
+    if ax2 <= bx1 or bx2 <= ax1 or ay2 <= by1 or by2 <= ay1:
+        return 0.0
+
     inter_x1 = max(ax1, bx1)
     inter_y1 = max(ay1, by1)
     inter_x2 = min(ax2, bx2)
@@ -68,6 +71,17 @@ def compute_iou_xyxy(box_a: Sequence[float], box_b: Sequence[float]) -> float:
     if union_area <= 0.0:
         return 0.0
     return inter_area / union_area
+
+
+def _precompute_iou_matrix(
+    pred_boxes: Sequence[Sequence[float]],
+    gt_boxes: Sequence[Sequence[float]],
+) -> List[List[float]]:
+    """Precompute M x N IoU matrix once so multi-threshold mAP@50:95 is 10x faster."""
+    return [
+        [compute_iou_xyxy(p_box, g_box) for g_box in gt_boxes]
+        for p_box in pred_boxes
+    ]
 
 
 def percentile(values: Sequence[float], q: float) -> float:
@@ -91,20 +105,22 @@ def greedy_match_boxes(
     pred_scores: Sequence[float],
     gt_boxes: Sequence[Sequence[float]],
     iou_threshold: float,
+    iou_matrix: Optional[List[List[float]]] = None,
 ) -> Tuple[List[Tuple[int, int, float]], List[int], List[int]]:
     """Match confidence-sorted predictions to ground-truth boxes above iou_threshold."""
     order = sorted(range(len(pred_boxes)), key=lambda i: pred_scores[i], reverse=True)
     matched_gt: Set[int] = set()
     matches: List[Tuple[int, int, float]] = []
     unmatched_preds: List[int] = []
+    matrix = iou_matrix if iou_matrix is not None else _precompute_iou_matrix(pred_boxes, gt_boxes)
 
     for pred_idx in order:
         best_gt = -1
         best_iou = -1.0
-        for gt_idx, gt_box in enumerate(gt_boxes):
+        row = matrix[pred_idx]
+        for gt_idx, iou in enumerate(row):
             if gt_idx in matched_gt:
                 continue
-            iou = compute_iou_xyxy(pred_boxes[pred_idx], gt_box)
             if iou >= iou_threshold and iou > best_iou:
                 best_iou = iou
                 best_gt = gt_idx
@@ -123,6 +139,7 @@ def compute_ap_at_threshold(
     pred_scores: Sequence[float],
     gt_boxes: Sequence[Sequence[float]],
     iou_threshold: float,
+    iou_matrix: Optional[List[List[float]]] = None,
 ) -> float:
     """Compute 101-point COCO-style Average Precision (AP) at a single IoU threshold."""
     if not gt_boxes:
@@ -136,14 +153,15 @@ def compute_ap_at_threshold(
     fp_cum = 0
     precisions: List[float] = []
     recalls: List[float] = []
+    matrix = iou_matrix if iou_matrix is not None else _precompute_iou_matrix(pred_boxes, gt_boxes)
 
     for pred_idx in order:
         best_gt = -1
         best_iou = -1.0
-        for gt_idx, gt_box in enumerate(gt_boxes):
+        row = matrix[pred_idx]
+        for gt_idx, iou in enumerate(row):
             if gt_idx in matched_gt:
                 continue
-            iou = compute_iou_xyxy(pred_boxes[pred_idx], gt_box)
             if iou >= iou_threshold and iou > best_iou:
                 best_iou = iou
                 best_gt = gt_idx
@@ -180,9 +198,15 @@ def calculate_map50_and_map50_95(
     gt_boxes: Sequence[Sequence[float]],
 ) -> DetectionKPIs:
     """Calculate mAP@50, mAP@50:95 (0.50:0.05:0.95), and IoU P50/P90 distribution."""
+    iou_matrix = _precompute_iou_matrix(pred_boxes, gt_boxes)
     thresholds = [round(0.50 + 0.05 * i, 2) for i in range(10)]
-    aps = [compute_ap_at_threshold(pred_boxes, pred_scores, gt_boxes, t) for t in thresholds]
-    matches, _, _ = greedy_match_boxes(pred_boxes, pred_scores, gt_boxes, iou_threshold=0.50)
+    aps = [
+        compute_ap_at_threshold(pred_boxes, pred_scores, gt_boxes, t, iou_matrix=iou_matrix)
+        for t in thresholds
+    ]
+    matches, _, _ = greedy_match_boxes(
+        pred_boxes, pred_scores, gt_boxes, iou_threshold=0.50, iou_matrix=iou_matrix
+    )
     matched_ious = [m[2] for m in matches] if matches else [0.0]
 
     return DetectionKPIs(

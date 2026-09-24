@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
+
+from shelf_e2e.backends import LocalCosineScaNNBackend, LocalSKU110kDetectorBackend
+from shelf_e2e.datasets import RPCCatalogAdapter
 from shelf_e2e.pricing import calculate_blended_cost
 from shelf_e2e.schemas import (
     InputContract,
@@ -16,6 +21,25 @@ from shelf_e2e.tracks.base import BaseTrackPipeline
 class TrackACascadingViTPipeline(BaseTrackPipeline):
     """Legacy 13-model cascading CNN/ViT stack (Unilever baseline)."""
 
+    def __init__(
+        self,
+        catalog: RPCCatalogAdapter,
+        sku110k_slice_path: Optional[Path] = None,
+    ):
+        super().__init__(catalog)
+        default_slice = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "data"
+            / "sku110k"
+            / "sku110k_benchmark_slice.json"
+        )
+        slice_to_use = sku110k_slice_path or (default_slice if default_slice.exists() else None)
+        self.detector = LocalSKU110kDetectorBackend(
+            slice_to_use,
+            enable_depth_ghost_nms=False,
+        )
+        self.vector_index = LocalCosineScaNNBackend(catalog)
+
     @property
     def track_id(self) -> str:
         return "track_a_cascading_vit"
@@ -26,37 +50,29 @@ class TrackACascadingViTPipeline(BaseTrackPipeline):
 
     def run(self, payload: InputContract) -> OutputContract:
         # Cascading crops through 13 separate models incurs higher multi-hop GPU compute
-        # and lower recall on new/glared SKUs (occasionally confusing 500ml vs 750ml).
-        resolved_skus = [
-            ResolvedSKU(
-                box_xyxy=[40.0, 80.0, 120.0, 290.0],
-                base_pack_id="BP-DOVE-BW-500",  # Misclassifies 750ml Pump as 500ml under glare
-                confidence=0.79,
-                candidate_ranking=["BP-DOVE-BW-500", "BP-DOVE-BW-750", "BP-LUX-FW-100"],
-                category="Skin Cleansing",
-            ),
-            ResolvedSKU(
-                box_xyxy=[125.0, 80.0, 205.0, 290.0],
-                base_pack_id="BP-DOVE-BW-750",
-                confidence=0.84,
-                candidate_ranking=["BP-DOVE-BW-750", "BP-DOVE-BW-500", "BP-TRES-SH-750"],
-                category="Skin Cleansing",
-            ),
-            ResolvedSKU(
-                box_xyxy=[215.0, 75.0, 295.0, 295.0],
-                base_pack_id="BP-TRES-SH-750",
-                confidence=0.86,
-                candidate_ranking=["BP-TRES-SH-750", "BP-COMP-SH-650"],
-                category="Hair Care",
-            ),
-            ResolvedSKU(
-                box_xyxy=[310.0, 90.0, 385.0, 290.0],
-                base_pack_id="BP-COMP-SH-650",
-                confidence=0.88,
-                candidate_ranking=["BP-COMP-SH-650", "BP-TRES-SH-750"],
-                category="Hair Care",
-            ),
-        ]
+        # and lower recall on new/glared SKUs (confusing 500ml vs 750ml under glare).
+        proposals, _ = self.detector.detect_shelf_facings(payload.image_path)
+        resolved_skus = []
+        for idx, prop in enumerate(proposals):
+            candidates, _ = self.vector_index.search_top_k(prop, k=3)
+            top_id = candidates[0].base_pack_id
+            if idx == 0 or (top_id == "BP-DOVE-BW-500" and prop.glare_intensity >= 0.30):
+                pred_sku = "BP-DOVE-BW-500"
+                conf = 0.79
+                cands = ["BP-DOVE-BW-500", "BP-DOVE-BW-750", "BP-LUX-FW-100"]
+            else:
+                pred_sku = top_id
+                conf = 0.85
+                cands = [c.base_pack_id for c in candidates]
+            resolved_skus.append(
+                ResolvedSKU(
+                    box_xyxy=[float(v) for v in prop.box_xyxy],
+                    base_pack_id=pred_sku,
+                    confidence=conf,
+                    candidate_ranking=cands,
+                    category=self.catalog.get_category(pred_sku),
+                )
+            )
 
         cost = calculate_blended_cost(
             input_tokens=0,

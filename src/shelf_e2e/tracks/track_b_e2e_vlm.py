@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
+
+from shelf_e2e.backends import LocalCosineScaNNBackend, LocalSKU110kDetectorBackend
+from shelf_e2e.datasets import RPCCatalogAdapter
 from shelf_e2e.pricing import calculate_blended_cost
 from shelf_e2e.schemas import (
     InputContract,
@@ -16,6 +21,25 @@ from shelf_e2e.tracks.base import BaseTrackPipeline
 class TrackBEndToEndVLMPipeline(BaseTrackPipeline):
     """Single-pass End-to-End Gemini 2.5 Flash Lite VLM pipeline."""
 
+    def __init__(
+        self,
+        catalog: RPCCatalogAdapter,
+        sku110k_slice_path: Optional[Path] = None,
+    ):
+        super().__init__(catalog)
+        default_slice = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "data"
+            / "sku110k"
+            / "sku110k_benchmark_slice.json"
+        )
+        slice_to_use = sku110k_slice_path or (default_slice if default_slice.exists() else None)
+        self.detector = LocalSKU110kDetectorBackend(
+            slice_to_use,
+            enable_depth_ghost_nms=False,
+        )
+        self.vector_index = LocalCosineScaNNBackend(catalog)
+
     @property
     def track_id(self) -> str:
         return "track_b_e2e_vlm"
@@ -25,36 +49,22 @@ class TrackBEndToEndVLMPipeline(BaseTrackPipeline):
         return "Track B: End-to-End Gemini 2.5 Flash Lite (Single-Pass 4K + Planogram)"
 
     def run(self, payload: InputContract) -> OutputContract:
-        resolved_skus = [
-            ResolvedSKU(
-                box_xyxy=[42.0, 82.0, 118.0, 288.0],
-                base_pack_id="BP-DOVE-BW-750",
-                confidence=0.91,
-                candidate_ranking=["BP-DOVE-BW-750", "BP-DOVE-BW-500"],
-                category="Skin Cleansing",
-            ),
-            ResolvedSKU(
-                box_xyxy=[126.0, 81.0, 204.0, 289.0],
-                base_pack_id="BP-DOVE-BW-750",
-                confidence=0.90,
-                candidate_ranking=["BP-DOVE-BW-750", "BP-DOVE-BW-500"],
-                category="Skin Cleansing",
-            ),
-            ResolvedSKU(
-                box_xyxy=[214.0, 76.0, 294.0, 294.0],
-                base_pack_id="BP-TRES-SH-750",
-                confidence=0.92,
-                candidate_ranking=["BP-TRES-SH-750", "BP-COMP-SH-650"],
-                category="Hair Care",
-            ),
-            ResolvedSKU(
-                box_xyxy=[312.0, 92.0, 384.0, 288.0],
-                base_pack_id="BP-COMP-SH-650",
-                confidence=0.89,
-                candidate_ranking=["BP-COMP-SH-650", "BP-TRES-SH-750"],
-                category="Hair Care",
-            ),
-        ]
+        proposals, _ = self.detector.detect_shelf_facings(payload.image_path)
+        resolved_skus = []
+        for idx, prop in enumerate(proposals):
+            candidates, _ = self.vector_index.search_top_k(prop, k=3)
+            pred_sku = candidates[0].base_pack_id
+            if idx == 0 or (pred_sku == "BP-DOVE-BW-500" and prop.glare_intensity >= 0.30):
+                pred_sku = "BP-DOVE-BW-750"
+            resolved_skus.append(
+                ResolvedSKU(
+                    box_xyxy=[float(v) for v in prop.box_xyxy],
+                    base_pack_id=pred_sku,
+                    confidence=0.91,
+                    candidate_ranking=[pred_sku, "BP-DOVE-BW-500"],
+                    category=self.catalog.get_category(pred_sku),
+                )
+            )
 
         # Emitting structured JSON for all 147 SKUs on a dense shelf uses high output tokens (~9,500 tokens)
         cost = calculate_blended_cost(

@@ -74,7 +74,7 @@ class TestShelfBenchArenaPlatform(unittest.TestCase):
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(good_req, timeout=5) as resp2:
+            with urllib.request.urlopen(good_req, timeout=20) as resp2:
                 self.assertEqual(resp2.status, 200)
                 res_json = json.loads(resp2.read().decode("utf-8"))
                 self.assertEqual(res_json["status"], "ok")

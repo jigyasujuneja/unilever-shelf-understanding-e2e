@@ -1,0 +1,51 @@
+{
+  "taxonomy_version": "unilever-7dim-v2.0",
+  "hul_brands": [
+    "Dove",
+    "Tresemme",
+    "Sunsilk",
+    "Pond's",
+    "Vaseline",
+    "Lux",
+    "Lifebuoy",
+    "Lakme",
+    "Clinic Plus",
+    "Simple",
+    "Love Beauty and Planet",
+    "Indulekha",
+    "Pears",
+    "Closeup",
+    "Pepsodent"
+  ],
+  "competitor_brands": [
+    "L'Oreal",
+    "Pantene",
+    "Nivea",
+    "Head & Shoulders",
+    "Himalaya",
+    "Cetaphil",
+    "Garnier",
+    "Neutrogena",
+    "Colgate",
+    "Palmolive"
+  ],
+  "brand_aliases": {
+    "tresemm\u00e9": "Tresemme",
+    "ponds": "Pond's",
+    "pond": "Pond's",
+    "loreal": "L'Oreal",
+    "l'or\u00e9al": "L'Oreal",
+    "h&s": "Head & Shoulders",
+    "head and shoulders": "Head & Shoulders",
+    "lbp": "Love Beauty and Planet"
+  },
+  "size_rules": {
+    "small_max_ml_or_g": 55,
+    "medium_max_ml_or_g": 110,
+    "buckets": [
+      "Small / Trial / Sachet (<=55g/ml)",
+      "Medium / Regular (56-110g/ml)",
+      "Large / Family (>110g/ml)"
+    ]
+  }
+}
