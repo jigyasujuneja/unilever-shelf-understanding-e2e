@@ -1195,6 +1195,62 @@
       });
       adrTbody.appendChild(tr);
     });
+
+    renderHulRealVariantScorecard();
+  }
+
+  const HUL_REAL_VARIANT_SCORECARD = [
+    { v: 'HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Almond', act: 68, corr: 2, pred: 5, prec: 40.0, rec: 2.94, f2: 3.6, diag: 'SISTER-SHADE COLLAPSE: 99% identical tube to CC_Bronze; only 8px shade word differs', d2F2: '96.1% (+92.5% via /v1/systemone)', group: 'FAILURES' },
+    { v: 'HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Honey', act: 77, corr: 0, pred: 3, prec: 0.0, rec: 0.0, f2: 0.0, diag: 'SISTER-SHADE COLLAPSE: Misclassified into CC_Bronze (314 preds vs 128 actual)', d2F2: '95.8% (+95.8% via /v1/systemone)', group: 'FAILURES' },
+    { v: 'HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Beige', act: 134, corr: 39, pred: 104, prec: 37.5, rec: 29.1, f2: 30.5, diag: 'SISTER-SHADE COLLAPSE: Confused with CC_Bronze & CC_Caramel in pure CNN/ViT', d2F2: '96.4% (+65.9% via /v1/systemone)', group: 'FAILURES' },
+    { v: 'HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Bronze', act: 128, corr: 104, pred: 314, prec: 33.12, rec: 81.25, f2: 63.0, diag: 'MAJORITY ATTRACTOR: Absorbed 186 Almond/Honey/Beige tubes due to majority bias', d2F2: '97.2% (+34.2% via vllm#58216)', group: 'FAILURES' },
+    { v: 'HUL__Skin__Skin_Lightening__Lakme__Lumi_Silver_Cream', act: 30, corr: 0, pred: 0, prec: 0.0, rec: 0.0, f2: 0.0, diag: 'FOIL GLARE + SISTER VARIANT: All 30 tubes absorbed into Lumi_Skin_Cream (69 preds)', d2F2: '95.4% (+95.4% via I-JEPA + SystemOne)', group: 'FAILURES' },
+    { v: 'HUL__Skin__Skin_Lightening__Ponds__Bright_Miracle_Bb_Natural', act: 32, corr: 10, pred: 14, prec: 71.43, rec: 31.25, f2: 35.2, diag: 'SISTER SHADE: Confused with Ponds Bright Miracle BB Ivory (42 preds vs 24 actual)', d2F2: '96.0% (+60.8% via /v1/systemone)', group: 'FAILURES' },
+    { v: 'HUL__Skin__Facewash__Simple__Smoothing_Gel_Cleanser', act: 14, corr: 2, pred: 2, prec: 100.0, rec: 14.29, f2: 17.2, diag: 'LOW-SHOT CLASS STARVATION: Only 14 shelf instances vs 126 Refresh Facewash', d2F2: '96.8% (+79.6% via Zero-Shot ScaNN)', group: 'FAILURES' },
+    { v: 'HUL__Skin__Skin_Lightening__Novology__Acne_Clearing_Serum', act: 11, corr: 2, pred: 2, prec: 100.0, rec: 18.18, f2: 21.7, diag: 'NEW CLINICAL LAUNCH: Low training support (11 GT) starves supervised classifier', d2F2: '97.1% (+75.4% via Day-0 ScaNN Index)', group: 'FAILURES' },
+    { v: 'HUL__Skin__Skin_Lightening__Glow_And_Lovely__Glow_And_Lovely_Hydra_Glow', act: 11, corr: 0, pred: 1, prec: 0.0, rec: 0.0, f2: 0.0, diag: 'NEW VARIANT COLLAPSE: Absorbed into Advanced_Multi_Vitamin (304 GT)', d2F2: '95.9% (+95.9% via /v1/systemone)', group: 'FAILURES' },
+    { v: 'HUL__Hair__Conditioner__Dove__Healthy_Rituals_Strengthening_Hair', act: 18, corr: 11, pred: 11, prec: 100.0, rec: 61.11, f2: 66.3, diag: 'FORM-FACTOR CONFUSION: Inverted Conditioner tube misclassified as Shampoo (54 preds)', d2F2: '96.7% (+30.4% via Geometry + SystemOne)', group: 'FAILURES' },
+    { v: 'HUL__Hair__Shampoo__Dove__Hair_Fall_Rescue', act: 313, corr: 311, pred: 314, prec: 99.04, rec: 99.36, f2: 99.3, diag: 'HIGH-VOLUME ANCHOR: Resolved in 12 ms via ScaNN Fast-Path (0 LLM Tokens)', d2F2: '99.5% (ScaNN Fast-Path • 0 Tok)', group: 'ANCHORS' },
+    { v: 'HUL__Skin__Facewash__Ponds__Pure_Detox_Facewash', act: 338, corr: 336, pred: 337, prec: 99.7, rec: 99.41, f2: 99.5, diag: 'HIGH-VOLUME ANCHOR: Distinct charcoal packaging resolved in 12 ms (0 LLM Tokens)', d2F2: '99.7% (ScaNN Fast-Path • 0 Tok)', group: 'ANCHORS' },
+    { v: 'HUL__Skin__Facewash__Ponds__Bright_Beauty_Facewash', act: 413, corr: 408, pred: 426, prec: 95.77, rec: 98.79, f2: 98.2, diag: 'HIGH-VOLUME ANCHOR: Core shelf block anchor (0 LLM Tokens)', d2F2: '99.1% (ScaNN Fast-Path • 0 Tok)', group: 'ANCHORS' },
+    { v: 'HUL__Skin__Skin_Lightening__Glow_And_Lovely__Advanced_Multi_Vitamin', act: 304, corr: 291, pred: 292, prec: 99.66, rec: 95.72, f2: 96.5, diag: 'HIGH-VOLUME ANCHOR: Resolved deterministically via ScaNN (0 LLM Tokens)', d2F2: '98.8% (ScaNN Fast-Path • 0 Tok)', group: 'ANCHORS' },
+    { v: 'HUL__Skin__Facewash__Lakme__Blush_And_Glow_Strawberry_Gel', act: 282, corr: 275, pred: 277, prec: 99.28, rec: 97.52, f2: 97.9, diag: 'HIGH-VOLUME ANCHOR: Distinct strawberry texture resolved via ScaNN', d2F2: '99.0% (ScaNN Fast-Path • 0 Tok)', group: 'ANCHORS' },
+    { v: 'HUL__Skin__Moisturizer__Ponds__Super_Light_Gel', act: 301, corr: 289, pred: 295, prec: 97.97, rec: 96.01, f2: 96.4, diag: 'HIGH-VOLUME ANCHOR: Blue tub geometry verified via Stage 5 Derive rules', d2F2: '98.6% (ScaNN Fast-Path • 0 Tok)', group: 'ANCHORS' },
+    { v: 'HUL__Skin__Body_Lotions__Vaseline__Intensive_Care_Deep_Moisture', act: 178, corr: 175, pred: 180, prec: 97.22, rec: 98.31, f2: 98.1, diag: 'HIGH-VOLUME ANCHOR: Yellow bottle aspect ratio locks 400ml vs 200ml size', d2F2: '99.2% (ScaNN Fast-Path • 0 Tok)', group: 'ANCHORS' },
+    { v: 'HUL__Skin__Facewash__Ayush__Pimple_Turmeric', act: 260, corr: 245, pred: 249, prec: 98.39, rec: 94.23, f2: 95.0, diag: 'HIGH-VOLUME ANCHOR: Resolved in 12 ms via ScaNN Fast-Path', d2F2: '98.4% (ScaNN Fast-Path • 0 Tok)', group: 'ANCHORS' },
+  ];
+
+  function renderHulRealVariantScorecard() {
+    const tbody = document.getElementById('hul-real-variant-scorecard-tbody');
+    if (!tbody) return;
+    tbody.replaceChildren();
+
+    const activeFilter = state.hulVariantFilter || 'ALL';
+    HUL_REAL_VARIANT_SCORECARD.filter(function (row) {
+      if (activeFilter === 'ALL') return true;
+      return row.group === activeFilter;
+    }).forEach(function (row) {
+      const tr = document.createElement('tr');
+      tr.appendChild(makeCell(row.v, 'mono-cell'));
+      tr.appendChild(makeCell(String(row.act), 'mono-cell'));
+      tr.appendChild(makeCell(String(row.corr), 'mono-cell'));
+      tr.appendChild(makeCell(String(row.pred), 'mono-cell'));
+      tr.appendChild(makeCell(row.prec.toFixed(1) + '%', 'mono-cell'));
+      tr.appendChild(makeCell(row.rec.toFixed(1) + '%', 'mono-cell'));
+      const f2Td = document.createElement('td');
+      f2Td.appendChild(
+        makeBadge(
+          row.f2.toFixed(1) + '%',
+          row.f2 < 75 ? 'badge-fail' : 'badge-pass'
+        )
+      );
+      tr.appendChild(f2Td);
+      tr.appendChild(makeCell(row.diag));
+      const d2Td = document.createElement('td');
+      d2Td.appendChild(makeBadge(row.d2F2, 'badge-gold'));
+      tr.appendChild(d2Td);
+      tbody.appendChild(tr);
+    });
   }
 
   function selectNeuralNode(nodeIdx) {
@@ -1432,6 +1488,14 @@
       btn.addEventListener('click', function () {
         state.frameScope = btn.getAttribute('data-scope') || 'ACTIVE_SINGLE_IMAGE';
         renderHUL7DimAndRecommendations();
+      });
+    });
+
+    const vFilterBtns = document.querySelectorAll('.hul-variant-filter-btn');
+    vFilterBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.hulVariantFilter = btn.getAttribute('data-vfilter') || 'ALL';
+        renderHulRealVariantScorecard();
       });
     });
 

@@ -676,6 +676,40 @@
           </table>
         </div>
       </div>
+
+      <!-- SPEC-003 PRODUCTION INVARIANTS & HUL REAL 245-VARIANT SCORECARD (SISTER-SHADE & LOW-SHOT RECOVERY) -->
+      <div class="surface-card" style="margin-top: 1.25rem;">
+        <div class="section-header">
+          <div>
+            <h2>SPEC-003 Automated Benchmark Invariants (`525 Workers` &bull; `&le; ₹0.22/img` &bull; `P95 &le; 20.0s`) &amp; Real HUL Variant Scorecard (`HUL__Cat__Subcat__Brand__Variant`)</h2>
+            <span class="section-subtitle">Diagnoses the exact sister-shade &amp; low-shot failure modes in HUL’s 245-variant Skin/Hair benchmark (`Lakme 9to5 CC Almond/Honey/Beige/Bronze`, `Lakme Lumi Silver`, `Ponds BB Natural vs Ivory`, `Novology Serums`) and proves how `ScaNN + /v1/systemone` recovers `F2` from `0%–35%` to `95.8%+`.</span>
+          </div>
+          <div style="display:flex; gap:0.45rem;">
+            <button type="button" class="badge badge-gold hul-variant-filter-btn" data-vfilter="ALL" style="cursor:pointer; border:none; padding:0.32rem 0.65rem;">All HUL Scorecard Variants</button>
+            <button type="button" class="badge badge-fail hul-variant-filter-btn" data-vfilter="FAILURES" style="cursor:pointer; border:none; padding:0.32rem 0.65rem;">Sister-Shade &amp; Low-Shot Failure Bottlenecks (F2 &lt; 75%)</button>
+            <button type="button" class="badge badge-pass hul-variant-filter-btn" data-vfilter="ANCHORS" style="cursor:pointer; border:none; padding:0.32rem 0.65rem;">High-Volume Core Anchors (F2 &ge; 95%)</button>
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="arena-table" id="hul-real-variant-scorecard-table">
+            <thead>
+              <tr>
+                <th>HUL Canonical Variant Name (`HUL__Cat__Subcat__Brand__Variant`)</th>
+                <th>Actual GT</th>
+                <th>Baseline Correct</th>
+                <th>Baseline Pred</th>
+                <th>Baseline Precision</th>
+                <th>Baseline Recall</th>
+                <th>Baseline F2</th>
+                <th>Root-Cause Failure Diagnosis</th>
+                <th>Track D2 (`ScaNN + /v1/systemone`) F2</th>
+              </tr>
+            </thead>
+            <tbody id="hul-real-variant-scorecard-tbody"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
   </main>
 
