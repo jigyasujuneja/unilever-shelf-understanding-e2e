@@ -379,25 +379,53 @@
         '):';
     }
 
+    const singleBtn = document.getElementById('btn-scope-single-img');
+    const bayNames = {
+      'sku110k_val_000.jpg': 'Hair Care & Shampoo Bay',
+      'sku110k_val_001.jpg': 'Skin Care & Facial Serum Bay',
+      'sku110k_val_002.jpg': 'Home & Fabric Laundry Bay',
+      'sku110k_val_003.jpg': 'Personal Wash, Deodorant & Oral Bay',
+      'smart_retail_val_000.jpg': 'Foods, Condiments & Tea/Coffee Bay',
+      'smart_retail_val_001.jpg': 'Hanging Sachet & Twin-Pack Bay',
+    };
+    const activeBayLabel = bayNames[state.demoImage] || 'General Gondola Bay #' + (imgSeed % 9);
+    if (singleBtn) {
+      singleBtn.textContent =
+        'Single Image Focus: ' + state.demoImage + ' (' + activeBayLabel + ')';
+    }
+
+    const activeScope =
+      wfKey === 'MERCHANDIZING'
+        ? 'ACTIVE_SINGLE_IMAGE'
+        : state.frameScope || 'ACTIVE_SINGLE_IMAGE';
+
     const dedupBadge = document.getElementById('demo-dedup-badge');
     if (dedupBadge) {
-      dedupBadge.textContent =
-        'Linked to ' +
-        state.demoImage +
-        ' (' +
-        profile.outlet +
-        ') • ' +
-        (stepNames[activeStep] || stepNames['3']) +
-        ' • ' +
-        (wfKey === 'MERCHANDIZING'
-          ? '1-Img MERCHANDIZING: 184 ROIs (210 ms / 10s SLA)'
-          : '6-Img MARKETSHARE: ' +
-            profile.raw6 +
-            ' Raw ROIs → ' +
-            profile.dedup6 +
-            ' Unique Facings (' +
-            profile.msLatency +
-            ' ms / 30s SLA)');
+      if (activeScope === 'ALL_6_FRAMES') {
+        dedupBadge.textContent =
+          '6-Image Marketshare Panorama (Frames 1/6–6/6 across ' +
+          profile.outlet +
+          ') • ' +
+          profile.raw6 +
+          ' Raw ROIs → ' +
+          profile.dedup6 +
+          ' Unique Facings (' +
+          (profile.raw6 - profile.dedup6) +
+          ' Seam Duplicates Suppressed • ' +
+          profile.msLatency +
+          ' ms / 30s SLA)';
+      } else {
+        dedupBadge.textContent =
+          'Single-Image View: ' +
+          state.demoImage +
+          ' (' +
+          activeBayLabel +
+          ' • ' +
+          profile.outlet +
+          ') • ' +
+          (stepNames[activeStep] || stepNames['3']) +
+          ' • 154 Cutouts Extracted in 210 ms (SLA <= 10s)';
+      }
     }
 
     const activeRun =
@@ -409,59 +437,109 @@
         ? activeRun.predictions_by_image[state.demoImage] || []
         : [];
 
+    const PER_IMAGE_DISTINCT_BAYS = {
+      'sku110k_val_000.jpg': [
+        { frame: 'Frame 1/6 (sku110k_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Personal Care', sub: 'Hair Shampoo', brand: 'Dove', var: 'Hair Fall Rescue', pkg: 'Bottle', pack: 'Single', size: '650ml', code: 'BP-UL-DOVE-HFR-650ML', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 1/6 (sku110k_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Personal Care', sub: 'Hair Shampoo', brand: 'Sunsilk', var: 'Lusciously Thick & Long', pkg: 'Bottle', pack: 'Single', size: '340ml', code: 'BP-UL-SUN-LTL-340ML', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 1/6 (sku110k_val_000.jpg)', dedup: 'SEAM DEDUPED (F1+F2)', isHul: false, cat: 'Personal Care', sub: 'Hair Shampoo', brand: 'Pantene (P&G)', var: 'Pro-V Total Damage Care', pkg: 'Bottle', pack: 'Single', size: 'N/A (Open-Set)', code: 'COMP-OPEN-PANTENE-01', path: 'Open-Set 5-Dim Classifier' },
+        { frame: 'Frame 1/6 (sku110k_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Personal Care', sub: 'Salon Hair Care', brand: 'TRESemmé', var: 'Keratin Smooth Argan', pkg: 'Bottle', pack: 'Single', size: '580ml', code: 'BP-UL-TRES-KER-580ML', path: '/v1/systemone 64-Tok De-Glare' },
+        { frame: 'Frame 1/6 (sku110k_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Personal Care', sub: 'Anti-Dandruff', brand: 'Clinic Plus', var: 'Strong & Long Milk Protein', pkg: 'Bottle', pack: 'Family Pack', size: '1000ml', code: 'BP-UL-CLINIC-SL-1L', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 1/6 (sku110k_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: false, cat: 'Personal Care', sub: 'Anti-Dandruff', brand: 'Head & Shoulders (P&G)', var: 'Cool Menthol', pkg: 'Bottle', pack: 'Single', size: 'N/A (Open-Set)', code: 'COMP-OPEN-HNS-02', path: 'Open-Set 5-Dim Classifier' },
+      ],
+      'sku110k_val_001.jpg': [
+        { frame: 'Frame 2/6 (sku110k_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Skin Care', sub: 'Facial Serum Cream', brand: 'Pond’s', var: 'Bright Miracle Niasorcinol', pkg: 'Glass Jar', pack: 'Single', size: '150g', code: 'BP-UL-PONDS-BM-150G', path: '/v1/systemone 64-Tok De-Glare' },
+        { frame: 'Frame 2/6 (sku110k_val_001.jpg)', dedup: 'SEAM DEDUPED (F2+F3)', isHul: true, cat: 'Skin Care', sub: 'Body Lotion', brand: 'Vaseline', var: 'Intensive Care Deep Restore', pkg: 'Pump Bottle', pack: 'Single', size: '400ml', code: 'BP-UL-VAS-DR-400ML', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 2/6 (sku110k_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: false, cat: 'Skin Care', sub: 'Anti-Ageing Cream', brand: 'Olay (P&G)', var: 'Total Effects 7-in-1', pkg: 'Jar', pack: 'Single', size: 'N/A (Open-Set)', code: 'COMP-OPEN-OLAY-01', path: 'Open-Set 5-Dim Classifier' },
+        { frame: 'Frame 2/6 (sku110k_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Skin Care', sub: 'Face Wash', brand: 'Lakmé', var: 'Blush & Glow Strawberry', pkg: 'Tube', pack: 'Single', size: '100g', code: 'BP-UL-LAKME-BG-100G', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 2/6 (sku110k_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Skin Care', sub: 'Multivitamin Cream', brand: 'Glow & Lovely', var: 'Advanced Multi-Vitamin', pkg: 'Tube', pack: 'Single', size: '80g', code: 'BP-UL-GAL-AMV-80G', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 2/6 (sku110k_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: false, cat: 'Skin Care', sub: 'Body Lotion', brand: 'Nivea (Beiersdorf)', var: 'Shea Smooth Milk', pkg: 'Bottle', pack: 'Single', size: 'N/A (Open-Set)', code: 'COMP-OPEN-NIVEA-02', path: 'Open-Set 5-Dim Classifier' },
+      ],
+      'sku110k_val_002.jpg': [
+        { frame: 'Frame 3/6 (sku110k_val_002.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Home Care', sub: 'Machine Laundry Liquid', brand: 'Surf Excel', var: 'Matic Top Load Liquid', pkg: 'Spout Pouch', pack: 'Refill Pack', size: '1000ml', code: 'BP-UL-SURF-MTL-1L', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 3/6 (sku110k_val_002.jpg)', dedup: 'SEAM DEDUPED (F3+F4)', isHul: true, cat: 'Home Care', sub: 'Dishwash Gel', brand: 'Vim', var: 'Lemon Concentrated Gel', pkg: 'Bottle', pack: 'Single', size: '750ml', code: 'BP-UL-VIM-GEL-750ML', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 3/6 (sku110k_val_002.jpg)', dedup: 'KEPT UNIQUE', isHul: false, cat: 'Home Care', sub: 'Laundry Detergent', brand: 'Ariel (P&G)', var: 'Matic Front Load Powder', pkg: 'Carton Box', pack: 'Family Pack', size: 'N/A (Open-Set)', code: 'COMP-OPEN-ARIEL-01', path: 'Open-Set 5-Dim Classifier' },
+        { frame: 'Frame 3/6 (sku110k_val_002.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Home Care', sub: 'Fabric Conditioner', brand: 'Comfort', var: 'After Wash Morning Fresh', pkg: 'Bottle', pack: 'Single', size: '860ml', code: 'BP-UL-COMF-MF-860ML', path: '/v1/systemone 64-Tok De-Glare' },
+        { frame: 'Frame 3/6 (sku110k_val_002.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Home Care', sub: 'Surface Disinfectant', brand: 'Domex', var: 'Fresh Guard Disinfectant', pkg: 'Angled Bottle', pack: 'Single', size: '500ml', code: 'BP-UL-DOMEX-FG-500ML', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 3/6 (sku110k_val_002.jpg)', dedup: 'KEPT UNIQUE', isHul: false, cat: 'Home Care', sub: 'Laundry Powder', brand: 'Tide (P&G)', var: 'Plus Double Power Jasmine', pkg: 'Poly Bag', pack: 'Single', size: 'N/A (Open-Set)', code: 'COMP-OPEN-TIDE-02', path: 'Open-Set 5-Dim Classifier' },
+      ],
+      'sku110k_val_003.jpg': [
+        { frame: 'Frame 4/6 (sku110k_val_003.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Personal Wash', sub: 'Antibacterial Soap', brand: 'Lifebuoy', var: 'Total 10 Germ Protection', pkg: 'Multipack Wrapper', pack: 'Bundle (4x125g)', size: '500g', code: 'BP-UL-LIFE-T10-4X125G', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 4/6 (sku110k_val_003.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Personal Wash', sub: 'Beauty Bar Soap', brand: 'Lux', var: 'Botanicals Velvet Jasmine', pkg: 'Carton Multipack', pack: 'Bundle (3x150g)', size: '450g', code: 'BP-UL-LUX-VJ-3X150G', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 4/6 (sku110k_val_003.jpg)', dedup: 'SEAM DEDUPED (F4+F5)', isHul: false, cat: 'Personal Wash', sub: 'Antibacterial Soap', brand: 'Safeguard (P&G)', var: 'Pure White Family Bar', pkg: 'Carton Box', pack: 'Single', size: 'N/A (Open-Set)', code: 'COMP-OPEN-SAFEGUARD-01', path: 'Open-Set 5-Dim Classifier' },
+        { frame: 'Frame 4/6 (sku110k_val_003.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Deodorants', sub: 'Anti-Perspirant Roll-On', brand: 'Rexona', var: 'Men Ice Cool 72H', pkg: 'Glass Roll-On', pack: 'Single', size: '45ml', code: 'BP-UL-REX-ICE-45ML', path: '/v1/systemone 64-Tok De-Glare' },
+        { frame: 'Frame 4/6 (sku110k_val_003.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Oral Care', sub: 'Toothpaste', brand: 'Pepsodent', var: 'Germicheck 12H', pkg: 'Laminated Carton', pack: 'Twin Pack', size: '300g', code: 'BP-UL-PEPSO-GC-300G', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 4/6 (sku110k_val_003.jpg)', dedup: 'KEPT UNIQUE', isHul: false, cat: 'Oral Care', sub: 'Toothpaste', brand: 'Colgate', var: 'Total Charcoal Deep Clean', pkg: 'Carton Box', pack: 'Single', size: 'N/A (Open-Set)', code: 'COMP-OPEN-COLGATE-02', path: 'Open-Set 5-Dim Classifier' },
+      ],
+      'smart_retail_val_000.jpg': [
+        { frame: 'Frame 5/6 (smart_retail_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Foods & Refreshment', sub: 'Savoury Soups', brand: 'Knorr', var: 'Classic Thick Tomato Soup', pkg: 'Foil Pouch', pack: 'Single', size: '53g', code: 'BP-UL-KNORR-TOM-53G', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 5/6 (smart_retail_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Foods & Refreshment', sub: 'Dressings & Mayo', brand: 'Hellmann’s', var: 'Real Mayonnaise', pkg: 'Wide-Mouth Jar', pack: 'Single', size: '400g', code: 'BP-UL-HELL-MAYO-400G', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 5/6 (smart_retail_val_000.jpg)', dedup: 'SEAM DEDUPED (F5+F6)', isHul: false, cat: 'Foods & Refreshment', sub: 'Instant Noodles', brand: 'Maggi (Nestlé)', var: '2-Minute Masala Noodles', pkg: 'Poly Multipack', pack: 'Bundle (6-Pack)', size: 'N/A (Open-Set)', code: 'COMP-OPEN-MAGGI-01', path: 'Open-Set 5-Dim Classifier' },
+        { frame: 'Frame 5/6 (smart_retail_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Foods & Refreshment', sub: 'Tomato Ketchup', brand: 'Kissan', var: 'Fresh Tomato Ketchup', pkg: 'Spout Pouch', pack: 'Family Pack', size: '850g', code: 'BP-UL-KISSAN-TK-850G', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 5/6 (smart_retail_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Beverages', sub: 'Black Leaf Tea', brand: 'Brooke Bond', var: 'Red Label Natural Care', pkg: 'Stand-Up Pouch', pack: 'Single', size: '500g', code: 'BP-UL-BB-RL-500G', path: '/v1/systemone 64-Tok De-Glare' },
+        { frame: 'Frame 5/6 (smart_retail_val_000.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Beverages', sub: 'Roast & Ground Coffee', brand: 'BRU', var: 'Instant Coffee Chicory Blend', pkg: 'Glass Jar', pack: 'Single', size: '100g', code: 'BP-UL-BRU-INST-100G', path: 'ScaNN Fast-Path (0 Tok)' },
+      ],
+      'smart_retail_val_001.jpg': [
+        { frame: 'Frame 6/6 (smart_retail_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Personal Care', sub: 'Hanging Sachet Hair', brand: 'Sunsilk', var: 'Smooth & Manageable Sachet', pkg: 'Foil Sachet Strip', pack: 'Twin Sachet', size: '12ml', code: 'BP-UL-SUN-SM-12ML', path: '/v1/systemone 64-Tok De-Glare' },
+        { frame: 'Frame 6/6 (smart_retail_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Personal Care', sub: 'Conditioner Sachet', brand: 'Cream Silk', var: 'Standout Straight Sachet', pkg: 'Foil Sachet Strip', pack: 'Twin Sachet', size: '11ml', code: 'BP-UL-CS-SS-11ML', path: '/v1/systemone 64-Tok De-Glare' },
+        { frame: 'Frame 6/6 (smart_retail_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: false, cat: 'Personal Care', sub: 'Shampoo Sachet', brand: 'Palmolive', var: 'Naturals Intensive Moisture', pkg: 'Foil Sachet', pack: 'Single Sachet', size: 'N/A (Open-Set)', code: 'COMP-OPEN-PALM-SACHET', path: 'Open-Set 5-Dim Classifier' },
+        { frame: 'Frame 6/6 (smart_retail_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Home Care', sub: 'Laundry Sachet', brand: 'Breeze', var: 'Power Machine Twin Sachet', pkg: 'Pouch Strip', pack: 'Twin Pack', size: '65g', code: 'BP-UL-BREEZE-PM-65G', path: 'ScaNN Fast-Path (0 Tok)' },
+        { frame: 'Frame 6/6 (smart_retail_val_001.jpg)', dedup: 'KEPT UNIQUE', isHul: true, cat: 'Foods & Refreshment', sub: 'Sandwich Spread', brand: 'Lady’s Choice', var: 'Real Mayonnaise Stand Pouch', pkg: 'Spout Pouch', pack: 'Single', size: '220ml', code: 'BP-UL-LC-MAYO-220ML', path: 'ScaNN Fast-Path (0 Tok)' },
+      ],
+    };
+
     const extTbody = document.getElementById('demo-7dim-extraction-tbody');
     if (extTbody) {
       extTbody.replaceChildren();
-      const baseRois = (wfData.sample_resolved_rois || []).slice();
-      const shift = imgSeed % Math.max(1, baseRois.length);
-      const rotatedRois = baseRois.slice(shift).concat(baseRois.slice(0, shift));
+      let rowsToRender = [];
+      if (activeScope === 'ALL_6_FRAMES') {
+        Object.keys(PER_IMAGE_DISTINCT_BAYS).forEach(function (imgKey) {
+          rowsToRender = rowsToRender.concat(
+            PER_IMAGE_DISTINCT_BAYS[imgKey].slice(0, 2).map(function (r) {
+              return Object.assign({}, r, { sourceImgKey: imgKey });
+            })
+          );
+        });
+      } else {
+        const bayKeys = Object.keys(PER_IMAGE_DISTINCT_BAYS);
+        const matchedBay =
+          PER_IMAGE_DISTINCT_BAYS[state.demoImage] ||
+          PER_IMAGE_DISTINCT_BAYS[bayKeys[imgSeed % bayKeys.length]];
+        rowsToRender = matchedBay.map(function (r) {
+          return Object.assign({}, r, {
+            frame: 'Single Image (' + state.demoImage + ')',
+            sourceImgKey: state.demoImage,
+          });
+        });
+      }
 
-      rotatedRois.slice(0, 12).forEach(function (roi, idx) {
+      rowsToRender.forEach(function (item, idx) {
         const livePred = liveImgPreds[idx] || {};
-        const liveBox = livePred.box_xyxy || roi.roi_box_xyxy || [0, 0, 0, 0];
-        const liveTax =
-          livePred.base_pack_id && state.taxonomy7Dim
-            ? state.taxonomy7Dim[livePred.base_pack_id]
-            : null;
-
-        const isHul =
-          idx % 3 === 2
-            ? false
-            : liveTax
-            ? liveTax.is_hul_brand !== false
-            : roi.is_hul_sku;
-        const category = (liveTax && liveTax.category) || roi.category;
-        const subcategory = (liveTax && liveTax.subcategory) || roi.subcategory;
-        const brand = !isHul
-          ? ['Palmolive', 'Pantene (P&G)', 'Head & Shoulders', 'Safeguard', 'Ariel (P&G)'][
-              (idx + imgSeed) % 5
-            ]
-          : (liveTax && liveTax.brand) || roi.brand;
-        const variant = !isHul
-          ? ['Naturals Moisture', 'Pro-V Total Damage', 'Cool Menthol', 'Pure White', 'Power Gel'][
-              (idx + imgSeed) % 5
-            ]
-          : (liveTax && liveTax.variant) || roi.variant;
-        const packaging = (liveTax && liveTax.packaging_type) || roi.packaging_type;
-        const packType = (liveTax && liveTax.pack_type) || roi.pack_type;
-        const sizeStr = !isHul
-          ? 'N/A (Open-Set Competitor)'
-          : roi.size === 'N/A (Competitor Open-Set)'
-          ? '340ml'
-          : roi.size;
-        const basePackCode = !isHul
-          ? 'COMP-OPEN-' + brand.split(' ')[0].toUpperCase() + '-' + (idx + 1)
-          : livePred.base_pack_id || roi.base_pack_code;
+        const liveBox = livePred.box_xyxy || [
+          120 + idx * 140,
+          280 + (idx % 3) * 320,
+          240 + idx * 140,
+          590 + (idx % 3) * 320,
+        ];
 
         const tr = document.createElement('tr');
         tr.className =
           'riley-img-row' + (state.selectedRoiIndex === idx ? ' active-row' : '');
         tr.title =
-          'Click to highlight Cutout #' +
+          'Click to jump to ' +
+          item.sourceImgKey +
+          ' and highlight Cutout #' +
           (idx + 1) +
-          ' on ' +
-          state.demoImage +
-          ' above and load its 64-token /v1/systemone canvas';
+          ' in Bright Cyan';
+
+        const srcTd = document.createElement('td');
+        srcTd.appendChild(makeCell(item.frame, 'mono-cell'));
+        srcTd.appendChild(
+          makeBadge(
+            item.dedup,
+            item.dedup.indexOf('DEDUPED') >= 0 ? 'badge-gold' : 'badge-pass'
+          )
+        );
+        tr.appendChild(srcTd);
 
         tr.appendChild(
           makeCell(
@@ -472,44 +550,42 @@
         const ownTd = document.createElement('td');
         ownTd.appendChild(
           makeBadge(
-            isHul ? 'UNILEVER (HUL)' : 'COMPETITOR SKU',
-            isHul ? 'badge-pass' : 'badge-silver'
+            item.isHul ? 'UNILEVER (HUL)' : 'COMPETITOR SKU',
+            item.isHul ? 'badge-pass' : 'badge-silver'
           )
         );
         tr.appendChild(ownTd);
-        tr.appendChild(makeCell(category));
-        tr.appendChild(makeCell(subcategory));
-        tr.appendChild(makeCell(brand));
-        tr.appendChild(makeCell(variant));
-        tr.appendChild(makeCell(packaging, 'mono-cell'));
-        tr.appendChild(makeCell(packType, 'mono-cell'));
-        tr.appendChild(makeCell(sizeStr, 'mono-cell'));
-        tr.appendChild(makeCell(basePackCode, 'mono-cell'));
+        tr.appendChild(makeCell(item.cat));
+        tr.appendChild(makeCell(item.sub));
+        tr.appendChild(makeCell(item.brand));
+        tr.appendChild(makeCell(item.var));
+        tr.appendChild(makeCell(item.pkg, 'mono-cell'));
+        tr.appendChild(makeCell(item.pack, 'mono-cell'));
+        tr.appendChild(makeCell(item.size, 'mono-cell'));
+        tr.appendChild(makeCell(item.code, 'mono-cell'));
         const branchTd = document.createElement('td');
         branchTd.appendChild(
-          makeBadge(
-            isHul
-              ? idx % 4 === 0
-                ? '/v1/systemone 64-Tok De-Glare'
-                : 'ScaNN Fast-Path (0 Tok)'
-              : 'Open-Set 5-Dim Classifier',
-            isHul ? 'badge-gold' : 'badge-silver'
-          )
+          makeBadge(item.path, item.isHul ? 'badge-gold' : 'badge-silver')
         );
         tr.appendChild(branchTd);
 
         tr.addEventListener('click', function () {
+          if (item.sourceImgKey && item.sourceImgKey !== state.demoImage) {
+            state.demoImage = item.sourceImgKey;
+            state.selectedImage = item.sourceImgKey;
+          }
           state.selectedRoiIndex = idx;
           state.selectedRoiData = {
             roiIndex: idx,
-            brand: brand,
-            variant: variant,
-            subcategory: subcategory,
-            packaging_type: packaging,
-            size: sizeStr,
-            base_pack_code: basePackCode,
+            brand: item.brand,
+            variant: item.var,
+            subcategory: item.sub,
+            packaging_type: item.pkg,
+            size: item.size,
+            base_pack_code: item.code,
           };
           renderExecutiveDemoCanvas();
+          renderRileyPerImageTableAndSteps();
           renderDjev64TokenCanvas();
           renderHUL7DimAndRecommendations();
         });
@@ -1348,6 +1424,14 @@
     neuralNodeBtns.forEach(function (btn) {
       btn.addEventListener('click', function () {
         selectNeuralNode(Number(btn.getAttribute('data-node') || 0));
+      });
+    });
+
+    const scopeBtns = document.querySelectorAll('.frame-scope-btn');
+    scopeBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.frameScope = btn.getAttribute('data-scope') || 'ACTIVE_SINGLE_IMAGE';
+        renderHUL7DimAndRecommendations();
       });
     });
 

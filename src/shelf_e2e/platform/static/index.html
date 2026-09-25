@@ -316,14 +316,27 @@
           <div class="section-header">
             <div>
               <h2 id="demo-7dim-matrix-title">Live Image Extraction Matrix — Separated by HUL Stage 4 (`Classify`: 5 Visual Dims) vs. Stage 5 (`Derive`: Pack Size + ERP Base Pack Code)</h2>
-              <span class="section-subtitle" id="demo-7dim-matrix-subtitle">Click any product row below to highlight its exact physical bottle on the store shelf photo above and inspect its 64-token neural canvas.</span>
+              <span class="section-subtitle" id="demo-7dim-matrix-subtitle">Toggle between <strong>All 6 Images in Request (`Marketshare` Panorama Stitch)</strong> or <strong>Single Image (`Merchandizing` / Bay Focus)</strong>. Click any row to jump to its frame &amp; highlight its bottle in <strong>Cyan</strong>.</span>
             </div>
             <span class="badge badge-pass" id="demo-dedup-badge">Linked to sku110k_val_000.jpg</span>
           </div>
+
+          <!-- MULTI-IMAGE (6-FRAME MARKETSHARE PANORAMA) VS SINGLE-IMAGE SWITCHER BAR -->
+          <div id="demo-frame-filter-bar" style="display: flex; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.85rem; padding: 0.55rem 0.75rem; background: #f1f5f9; border-radius: 6px; align-items: center;">
+            <strong style="font-size: 0.75rem; color: #0f172a; margin-right: 0.3rem;">Extraction Scope:</strong>
+            <button type="button" class="badge badge-gold frame-scope-btn" data-scope="ALL_6_FRAMES" style="cursor:pointer; border:none; padding: 0.32rem 0.65rem;">
+              All 6 Images in Request (Panorama Stitch: Frames 1/6–6/6 • 902 Unique Facings)
+            </button>
+            <button type="button" class="badge badge-pass frame-scope-btn" data-scope="ACTIVE_SINGLE_IMAGE" id="btn-scope-single-img" style="cursor:pointer; border:none; padding: 0.32rem 0.65rem;">
+              Single Image Focus: sku110k_val_000.jpg (Hair Care Bay)
+            </button>
+          </div>
+
           <div class="table-wrapper">
             <table class="arena-table" id="demo-7dim-extraction-table">
               <thead>
                 <tr>
+                  <th title="Which image in the 6-image request (or single-image audit) this product was extracted from">Source Image &amp; Seam Dedup</th>
                   <th title="Individual bottle/pack cutout coordinates [x1, y1, x2, y2] on the shelf photo">Shelf Cutout (Crop ROI)</th>
                   <th title="Unilever (HUL) owned brand vs Competitor (P&G, Colgate, etc.)">Owner (HUL vs Competitor)</th>
                   <th title="Stage 4 Visual Classification #1">[Classify 1] Category</th>
