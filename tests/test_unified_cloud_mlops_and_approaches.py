@@ -21,6 +21,7 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+import utils  # Registers _local_shims at the end of sys.path if Pillow/OTel are not installed
 from PIL import Image
 
 import approaches
@@ -70,6 +71,9 @@ class UnifiedCloudArchitectureTests(unittest.TestCase):
             "tiered_hybrid_scann",
             "djev_systemone_sister_shade",
             "hul_8stage_gemini38_hybrid",
+            "track_a_cascading_vit",
+            "track_e_open_vocab",
+            "track_f_sam2_scann",
         }
         self.assertTrue(expected.issubset(set(reg.keys())))
 

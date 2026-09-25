@@ -27,7 +27,7 @@ from utils import dataset
 from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "configs", "src"]
+SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "configs", "data/splits", "results", "src"]
 
 
 def _session() -> AuthorizedSession:
