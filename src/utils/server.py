@@ -81,6 +81,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(_build_cx_storyboard(self.results_dir))
             if parts == ["api", "v1", "eng-workbench"]:
                 return self._json(_build_eng_workbench(self.results_dir))
+            if parts[:3] == ["api", "v1", "sales-edge-mt-pc"]:
+                payload = _build_sales_edge_mt_pc()
+                if len(parts) == 4 and parts[3] in payload["backend_pipelines"]:
+                    return self._json(payload["backend_pipelines"][parts[3]])
+                return self._json(payload)
             if parts[:2] == ["api", "runs"] and len(parts) == 3:
                 summary, images = runner.load_run(parts[2], self.results_dir)
                 return self._json({"summary": summary,
@@ -164,6 +169,20 @@ def _build_eng_workbench(results_dir: Path) -> dict:
             "train_test_gap_f2": 0.005,
         }),
     }
+
+
+def _build_sales_edge_mt_pc() -> dict:
+    """Return the unified Sales EDGE - MT PC 4-Pipeline + GT/Shikkar + 13-Model replacement payload."""
+    from utils.hul_domain import compute_hul_7dim_and_gondola_summary
+
+    summary = compute_hul_7dim_and_gondola_summary(
+        total_boxes=139,
+        scann_count=124,
+        djev_sister_shade_count=12,
+        gemini_open_set_count=3,
+        approach_name="hul_8stage_gemini38_hybrid",
+    )
+    return summary["sales_edge_mt_pc_applications"]
 
 
 def serve(host: str = "127.0.0.1", port: int = 8080, results_dir: Path = runner.RESULTS_DIR,
