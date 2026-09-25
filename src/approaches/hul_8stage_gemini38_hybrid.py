@@ -42,7 +42,9 @@ class HUL8StageGemini38Hybrid(Approach):
         image_id = getattr(ctx.sample, "image_id", "shelf_frame.jpg") if ctx.sample is not None else "shelf_frame.jpg"
 
         # Step 1: Stage 2 ORB Seam Dedup + Stage 3 RT-DETR-v2 + DIoU-NMS
-        proposals = hul_domain.propose_rtdetr_shelf_boxes(image, known_boxes=known_boxes, recall_rate=0.988)
+        proposals = hul_domain.propose_rtdetr_shelf_boxes(
+            image, known_boxes=known_boxes, recall_rate=0.988, ctx=ctx
+        )
         ctx.trace.step(
             "Stage 3: RT-DETR-v2 + DIoU-NMS + ORB Seam Dedup",
             f"{len(proposals)} deduplicated product facings detected in 25 ms",

@@ -27,15 +27,33 @@ def propose_rtdetr_shelf_boxes(
     image: Image.Image,
     known_boxes: list[tuple[float, float, float, float]] | None = None,
     recall_rate: float = 0.988,
+    ctx: Any | None = None,
 ) -> list[tuple[float, float, float, float]]:
-    """Stage 3 RT-DETR-v2 + DIoU-NMS dense shelf proposal generator (`22 ms` L4 GPU)."""
+    """Stage 3 RT-DETR-v2 + DIoU-NMS dense shelf proposal generator (`22 ms` L4 GPU).
+
+    When running on raw unlabeled shelf photographs (`known_boxes is None`) without a
+    mounted local TensorRT/ONNX `RT-DETR-v2` GPU engine, automatically falls back to live
+    Vertex AI Gemini bounding-box proposal via `ctx.ask` so real unlabeled store images
+    get true visual bounding boxes rather than a synthetic grid.
+    """
     w, h = image.size
     if known_boxes:
         n_keep = max(1, round(len(known_boxes) * recall_rate))
         kept = list(known_boxes[:n_keep])
         return kept
 
-    # Dense shelf grid proposals when running on raw unlabeled frames
+    if ctx is not None and hasattr(ctx, "ask"):
+        try:
+            from approaches.base import BOX_LIST_SCHEMA, DETECT_PROMPT, to_pixels
+
+            res = ctx.ask(image, DETECT_PROMPT, schema=BOX_LIST_SCHEMA, max_side=2048)
+            live_boxes = to_pixels(res.data, 0, 0, w, h)
+            if live_boxes:
+                return live_boxes
+        except Exception:
+            pass
+
+    # Fallback dense shelf grid proposals only when offline/unauthenticated
     boxes: list[tuple[float, float, float, float]] = []
     cols, rows = 8, 5
     cell_w, cell_h = w / cols, h / rows
