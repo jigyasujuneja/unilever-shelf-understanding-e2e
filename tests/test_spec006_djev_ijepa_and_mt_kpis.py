@@ -192,6 +192,73 @@ class TestSpec006DjevIjepaAndMTKPIs(unittest.TestCase):
         self.assertTrue(merch_res.within_sla)
         self.assertLessEqual(merch_res.actual_total_ms, 10000.0)
 
+    def test_sister_shade_disambiguator_rescues_lakme_cc_almond_and_honey_from_bronze_collapse(
+        self,
+    ) -> None:
+        from shelf_e2e.sister_shade_disambiguator import (
+            SisterCandidateProfile,
+            resolve_sister_shade_and_low_f2,
+        )
+
+        candidates = [
+            SisterCandidateProfile(
+                canonical_variant_id="HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Bronze",
+                brand="Lakme",
+                product_line_cluster="Lakme_9to5_CC",
+                shade_or_active_token="Bronze",
+                discriminative_sub_roi_rel=(0.15, 0.62, 0.85, 0.88),
+                reference_cielab_swatch=(48.0, 14.5, 22.0),
+                training_prior_count=314,
+                cap_orientation="CAP_DOWN_TUBE",
+            ),
+            SisterCandidateProfile(
+                canonical_variant_id="HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Almond",
+                brand="Lakme",
+                product_line_cluster="Lakme_9to5_CC",
+                shade_or_active_token="Almond",
+                discriminative_sub_roi_rel=(0.15, 0.62, 0.85, 0.88),
+                reference_cielab_swatch=(72.0, 7.2, 16.5),
+                training_prior_count=68,
+                cap_orientation="CAP_DOWN_TUBE",
+            ),
+            SisterCandidateProfile(
+                canonical_variant_id="HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Honey",
+                brand="Lakme",
+                product_line_cluster="Lakme_9to5_CC",
+                shade_or_active_token="Honey",
+                discriminative_sub_roi_rel=(0.15, 0.62, 0.85, 0.88),
+                reference_cielab_swatch=(64.0, 10.5, 26.0),
+                training_prior_count=77,
+                cap_orientation="CAP_DOWN_TUBE",
+            ),
+        ]
+        # Raw global ViT embeddings are 99.4% identical across sister tubes
+        raw_scores = {
+            "HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Bronze": 0.942,
+            "HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Almond": 0.940,
+            "HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Honey": 0.939,
+        }
+        res = resolve_sister_shade_and_low_f2(
+            full_box_xyxy=(100, 200, 240, 520),
+            candidates=candidates,
+            raw_cosine_scores=raw_scores,
+            observed_sub_roi_lab=(71.5, 7.5, 16.2),
+            observed_ocr_shade_hint="Almond",
+            observed_cap_orientation="CAP_DOWN_TUBE",
+        )
+        # Baseline collapses into CC_Bronze due to majority prior + global embedding tie
+        self.assertEqual(
+            res.baseline_winner_id,
+            "HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Bronze",
+        )
+        # 5-Stage Sister-Shade Disambiguator correctly recovers CC_Almond
+        self.assertEqual(
+            res.resolved_variant_id,
+            "HUL__Skin__Skin_Lightening__Lakme__9_To_5_CC_Almond",
+        )
+        self.assertEqual(res.systemone_pinned_tokens_pct, 89.1)
+
 
 if __name__ == "__main__":
     unittest.main()
+
