@@ -1,64 +1,71 @@
 {
   "images": 50,
-  "errors": 0,
-  "tp": 4195,
-  "fp": 580,
-  "fn": 2959,
-  "precision": 0.8785,
-  "recall": 0.5864,
-  "f2": 0.6282,
-  "accuracy": 0.5424,
-  "p50_latency_s": 19.431,
-  "p95_latency_s": 34.711,
-  "p99_latency_s": 38.152,
-  "cost_per_image_usd": 0.014107676000000001,
+  "errors": 1,
+  "tp": 4979,
+  "fp": 823,
+  "fn": 2175,
+  "precision": 0.8582,
+  "recall": 0.696,
+  "f2": 0.7233,
+  "accuracy": 0.6242,
+  "p50_latency_s": 32.358,
+  "p95_latency_s": 107.127,
+  "p99_latency_s": 110.898,
+  "cost_per_image_usd": 0.0212638,
   "tokens": {
-    "input_tokens": 67696,
-    "output_tokens": 171292,
-    "thinking_tokens": 0,
-    "calls": 50,
+    "input_tokens": 248777,
+    "output_tokens": 225693,
+    "thinking_tokens": 1726,
+    "calls": 196,
     "traffic": {
-      "standard": 50
+      "standard": 196
     },
     "buckets": {
-      "standard/output": 171292,
-      "standard/text_input": 14100,
-      "standard/image_input": 53596
+      "standard/output": 227419,
+      "standard/text_input": 39837,
+      "standard/image_input": 208940
     }
   },
-  "run_id": "0924-220442-single_pass-gemini-3.8-flash",
-  "approach": "single_pass",
+  "run_id": "0924-231554-detect_classify-gemini-3.8-flash",
+  "approach": "detect_classify",
   "model": "gemini-3.8-flash",
   "tier": "standard",
   "traffic": {
-    "standard": 50
+    "standard": 196
   },
   "priority_served": null,
-  "architecture": "Gemini, one call detects and classifies every product [gemini-3.8-flash]",
+  "architecture": "Gemini, pass 1 detects boxes, pass 2 classifies each box [gemini-3.8-flash]",
   "steps": [
-    "Downscale the image (longest side 2048 px)",
-    "One Gemini call returns every product box with its class",
-    "Map boxes back to original pixels, drop any labelled not_a_product"
+    "Pass 1: one Gemini call on the full image returns every product box",
+    "Pass 2: crop each box onto numbered contact sheets, Gemini labels every crop",
+    "Drop boxes labelled not_a_product"
   ],
   "owner": "rgavigan",
   "split": "test",
   "limit": 50,
   "seed": 0,
   "workers": 4,
-  "created_at": "2026-09-24T22:04:42+00:00",
+  "created_at": "2026-09-24T23:15:54+00:00",
   "environment": {
     "platform": "cloud-run",
     "region": "us-central1",
     "job": "shelf-bench",
-    "execution": "shelf-bench-sf5kk",
-    "task_index": 0,
+    "execution": "shelf-bench-5pw99",
+    "task_index": 2,
     "cpu": 2,
     "memory_gib": 4
   },
-  "wall_time_s": 269.5,
+  "telemetry": {
+    "trace_id": "48e1d493bedf2cb78750df923c754ed3",
+    "span_id": "a27c01b14c18c897",
+    "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=48e1d493bedf2cb78750df923c754ed3?project=unilever-shelf-understanding",
+    "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Funilever-shelf-understanding%2Ftraces%2F48e1d493bedf2cb78750df923c754ed3%22%20timestamp%3E%3D%222026-09-24T23%3A10%3A56Z%22%20timestamp%3C%3D%222026-09-25T23%3A15%3A56Z%22?project=unilever-shelf-understanding",
+    "task_logs_url": "https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_run_job%22%0Aresource.labels.job_name%3D%22shelf-bench%22%0Alabels.%22run.googleapis.com%2Fexecution_name%22%3D%22shelf-bench-5pw99%22%0Alabels.%22run.googleapis.com%2Ftask_index%22%3D%222%22%0Atimestamp%3E%3D%222026-09-24T23%3A10%3A56Z%22%20timestamp%3C%3D%222026-09-25T23%3A15%3A56Z%22?project=unilever-shelf-understanding"
+  },
+  "wall_time_s": 529.7,
   "pricing": {
     "source": "cloudbilling.googleapis.com (Cloud Billing Catalog API, list prices)",
-    "fetched_at": "2026-09-24T22:04:39+00:00",
+    "fetched_at": "2026-09-24T23:15:51+00:00",
     "location": "global",
     "region": "us-central1",
     "usd_to_inr": 95.54500000065303,
@@ -220,17 +227,17 @@
   },
   "usd_to_inr": 95.54500000065303,
   "cost": {
-    "gemini_list_usd_per_image": 0.027724680000000005,
-    "gemini_credit_usd_per_image": 0.013862340000000003,
-    "gemini_net_usd_per_image": 0.013862340000000003,
+    "gemini_list_usd_per_image": 0.04157616,
+    "gemini_credit_usd_per_image": 0.02078808,
+    "gemini_net_usd_per_image": 0.02078808,
     "storage_usd_per_image": 6.08e-07,
     "services_usd_per_image": 0.0,
-    "compute_seconds": 278.1,
+    "compute_seconds": 539.9,
     "compute_source": "Cloud Run task start->completion (Admin API)",
-    "compute_usd_per_image": 0.00024472800000000005,
-    "total_usd_per_image": 0.014107676000000001
+    "compute_usd_per_image": 0.000475112,
+    "total_usd_per_image": 0.0212638
   },
-  "token_cost_per_image_usd": 0.013862340000000003,
+  "token_cost_per_image_usd": 0.02078808,
   "storage_cost_per_image_usd": 6.08e-07,
-  "compute_cost_per_image_usd": 0.00024472800000000005
+  "compute_cost_per_image_usd": 0.000475112
 }

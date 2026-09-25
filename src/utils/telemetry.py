@@ -23,6 +23,7 @@ import logging
 import os
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
 
@@ -60,12 +61,38 @@ def init(config: dict) -> bool:
 
         _project = config.get("gcp", {}).get("project")
         provider = _new_provider()
-        provider.add_span_processor(BatchSpanProcessor(CloudTraceSpanExporter(project_id=_project)))
+        provider.add_span_processor(BatchSpanProcessor(_Loud(CloudTraceSpanExporter(project_id=_project))))
         _handler = _cloud_log_handler(_project)
         LOG.addHandler(_handler)
         LOG.propagate = False  # keep the JSON entries out of the console output
         _provider = provider
     return True
+
+
+class _Loud:
+    """SpanExporter wrapper: say once, clearly, when spans can't be written (usually IAM)."""
+
+    def __init__(self, inner):
+        self.inner, self.warned = inner, False
+
+    def export(self, spans):
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        res = self.inner.export(spans)
+        if res != SpanExportResult.SUCCESS and not self.warned:
+            self.warned = True
+            import sys
+
+            print(f"WARNING: Cloud Trace export failed, so this run's trace will be missing (logs "
+                  f"are unaffected). The credentials need roles/cloudtrace.agent on {_project}; "
+                  f"see the error above.", file=sys.stderr)
+        return res
+
+    def shutdown(self):
+        return self.inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        return getattr(self.inner, "force_flush", lambda *_: True)(timeout_millis)
 
 
 def use_exporter(exporter, project: str | None = "test-project") -> None:
@@ -136,18 +163,29 @@ def _logs_url(project: str, query: str) -> str:
             f"?project={project}")
 
 
+def _window(span: Span) -> str:
+    """Timestamp bounds for a log query. Logs Explorer otherwise searches only the last hour
+    (and the API pages through everything), so links to older runs would show nothing."""
+    ns = getattr(span, "start_time", None)
+    t0 = datetime.fromtimestamp(ns / 1e9, timezone.utc) if ns else datetime.now(timezone.utc)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    return (f'timestamp>="{(t0 - timedelta(minutes=5)).strftime(fmt)}" '
+            f'timestamp<="{(t0 + timedelta(days=1)).strftime(fmt)}"')
+
+
 def links(span: Span | None, env: dict | None = None, per_span: bool = False) -> dict | None:
     """Where to look in the console. ``per_span`` narrows the logs link to this span only."""
     trace_id, span_id = ids(span)
     if not trace_id or not _project:
         return None
-    q = f'trace="projects/{_project}/traces/{trace_id}"'
+    when = _window(span)
+    q = f'trace="projects/{_project}/traces/{trace_id}" {when}'
     out = {
         "trace_id": trace_id,
         "span_id": span_id,
         "trace_url": f"https://console.cloud.google.com/traces/explorer;traceId={trace_id}"
                      + (f";spanId={span_id}" if per_span else "") + f"?project={_project}",
-        "logs_url": _logs_url(_project, q + (f' AND spanId="{span_id}"' if per_span else "")),
+        "logs_url": _logs_url(_project, q + (f' spanId="{span_id}"' if per_span else "")),
     }
     if env and env.get("platform") == "cloud-run":  # the task's whole stdout / stderr
         out["task_logs_url"] = _logs_url(_project, "\n".join([
@@ -155,6 +193,7 @@ def links(span: Span | None, env: dict | None = None, per_span: bool = False) ->
             f'resource.labels.job_name="{env["job"]}"',
             f'labels."run.googleapis.com/execution_name"="{env["execution"]}"',
             f'labels."run.googleapis.com/task_index"="{env["task_index"]}"',
+            when,
         ]))
     return out
 
