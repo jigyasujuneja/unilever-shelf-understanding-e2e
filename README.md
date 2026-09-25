@@ -5,6 +5,8 @@
 **Standalone v1.0 Reference Archive:** Tag `v1.0-standalone-reference` | Branch `reference/standalone-v1`  
 
 **Documentation Index:**
+* [Doc 1 — Principal FDE Architecture, Business Meaning & End-to-End Request Walkthrough (`docs/DOC1_PRINCIPAL_FDE_ARCHITECTURE_AND_WALKTHROUGH.md`)](docs/DOC1_PRINCIPAL_FDE_ARCHITECTURE_AND_WALKTHROUGH.md)
+* [Doc 2 — Deep-Dive Model Performance Across All KPIs, Causal Ablation & Failure Modes (`docs/DOC2_DEEP_DIVE_MODEL_PERFORMANCE_KPIS_AND_LIMITATIONS.md`)](docs/DOC2_DEEP_DIVE_MODEL_PERFORMANCE_KPIS_AND_LIMITATIONS.md)
 * [End-to-End Developer & Argolis Cloud How-To Guide (`HOW_TO_GUIDE.md`)](HOW_TO_GUIDE.md)
 * [High-Cardinality Variant Classification Deep-Dive (`245` to `10,000+` SKUs) (`reports/HIGH_CARDINALITY_VARIANT_DEEP_DIVE.md`)](reports/HIGH_CARDINALITY_VARIANT_DEEP_DIVE.md)
 * [Google-Style Technical Design Document (`TDD_GOOGLE_DESIGN_DOC.md`)](TDD_GOOGLE_DESIGN_DOC.md)
