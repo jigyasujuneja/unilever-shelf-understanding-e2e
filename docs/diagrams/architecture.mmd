@@ -1,0 +1,49 @@
+flowchart TB
+  classDef local fill:#f1f3f4,stroke:#5f6368,color:#202124
+  classDef gcp fill:#e8f0fe,stroke:#1a73e8,color:#174ea6
+  classDef ai fill:#fce8e6,stroke:#d93025,color:#a50e0e
+  classDef data fill:#e6f4ea,stroke:#188038,color:#0d652d
+  classDef future fill:#fff,stroke:#9aa0a6,color:#5f6368,stroke-dasharray: 5 5
+
+  subgraph DEV["Developer machine"]
+    direction LR
+    CLI["shelf-bench CLI<br/>src/cli.py"]:::local
+    RES[("results/<br/>one folder per run")]:::local
+    UI["Leaderboard UI<br/>src/utils/server.py"]:::local
+    CLI -- "4. pull runs" --> RES --> UI
+  end
+
+  subgraph GCP["GCP project: unilever-shelf-understanding"]
+    direction TB
+    subgraph BUILD["Build"]
+      direction LR
+      CB["Cloud Build"]:::gcp --> AR["Artifact Registry<br/>shelf-bench image"]:::gcp
+    end
+
+    subgraph RUN["Cloud Run (us-central1)"]
+      direction LR
+      T["Job: shelf-bench<br/>one task per approach x tier x model<br/>src/runner.py + src/approaches/"]:::gcp
+      ADMIN["Admin API<br/>real task durations"]:::gcp
+    end
+
+    subgraph SERVICES["Called by every task"]
+      direction LR
+      GEM["Vertex AI Gemini (global)<br/>gemini-3.8-flash<br/>gemini-3.5-flash-lite"]:::ai
+      BILL["Cloud Billing Catalog API<br/>live prices + USD to INR"]:::gcp
+      DS[("Cloud Storage<br/>SKU110K_fixed/ dataset<br/>results/ output")]:::data
+    end
+
+    subgraph RET["Product retrieval (optional)"]
+      direction LR
+      EMB["Vertex AI multimodal<br/>embeddings"]:::future --> ADB[("AlloyDB<br/>pgvector / ScaNN<br/>not provisioned yet")]:::future
+    end
+  end
+
+  CLI -- "1. source tarball" --> CB
+  AR -- "2. image" --> T
+  CLI -- "3. create job + run" --> T
+  CLI -- "5. finalize compute cost" --> ADMIN
+  T -- "detect + classify" --> GEM
+  T -- "prices" --> BILL
+  T -- "read images, write runs" --> DS
+  T -. "retrieval approaches:<br/>utils/embeddings + utils/alloydb" .-> EMB

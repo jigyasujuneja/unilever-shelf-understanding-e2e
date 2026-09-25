@@ -1,29 +1,53 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "unilever-shelf-e2e-benchmark"
-version = "0.1.0"
-description = "End-to-End Retail Shelf Understanding Benchmark & Evaluation Harness (SPEC-001 & SPEC-002)"
+name = "shelf-bench"
+version = "1.0.0"
+description = "Unified Cloud-Native Retail Shelf Intelligence & Evaluation Harness (HUL 8-Stage E2E + SKU-110K shelf-bench on Argolis GCP)"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    { name = "Jigyasu Juneja", email = "jjuneja@google.com" }
+    { name = "Jigyasu Juneja", email = "jjuneja@google.com" },
+    { name = "Riley Zhou", email = "rgavigan@google.com" },
+    { name = "Anil Sener", email = "anilsener@google.com" }
 ]
 dependencies = [
+    "google-cloud-alloydb-connector[pg8000]>=1.4.0",
+    "google-cloud-logging>=3.10.0",
+    "google-cloud-storage>=2.14.0",
+    "google-genai>=1.5.0",
+    "opentelemetry-exporter-gcp-trace>=1.9.0",
+    "opentelemetry-sdk>=1.30.0",
+    "pillow>=10.2.0",
     "pydantic>=2.5.0",
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.1",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-]
+dev = ["pytest>=8.0.0", "ruff>=0.12.0"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[project.scripts]
+shelf-bench = "cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["cli", "runner"]
+packages = ["approaches", "utils", "shelf_e2e", "shelf_e2e.tracks", "shelf_e2e.platform"]
+
+[tool.setuptools.package-data]
+utils = ["static/*"]
+shelf_e2e = ["platform/static/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

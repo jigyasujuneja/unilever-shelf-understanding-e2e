@@ -1,0 +1,81 @@
+# shelf-bench configuration. This is the only config file.
+
+gcp:
+  project: unilever-shelf-understanding
+  location: global                 # Vertex AI Gemini endpoint
+  region: us-central1              # Cloud Run + Cloud Build + bucket region
+  data: gs://unilever-shelf-understanding-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
+  hul_labeled_data: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks
+  hul_catalog_data: gs://unilever-shelf-understanding-shelf-images/HUL_catalog
+  results: gs://unilever-shelf-understanding-shelf-images/results        # run outputs from Cloud Run
+
+# Cloud Run job that executes benchmark runs (shelf-bench cloud-run) and Cloud Run service
+# that hosts the unified backend & UI (shelf-bench cloud-service).
+cloud_run:
+  job: shelf-bench
+  service: perfect-store-control-plane
+  cpu: 2
+  memory_gib: 4
+  parallelism: 2    # tasks at once (default: number of models) - concurrent tasks use different models
+  # Direct VPC egress, needed to reach a private-IP AlloyDB instance. Leave unset otherwise.
+  # network: default
+  # subnet: default
+
+# Defaults for `shelf-bench run` (all overridable on the command line).
+defaults:
+  split: test      # leaderboard split (train | val | test)
+  limit: 50        # images per run (0 = entire split: 2,936 test images). Only runs with this
+                   # limit + seed on the test split, from Cloud Run, are ranked.
+  seed: 0          # same seed + limit => identical image set for every run
+  workers: 4       # images processed concurrently
+  tier: [standard] # Gemini PayGo tier(s) to run: standard and/or priority (-t on the CLI)
+
+# OpenTelemetry: one Cloud Trace trace per run (run -> image -> Gemini/stage call spans with every
+# token count, traffic type, retry and cost) plus matching Cloud Logging entries (with prompts
+# and responses). Links land in summary.json["telemetry"]. SHELF_BENCH_TELEMETRY=0 overrides.
+telemetry:
+  enabled: true
+
+# Models offered by `shelf-bench list`. Any Vertex Gemini model id works with -m.
+models:
+  - gemini-3.8-flash
+  - gemini-3.5-flash-lite
+
+# AlloyDB, for approaches that identify products by vector lookup (utils/alloydb.py has the
+# setup SQL and IAM). Approaches read this in setup(): AlloyDB(**config["alloydb"]).
+# Automatically falls back to embedded in-memory HUL-245 ScaNN when AlloyDB is unreachable.
+alloydb:
+  instance: projects/unilever-shelf-understanding/locations/us-central1/clusters/CLUSTER/instances/INSTANCE
+  database: postgres
+  ip_type: PRIVATE       # PRIVATE (needs cloud_run.network) | PUBLIC | PSC
+  fallback_local_scann: true
+
+# HUL Production SLAs and Routing Gate Thresholds (tuned on `val` split, locked for `test` split)
+hul_slas:
+  marketshare_p95_s: 30.0
+  merchandizing_p95_s: 10.0
+  max_cost_per_image_inr: 0.22
+  min_sku_f2: 0.95
+  min_sister_shade_f2: 0.94
+  scann_similarity_gate: 0.82
+  sister_shade_margin_gate: 0.045
+  calibration_temperature: 0.78
+
+# MLOps & GenAIOps 7-Gate CI/CD Promotion Contract & Drift Guardrails
+mlops_gates:
+  max_psi_drift: 0.20
+  max_ece_calibration: 0.025
+  max_escalation_rate: 0.15
+  min_box_f2: 0.96
+  max_train_test_gap_f2: 0.008
+  mcnemar_alpha: 0.05
+
+# Prices are NOT configured here: every run fetches current list prices from GCP's Cloud
+# Billing Catalog API (Gemini SKUs per traffic type, Cloud Run, Cloud Storage) and GCP's own
+# USD->INR rate, and stores that price sheet in its summary. See src/utils/pricing.py.
+promotions:
+  - name: Gemini 3.x Flash introductory pricing (50% credit back on net spend)
+    models: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash]
+    credit_share: 0.5
+    until: 2026-12-31
+    source: https://cloud.google.com/vertex-ai/generative-ai/pricing

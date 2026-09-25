@@ -6,3 +6,5 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+data/SKU110K_fixed/
+data/raw/
