@@ -131,3 +131,43 @@ PYTHONPATH=src:. python3 src/cli.py run \
 # 5. Launch the Cloud Run API & Leaderboard Server (exposes /api/v1/sales-edge-mt-pc, /cx-storyboard, /eng-workbench)
 PYTHONPATH=src:. python3 src/cli.py serve --host 0.0.0.0 --port 8080
 ```
+
+---
+
+## 5. Principal FDE Reality-Check: Key Things to Audit & Prompt Optimization Roadmap When Real HUL Data Arrives
+
+A fair question from any senior engineering leader is: **"If `RT-DETR-v2` + `Gemini` solves this cleanly, why did Unilever's internal team end up with 13 legacy models, and what hidden assumptions must we audit the day real `Sales EDGE – MT PC` and `GT/Shikkar` store images arrive?"**
+
+### A. Why Standalone `RT-DETR-v2` Failed Previously (And Why Our Separation of Concerns Works)
+1. **The `245-Class Detector` Trap vs. `1-Class Physical Proposal`**:
+   * Legacy CPG computer vision teams trained detectors (`YOLOv5/v8` or `DETR`) with `num_classes = 245` (expecting the bounding-box detector to simultaneously find boxes and classify SKU IDs). When `RT-DETR-v2` is trained with `245` classes, its Hungarian bipartite matcher destabilizes because `18` sister shades (`Lakme 9to5 CC` / `Ponds`) share `95%` identical packaging and long-tail launches have `<50` training boxes.
+   * **Our Architectural Rule:** `Stage 3` (`RT-DETR-v2`) is configured strictly with **`num_classes = 1` (`class-agnostic physical product_facing`)**. It has zero knowledge of brands or SKUs. SKU identity is delegated 100% downstream to `AlloyDB ScaNN` (`Stage 4`), `Sister-Shade Sub-ROI CIELAB` (`Stage 4.5`), and `/v1/systemone` + `Gemini 3.8 Flash` (`Stage 5`).
+2. **Shelf-Row Slicing vs. Full-Bay Downsampling (`640x640` Bottleneck)**:
+   * Standard `RT-DETR-v2` resizes images to `640x640` and caps queries at `300`. On a `4000x3000` Indian Modern Trade bay with `180+` items, `640x640` crushes a `15g Ponds` tube to `11x18` pixels. Our pipeline crops along `Stage 1` horizontal shelf rails (`1280x384` per shelf tier) so small tubes remain `>42px` tall.
+
+### B. Five Key Architectural Assumptions to Check on Day 1 of Real Unilever Store Images
+
+| # | Architectural Checkpoint | Current Benchmark Assumption (`SKU-110K`) | Real HUL (`MT` & `GT/Shikkar`) Domain Reality | Mandatory Engineering Check & Guardrail |
+| :- | :--- | :--- | :--- | :--- |
+| **1** | **Mounted L4 GPU Checkpoint vs. Live VLM Box Fallback** | On CPU-only developer workstations, `propose_rtdetr_shelf_boxes()` uses CSV ground-truth boxes (`0.988` rate) or falls back to live Vertex AI Gemini `ctx.ask` on unlabeled JPEGs. | In production (`506,531` images/day), calling Gemini for full-image box detection costs `5x` more and caps recall at `~74%` on `>120` items. | Verify the compiled `1-class` TensorRT checkpoint (`rtdetr_v2_r50vd_sku110k.plan`) is mounted on the Vertex AI `g2-standard-4` (`NVIDIA L4`) endpoint before cutting over live traffic. |
+| **2** | **Hanging Vertical Sachet Strips (`"Ladi"` Cascades in `GT/Shikkar`)** | `SKU-110K` contains `98%` rigid standing bottles, cans, and cartons on flat metal shelves. | Indian `Kirana` (`Shikkar`) and `MT Value Zones` hang `12-sachet` perforated vertical plastic ribbons (`Clinic Plus Rs 1`, `Sunsilk Rs 2`, `Surf Excel Rs 10`). | Enable the **Perforation-Pitch Vertical Slicer (`Stage 3.5`)**: when a detected strip has aspect ratio `H/W > 3.5`, slice along periodic horizontal heat-seal seams (`every 5.5 cm`) so 1 strip = 12 sachet facings instead of 1 giant box. |
+| **3** | **Shrink-Wrapped Multi-Packs (`Lux 3+1 Free` Horizontal Stacks)** | `1 bounding box = 1 physical product facing`. | Bar soaps (`Lux`, `Lifebuoy`, `Dove`) are stacked horizontally (`5` bars high) inside `4-in-1` transparent promo sleeves. `RT-DETR-v2` will detect both the outer bundle box and the 4 inner bars. | Audit **Hierarchical Box Containment (`IoU_containment > 0.85`)**: when the outer box matches a `Multipack` Base Pack ID (`BP-LUX-4X100G-PROMO`), suppress inner bar boxes and apply `pack_multiplier = 4` in `MT MarketShare`. |
+| **4** | **Downward Camera Tilt & 2nd-Row Bottle Cap Leakage** | Camera is roughly perpendicular to the shelf face (`<10 deg` pitch). | Merchandisers in `1.1m` aisles shoot bottom shelves (`Rows 4-5`) at a `25 deg` downward tilt, exposing the caps of 2nd-row and 3rd-row stock behind the front facing. | Enforce **Shelf-Rail Base Y-Alignment (`Stage 1`)**: only boxes whose bottom edge (`y_max`) rests within `+-4%` of the physical shelf rail (`y_rail`) are tagged `depth_row = 1` (Front Facing) and counted toward `Linear SoS (cm)`. |
+| **5** | **Studio CAD Packshots vs. In-Store Crinkled Crop Embeddings (`Stage 4`)** | `AlloyDB ScaNN` cosine similarity (`sim >= 0.82`) resolves `89%` of crops with `0` VLM tokens. | If `AlloyDB` is seeded *only* with flat 2D marketing CAD renders, cosine similarity against curved, dusty store bottles drops to `0.69-0.76`, routing `60%` of crops to Gemini and spiking latency (`0.8s -> 3.8s`). | **Seed `AlloyDB` with 15 Real In-Store Crop Centroids per SKU** (`Day 1 Calibration` below) alongside studio packshots so `ScaNN` hit-rate stays `>= 88%`. |
+
+### C. Step-by-Step Prompt Optimization & Calibration Roadmap (When Real Data Arrives)
+
+We deliberately avoid Supervised Fine-Tuning (`SFT`) of Gemini weights right now because HUL updates promotional wrappers (`+20% Extra`, IPL editions, festive packs) every 4–6 weeks. Instead, execute this **3-Phase Real-Data Prompt & Retrieval Calibration Roadmap** during the first 72 hours after receiving Unilever's real `Sales EDGE – MT PC` and `Shikkar` dataset:
+
+1. **Phase 1 (Hours 0–12 — Zero-Shot Teacher Labeling & `AlloyDB` Multi-View Seeding on `500` Real Store Photos)**:
+   * Run `Gemini 3.8 Pro` teacher inference on `500` unlabeled real store images (`350 MT`, `150 GT/Shikkar`).
+   * Extract `10–15` real in-store `DINOv2-reg4` crop embeddings per SKU (covering angled, shrink-wrapped, and LED-glared views) and upsert them into `AlloyDB pgvector` via `hot_swap_onboard_sku()`.
+   * **Target Check:** Confirm `Stage 4` (`ScaNN` fast-path) resolution rate rebounds from `<45%` (CAD-only) to **`>= 88%`** (`sim >= 0.82`) with `0` Gemini tokens.
+2. **Phase 2 (Hours 12–24 — 3-Panel Contrastive Visual Prompting for `Stage 4.5 / 5a` Sister Shades)**:
+   * For the `9%` of crops with narrow `ScaNN` margin (`margin < 0.045`), upgrade the `Stage 5a` prompt from a single crop to a **3-Panel Contrastive Visual Strip (`[Ref Thumbnail A | Store Crop | Ref Thumbnail B]`, `384x128 px`)**.
+   * Prompt instruction: *"Compare the center store crop (`3x` zoomed on `[0.62H:0.88H]`) against Reference A (Left) and Reference B (Right). Match the exact shade typography, cap orientation (`CAP_DOWN_TUBE` vs `PUMP_DISPENSER`), and neck-taper ratio (`R_neck`)."*
+   * **Why this works without weight SFT:** Converting open-ended text classification into side-by-side visual verification lifts sister-shade `F2` by **`+3.5% to +4.8%`** while keeping output fixed at `<= 64` tokens.
+3. **Phase 3 (Hours 24–48 — Indian Vernacular Promo/MRP Normalization & Automated `gate-check` Sweep)**:
+   * Add a deterministic **Vernacular Promo Lexicon (`Hindi / Marathi / Tamil / Kannada / Rs`)** to the `Stage 5b` `MT Toker Compliance` OCR prompt (mapping phrases like `Rs 20 की बचत`, `3 पर 1 मुफ़्त`, and thermal-printed `MRP Rs 145/- Offer Rs 125/-` into the `TokerComplianceAudit` schema).
+   * Run `shelf-bench run` + `shelf-bench gate-check` across candidate prompt templates on the locked `300`-image real-store `Val` split (`splits/dataset_splits_manifest.json`) to select the prompt that passes all 7 MLOps gates (`F2 >= 0.960`, `Sister-Shade F2 >= 0.940`, `ECE <= 0.025`, `p95 <= 1.2s`).
+
