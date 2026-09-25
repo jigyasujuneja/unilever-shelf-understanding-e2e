@@ -21,6 +21,12 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from shelf_e2e.sister_shade_disambiguator import (
+    DisambiguatedSisterResult,
+    SisterCandidateProfile,
+    resolve_sister_shade_and_low_f2,
+)
+
 
 @dataclass
 class HULSevenDimSKU:
@@ -190,6 +196,25 @@ class HULEndToEndShelfProcessor:
             is_hul_sku=is_hul,
             routing_branch=routing_branch,
             confidence=conf,
+        )
+
+    def disambiguate_sister_shade_roi(
+        self,
+        full_box_xyxy: tuple[int, int, int, int],
+        candidates: List[SisterCandidateProfile],
+        raw_cosine_scores: Dict[str, float],
+        observed_sub_roi_lab: tuple[float, float, float],
+        observed_ocr_shade_hint: str = "",
+        observed_cap_orientation: str = "CAP_DOWN_TUBE",
+    ) -> DisambiguatedSisterResult:
+        """Stage 4.5 (`Sister-Shade & Low-F2 Disambiguation`): Resolve near-identical sister variants (`Lakme CC`, `SPF`, `Conditioner` vs `Shampoo`)."""
+        return resolve_sister_shade_and_low_f2(
+            full_box_xyxy=full_box_xyxy,
+            candidates=candidates,
+            raw_cosine_scores=raw_cosine_scores,
+            observed_sub_roi_lab=observed_sub_roi_lab,
+            observed_ocr_shade_hint=observed_ocr_shade_hint,
+            observed_cap_orientation=observed_cap_orientation,
         )
 
     def deduplicate_multi_image_panorama(
