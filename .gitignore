@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Dataset (download with `make data`, ~12 GB archive / ~13 GB extracted)
+data/
+
+# Credentials
+.env
+*.pem
+*.key
+*service-account*.json
+application_default_credentials.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log
+
+# results/ IS committed: each run is a small JSON folder so the leaderboard is shared.

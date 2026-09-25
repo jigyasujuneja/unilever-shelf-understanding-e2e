@@ -1,0 +1,39 @@
+sequenceDiagram
+  autonumber
+  actor Dev as Developer
+  participant CLI as shelf-bench CLI
+  participant CB as Cloud Build + Artifact Registry
+  participant CR as Cloud Run job
+  participant T as Task (runner.py)
+  participant BILL as Billing Catalog API
+  participant GCS as Cloud Storage
+  participant GEM as Vertex AI Gemini
+  participant RET as Embeddings + AlloyDB (optional)
+
+  Dev->>CLI: make cloud (shelf-bench cloud-run -a ... -m ...)
+  CLI->>GCS: upload source tarball
+  CLI->>CB: create build
+  CB-->>CLI: image pushed (poll until SUCCESS)
+  CLI->>CR: create / patch job (image, args, one task per approach x tier x model)
+  CLI->>CR: run execution
+  par every task in parallel
+    CR->>T: start task N (approach, model, tier)
+    T->>BILL: fetch live prices (Gemini, embeddings, Cloud Run, GCS, USD to INR)
+    T->>GCS: read annotations + seeded sample of test images
+    loop each image (4 workers)
+      T->>GEM: generateContent (single_pass: 1 call / detect_classify: detect then classify)
+      GEM-->>T: boxes + labels, usage_metadata (tokens, traffic type)
+      opt retrieval approach (its own embedder, DB and SQL)
+        T->>RET: embed crop (utils/embeddings), then its SQL query (utils/alloydb)
+        RET-->>T: closest products (vector or hybrid)
+      end
+      Note over T: score vs ground truth (IoU >= 0.5), cost from token buckets + ctx.bill units
+    end
+    T->>GCS: write images.jsonl + summary.json (provisional compute cost)
+  end
+  CLI->>CR: poll execution until all tasks finish
+  CLI->>GCS: pull new runs into results/
+  CLI->>CR: Admin API: task start / completion times
+  CLI->>GCS: write summary with final compute cost
+  Dev->>CLI: make ui
+  CLI-->>Dev: leaderboard + step-by-step run pages

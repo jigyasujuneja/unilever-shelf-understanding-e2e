@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shelf-bench"
+version = "0.2.0"
+description = "Benchmark shelf product-detection approaches on SKU-110K and compare them on a leaderboard."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-cloud-alloydb-connector[pg8000]>=1.4.0",
+    "google-cloud-logging>=3.10.0",
+    "google-cloud-storage>=2.14.0",
+    "google-genai>=1.5.0",
+    "opentelemetry-exporter-gcp-trace>=1.9.0",
+    "opentelemetry-sdk>=1.30.0",
+    "pillow>=10.2.0",
+    "pyyaml>=6.0.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.12.0"]
+
+[project.scripts]
+shelf-bench = "cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["cli", "runner"]
+packages = ["approaches", "utils"]
+
+[tool.setuptools.package-data]
+utils = ["static/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
