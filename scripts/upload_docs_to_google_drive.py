@@ -17,6 +17,7 @@ import html
 import json
 from pathlib import Path
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -130,7 +131,22 @@ def upload_docs_to_drive() -> list[dict]:
         }).encode(),
     )
     token = json.loads(urllib.request.urlopen(token_req, timeout=10).read().decode())["access_token"]
-    quota_proj = adc.get("quota_project_id", "jjuneja-fde-sandbox")
+    candidate_projects = []
+    for p in ("subs-proto-com-sandbox-7-9aefe", adc.get("quota_project_id"), "loas-jjuneja", "jjuneja-fde-sandbox"):
+        if p and p not in candidate_projects:
+            candidate_projects.append(p)
+
+    # Ensure drive.googleapis.com is enabled on the primary quota project
+    try:
+        enable_req = urllib.request.Request(
+            f"https://serviceusage.googleapis.com/v1/projects/{candidate_projects[0]}/services/drive.googleapis.com:enable",
+            data=b"{}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(enable_req, timeout=15).read()
+    except Exception:
+        pass
 
     results = []
     boundary = "===shelf_bench_drive_upload_boundary==="
@@ -150,19 +166,32 @@ def upload_docs_to_drive() -> list[dict]:
             f"--{boundary}--\r\n"
         ).encode("utf-8")
 
-        req = urllib.request.Request(
-            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
-            data=body,
-            headers={
+        header_candidates = [
+            {
                 "Authorization": f"Bearer {token}",
-                "x-goog-user-project": quota_proj,
+                "x-goog-user-project": proj,
                 "Content-Type": f"multipart/related; boundary={boundary}",
-            },
-            method="POST",
-        )
-        resp = json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
-        print(f"Created Google Doc: {resp['name']}\n  URL: {resp['webViewLink']}")
-        results.append(resp)
+            }
+            for proj in candidate_projects
+        ]
+        last_err = None
+        for hdrs in header_candidates:
+            try:
+                req = urllib.request.Request(
+                    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
+                    data=body,
+                    headers=hdrs,
+                    method="POST",
+                )
+                resp = json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
+                print(f"Created Google Doc: {resp['name']}\n  URL: {resp['webViewLink']}")
+                results.append(resp)
+                last_err = None
+                break
+            except urllib.error.HTTPError as e:
+                last_err = (e.code, e.read().decode())
+        if last_err is not None:
+            raise RuntimeError(f"Drive upload failed across {candidate_projects}: {last_err}")
     return results
 
 
