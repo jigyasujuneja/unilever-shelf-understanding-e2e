@@ -1371,6 +1371,17 @@
       });
     });
 
+    const jumpBtns = document.querySelectorAll('.playbook-jump-btn');
+    jumpBtns.forEach(function (jbtn) {
+      jbtn.addEventListener('click', function () {
+        const target = jbtn.getAttribute('data-jump-tab');
+        if (target) {
+          activateTabById(target);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    });
+
     const actPitches = {
       '1': 'Act 1 (The Problem): 1-Pass Gemini 3.5 Flash-Lite downscales 4K shelves to 2048px and emits 3,009 tokens—dropping to 50.1% Acc, 15.1% F2 on 221-SKU shelves, and 31.68s p99 (violating HUL <=10s & <=30s SLAs).',
       '2': 'Act 2 (The 8-Stage Hybrid Pipeline): YOLO11m + Depth-Ghost NMS + 6-Frame Panorama Dedup localizes 902 unique facings in 40ms; 92% resolve via ScaNN (0 tokens) & 8% via 1-Step /v1/systemone (64 pinned tokens).',
