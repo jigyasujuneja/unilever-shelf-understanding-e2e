@@ -30,6 +30,7 @@
         <button type="button" class="tab-btn" id="tab-btn-mlflow" data-tab="panel-mlflow">4. Tiered Latency &amp; FinOps Telemetry</button>
         <button type="button" class="tab-btn" id="tab-btn-pareto" data-tab="panel-pareto">5. Cost–Accuracy Pareto Frontier</button>
         <button type="button" class="tab-btn" id="tab-btn-spec005" data-tab="panel-spec005">6. 7-Dim Catalog (Classify vs Derive)</button>
+        <button type="button" class="tab-btn" id="tab-btn-exec-matrix" data-tab="panel-exec-matrix">7. Leadership Architecture &amp; KPI Scorecard</button>
       </nav>
 
       <div class="run-trigger-group">
@@ -46,6 +47,40 @@
         </select>
         <input type="text" id="engineer-ldap-input" class="text-input" value="jjuneja" aria-label="Architect ID" />
         <button type="button" id="trigger-run-btn" class="primary-btn">Execute Live Gondola Audit</button>
+      </div>
+    </section>
+
+    <!-- 5-ACT EXECUTIVE PRODUCTION JOURNEY STORYBOARD BAR (GUIDED LEADERSHIP WALKTHROUGH) -->
+    <section class="surface-card" id="exec-journey-bar" style="margin-bottom: 1rem; padding: 0.85rem 1.1rem; border-left: 4px solid #0057b8;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem;">
+        <div>
+          <strong style="font-size: 0.86rem; color: #0f172a; text-transform: uppercase; letter-spacing: 0.04em;">5-Act Executive Production Walkthrough (Click Any Act to Guide Leadership):</strong>
+          <span class="section-subtitle" id="exec-journey-pitch" style="margin-left: 0.5rem; color: #0057b8; font-weight: 600;">
+            Act 1 Selected: Show why naive 1-Pass Gemini VLM fails (50.1% Acc, 66.4% F2, 24.73s p95, ₹0.128/img) on 221-SKU Modern Trade shelves.
+          </span>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.55rem;">
+        <button type="button" class="riley-step-card exec-act-btn active" data-act="1" style="margin-bottom: 0; text-align: left;">
+          <div class="riley-step-head"><span class="riley-step-title">Act 1: The Field Reality</span><span class="riley-step-time">Problem</span></div>
+          <div class="riley-step-sub">Why 1-Pass VLM hits 50.1% Acc &amp; 31.68s p99 on 221-SKU shelves</div>
+        </button>
+        <button type="button" class="riley-step-card exec-act-btn" data-act="2" style="margin-bottom: 0; text-align: left;">
+          <div class="riley-step-head"><span class="riley-step-title">Act 2: 3-Pane Live Audit</span><span class="riley-step-time">1.12s E2E</span></div>
+          <div class="riley-step-sub">YOLO11 + Depth NMS + ScaNN + 1-Step /v1/systemone (64 tokens)</div>
+        </button>
+        <button type="button" class="riley-step-card exec-act-btn" data-act="3" style="margin-bottom: 0; text-align: left;">
+          <div class="riley-step-head"><span class="riley-step-title">Act 3: Classify vs Derive</span><span class="riley-step-time">7 Dims</span></div>
+          <div class="riley-step-sub">HUL Closed-Set Base Pack vs Non-HUL Competitor Open-Set 5-Dim</div>
+        </button>
+        <button type="button" class="riley-step-card exec-act-btn" data-act="4" style="margin-bottom: 0; text-align: left;">
+          <div class="riley-step-head"><span class="riley-step-title">Act 4: Rupee Uplift &amp; Rep</span><span class="riley-step-time">+₹14.2k/wk</span></div>
+          <div class="riley-step-sub">Stage 6 Recommend: Sales History + Exclusions + Association + Region</div>
+        </button>
+        <button type="button" class="riley-step-card exec-act-btn" data-act="5" style="margin-bottom: 0; text-align: left;">
+          <div class="riley-step-head"><span class="riley-step-title">Act 5: Executive Matrix</span><span class="riley-step-time">8 Tracks</span></div>
+          <div class="riley-step-sub">Full Scorecard across Business SLA, FinOps Cost, ML &amp; 7 Dimensions</div>
+        </button>
       </div>
     </section>
 
@@ -455,6 +490,70 @@
               </tr>
             </thead>
             <tbody id="spec005-taxonomy-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 7: EXECUTIVE LEADERSHIP ARCHITECTURE & MULTI-LEVEL KPI SCORECARD -->
+    <section id="panel-exec-matrix" class="tab-panel hidden">
+      <div class="surface-card" style="margin-bottom: 1.25rem;">
+        <div class="section-header">
+          <div>
+            <h2>Executive Architecture &amp; Multi-Level KPI Scorecard (8 Neural Architectures &times; 4 Strategic KPI Levels)</h2>
+            <span class="section-subtitle">Synthesizes <strong>Level 1: Business &amp; SLA Compliance</strong>, <strong>Level 2: FinOps Unit Economics</strong>, <strong>Level 3: Core ML &amp; Tail Latency (F2 / p95 / p99)</strong>, and <strong>Level 4: Granular 7-Dimension (`Classify` vs `Derive`) &amp; Stress Slices</strong>.</span>
+          </div>
+          <span class="badge badge-gold">Production Winner: Track D2 (ScaNN + System-1 /v1/systemone 64-Token Canvas)</span>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="arena-table" id="exec-master-scorecard-table">
+            <thead>
+              <tr>
+                <th>Architecture Track</th>
+                <th>[L1: Business SLA] Marketshare (6 Imgs &le;30s)</th>
+                <th>[L1: Business SLA] Merchandizing (1 Img &le;10s)</th>
+                <th>[L1: Business] OSA Detection Recall</th>
+                <th>[L2: Cost] Total ₹/Img (Model + Compute)</th>
+                <th>[L2: FinOps] Annual Run-Rate (50M Imgs/yr)</th>
+                <th>[L3: ML] Accuracy</th>
+                <th>[L3: ML] F2 Score (&beta;=2)</th>
+                <th>[L3: Tail] p95 / p99 Latency</th>
+                <th>[L3: Safety] Hallucinated SKUs</th>
+                <th>Executive Verdict</th>
+              </tr>
+            </thead>
+            <tbody id="exec-master-scorecard-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="surface-card">
+        <div class="section-header">
+          <div>
+            <h2>Level 4 Granular Breakdown — Per-Dimension Accuracy (`Stage 4 Classify` [5 Dims] vs `Stage 5 Derive` [2 Dims + Base Pack]) &amp; Stress Slices</h2>
+            <span class="section-subtitle">Compares how each neural architecture performs across every single HUL dimension, Competitor Open-Set extraction, Specular Foil Glare, and 2nd-Row Depth Ghosts.</span>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="arena-table" id="exec-7dim-level-table">
+            <thead>
+              <tr>
+                <th>Architecture Track</th>
+                <th>[Classify 1] Category</th>
+                <th>[Classify 2] Subcategory</th>
+                <th>[Classify 3] Brand</th>
+                <th>[Classify 4] Variant</th>
+                <th>[Classify 5] Packaging</th>
+                <th>[Derive 6] Pack Type</th>
+                <th>[Derive 7] Size</th>
+                <th>[Derive] Base Pack Code (HUL)</th>
+                <th>Non-HUL Competitor (79 SKUs)</th>
+                <th>Specular Glare Slice</th>
+                <th>221-SKU Dense Shelf F2</th>
+              </tr>
+            </thead>
+            <tbody id="exec-7dim-level-tbody"></tbody>
           </table>
         </div>
       </div>

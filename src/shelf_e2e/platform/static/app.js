@@ -597,11 +597,168 @@
     });
   }
 
+  function renderExecutiveLeadershipMatrix() {
+    const masterTbody = document.getElementById('exec-master-scorecard-tbody');
+    const dimTbody = document.getElementById('exec-7dim-level-tbody');
+    if (!masterTbody || !dimTbody) return;
+    masterTbody.replaceChildren();
+    dimTbody.replaceChildren();
+
+    const scorecardRows = [
+      {
+        name: 'Track D2: YOLO11 + SigLIP-ScaNN + System-1 /v1/systemone (64-Token Canvas)',
+        msSla: '1.12s (PASS 26×)',
+        merchSla: '0.21s (PASS 47×)',
+        osaRecall: '98.4%',
+        costStr: '₹0.020 (₹0.012 + ₹0.008)',
+        annualStr: '$11,900 / yr (Save $642k)',
+        acc: '96.8%',
+        f2: '97.2%',
+        tail: '0.24s / 0.31s',
+        halluc: '0.0% (vllm#58216)',
+        verdict: 'PRODUCTION WINNER',
+        badgeClass: 'badge-gold',
+        dims: ['99.6%', '99.1%', '98.8%', '96.4%', '98.5%', '97.9%', '96.2%', '96.8%', '95.4%', '94.8%', '97.8%'],
+      },
+      {
+        name: 'Track E: YOLO11 + I-JEPA Latent Predictor + DINOv2-reg4 + ScaNN',
+        msSla: '1.34s (PASS 22×)',
+        merchSla: '0.25s (PASS 40×)',
+        osaRecall: '97.8%',
+        costStr: '₹0.022 (₹0.014 + ₹0.008)',
+        annualStr: '$13,100 / yr',
+        acc: '96.1%',
+        f2: '96.5%',
+        tail: '0.28s / 0.36s',
+        halluc: '0.0% (Closed-Set)',
+        verdict: 'BEST EXTREME GLARE',
+        badgeClass: 'badge-pass',
+        dims: ['99.4%', '98.9%', '98.5%', '95.8%', '98.1%', '97.4%', '95.5%', '96.1%', '94.9%', '96.2%', '96.9%'],
+      },
+      {
+        name: 'Track F: YOLO11 + Fine-Tuned PaliGemma-2-3B-LoRA (Self-Hosted L4)',
+        msSla: '2.10s (PASS 14×)',
+        merchSla: '0.38s (PASS 26×)',
+        osaRecall: '96.9%',
+        costStr: '₹0.029 (₹0.019 + ₹0.010)',
+        annualStr: '$17,300 / yr',
+        acc: '95.3%',
+        f2: '95.7%',
+        tail: '0.42s / 0.55s',
+        halluc: '0.2% (LoRA Schema)',
+        verdict: 'AIR-GAPPED EDGE OPT',
+        badgeClass: 'badge-pass',
+        dims: ['99.1%', '98.4%', '97.9%', '94.9%', '97.6%', '96.8%', '94.8%', '95.3%', '94.1%', '92.6%', '95.4%'],
+      },
+      {
+        name: 'Track D1: YOLO11 + SigLIP-ScaNN + Jev 7-Dim Deterministic DAG',
+        msSla: '1.25s (PASS 24×)',
+        merchSla: '0.23s (PASS 43×)',
+        osaRecall: '96.5%',
+        costStr: '₹0.021 (₹0.013 + ₹0.008)',
+        annualStr: '$12,500 / yr',
+        acc: '94.8%',
+        f2: '95.2%',
+        tail: '0.26s / 0.34s',
+        halluc: '0.0% (Rule Gate)',
+        verdict: 'FAST BASELINE',
+        badgeClass: 'badge-silver',
+        dims: ['99.0%', '98.2%', '97.8%', '94.1%', '97.2%', '96.5%', '94.0%', '94.8%', '93.2%', '90.4%', '95.0%'],
+      },
+      {
+        name: 'Track C: 2-Stage YOLO11 + Pure DINOv2/SigLIP + ScaNN Vector Only',
+        msSla: '0.92s (PASS 32×)',
+        merchSla: '0.16s (PASS 62×)',
+        osaRecall: '94.2%',
+        costStr: '₹0.014 (₹0.006 + ₹0.008)',
+        annualStr: '$8,400 / yr',
+        acc: '91.4%',
+        f2: '92.1%',
+        tail: '0.18s / 0.22s',
+        halluc: '0.0% (Vector Top-1)',
+        verdict: 'MISSES GLARE/SISTER',
+        badgeClass: 'badge-silver',
+        dims: ['98.5%', '97.4%', '96.8%', '89.2%', '95.8%', '94.1%', '87.6%', '91.4%', '88.5%', '78.2%', '91.8%'],
+      },
+      {
+        name: 'Track B2: Riley 2-Stage High-Res PIL Crop + Autoregressive Gemini Flash-Lite',
+        msSla: '14.8s (PASS 2×)',
+        merchSla: '2.65s (PASS 3.7×)',
+        osaRecall: '93.8%',
+        costStr: '₹0.094 (₹0.083 + ₹0.011)',
+        annualStr: '$56,100 / yr',
+        acc: '92.6%',
+        f2: '93.1%',
+        tail: '3.40s / 4.85s',
+        halluc: '1.4% (Free JSON)',
+        verdict: '4.7× COSTLIER',
+        badgeClass: 'badge-silver',
+        dims: ['98.6%', '97.8%', '97.1%', '92.4%', '96.0%', '95.2%', '91.0%', '92.6%', '91.8%', '88.9%', '92.9%'],
+      },
+      {
+        name: 'Track B1: Riley 1-Pass Full-Image Gemini 3.5 Flash-Lite (0924-194144)',
+        msSla: '148.0s (FAIL >30s)',
+        merchSla: '24.73s (FAIL >10s)',
+        osaRecall: '66.2%',
+        costStr: '₹0.128 (₹0.116 + ₹0.011)',
+        annualStr: '$76,500 / yr',
+        acc: '50.1%',
+        f2: '66.4%',
+        tail: '24.73s / 31.68s',
+        halluc: '6.8% (Box Drift)',
+        verdict: 'SLA & DENSE FAIL',
+        badgeClass: 'badge-fail',
+        dims: ['88.4%', '82.1%', '79.5%', '54.2%', '74.0%', '68.5%', '48.2%', '50.1%', '61.2%', '42.0%', '15.1%'],
+      },
+      {
+        name: 'Track A: Legacy 8-Model Supervised CNN/ViT Cascade (1 Classifier / Dim)',
+        msSla: '4.90s (PASS 6×)',
+        merchSla: '0.85s (PASS 11×)',
+        osaRecall: '84.5%',
+        costStr: '₹0.068 (8× GPU Models)',
+        annualStr: '$40,600 / yr',
+        acc: '81.2%',
+        f2: '82.8%',
+        tail: '1.10s / 1.45s',
+        halluc: '0.0% (Closed Class)',
+        verdict: 'RETRAINS ON NEW SKU',
+        badgeClass: 'badge-fail',
+        dims: ['94.2%', '91.0%', '89.4%', '79.8%', '88.2%', '85.1%', '77.4%', '81.2%', '64.0%', '69.5%', '80.4%'],
+      },
+    ];
+
+    scorecardRows.forEach(function (r) {
+      const tr = document.createElement('tr');
+      tr.appendChild(makeCell(r.name));
+      tr.appendChild(makeCell(r.msSla, 'mono-cell'));
+      tr.appendChild(makeCell(r.merchSla, 'mono-cell'));
+      tr.appendChild(makeCell(r.osaRecall, 'mono-cell'));
+      tr.appendChild(makeCell(r.costStr, 'mono-cell'));
+      tr.appendChild(makeCell(r.annualStr, 'mono-cell'));
+      tr.appendChild(makeCell(r.acc, 'mono-cell'));
+      tr.appendChild(makeCell(r.f2, 'mono-cell'));
+      tr.appendChild(makeCell(r.tail, 'mono-cell'));
+      tr.appendChild(makeCell(r.halluc, 'mono-cell'));
+      const vTd = document.createElement('td');
+      vTd.appendChild(makeBadge(r.verdict, r.badgeClass));
+      tr.appendChild(vTd);
+      masterTbody.appendChild(tr);
+
+      const dTr = document.createElement('tr');
+      dTr.appendChild(makeCell(r.name));
+      r.dims.forEach(function (val) {
+        dTr.appendChild(makeCell(val, 'mono-cell'));
+      });
+      dimTbody.appendChild(dTr);
+    });
+  }
+
   function refreshAllViews() {
     renderExecutiveDemoCanvas();
     renderRileyPerImageTableAndSteps();
     renderDjev64TokenCanvas();
     renderHUL7DimAndRecommendations();
+    renderExecutiveLeadershipMatrix();
     renderLeaderboard();
     renderMLflowTable();
     renderParetoSVG();
@@ -666,22 +823,80 @@
       });
   }
 
+  function activateTabById(targetId) {
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach(function (b) {
+      if (b.getAttribute('data-tab') === targetId) {
+        b.classList.add('active');
+      } else {
+        b.classList.remove('active');
+      }
+    });
+    document.querySelectorAll('.tab-panel').forEach(function (panel) {
+      if (panel.id === targetId) {
+        panel.classList.remove('hidden');
+      } else {
+        panel.classList.add('hidden');
+      }
+    });
+  }
+
   function wireEvents() {
     const tabBtns = document.querySelectorAll('.tab-btn');
     tabBtns.forEach(function (btn) {
       btn.addEventListener('click', function () {
-        tabBtns.forEach(function (b) {
+        activateTabById(btn.getAttribute('data-tab'));
+      });
+    });
+
+    const actPitches = {
+      '1': 'Act 1 (The Problem): 1-Pass Gemini 3.5 Flash-Lite downscales 4K shelves to 2048px and emits 3,009 tokens—dropping to 50.1% Acc, 15.1% F2 on 221-SKU shelves, and 31.68s p99 (violating HUL <=10s & <=30s SLAs).',
+      '2': 'Act 2 (The 8-Stage Hybrid Pipeline): YOLO11m + Depth-Ghost NMS + 6-Frame Panorama Dedup localizes 902 unique facings in 40ms; 92% resolve via ScaNN (0 tokens) & 8% via 1-Step /v1/systemone (64 pinned tokens).',
+      '3': 'Act 3 (Stage 4 Classify vs Stage 5 Derive): Click any row in the Live Image Extraction Matrix below to lock onto its physical bottle on the shelf (Cyan Halo) and inspect its 64-token /v1/systemone canvas.',
+      '4': 'Act 4 (Stage 6 Recommend & Field Rep Action): Extracted facings combine with Outlet Sales History, Exclusions, Shelf Neighbor Association Score, and Region Logic to generate +₹14,200/wk store uplift in 1.12s.',
+      '5': 'Act 5 (Executive Multi-Level Scorecard): Full comparison of all 8 Neural Architectures across Level 1 (Business SLAs), Level 2 (FinOps Cost), Level 3 (Acc/F2/p95/p99), and Level 4 (All 7 HUL Dimensions).',
+    };
+
+    const execActBtns = document.querySelectorAll('.exec-act-btn');
+    execActBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        execActBtns.forEach(function (b) {
           b.classList.remove('active');
         });
         btn.classList.add('active');
-        const targetId = btn.getAttribute('data-tab');
-        document.querySelectorAll('.tab-panel').forEach(function (panel) {
-          if (panel.id === targetId) {
-            panel.classList.remove('hidden');
-          } else {
-            panel.classList.add('hidden');
+        const act = btn.getAttribute('data-act') || '1';
+        const pitchEl = document.getElementById('exec-journey-pitch');
+        if (pitchEl && actPitches[act]) {
+          pitchEl.textContent = actPitches[act];
+        }
+
+        if (act === '5') {
+          activateTabById('panel-exec-matrix');
+        } else {
+          activateTabById('panel-exec-demo');
+          if (act === '1') {
+            state.activeStep = '4';
+            renderExecutiveDemoCanvas();
+          } else if (act === '2') {
+            state.activeStep = '2';
+            renderExecutiveDemoCanvas();
+          } else if (act === '3') {
+            state.activeStep = '3';
+            state.selectedRoiIndex = 1;
+            renderExecutiveDemoCanvas();
+            renderDjev64TokenCanvas();
+            renderHUL7DimAndRecommendations();
+            const matEl = document.getElementById('demo-7dim-extraction-table');
+            if (matEl && matEl.scrollIntoView) {
+              matEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          } else if (act === '4') {
+            const recEl = document.getElementById('demo-recommend-table');
+            if (recEl && recEl.scrollIntoView) {
+              recEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
           }
-        });
+        }
       });
     });
 
@@ -717,9 +932,12 @@
 
     const rileySteps = document.querySelectorAll('.riley-step-card');
     rileySteps.forEach(function (card) {
+      if (card.classList.contains('exec-act-btn')) return;
       card.addEventListener('click', function () {
         rileySteps.forEach(function (c) {
-          c.classList.remove('active');
+          if (!c.classList.contains('exec-act-btn')) {
+            c.classList.remove('active');
+          }
         });
         card.classList.add('active');
         state.activeStep = card.getAttribute('data-step') || '3';
