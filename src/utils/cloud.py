@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import math
+import os
 import tarfile
 import time
 from datetime import datetime, timezone
@@ -73,14 +74,114 @@ def task_seconds(env: dict, session: AuthorizedSession | None = None) -> float:
     return math.ceil(secs * 10) / 10
 
 
+REQUIRED_ARGOLIS_APIS = [
+    "aiplatform.googleapis.com",
+    "run.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "storage.googleapis.com",
+    "cloudbilling.googleapis.com",
+    "cloudtrace.googleapis.com",
+    "logging.googleapis.com",
+]
+
+
+def ensure_argolis_infra(s: AuthorizedSession, project: str, region: str, log=print) -> dict:
+    """Ensure any Argolis GCP project has required APIs, Uniform-Bucket-Level-Access GCS buckets,
+    and Artifact Registry repository (`cloud-run-source-deploy`) created before running Cloud Build/Run.
+    """
+    log(f"[Argolis Bootstrap] Verifying GCP APIs, GCS buckets, and Artifact Registry in project={project!r} ({region}) ...")
+    # 1. Enable required GCP services via Service Usage API
+    su_url = f"https://serviceusage.googleapis.com/v1/projects/{project}/services:batchEnable"
+    r_su = s.post(su_url, json={"serviceIds": REQUIRED_ARGOLIS_APIS})
+    if r_su.status_code < 300:
+        log(f"  [1/3] Enabled {len(REQUIRED_ARGOLIS_APIS)} GCP APIs ({', '.join(REQUIRED_ARGOLIS_APIS[:4])}, ...)")
+
+    # 2. Ensure GCS buckets exist with uniformBucketLevelAccess=True (mandatory in Argolis)
+    data_bucket = os.environ.get("SHELF_BENCH_BUCKET") or f"{project}-shelf-images"
+    source_bucket = f"run-sources-{project}-{region}"
+    for b_name in (data_bucket, source_bucket):
+        chk = s.get(f"https://storage.googleapis.com/storage/v1/b/{b_name}")
+        if chk.status_code == 404:
+            log(f"  [2/3] Creating Argolis-compliant GCS bucket gs://{b_name} (uniformBucketLevelAccess=True) ...")
+            _ok(s.post(
+                f"https://storage.googleapis.com/storage/v1/b?project={project}",
+                json={
+                    "name": b_name,
+                    "location": region,
+                    "iamConfiguration": {"uniformBucketLevelAccess": {"enabled": True}},
+                },
+            ))
+        else:
+            log(f"  [2/3] Verified GCS bucket gs://{b_name}")
+
+    # 3. Ensure Artifact Registry repository `cloud-run-source-deploy` exists in `region`
+    ar_base = f"https://artifactregistry.googleapis.com/v1/projects/{project}/locations/{region}/repositories"
+    ar_chk = s.get(f"{ar_base}/cloud-run-source-deploy")
+    if ar_chk.status_code == 404:
+        log(f"  [3/3] Creating Artifact Registry Docker repo {region}-docker.pkg.dev/{project}/cloud-run-source-deploy ...")
+        s.post(
+            f"{ar_base}?repositoryId=cloud-run-source-deploy",
+            json={"format": "DOCKER", "description": "Cloud Run source deploy repository for shelf-bench"},
+        )
+        time.sleep(3)
+    else:
+        log(f"  [3/3] Verified Artifact Registry repo {region}-docker.pkg.dev/{project}/cloud-run-source-deploy")
+
+    return {
+        "project": project,
+        "region": region,
+        "data_bucket": f"gs://{data_bucket}",
+        "source_bucket": f"gs://{source_bucket}",
+        "artifact_registry": f"{region}-docker.pkg.dev/{project}/cloud-run-source-deploy",
+    }
+
+
+def bootstrap_argolis_project(
+    project: str | None = None,
+    region: str | None = None,
+    upload_datasets: bool = True,
+    seed_results: bool = True,
+    log=print,
+) -> dict:
+    """One-command Argolis Setup (`shelf-bench bootstrap --project <ANY_ARGOLIS_PROJECT>`):
+    1. Dynamically sets `SHELF_BENCH_PROJECT` and `SHELF_BENCH_REGION`.
+    2. Enables all 8 GCP APIs (`Vertex AI`, `Cloud Run`, `Cloud Build`, `Artifact Registry`, `GCS`, `Billing`, `Trace`, `Logging`).
+    3. Creates Argolis-compliant GCS buckets (`gs://<project>-shelf-images` and `gs://run-sources-<project>-<region>`).
+    4. Uploads `SKU110K_fixed` (`train/val/test`), `HUL_labeled_benchmarks` (`59` real images), `HUL_catalog` (`184/245` SKUs),
+       `dataset_splits_manifest.json`, and existing `results/` to `gs://<project>-shelf-images/`.
+    """
+    if project:
+        os.environ["SHELF_BENCH_PROJECT"] = project
+    if region:
+        os.environ["SHELF_BENCH_REGION"] = region
+    cfg = load_config(project_override=project)
+    proj, reg = cfg["gcp"]["project"], cfg["gcp"]["region"]
+    s = _session()
+    infra = ensure_argolis_infra(s, proj, reg, log=log)
+
+    if upload_datasets:
+        log(f"[Argolis Bootstrap] Uploading all datasets (SKU-110K train/val/test, HUL labeled benchmarks, HUL 245-SKU catalog, splits) to {infra['data_bucket']} ...")
+        dataset.upload(dataset.LOCAL_ROOT, cfg["gcp"]["data"], dataset_target="all")
+
+    if seed_results and Path("results").is_dir():
+        log(f"[Argolis Bootstrap] Syncing committed benchmark results to {cfg['gcp']['results']} ...")
+        dataset.upload("results", cfg["gcp"]["results"], dataset_target="sku110k")
+
+    log(f"[Argolis Bootstrap] Project {proj!r} is 100% ready for `shelf-bench cloud-run` and `shelf-bench cloud-service`!")
+    return infra
+
+
 def build_image(s: AuthorizedSession, project: str, region: str, log=print) -> str:
+    ensure_argolis_infra(s, project, region, log=log)
     tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     image = f"{region}-docker.pkg.dev/{project}/cloud-run-source-deploy/shelf-bench:{tag}"
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for name in SOURCE_FILES:
-            tar.add(ROOT / name, arcname=name,
-                    filter=lambda t: None if "__pycache__" in t.name or ".egg-info" in t.name else t)
+            if (ROOT / name).exists():
+                tar.add(ROOT / name, arcname=name,
+                        filter=lambda t: None if "__pycache__" in t.name or ".egg-info" in t.name else t)
     bucket, obj = f"run-sources-{project}-{region}", f"shelf-bench/source-{tag}.tgz"
     dataset._gcs().bucket(bucket).blob(obj).upload_from_string(buf.getvalue())
     log(f"Building {image} with Cloud Build ...")

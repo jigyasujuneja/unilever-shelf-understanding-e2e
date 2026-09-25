@@ -27,8 +27,26 @@ CONFIG_PATH = Path(os.environ.get("SHELF_BENCH_CONFIG")
                    or Path(__file__).resolve().parents[2] / "config.yaml")
 
 
-def load_config(path: Path = CONFIG_PATH) -> dict:
-    return yaml.safe_load(Path(path).read_text()) if Path(path).exists() else {}
+def load_config(path: Path = CONFIG_PATH, project_override: str | None = None) -> dict:
+    cfg = yaml.safe_load(Path(path).read_text()) if Path(path).exists() else {}
+    gcp = cfg.setdefault("gcp", {})
+    proj = (
+        project_override
+        or os.environ.get("SHELF_BENCH_PROJECT")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or gcp.get("project")
+        or "unilever-shelf-understanding"
+    )
+    region = os.environ.get("SHELF_BENCH_REGION") or gcp.get("region") or "us-central1"
+    gcp["project"] = proj
+    gcp["region"] = region
+    bucket = os.environ.get("SHELF_BENCH_BUCKET") or f"{proj}-shelf-images"
+    gcp["bucket"] = bucket
+    gcp["data"] = f"gs://{bucket}/SKU110K_fixed"
+    gcp["hul_labeled_data"] = f"gs://{bucket}/HUL_labeled_benchmarks"
+    gcp["hul_catalog_data"] = f"gs://{bucket}/HUL_catalog"
+    gcp["results"] = f"gs://{bucket}/results"
+    return cfg
 
 
 @dataclass

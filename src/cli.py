@@ -28,14 +28,21 @@ def main(argv: list[str] | None = None) -> int:
     d = cfg.get("defaults", {})
     p = argparse.ArgumentParser(prog="shelf-bench", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--project", default=None, help="override Argolis GCP project id (sets SHELF_BENCH_PROJECT)")
+    p.add_argument("--region", default=None, help="override GCP region (sets SHELF_BENCH_REGION)")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("bootstrap", help="provision any Argolis GCP project (enable APIs, create Uniform-Access GCS buckets + Artifact Registry, and upload all datasets)")
+    s.add_argument("--project", dest="boot_project", default=None, help="target Argolis GCP project id")
+    s.add_argument("--region", dest="boot_region", default=None, help="target GCP region (default: us-central1)")
+    s.add_argument("--skip-upload", action="store_true", help="provision GCP APIs/buckets only without uploading dataset files")
 
     s = sub.add_parser("download", help="download and extract SKU-110K")
     s.add_argument("--root", default=dataset.LOCAL_ROOT)
 
     s = sub.add_parser("upload", help="copy datasets (SKU-110K, HUL labeled, catalog) to Argolis GCS")
     s.add_argument("--root", default=dataset.LOCAL_ROOT)
-    s.add_argument("--to", default=cfg.get("gcp", {}).get("data"))
+    s.add_argument("--to", default=None)
     s.add_argument("--dataset", default="all", choices=["all", "sku110k", "hul_labeled", "catalog"],
                    help="which dataset bundle to sync to Argolis GCS")
 
@@ -82,11 +89,24 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--root", default=dataset.DEFAULT_ROOT, help="local dir or gs:// URI")
 
     a = p.parse_args(argv)
+    if getattr(a, "project", None):
+        os.environ["SHELF_BENCH_PROJECT"] = a.project
+    if getattr(a, "region", None):
+        os.environ["SHELF_BENCH_REGION"] = a.region
+    cfg = load_config()
 
-    if a.cmd == "download":
+    if a.cmd == "bootstrap":
+        from utils import cloud
+
+        target_proj = a.boot_project or a.project or cfg["gcp"]["project"]
+        target_reg = a.boot_region or a.region or cfg["gcp"]["region"]
+        cloud.bootstrap_argolis_project(
+            project=target_proj, region=target_reg, upload_datasets=not a.skip_upload
+        )
+    elif a.cmd == "download":
         dataset.download(a.root)
     elif a.cmd == "upload":
-        dataset.upload(a.root, a.to, dataset_target=a.dataset)
+        dataset.upload(a.root, a.to or cfg["gcp"]["data"], dataset_target=a.dataset)
     elif a.cmd == "splits":
         m = dataset.build_and_verify_splits_manifest()
         print(f"Verified SHA-256 Split Manifest ({m['split_sha256'][:16]}): "

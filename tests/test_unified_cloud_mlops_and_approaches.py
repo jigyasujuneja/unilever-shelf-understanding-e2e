@@ -164,6 +164,29 @@ class UnifiedCloudArchitectureTests(unittest.TestCase):
             httpd.shutdown()
             httpd.server_close()
 
+    def test_dynamic_argolis_project_resolution_and_bootstrap(self) -> None:
+        from utils.llm import load_config
+
+        cfg = load_config(project_override="jjuneja-argolis-sandbox")
+        self.assertEqual(cfg["gcp"]["project"], "jjuneja-argolis-sandbox")
+        self.assertEqual(cfg["gcp"]["bucket"], "jjuneja-argolis-sandbox-shelf-images")
+        self.assertEqual(
+            cfg["gcp"]["data"],
+            "gs://jjuneja-argolis-sandbox-shelf-images/SKU110K_fixed",
+        )
+        self.assertEqual(
+            cfg["gcp"]["hul_labeled_data"],
+            "gs://jjuneja-argolis-sandbox-shelf-images/HUL_labeled_benchmarks",
+        )
+        self.assertEqual(
+            cfg["gcp"]["hul_catalog_data"],
+            "gs://jjuneja-argolis-sandbox-shelf-images/HUL_catalog",
+        )
+        self.assertEqual(
+            cfg["gcp"]["results"],
+            "gs://jjuneja-argolis-sandbox-shelf-images/results",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
