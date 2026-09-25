@@ -75,10 +75,43 @@ def _split_gs(uri: str) -> tuple[str, str]:
     return bucket, name
 
 
+@lru_cache(maxsize=1)
+def _adc_bearer_token() -> tuple[str, str]:
+    import json
+    import urllib.parse
+    import urllib.request
+
+    adc = json.loads(Path("~/.config/gcloud/application_default_credentials.json").expanduser().read_text())
+    req = urllib.request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=urllib.parse.urlencode({
+            "client_id": adc["client_id"],
+            "client_secret": adc["client_secret"],
+            "refresh_token": adc["refresh_token"],
+            "grant_type": "refresh_token",
+        }).encode(),
+    )
+    tok = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())["access_token"]
+    return tok, adc.get("quota_project_id", "jjuneja-fde-sandbox")
+
+
 def read_bytes(path: str) -> bytes:
     if str(path).startswith("gs://"):
         bucket, name = _split_gs(str(path))
-        return _gcs().bucket(bucket).blob(name).download_as_bytes()
+        try:
+            return _gcs().bucket(bucket).blob(name).download_as_bytes()
+        except Exception:
+            import urllib.parse
+            import urllib.request
+
+            tok, proj = _adc_bearer_token()
+            qname = urllib.parse.quote(name, safe="")
+            url = f"https://storage.googleapis.com/storage/v1/b/{bucket}/o/{qname}?alt=media"
+            req = urllib.request.Request(
+                url,
+                headers={"Authorization": f"Bearer {tok}", "x-goog-user-project": proj},
+            )
+            return urllib.request.urlopen(req, timeout=20).read()
     return Path(path).read_bytes()
 
 

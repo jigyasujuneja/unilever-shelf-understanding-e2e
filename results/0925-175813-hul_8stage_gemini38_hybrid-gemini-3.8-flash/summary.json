@@ -1,0 +1,379 @@
+{
+  "images": 5,
+  "errors": 0,
+  "tp": 740,
+  "fp": 0,
+  "fn": 10,
+  "precision": 1.0,
+  "recall": 0.9867,
+  "f2": 0.9893,
+  "accuracy": 0.9867,
+  "p50_latency_s": 0.722,
+  "p95_latency_s": 0.794,
+  "p99_latency_s": 0.794,
+  "cost_per_image_usd": 0.00044248000000000003,
+  "tokens": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "calls": 0,
+    "traffic": {},
+    "buckets": {}
+  },
+  "run_id": "0925-175813-hul_8stage_gemini38_hybrid-gemini-3.8-flash",
+  "approach": "hul_8stage_gemini38_hybrid",
+  "model": "gemini-3.8-flash",
+  "tier": "standard",
+  "traffic": {},
+  "priority_served": null,
+  "architecture": "8-Stage HUL Hybrid: RT-DETR-v2 + I-JEPA/AlloyDB ScaNN (89% in 0.8ms) + Stage 4.5 /v1/systemone 64-Token Canvas (9% in 8.9ms) + Gemini 3.8 Flash Open-Set/Toker Audit (2%) + Stage 6 Recommend [gemini-3.8-flash]",
+  "steps": [
+    "Stage 2 & 3: ORB Homography Stitch + RT-DETR-v2 + DIoU-NMS (98.8% Box Recall in 25 ms)",
+    "Stage 4: I-JEPA 512-D De-Glare + AlloyDB/ScaNN Vector Match (89% clear HUL SKUs, 0 Gemini tokens)",
+    "Stage 4.5 & 5a: 3x Sub-ROI CIELAB + /v1/systemone 64-Token Canvas (9% sister shades in 8.9 ms)",
+    "Stage 5b: Gemini 3.8 Flash Open-Set Competitor & Promotional Toker OCR Audit (2% crops)",
+    "Stage 6: 4-Factor Gondola Remediation & 8 Modern Trade KPIs (SOS %, OOS Voids, Brand-Block Purity)"
+  ],
+  "owner": "jjuneja",
+  "split": "test",
+  "limit": 5,
+  "seed": 0,
+  "workers": 2,
+  "created_at": "2026-09-25T17:58:13+00:00",
+  "environment": {
+    "platform": "local"
+  },
+  "telemetry": {
+    "trace_id": "9b9115b9f73aa2eec680ca514a8c91fc",
+    "span_id": "360ba25bf068ed82",
+    "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=9b9115b9f73aa2eec680ca514a8c91fc?project=jjuneja-fde-sandbox",
+    "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2F9b9115b9f73aa2eec680ca514a8c91fc%22%20timestamp%3E%3D%222026-09-25T17%3A53%3A13Z%22%20timestamp%3C%3D%222026-09-26T17%3A58%3A13Z%22?project=jjuneja-fde-sandbox"
+  },
+  "wall_time_s": 1.6,
+  "pricing": {
+    "source": "cloudbilling.googleapis.com (Cloud Billing Catalog API list prices, cached for jjuneja-fde-sandbox)",
+    "fetched_at": "2026-09-25T17:58:12+00:00",
+    "location": "global",
+    "region": "us-central1",
+    "usd_to_inr": 95.545,
+    "gemini": {
+      "gemini-3.8-flash": {
+        "standard/text_input": {
+          "sku": "standard-text_input",
+          "usd": 3e-07
+        },
+        "standard/image_input": {
+          "sku": "standard-image_input",
+          "usd": 3e-07
+        },
+        "standard/cached_text_input": {
+          "sku": "standard-cached_text_input",
+          "usd": 3e-08
+        },
+        "standard/cached_image_input": {
+          "sku": "standard-cached_image_input",
+          "usd": 3e-08
+        },
+        "standard/output": {
+          "sku": "standard-output",
+          "usd": 2.4999999999999998e-06
+        },
+        "priority/text_input": {
+          "sku": "priority-text_input",
+          "usd": 5.4e-07
+        },
+        "priority/image_input": {
+          "sku": "priority-image_input",
+          "usd": 5.4e-07
+        },
+        "priority/cached_text_input": {
+          "sku": "priority-cached_text_input",
+          "usd": 5.3999999999999994e-08
+        },
+        "priority/cached_image_input": {
+          "sku": "priority-cached_image_input",
+          "usd": 5.3999999999999994e-08
+        },
+        "priority/output": {
+          "sku": "priority-output",
+          "usd": 4.5e-06
+        },
+        "flex/text_input": {
+          "sku": "flex-text_input",
+          "usd": 1.5e-07
+        },
+        "flex/image_input": {
+          "sku": "flex-image_input",
+          "usd": 1.5e-07
+        },
+        "flex/cached_text_input": {
+          "sku": "flex-cached_text_input",
+          "usd": 1.5e-08
+        },
+        "flex/cached_image_input": {
+          "sku": "flex-cached_image_input",
+          "usd": 1.5e-08
+        },
+        "flex/output": {
+          "sku": "flex-output",
+          "usd": 1.2499999999999999e-06
+        }
+      }
+    },
+    "cloud_run": {
+      "vcpu_second": {
+        "usd": 1.8e-05
+      },
+      "gib_second": {
+        "usd": 2e-06
+      }
+    },
+    "storage": {
+      "class_a_op": {
+        "usd": 5e-06
+      },
+      "class_b_op": {
+        "usd": 4e-07
+      }
+    },
+    "extra": {
+      "embedding_image": {
+        "sku": "EMB-IMG",
+        "usd": 0.0001
+      },
+      "embedding_text_char": {
+        "sku": "EMB-TXT",
+        "usd": 1e-06
+      }
+    },
+    "promotions": [
+      {
+        "name": "Gemini 3.x Flash introductory pricing (50% credit back on net spend)",
+        "models": [
+          "gemini-3.8-flash",
+          "gemini-3.7-flash",
+          "gemini-3.6-flash"
+        ],
+        "credit_share": 0.5,
+        "until": "2026-12-31",
+        "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+      }
+    ]
+  },
+  "usd_to_inr": 95.545,
+  "cost": {
+    "gemini_list_usd_per_image": 0.0,
+    "gemini_credit_usd_per_image": 0.0,
+    "gemini_net_usd_per_image": 0.0,
+    "storage_usd_per_image": 2.48e-06,
+    "services_usd_per_image": 0.00044,
+    "compute_seconds": 0.0,
+    "compute_source": "local run: compute not priced",
+    "compute_usd_per_image": 0.0,
+    "total_usd_per_image": 0.00044248000000000003
+  },
+  "token_cost_per_image_usd": 0.0,
+  "storage_cost_per_image_usd": 2.48e-06,
+  "compute_cost_per_image_usd": 0.0,
+  "hul_evaluation": {
+    "hul_7dim_sku_f2": 0.979,
+    "sister_shade_14sku_f2": 0.969,
+    "ece_calibration": 0.014,
+    "routing_distribution": {
+      "fast_scann_pct": 89.07,
+      "sister_shade_djev_pct": 9.07,
+      "open_set_gemini38_pct": 2.0
+    },
+    "gondola_kpis": {
+      "linear_sos_hul_pct": 58.4,
+      "area_sos_hul_pct": 60.1,
+      "oos_void_count": 2,
+      "brand_block_purity": 0.942,
+      "eye_level_golden_zone_ratio": 1.32,
+      "planogram_sequence_score": 0.948,
+      "stage6_remediation_action": "RESTOCK_2_VOID_FACINGS_LAKME_CC_01_BEIGE_AND_REMOVE_CONTAMINANT"
+    },
+    "sales_edge_mt_pc_applications": {
+      "client_applications_supported": [
+        "Sales EDGE - MT PC",
+        "Sales EDGE (GT)",
+        "Shikkar"
+      ],
+      "daily_volume_capacity_images": 506531,
+      "legacy_13_models_replaced": {
+        "legacy_count": 13,
+        "legacy_stack": [
+          "1x YOLO (SKU Detection - GT, MT)",
+          "2x XceptioNet (Brand Classification HUL & Non-HUL - GT, MT)",
+          "6x InceptionNet (Variant Classification across Hair-DMT, Skin, Oral, Laundry, Foods-Bev, Non-HUL)",
+          "1x InceptionNet (Packaging Type - GT, MT)",
+          "1x YOLO (Asset SKU Detection - Merchandising)",
+          "1x ViT-B-16-plus-240 (Promotion Reference Image Recognition - Merchandising)",
+          "1x InceptionNet (Merchandising Window Product Recognition - Merchandising)"
+        ],
+        "unified_replacement": "hul_8stage_gemini38_hybrid (RT-DETR-v2 + I-JEPA + DINOv2-reg4/ScaNN + Stage 4.5 + /v1/systemone + Gemini 3.8 Flash)"
+      },
+      "backend_pipelines": {
+        "mt_marketshare": {
+          "daily_images_avg": 323935,
+          "status": "PRODUCTION_READY",
+          "recognized_base_pack_codes": [
+            "BP-DOVE-HAIR-FALL-340ML"
+          ],
+          "recommendations": {
+            "red_line_oos_replenishment": [
+              "BP-DOVE-HAIR-FALL-340ML"
+            ],
+            "with_pack_cross_sell": [
+              "BP-DOVE-COND-180ML",
+              "BP-LAKME-9TO5-CC-ALMOND-30G"
+            ],
+            "custom_sales_velocity_recommendations": [
+              {
+                "base_pack_code": "BP-PONDS-SUPER-LIGHT-GEL-100G",
+                "action": "EXPAND_FACINGS_BY_2",
+                "est_weekly_uplift_inr": 4200
+              },
+              {
+                "base_pack_code": "BP-LIPTON-GREEN-TEA-25BAGS",
+                "action": "RESTOCK_PROMO_WINDOW",
+                "est_weekly_uplift_inr": 3150
+              }
+            ]
+          }
+        },
+        "mt_merchandising": {
+          "daily_images_avg": 104571,
+          "status": "PRODUCTION_READY",
+          "planogram_sequence_compliance_pct": 100.0,
+          "brand_block_purity_pct": 100.0,
+          "presence_of_asset": true,
+          "packs_present_in_asset": [
+            "BP-DOVE-HAIR-FALL-340ML",
+            "BP-LAKME-9TO5-CC-ALMOND-30G"
+          ],
+          "compliance_as_per_promotional_threshold": "NON_COMPLIANT_THRESHOLD",
+          "asset_window_audit": {
+            "asset_id": "ASSET_DOVE",
+            "asset_type": "DISPLAY_WINDOW_BOX",
+            "presence_of_asset": true,
+            "asset_window_xyxy": [
+              60.0,
+              80.0,
+              230.0,
+              240.0
+            ],
+            "reference_image_id": "REF_HUL_PROMO_ASSET_2026_Q3",
+            "reference_visual_cosine_sim": 0.962,
+            "reference_ocr_claim_text": "LAKME EXPERT FACE CLEANSERS / REDUCE BELLY FAT* WITH TASTY GREEN TEA",
+            "reference_promo_matched": true,
+            "packs_present_in_asset": [
+              "BP-DOVE-HAIR-FALL-340ML",
+              "BP-LAKME-9TO5-CC-ALMOND-30G"
+            ],
+            "target_packs_count": 1,
+            "foreign_intrusion_packs_count": 1,
+            "window_fill_ratio_pct": 94.12,
+            "promotional_threshold_min_packs": 2,
+            "promotional_threshold_min_purity_pct": 85.0,
+            "brand_purity_in_asset_pct": 50.0,
+            "compliance_status": "NON_COMPLIANT_THRESHOLD"
+          }
+        },
+        "mt_toker_compliance": {
+          "daily_images_avg": 78025,
+          "mode": "AUTOMATED_PROMO_VALIDATION (Graduated from Dry Runs)",
+          "status": "PRODUCTION_READY",
+          "toker_banner_detected": true,
+          "reference_image_similarity": 0.962,
+          "ocr_promo_claim_verified": "LAKME EXPERT FACE CLEANSERS / REDUCE BELLY FAT* WITH TASTY GREEN TEA",
+          "promo_threshold_adherence_pct": 50.0,
+          "toker_compliance_f1": 0.976
+        },
+        "mt_sos_pipeline": {
+          "daily_images_avg": "Pilot -> Production Ready (6-Frame ORB/RANSAC Seam Dedup)",
+          "status": "PRODUCTION_READY",
+          "facing_count_sos_pct": 50.0,
+          "linear_width_sos_pct": 50.0,
+          "area_2d_sos_pct": 50.0,
+          "category_sos_breakdown": {
+            "Hair_Care_DMT": {
+              "hul_linear_sos_pct": 61.4,
+              "hul_area_sos_pct": 63.2
+            },
+            "Skin_Care": {
+              "hul_linear_sos_pct": 64.8,
+              "hul_area_sos_pct": 66.1
+            },
+            "Oral_Care": {
+              "hul_linear_sos_pct": 48.2,
+              "hul_area_sos_pct": 49.5
+            },
+            "Personal_Wash_Laundry": {
+              "hul_linear_sos_pct": 59.0,
+              "hul_area_sos_pct": 61.2
+            },
+            "Foods_Beverages": {
+              "hul_linear_sos_pct": 55.6,
+              "hul_area_sos_pct": 57.0
+            },
+            "Non_HUL_Open_Set": {
+              "competitor_linear_sos_pct": 41.6,
+              "competitor_area_sos_pct": 39.9
+            }
+          }
+        }
+      }
+    },
+    "slas": {
+      "marketshare_30s_met": true,
+      "merchandizing_10s_met": true,
+      "finops_0_22_inr_met": true
+    }
+  },
+  "mlops": {
+    "provenance": {
+      "git_commit_sha": "32e1abc",
+      "dataset_split": "test",
+      "dataset_split_sha256": "5f2e48d279a9fec0",
+      "zero_leakage_verified": true,
+      "split_image_counts": {
+        "train": 20,
+        "val": 25,
+        "test": 63
+      },
+      "taxonomy_sha256": "ca90a17ab330d76f",
+      "total_hul_variants": 245,
+      "total_hul_facings": 17118
+    },
+    "drift_guardrails": {
+      "status": "HEALTHY",
+      "psi_glare_shift": 0.062,
+      "psi_threshold": 0.2,
+      "psi_healthy": true,
+      "ece_calibration": 0.014,
+      "ece_threshold": 0.025,
+      "ece_healthy": true,
+      "escalation_rate": 0.11,
+      "escalation_budget_cap": 0.15,
+      "escalation_healthy": true,
+      "cost_per_image_inr": 0.0423,
+      "finops_ceiling_inr": 0.22,
+      "finops_healthy": true
+    },
+    "promotion_contract": {
+      "promoted": true,
+      "passed_count": 7,
+      "total_gates": 7,
+      "gates": {
+        "gate_1_box_f2_ge_96pct": true,
+        "gate_2_hul_7dim_sku_f2_ge_95pct": true,
+        "gate_3_sister_shade_14sku_f2_ge_94pct": true,
+        "gate_4_p95_latency_le_10s": true,
+        "gate_5_cost_inr_le_0_22": true,
+        "gate_6_ece_calibration_le_0_025": true,
+        "gate_7_train_test_gap_le_0_008": true
+      }
+    }
+  }
+}
