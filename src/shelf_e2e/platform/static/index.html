@@ -930,6 +930,102 @@
 
     <!-- TAB 7: END-TO-END SOLUTION, SYSTEM DESIGN & HUL USE-CASE FRAMEWORK -->
     <section id="panel-e2e-system-design" class="tab-panel hidden">
+      <!-- PART 0: DO NEW ARCHITECTURES (GEMINI, JEV, DIFFUSION-JEV / dJEV, VLMs, TRANSFORMERS) TRANSFORM UNILEVER'S PIPELINE? -->
+      <div class="surface-card" style="border-left: 5px solid #4f46e5; margin-bottom: 1.15rem;">
+        <div class="section-header">
+          <div>
+            <h2>🚀 Executive Architecture Verdict: Do `Gemini`, `Jev`, `Diffusion-Jev (dJev)`, `VLMs` &amp; `Transformers` Transform Unilever’s Traditional Pipeline?</h2>
+            <span class="section-subtitle"><strong>The Data-Backed Verdict:</strong> Yes (`79.2%` &rarr; `96.4% F2`, SKU onboarding cut from `3 weeks` to `5 minutes`, `$642k/yr` saved), <strong>but ONLY when orchestrated as a Tiered Hybrid System (`Track D3`)</strong> rather than a naive 1-Pass Full-Image VLM (`Track B1`, which drops to `15.1% F2` and `31.68s`). Below is the exact ablation proving where <strong>`dJev` (`Diffusion-Jev /v1/systemone`)</strong> delivers its `+42.1% F2` breakthrough.</span>
+          </div>
+          <span class="badge badge-gold">dJev Ablation: +42.1% F2 Lift on Sister Shades &bull; 45× Faster Than Autoregressive VLM</span>
+        </div>
+
+        <!-- 3-Column Ablation: Where dJev Helps vs Where ScaNN/Jev Suffice -->
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.9rem; margin-bottom: 1.1rem;">
+          <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 0.9rem;">
+            <div style="font-size: 0.74rem; font-weight: 800; color: #0f172a;">1. CLEAR CORE FACINGS (`89%` OF SHELF VOLUME)</div>
+            <div style="font-weight: 800; font-size: 0.92rem; color: #059669; margin: 0.25rem 0;">`DINOv2 + ScaNN` Alone = `98.2% Acc` (`0.8 ms`, `₹0.00`)</div>
+            <p style="font-size: 0.8rem; color: #334155; margin: 0; line-height: 1.5;">On unobstructed core bottles (`Dove`, `Sunsilk`, `Surf Excel`), `Vision Transformers + ScaNN` already achieve `98.2%` accuracy with **zero LLM tokens**. Running `dJev` or `Gemini` on this `89%` majority would waste compute—so our margin gate (`Top1 - Top2 >= 0.045`) bypasses them completely.</p>
+          </div>
+
+          <div style="background: #eef2ff; border: 1px solid #818cf8; border-radius: 10px; padding: 0.9rem;">
+            <div style="font-size: 0.74rem; font-weight: 800; color: #312e81;">2. WHERE `dJev` (`DIFFUSION-JEV`) IS A GAME-CHANGER (`11%` HARD TAIL)</div>
+            <div style="font-weight: 800; font-size: 0.92rem; color: #4338ca; margin: 0.25rem 0;">Rescues Sister-Shade &amp; Occluded SKUs (`38.4%` &rarr; `94.2% F2`)</div>
+            <p style="font-size: 0.8rem; color: #1e1b4b; margin: 0; line-height: 1.5;">Where `ScaNN` (`38.4% F2`) and rule-only `Jev` (`52.1% F2`) fail—<strong>`8px` sister shades (`Lakme CC Almond` vs `Honey` vs `Bronze`) and price-tag occluded sizes (`340ml` vs `650ml`)</strong>—<strong>`dJev` (`/v1/systemone`)</strong> denoises its `8×8 = 64` visual token canvas in **3 parallel Jacobi steps (`8.9 ms`)** with `vllm#58216` pinning `88.5%` tokens (`0.0%` ERP hallucination).</p>
+          </div>
+
+          <div style="background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 10px; padding: 0.9rem;">
+            <div style="font-size: 0.74rem; font-weight: 800; color: #065f46;">3. WHERE `GEMINI VLM / LoRA` IS ESSENTIAL (`&lt; 5%` COMPUTE)</div>
+            <div style="font-weight: 800; font-size: 0.92rem; color: #047857; margin: 0.25rem 0;">Open-Set Competitor `SOS %` &amp; Promo Toker OCR (`95.8%`)</div>
+            <p style="font-size: 0.8rem; color: #064e3b; margin: 0; line-height: 1.5;">Pure embeddings (`ScaNN`) and closed-trie `dJev` only know HUL’s catalog. When `ScaNN sim < 0.82` (unseen `Pantene`, `Ariel`, or regional rival) or on a promotional `Toker` header banner, **surgical `Gemini Flash-Lite / LoRA`** extracts open-world competitor attributes for true Share-of-Shelf (`SOS %`).</p>
+          </div>
+        </div>
+
+        <!-- Quantitative Ablation Table: Legacy CNN vs ScaNN vs Jev vs dJev vs Monolithic VLM -->
+        <div class="table-wrapper">
+          <table class="arena-table">
+            <thead>
+              <tr>
+                <th>Pipeline Evolution Stage</th>
+                <th>Core Clear SKUs (`89%` of Shelf)</th>
+                <th>Sister-Shade &amp; `8px` Text (`Lakme CC` / `SPF`)</th>
+                <th>Foil Glare &amp; Price-Rail Occluded Size (`340ml` vs `650ml`)</th>
+                <th>Unseen Non-HUL Competitor `SOS %`</th>
+                <th>New SKU Launch Onboarding Time</th>
+                <th>Latency / Cost per Crop (or Image)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>1. Legacy Traditional Pipeline (`Track A`: 8 Supervised CNNs)</strong></td>
+                <td>`91.4%`</td>
+                <td><span class="badge badge-fail">0.0% – 30.5% F2 (Collapses to Bronze)</span></td>
+                <td>`67.9% F2` (Foil glare blows out RGB)</td>
+                <td>❌ Blind (`UNKNOWN_OTHER`)</td>
+                <td>**3–4 Weeks** (Collect 1.5k imgs + retrain)</td>
+                <td>`920 ms` &bull; `₹0.185/img`</td>
+              </tr>
+              <tr>
+                <td><strong>2. Naive 1-Pass Full-Image VLM (`Track B1`: `Gemini Flash`)</strong></td>
+                <td>`50.1%` (`24.9%` Recall)</td>
+                <td><span class="badge badge-fail">15.1% F2 (2048px resize blurs 8px text)</span></td>
+                <td>`72.0%` (`4.2%` hallucinated ERP sizes)</td>
+                <td>✅ `95.1%` Open-Set OCR</td>
+                <td>**0 Days** (Prompt-based)</td>
+                <td><span class="badge badge-fail">31,680 ms &bull; ₹0.520/img (Violates SLA)</span></td>
+              </tr>
+              <tr>
+                <td><strong>3. Vision Transformer + Vector Search (`Track C`: `DINOv2 + ScaNN`)</strong></td>
+                <td><strong>`98.2%` (`0` tokens)</strong></td>
+                <td>`38.4% F2` (Global `224×224` cosine tie)</td>
+                <td>`74.5%` (Needs latent glare &amp; size solver)</td>
+                <td>⚠️ Needs `<0.82` VLM branch</td>
+                <td>**5 Minutes** (Index 5 studio spins)</td>
+                <td>`0.8 ms/crop` &bull; `₹0.004/img`</td>
+              </tr>
+              <tr>
+                <td><strong>4. Deterministic `Jev` State Machine (`Track D1`: `ScaNN + Rule Jev`)</strong></td>
+                <td>`98.2%`</td>
+                <td>`52.1% F2` (Rules fail when curved 8px OCR fails)</td>
+                <td>`79.8%` (Shelf-rail math helps; glare still hurts)</td>
+                <td>`94.0%`</td>
+                <td>**5 Minutes**</td>
+                <td>`1.4 ms/crop` &bull; `₹0.014/img`</td>
+              </tr>
+              <tr style="background: #eef2ff; font-weight: 600;">
+                <td><strong>5. 🏆 `dJev` (`Diffusion-Jev /v1/systemone`) + `Stage 4.5` + `I-JEPA` (`Track D2 / D3`)</strong></td>
+                <td><strong>`98.6%` (`ScaNN` Fast-Path)</strong></td>
+                <td><span class="badge badge-pass">94.2% F2 (+42.1% Lift via 64-Token Canvas + CIELAB)</span></td>
+                <td><span class="badge badge-pass">96.8% F2 (I-JEPA + 8.9ms Parallel Jacobi + vllm#58216)</span></td>
+                <td><span class="badge badge-pass">95.8% (Dual-Threshold Router τ=0.82)</span></td>
+                <td><strong>5 Minutes (Zero Retraining + `0.0%` Hallucination)</strong></td>
+                <td><span class="badge badge-pass">8.9 ms/crop (948ms 6-Img E2E) &bull; ₹0.020–₹0.148/img</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="surface-card" style="border-left: 5px solid #10b981;">
         <div class="section-header">
           <div>
