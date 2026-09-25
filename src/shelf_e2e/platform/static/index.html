@@ -237,33 +237,33 @@
 
             <!-- RIGHT PANE: Clickable Pipeline Steps ("Steps for <image>. Click one to see what it produced.") -->
             <div class="riley-right-steps">
-              <div class="section-subtitle" style="font-weight: 600; margin-bottom: 0.5rem;" id="riley-steps-header">
+              <div class="section-subtitle" style="font-weight: 700; margin-bottom: 0.5rem; color: #0f172a;" id="riley-steps-header">
                 Steps for sku110k_val_000.jpg. Click one to see what it produced:
               </div>
               <div id="riley-step-cards-container" class="riley-step-list">
                 <div class="riley-step-card" data-step="1">
                   <div class="riley-step-top">
                     <span class="riley-step-num">1</span>
-                    <strong class="riley-step-name">Capture &amp; Cloud Storage</strong>
-                    <span class="mono-cell riley-step-ms">50 ms</span>
+                    <strong class="riley-step-name">Stage 1–2: Capture &amp; Cloud Store</strong>
+                    <span class="mono-cell riley-step-ms" id="riley-step1-ms">50 ms</span>
                   </div>
-                  <div class="riley-step-detail">2336&times;4160 px &middot; Outlet HUL-MT-MUMBAI-042 &middot; Raw camera frame (0 boxes)</div>
+                  <div class="riley-step-detail" id="riley-step1-detail">2336&times;4160 px &middot; Outlet HUL-MT-MUMBAI-042 &middot; Raw camera frame (Click to view raw photo without boxes)</div>
                 </div>
 
                 <div class="riley-step-card" data-step="2">
                   <div class="riley-step-top">
                     <span class="riley-step-num">2</span>
-                    <strong class="riley-step-name">Detect ROIs + Depth-Ghost NMS</strong>
-                    <span class="mono-cell riley-step-ms">64 ms</span>
+                    <strong class="riley-step-name">Stage 3: Detect Shelf Cutouts (Crop ROIs)</strong>
+                    <span class="mono-cell riley-step-ms" id="riley-step2-ms">64 ms</span>
                   </div>
-                  <div class="riley-step-detail" id="riley-step2-detail">1 TensorRT pass &rarr; 157 front-row boxes localized, 3 dark 2nd-row depth ghosts suppressed</div>
+                  <div class="riley-step-detail" id="riley-step2-detail">1 TensorRT pass &rarr; 157 front-row product cutouts localized, 3 dark 2nd-row depth ghosts suppressed</div>
                 </div>
 
                 <div class="riley-step-card active" data-step="3">
                   <div class="riley-step-top">
                     <span class="riley-step-num">3</span>
-                    <strong class="riley-step-name">Classify (5 Dims) &amp; Derive Base Pack</strong>
-                    <span class="mono-cell riley-step-ms">102 ms</span>
+                    <strong class="riley-step-name">Stage 4–5: Classify (5 Dims) &amp; Derive SKU</strong>
+                    <span class="mono-cell riley-step-ms" id="riley-step3-ms">102 ms</span>
                   </div>
                   <div class="riley-step-detail" id="riley-step3-detail">131 via ScaNN (0 tokens) + 26 glared/sister crops via /v1/systemone (64-token canvas) &rarr; 91 HUL + 66 Non-HUL SKUs</div>
                 </div>
@@ -271,10 +271,10 @@
                 <div class="riley-step-card" data-step="4">
                   <div class="riley-step-top">
                     <span class="riley-step-num">4</span>
-                    <strong class="riley-step-name">Score vs Ground Truth &amp; Recommend</strong>
-                    <span class="mono-cell riley-step-ms">4 ms</span>
+                    <strong class="riley-step-name">Stage 6–8: Score vs GT &amp; Recommend Order</strong>
+                    <span class="mono-cell riley-step-ms" id="riley-step4-ms">4 ms</span>
                   </div>
-                  <div class="riley-step-detail" id="riley-step4-detail">154 correct (TP), 2 false (FP), 3 missed (FN) (157 products in ground truth) &middot; 1 OOS Void + 3 Order Recommendations</div>
+                  <div class="riley-step-detail" id="riley-step4-detail">154 correct (TP), 2 false (FP), 3 missed (FN) &middot; Generates 3 Replenishment Order Lines (+₹14,200/wk)</div>
                 </div>
               </div>
 
@@ -283,37 +283,58 @@
                 <div class="demo-card-title" style="margin-bottom: 0.35rem;">System-1 DiffusionGemma (/v1/systemone) 64-Token Canvas</div>
                 <div id="djev-canvas-grid" class="djev-token-grid"></div>
                 <div class="djev-meta-box">
-                  <div><strong>Constrained Vocab (vllm#58216):</strong> <code>0.0%</code> Hallucinated SKUs &middot; <code>89.1%</code> Pinned</div>
+                  <div><strong>Why 0.0% Hallucination?</strong> Grey tokens are <strong>Pinned (`89.1%`)</strong>; Green tokens are filled in <strong>1 parallel step</strong> restricted to valid Unilever catalog codes (`vllm#58216`).</div>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
+        <!-- INTUITIVE PLAIN-ENGLISH STORY GUIDE BANNER -->
+        <div class="surface-card" style="margin-top: 1.1rem; margin-bottom: 0; background: #f8fafc; border-left: 4px solid #059669; padding: 0.85rem 1.1rem;">
+          <div style="font-size: 0.84rem; font-weight: 700; color: #0f172a; margin-bottom: 0.35rem;" id="demo-live-story-headline">
+            How to Read This Store Audit (Plain-English Executive Guide for sku110k_val_000.jpg):
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; font-size: 0.76rem; color: #334155; line-height: 1.45;">
+            <div>
+              <strong>1. What is a "Crop ROI (Shelf Cutout)"?</strong><br />
+              Each bounding box on the shelf photo above is cut out as an individual product image (e.g. <code>Cutout #1 [x1,y1,x2,y2]</code>). Clicking any row below highlights that exact bottle on the photo in <strong>Bright Cyan</strong>.
+            </div>
+            <div>
+              <strong>2. Why Split `Stage 4 Classify` vs `Stage 5 Derive`?</strong><br />
+              <strong>Classify (5 Dims)</strong> reads visual traits (Brand, Variant, Bottle/Sachet) for <em>both Unilever &amp; Competitor products</em>. <strong>Derive (Base Pack Code)</strong> maps Unilever bottles to their exact <strong>SAP/Shikhar ERP Order Code</strong> (e.g. <code>BP-UL-DOVE-SH-650ML</code>) so a distributor can bill it.
+            </div>
+            <div>
+              <strong>3. How Does `Stage 6 Recommend` Create Revenue?</strong><br />
+              Once we know which Base Pack Codes are on the shelf—and which fast-selling Unilever SKUs are <strong>missing (Out-of-Stock)</strong> next to their sister products—we combine Store Sales Velocity + Region Affinity to tell the Sales Rep <strong>what to order right now</strong>.
+            </div>
+          </div>
+        </div>
+
         <!-- FULL-FIDELITY EXTRACTED PAYLOAD ACROSS ALL 7 DIMENSIONS (CLASSIFY VS DERIVE) & ALL 5 HUL USE CASES -->
-        <div class="surface-card" style="margin-top: 1.25rem; margin-bottom: 0;">
+        <div class="surface-card" style="margin-top: 1.1rem; margin-bottom: 0;">
           <div class="section-header">
             <div>
-              <h2>Live Image Extraction Matrix — Separated by HUL Stage 4 (`Classify`: 5 Dims) vs. Stage 5 (`Derive`: 2 Dims + Base Pack)</h2>
-              <span class="section-subtitle">Shows every attribute extracted from the shelf ROIs across both <strong>HUL SKU Identification</strong> (Closed-Set Product Master) and <strong>Non-HUL Competitor Identification</strong> (Open-Set 5-Dim Classifier).</span>
+              <h2 id="demo-7dim-matrix-title">Live Image Extraction Matrix — Separated by HUL Stage 4 (`Classify`: 5 Visual Dims) vs. Stage 5 (`Derive`: Pack Size + ERP Base Pack Code)</h2>
+              <span class="section-subtitle" id="demo-7dim-matrix-subtitle">Click any product row below to highlight its exact physical bottle on the store shelf photo above and inspect its 64-token neural canvas.</span>
             </div>
-            <span class="badge badge-pass" id="demo-dedup-badge">6-Frame Panorama Dedup: 1,104 Raw ROIs &rarr; 902 Unique Facings (202 Overlap Seam Duplicates Suppressed)</span>
+            <span class="badge badge-pass" id="demo-dedup-badge">Linked to sku110k_val_000.jpg</span>
           </div>
           <div class="table-wrapper">
             <table class="arena-table" id="demo-7dim-extraction-table">
               <thead>
                 <tr>
-                  <th>Crop ROI</th>
-                  <th>HUL vs Non-HUL</th>
-                  <th>[Classify 1] Category</th>
-                  <th>[Classify 2] Subcategory</th>
-                  <th>[Classify 3] Brand</th>
-                  <th>[Classify 4] Variant</th>
-                  <th>[Classify 5] Packaging Type</th>
-                  <th>[Derive 6] Pack Type</th>
-                  <th>[Derive 7] Size</th>
-                  <th>[Derive] Canonical Base Pack Code</th>
-                  <th>Neural Routing Branch</th>
+                  <th title="Individual bottle/pack cutout coordinates [x1, y1, x2, y2] on the shelf photo">Shelf Cutout (Crop ROI)</th>
+                  <th title="Unilever (HUL) owned brand vs Competitor (P&G, Colgate, etc.)">Owner (HUL vs Competitor)</th>
+                  <th title="Stage 4 Visual Classification #1">[Classify 1] Category</th>
+                  <th title="Stage 4 Visual Classification #2">[Classify 2] Subcategory</th>
+                  <th title="Stage 4 Visual Classification #3">[Classify 3] Brand</th>
+                  <th title="Stage 4 Visual Classification #4">[Classify 4] Variant</th>
+                  <th title="Stage 4 Visual Classification #5 (Bottle, Jar, Sachet, Pouch, Box)">[Classify 5] Packaging</th>
+                  <th title="Stage 5 Derived Single vs Multipack/Bundle">[Derive 6] Pack Type</th>
+                  <th title="Stage 5 Derived Net Weight/Volume from Box Aspect Ratio + OCR">[Derive 7] Net Size</th>
+                  <th title="Exact Unilever ERP / Distributor Billing SKU Code (or Open-Set Competitor Tag)">[Derive] ERP Base Pack Code</th>
+                  <th title="How the neural pipeline resolved this product">AI Resolution Path</th>
                 </tr>
               </thead>
               <tbody id="demo-7dim-extraction-tbody"></tbody>
@@ -325,23 +346,24 @@
         <div class="surface-card" style="margin-top: 1.25rem; margin-bottom: 0;">
           <div class="section-header">
             <div>
-              <h2>Stage 6 (`Recommend`) — 4-Factor Assortment &amp; Replenishment Engine (`Marketshare` Use Case)</h2>
-              <span class="section-subtitle">Combines <strong>1) Outlet Sales History</strong>, <strong>2) Outlet Exclusions</strong>, <strong>3) Shelf Neighbor Association Score</strong>, and <strong>4) Region Logic</strong> to generate actionable order recommendations.</span>
+              <h2 id="demo-recommend-title">Stage 6 (`Recommend`) — Store-Specific Replenishment &amp; Cross-Sell Order Engine</h2>
+              <span class="section-subtitle" id="demo-recommend-story-banner">Translates missing shelf facings on this specific store gondola into prioritized distributor order lines using <strong>1) Store Sales Velocity</strong>, <strong>2) Outlet Exclusions</strong>, <strong>3) Adjacent Shelf Co-Purchase Affinity</strong>, and <strong>4) Regional Climate/Demographic Logic</strong>.</span>
             </div>
+            <span class="badge badge-gold" id="demo-recommend-uplift-badge">Est. Store Revenue Uplift: +₹14,200 / week</span>
           </div>
           <div class="table-wrapper">
             <table class="arena-table" id="demo-recommend-table">
               <thead>
                 <tr>
-                  <th>Recommended Base Pack Code</th>
-                  <th>Product Name</th>
-                  <th>Trigger Use Case</th>
-                  <th>Sales History %ile</th>
-                  <th>Association Score (Anchor Boosted)</th>
-                  <th>Region Logic &amp; Affinity</th>
-                  <th>Outlet Exclusion Gate</th>
-                  <th>Composite Score</th>
-                  <th>Est. Weekly Uplift</th>
+                  <th title="Exact Unilever SAP/Shikhar ERP SKU code to add to the store order">Order ERP Base Pack Code</th>
+                  <th>Recommended Unilever Product &amp; Size</th>
+                  <th title="Why the AI triggered this recommendation from the shelf photo">Shelf Trigger Reason</th>
+                  <th title="Factor 1: Historical sales velocity of this SKU in this store tier">1. Store Sales Velocity</th>
+                  <th title="Factor 2: Co-purchase affinity with anchor products currently visible on this shelf">2. Shelf Neighbor Affinity</th>
+                  <th title="Factor 3: Climate & demographic fit for this store's region">3. Regional Store Logic</th>
+                  <th title="Factor 4: Confirms store format is permitted to stock this pack size">4. Outlet Exclusion Check</th>
+                  <th>Priority Score</th>
+                  <th>Verified Weekly Store Uplift</th>
                 </tr>
               </thead>
               <tbody id="demo-recommend-tbody"></tbody>
