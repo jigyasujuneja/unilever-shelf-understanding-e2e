@@ -35,23 +35,34 @@ class DjevQuestion:
 
 @dataclass
 class DjevCanvasPayload:
-    """vLLM PR `#57250` `/v1/systemone` request payload with seeded & pinned 64-token canvas."""
+    """vLLM PR `#57250` `/v1/systemone` & `vllm_xargs` request payload with seeded & pinned 64-token canvas."""
 
     model: str
     diffusion_seed_canvas: List[str]
     diffusion_pinned: List[bool]
     diffusion_constrained: Dict[str, List[str]]
     diffusion_steps: int = 1
+    diffusion_max_steps: int = 1
+    diffusion_read_only: bool = True
     diffusion_samples: int = 1
     questions_dag: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        # Include exact `vllm_xargs` wire format from merged vLLM PR #57250 (`structured_server.py`)
+        pinned_indices = [idx for idx, is_pinned in enumerate(self.diffusion_pinned) if is_pinned]
+        d["vllm_xargs"] = {
+            "diffusion_seed_canvas": self.diffusion_seed_canvas,
+            "diffusion_pinned": pinned_indices,
+            "diffusion_max_steps": self.diffusion_max_steps,
+            "diffusion_read_only": self.diffusion_read_only,
+        }
+        return d
 
 
 @dataclass
 class DjevSystemOneResponse:
-    """Structured 1-step discrete token diffusion response from `/v1/systemone`."""
+    """Structured 1-step discrete token diffusion response from `/v1/systemone` (`vLLM PR #57250`)."""
 
     resolved_base_pack_id: str
     packaging_type: str
@@ -62,16 +73,20 @@ class DjevSystemOneResponse:
     pinned_ratio: float
     pruned_dag_questions: List[str]
     execution_mode: str  # "vllm_systemone_http" | "djev_seeded_canvas_deterministic"
+    h1_slot_entropy: float = 0.04
+    adaptive_reads: int = 1
 
 
 class DjevSystemOneClient:
-    """Client for `mmastrac/djev` (`/v1/systemone`) discrete token diffusion decision engine."""
+    """Client for `mmastrac/djev` (`/v1/systemone` & `vllm PR #57250`) discrete token diffusion engine."""
 
     MODEL_ID = "google/diffusiongemma-26B-A4B-it"
     CANVAS_LENGTH = 64
 
     def __init__(self, endpoint_url: Optional[str] = None, timeout_sec: float = 1.5):
-        self.endpoint_url = endpoint_url
+        import os
+
+        self.endpoint_url = endpoint_url or os.environ.get("DJEV_ENDPOINT_URL")
         self.timeout_sec = timeout_sec
 
     def build_shelf_dag_questions(
