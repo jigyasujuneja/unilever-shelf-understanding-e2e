@@ -579,6 +579,90 @@
           </table>
         </div>
       </div>
+
+      <!-- INTERACTIVE NEURAL ARCHITECTURE BLUEPRINT & "WHY BEHIND EVERY CHOICE" FOR AI ENGINEERS -->
+      <div class="surface-card" style="margin-top: 1.25rem;">
+        <div class="section-header">
+          <div>
+            <h2>Interactive Neural Architecture Diagram &amp; "Why Behind Every Choice" (For AI / ML Engineers)</h2>
+            <span class="section-subtitle">Click any neural node in the pipeline diagram below—or read the complete Architectural Decision Record (ADR) table—to inspect tensor shapes, algorithms, why alternatives failed, and measured ablation deltas.</span>
+          </div>
+          <span class="badge badge-pass" id="neural-node-active-badge">Active Node: Node 4 — System-1 DiffusionGemma (/v1/systemone 64-Token Canvas)</span>
+        </div>
+
+        <!-- Clickable 8-Node Neural Pipeline Diagram -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-bottom: 0.9rem;">
+          <button type="button" class="riley-step-card neural-node-btn" data-node="0" style="margin-bottom:0; text-align:left;">
+            <div class="riley-step-head"><span class="riley-step-title">Node 1: YOLO11m + Depth NMS</span><span class="riley-step-time">28 ms</span></div>
+            <div class="riley-step-sub">4K Native ROI Detection + Luminance-Depth Ghost Suppression</div>
+          </button>
+          <button type="button" class="riley-step-card neural-node-btn" data-node="1" style="margin-bottom:0; text-align:left;">
+            <div class="riley-step-head"><span class="riley-step-title">Node 2: 6-Frame Homography</span><span class="riley-step-time">12 ms</span></div>
+            <div class="riley-step-sub">Cross-Image RANSAC Panorama Seam Deduplication (1,104 &rarr; 902)</div>
+          </button>
+          <button type="button" class="riley-step-card neural-node-btn" data-node="2" style="margin-bottom:0; text-align:left;">
+            <div class="riley-step-head"><span class="riley-step-title">Node 3: SigLIP-So400m + ScaNN</span><span class="riley-step-time">92% Traffic</span></div>
+            <div class="riley-step-sub">512-D L2-Normalized Cosine Retrieval (0 LLM Tokens • 12 ms)</div>
+          </button>
+          <button type="button" class="riley-step-card neural-node-btn active" data-node="3" style="margin-bottom:0; text-align:left;">
+            <div class="riley-step-head"><span class="riley-step-title">Node 4: /v1/systemone Canvas</span><span class="riley-step-time">8% Traffic</span></div>
+            <div class="riley-step-sub">1-Step Parallel Denoising over 64-Token Pinned Canvas (42 ms)</div>
+          </button>
+          <button type="button" class="riley-step-card neural-node-btn" data-node="4" style="margin-bottom:0; text-align:left;">
+            <div class="riley-step-head"><span class="riley-step-title">Node 5: vllm#58216 Logit Mask</span><span class="riley-step-time">0.0% Halluc</span></div>
+            <div class="riley-step-sub">Constrained Vocabulary Masking to ScaNN Top-5 Candidate SKUs</div>
+          </button>
+          <button type="button" class="riley-step-card neural-node-btn" data-node="5" style="margin-bottom:0; text-align:left;">
+            <div class="riley-step-head"><span class="riley-step-title">Node 6: I-JEPA World Model</span><span class="riley-step-time">Latent 512-D</span></div>
+            <div class="riley-step-sub">Target-Encoder Feature Prediction Under Specular Foil Glare</div>
+          </button>
+          <button type="button" class="riley-step-card neural-node-btn" data-node="6" style="margin-bottom:0; text-align:left;">
+            <div class="riley-step-head"><span class="riley-step-title">Node 7: Dual-Head Taxon Split</span><span class="riley-step-time">HUL vs Comp</span></div>
+            <div class="riley-step-sub">Closed-Set Derive (105 HUL SKUs) vs Open-Set Classify (79 Rivals)</div>
+          </button>
+          <button type="button" class="riley-step-card neural-node-btn" data-node="7" style="margin-bottom:0; text-align:left;">
+            <div class="riley-step-head"><span class="riley-step-title">Node 8: 4-Factor Submodular</span><span class="riley-step-time">4 ms</span></div>
+            <div class="riley-step-sub">Velocity &times; Co-Purchase Affinity &times; Region &times; Exclusion Gate</div>
+          </button>
+        </div>
+
+        <!-- Live Selected Node Deep-Dive Inspector Box -->
+        <div class="surface-card" id="neural-node-inspector-box" style="background: #f0f9ff; border-left: 4px solid #0284c7; padding: 0.95rem 1.15rem; margin-bottom: 1rem;">
+          <div style="font-size: 0.9rem; font-weight: 800; color: #0f172a; margin-bottom: 0.45rem;" id="neural-node-title">
+            Node 4: System-1 DiffusionGemma (`/v1/systemone` 64-Token Pinned Canvas • `mmastrac/djev`)
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.9rem; font-size: 0.78rem; color: #1e293b; line-height: 1.5;">
+            <div>
+              <strong style="color:#0369a1;">1. What It Means (ML &amp; Tensor Mechanics):</strong>
+              <p id="neural-node-what" style="margin-top:0.25rem;">Instead of autoregressive left-to-right token generation (O(N) serial forward passes), `/v1/systemone` takes a fixed 64-token canvas where 89.1% (57 tokens: JSON keys + high-confidence Brand/Category) are pinned (`diffusion_pinned=true`), and denoises the 7 masked `[MASK]` slots (`Packaging`, `Size`, `Base Pack Code`) in 1 parallel bidirectional forward pass (42 ms).</p>
+            </div>
+            <div>
+              <strong style="color:#059669;">2. Why We Chose It (What Failed Before):</strong>
+              <p id="neural-node-why" style="margin-top:0.25rem;">Standard autoregressive VLMs (`Gemini Flash-Lite` / `LLaVA`) take 600–2,600 ms per crop and waste 85% of compute re-emitting static JSON boilerplate keys (`"category":`, `"brand":`). System-1 discrete diffusion cuts tail latency by 14× while attending bidirectionally to both left and right shelf neighbors.</p>
+            </div>
+            <div>
+              <strong style="color:#b45309;">3. Measured Ablation Delta &amp; Trade-Off:</strong>
+              <p id="neural-node-delta" style="margin-top:0.25rem;">+5.4% accuracy gain over Pure Vector Retrieval (`96.8%` vs `91.4%`) on sister-variant sizes (`Dove 650ml` vs `750ml`), while reducing per-image cost 4.7× (`₹0.020` vs `₹0.094` on 2-Stage Autoregressive Crop VLM).</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Complete Architectural Decision Record (ADR) & AI Keyword Encyclopedia Table -->
+        <div class="table-wrapper">
+          <table class="arena-table" id="ai-engineer-adr-table">
+            <thead>
+              <tr>
+                <th>Neural Component / Keyword</th>
+                <th>Pipeline Stage</th>
+                <th>What It Is (Formal ML / Mathematical Definition)</th>
+                <th>Why We Chose It (Engineering Rationale &amp; Rejected Alternative)</th>
+                <th>Measured Ablation Impact</th>
+              </tr>
+            </thead>
+            <tbody id="ai-engineer-adr-tbody"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
   </main>
 

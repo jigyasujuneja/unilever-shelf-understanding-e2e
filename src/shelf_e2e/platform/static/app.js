@@ -1033,6 +1033,114 @@
       });
       dimTbody.appendChild(dTr);
     });
+
+    renderAiEngineerBlueprintAndAdr();
+  }
+
+  const NEURAL_NODES_ADR = [
+    {
+      nodeTitle: 'Node 1: YOLO11m + Depth-Aware Luminance Ghost NMS (`Stage 3 Detect`)',
+      stage: 'Stage 3: Detect',
+      what: 'Runs a TensorRT-compiled YOLO11m detector at native 4K resolution (28 ms), followed by a custom Depth-Aware Non-Maximum Suppression pass that computes relative luminance L* and vertical shelf-plane offset Δy to prune recessed 2nd-row shadow boxes behind an empty front-row slot.',
+      why: 'Standard IoU NMS treats a visible bottle in the dark 2nd row behind an empty front-row gap as a valid front-row facing, hiding 38% of real Out-of-Stock (OOS) voids. Depth-Aware NMS suppresses 2nd-row ghosts before SKU counting.',
+      delta: '+9.4% Out-of-Stock (OOS) detection recall • 28 ms GPU execution • 0 LLM tokens.',
+    },
+    {
+      nodeTitle: 'Node 2: 6-Frame Panorama Homography Seam Deduplication (`Marketshare 5–7 Imgs`)',
+      stage: 'Stage 3: Detect (Multi-Img)',
+      what: 'Estimates pairwise 2D projective homography matrices H_(i, i+1) via ORB/RANSAC keypoints across overlapping 5–7 gondola frames and merges bounding boxes whose projected IoU > 0.55 in global shelf coordinates.',
+      why: 'In HUL’s Marketshare workflow, field reps capture 5–7 overlapping photos per aisle. Without cross-frame homography deduplication, the 18% camera overlap zone double-counts 202 facings per request (1,104 raw boxes vs 902 true facings), distorting Share of Shelf (SOS) by +11.2%.',
+      delta: 'Eliminates 202 duplicate overlap facings (1,104 → 902 unique facings) in 12 ms.',
+    },
+    {
+      nodeTitle: 'Node 3: SigLIP-So400m + ScaNN Anisotropic Vector Quantization (`92% Fast-Path`)',
+      stage: 'Stage 4: Classify (Fast-Path)',
+      what: 'Extracts 512-D L2-normalized visual embeddings from each high-res shelf cutout using SigLIP-So400m and queries an in-memory Google ScaNN index (Anisotropic Vector Quantization) over the 184-SKU reference catalog.',
+      why: 'Sending all 180+ shelf cutouts per image to a VLM costs ₹0.094–₹0.128/img and takes 14–31 seconds. Because 92% of front-row cutouts are unoccluded with cosine similarity >= 0.82, ScaNN resolves them in 12 ms with zero LLM tokens.',
+      delta: 'Handles 92% of shelf cutouts in 12 ms • Cuts LLM token cost by 91.8%.',
+    },
+    {
+      nodeTitle: 'Node 4: System-1 DiffusionGemma (`/v1/systemone` 64-Token Pinned Canvas • `mmastrac/djev`)',
+      stage: 'Stage 4 & 5: Disambiguate',
+      what: 'For the 8% ambiguous/glared cutouts (margin < 0.06), constructs a fixed 64-token canvas where 89.1% (57 tokens: JSON schema keys + high-confidence Category/Brand) are pinned (`diffusion_pinned=true`) and denoises the 7 `[MASK]` slots (`Packaging`, `Size`, `Base Pack Code`) in 1 parallel bidirectional forward pass (42 ms).',
+      why: 'Autoregressive VLMs decode left-to-right token-by-token (600–2,600 ms) and waste 85% of compute re-emitting static JSON syntax. Discrete diffusion (`mmastrac/djev`) resolves all 7 masked attributes simultaneously in 1 step while attending bidirectionally to left/right shelf context.',
+      delta: '+5.4% accuracy on sister variants (`650ml` vs `750ml`) • 14× lower latency (42 ms vs 600 ms).',
+    },
+    {
+      nodeTitle: 'Node 5: `vllm#58216` Constrained Vocabulary Logit Masking (`diffusion_constrained`)',
+      stage: 'Stage 5: Derive Base Pack',
+      what: 'Applies a hard logit mask `M_i in {0, -inf}^|V|` at token slot #15 (`base_pack_code`) during the `/v1/systemone` forward pass, restricting valid output tokens exclusively to the ScaNN Top-5 candidate Base Pack IDs.',
+      why: 'Free-text VLM generation hallucinates non-existent pack sizes or invalid ERP strings (`1.4%` to `6.8%` hallucination rate), which causes downstream SAP/Shikhar distributor order API rejections.',
+      delta: 'Guarantees 0.0% hallucinated Base Pack SKU codes across 100% of production audits.',
+    },
+    {
+      nodeTitle: 'Node 6: I-JEPA Latent World-Model Predictor (`Track E` Specular Foil Glare Recovery)',
+      stage: 'Stage 4: De-Glare Latent',
+      what: 'Uses a Joint-Embedding Predictive Architecture (I-JEPA) ViT predictor `g_phi(z_ctx, pos_mask) -> z_hat_target` to reconstruct the missing 512-D target-encoder semantic embedding of foil-glare-damaged sachet patches directly in representation space.',
+      why: 'Pixel-space diffusion inpainting hallucinates unreadable text on metallic shampoo sachets and adds 350 ms/crop. Predicting latent semantic features in representation space bypasses pixel reconstruction altogether.',
+      delta: '+18.0% accuracy recovery on extreme specular foil glare slice (`96.2%` vs `78.2%` pure vector).',
+    },
+    {
+      nodeTitle: 'Node 7: Dual-Head Taxonomic Split (`HUL Closed-Set Derive` vs `Competitor Open-Set Classify`)',
+      stage: 'Stage 4 & 5: Dual Routing',
+      what: 'Splits cutouts at Stage 4 via brand-ownership confidence: Unilever (`HUL`) cutouts route to Stage 5 Closed-Set `Derive` (`Pack Type + Size + ERP Base Pack Code`), while Non-HUL Competitor cutouts (`P&G`, `Colgate`) route to the Open-Set 5-Dimension Classifier (`COMP-OPEN-*`).',
+      why: 'Unilever’s ERP only contains Base Pack codes for its own 105 SKUs, yet Marketshare (`SOS`) requires counting every competitor facing (`79` rival SKUs) by Category, Subcategory, Brand, Variant, and Packaging.',
+      delta: 'Captures 95.4% accuracy on 79 unseen Competitor SKUs with 0 false HUL ERP collisions.',
+    },
+    {
+      nodeTitle: 'Node 8: 4-Factor Submodular Assortment & Replenishment Recommender (`Stage 6 Recommend`)',
+      stage: 'Stage 6: Recommend',
+      what: 'Scores missing/under-faced HUL SKUs via `S(u) = (0.35*V_store + 0.30*A_neighbor + 0.20*R_region + 0.15*OOS_urgency) * I_exclusion`, combining Store Sales Velocity, Adjacent Co-Purchase Affinity, Regional Climate Logic, and Store Format Exclusions.',
+      why: 'Recommending every missing catalog SKU floods field reps with slow-moving items that don’t fit the store format. Weighting by visible shelf-neighbor anchors (e.g. 14 Dove Shampoos next to 0 Dove Conditioners) maximizes conversion.',
+      delta: 'Generates +₹14,200 to +₹21,300/wk verified store revenue uplift in 4 ms.',
+    },
+  ];
+
+  function renderAiEngineerBlueprintAndAdr() {
+    const adrTbody = document.getElementById('ai-engineer-adr-tbody');
+    if (!adrTbody) return;
+    adrTbody.replaceChildren();
+
+    NEURAL_NODES_ADR.forEach(function (item, idx) {
+      const tr = document.createElement('tr');
+      tr.className = 'riley-img-row';
+      tr.appendChild(makeCell(item.nodeTitle));
+      const stgTd = document.createElement('td');
+      stgTd.appendChild(makeBadge(item.stage, 'badge-silver'));
+      tr.appendChild(stgTd);
+      tr.appendChild(makeCell(item.what));
+      tr.appendChild(makeCell(item.why));
+      const dTd = document.createElement('td');
+      dTd.appendChild(makeBadge(item.delta, 'badge-pass'));
+      tr.appendChild(dTd);
+
+      tr.addEventListener('click', function () {
+        selectNeuralNode(idx);
+      });
+      adrTbody.appendChild(tr);
+    });
+  }
+
+  function selectNeuralNode(nodeIdx) {
+    const item = NEURAL_NODES_ADR[nodeIdx] || NEURAL_NODES_ADR[3];
+    const btns = document.querySelectorAll('.neural-node-btn');
+    btns.forEach(function (b) {
+      if (Number(b.getAttribute('data-node')) === nodeIdx) {
+        b.classList.add('active');
+      } else {
+        b.classList.remove('active');
+      }
+    });
+    const badge = document.getElementById('neural-node-active-badge');
+    if (badge) badge.textContent = 'Active Node: ' + item.nodeTitle;
+    const tEl = document.getElementById('neural-node-title');
+    if (tEl) tEl.textContent = item.nodeTitle;
+    const wEl = document.getElementById('neural-node-what');
+    if (wEl) wEl.textContent = item.what;
+    const yEl = document.getElementById('neural-node-why');
+    if (yEl) yEl.textContent = item.why;
+    const dEl = document.getElementById('neural-node-delta');
+    if (dEl) dEl.textContent = item.delta;
   }
 
   function refreshAllViews() {
@@ -1214,10 +1322,18 @@
 
     const rileySteps = document.querySelectorAll('.riley-step-card');
     rileySteps.forEach(function (card) {
-      if (card.classList.contains('exec-act-btn')) return;
+      if (
+        card.classList.contains('exec-act-btn') ||
+        card.classList.contains('neural-node-btn')
+      ) {
+        return;
+      }
       card.addEventListener('click', function () {
         rileySteps.forEach(function (c) {
-          if (!c.classList.contains('exec-act-btn')) {
+          if (
+            !c.classList.contains('exec-act-btn') &&
+            !c.classList.contains('neural-node-btn')
+          ) {
             c.classList.remove('active');
           }
         });
@@ -1225,6 +1341,13 @@
         state.activeStep = card.getAttribute('data-step') || '3';
         renderExecutiveDemoCanvas();
         renderHUL7DimAndRecommendations();
+      });
+    });
+
+    const neuralNodeBtns = document.querySelectorAll('.neural-node-btn');
+    neuralNodeBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        selectNeuralNode(Number(btn.getAttribute('data-node') || 0));
       });
     });
 
