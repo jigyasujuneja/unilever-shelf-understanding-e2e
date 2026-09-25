@@ -5,22 +5,46 @@
 # Verified against merged upstream PR: https://github.com/vllm-project/vllm/pull/57250
 # and reference server: https://github.com/mmastrac/djev
 #
-# Supported Argolis GPU Hardware Profiles (No A100 Quota Required!):
-#   Profile A (Single L4 24GB - Cloud Run GPU or g2-standard-8):
-#     Model: nvidia/diffusiongemma-26B-A4B-it-NVFP4 (~13.5 GB VRAM)
+# Supported Argolis GPU Hardware Profiles (Verified Live on jjuneja-fde-sandbox):
+#   Profile 0 (RECOMMENDED - Serverless Cloud Run 1x NVIDIA RTX PRO 6000 Blackwell 96GB GDDR7):
+#     Regions: us-central1, asia-south2 (Delhi), asia-southeast1 (Singapore), europe-west4
+#     Model: google/diffusiongemma-26B-A4B-it (52GB BF16), RedHatAI FP8 (26GB), or NVFP4 (13.5GB native Blackwell FP4!)
+#     Scales to zero (--min-instances=0 -> $0 idle cost!)
+#   Profile A (Single L4 24GB - GCE g2-standard-4 in us-central1-b):
+#     Model: nvidia/diffusiongemma-26B-A4B-it-NVFP4
 #   Profile B (Dual L4 48GB - GCE g2-standard-24, TP=2):
 #     Model: RedHatAI/diffusiongemma-26B-A4B-it-FP8-dynamic (~26 GB VRAM)
-#   Profile C (Quad L4 96GB - GCE g2-standard-48, TP=4 or 1x A100 80GB):
+#   Profile C (Quad L4 96GB - GCE g2-standard-48, TP=4):
 #     Model: google/diffusiongemma-26B-A4B-it (Full BF16, ~52 GB VRAM)
 # ==============================================================================
 set -euo pipefail
 
 PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-jjuneja-fde-sandbox}"
 REGION="${GOOGLE_CLOUD_REGION:-us-central1}"
-ZONE="${GOOGLE_CLOUD_ZONE:-us-central1-a}"
-PROFILE="${DJEV_GPU_PROFILE:-single-l4-fp4}" # single-l4-fp4 | dual-l4-fp8 | full-bf16
+ZONE="${GOOGLE_CLOUD_ZONE:-us-central1-b}"
+PROFILE="${DJEV_GPU_PROFILE:-cloudrun-rtx6000}" # cloudrun-rtx6000 | single-l4-fp4 | dual-l4-fp8 | full-bf16
 
-echo "[1/4] Configuring Argolis project: ${PROJECT_ID} (${ZONE}) for profile: ${PROFILE}"
+echo "[1/4] Configuring Argolis project: ${PROJECT_ID} (${REGION}/${ZONE}) for profile: ${PROFILE}"
+
+if [[ "${PROFILE}" == "cloudrun-rtx6000" ]]; then
+  MODEL_ID="${DJEV_MODEL_ID:-RedHatAI/diffusiongemma-26B-A4B-it-FP8-dynamic}"
+  echo "[2/4] Deploying Serverless Cloud Run Service with 1x NVIDIA RTX PRO 6000 Blackwell (96GB GDDR7, 20 vCPU, 80GiB RAM, min-instances=0) in ${REGION}..."
+  gcloud beta run deploy djev-systemone-rtx6000 \
+    --project="${PROJECT_ID}" \
+    --region="${REGION}" \
+    --image=vllm/vllm-openai:latest \
+    --cpu=20 \
+    --memory=80Gi \
+    --gpu=1 \
+    --gpu-type=nvidia-rtx-pro-6000 \
+    --no-gpu-zonal-redundancy \
+    --min-instances=0 \
+    --max-instances=2 \
+    --port=8000 \
+    --command="vllm" \
+    --args="serve,${MODEL_ID},--diffusion-config={\"canvas_length\":64},--max-logprobs=32,--enable-prefix-caching,--port=8000"
+  exit 0
+fi
 
 if [[ "${PROFILE}" == "single-l4-fp4" ]]; then
   MACHINE_TYPE="g2-standard-8"
