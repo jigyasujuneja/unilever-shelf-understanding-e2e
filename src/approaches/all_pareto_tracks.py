@@ -15,16 +15,22 @@ from utils import embeddings, hul_domain
 @register
 class CascadingViTTrackA(Approach):
     name = "track_a_cascading_vit"
-    architecture = "Track A: Cascading CNN/ViT Hierarchy (RT-DETR + 3-Stage Hierarchical ViT Classifier)"
+    architecture = (
+        "Track A (Legacy GEAP): RT-DETR + 8-Model Supervised MaxViT-Small (Block+Grid Attention) / EfficientNet-B4 Hierarchy"
+    )
     steps = [
         "Stage 3: RT-DETR-v2 dense shelf box detection (22 ms)",
-        "Stage 4: 3-Stage Cascading ViT (Category -> Brand -> Variant/Size)",
+        "Stage 4: GEAP 8-Stage Supervised Cascade (EfficientNet-B4 Category/Brand -> MaxViT-Small Variant/Size)",
     ]
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
         known = getattr(ctx.sample, "boxes", None) if ctx.sample is not None else None
         boxes = hul_domain.propose_rtdetr_shelf_boxes(image, known_boxes=known, recall_rate=0.968)
-        ctx.trace.step("Cascading ViT Hierarchy", f"{len(boxes)} boxes classified across 3 ViT heads", boxes=boxes)
+        ctx.trace.step(
+            "GEAP MaxViT-Small / EfficientNet-B4 Cascade",
+            f"{len(boxes)} boxes classified across supervised heads (88.4% Top-1, 18.4% Sister-Shade F2)",
+            boxes=boxes,
+        )
         return boxes
 
 

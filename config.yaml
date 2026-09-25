@@ -1,13 +1,13 @@
 # shelf-bench configuration. This is the only config file.
 
 gcp:
-  project: unilever-shelf-understanding
+  project: jjuneja-fde-sandbox
   location: global                 # Vertex AI Gemini endpoint
   region: us-central1              # Cloud Run + Cloud Build + bucket region
-  data: gs://unilever-shelf-understanding-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
-  hul_labeled_data: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks
-  hul_catalog_data: gs://unilever-shelf-understanding-shelf-images/HUL_catalog
-  results: gs://unilever-shelf-understanding-shelf-images/results        # run outputs from Cloud Run
+  data: gs://jjuneja-fde-sandbox-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
+  hul_labeled_data: gs://jjuneja-fde-sandbox-shelf-images/HUL_labeled_benchmarks
+  hul_catalog_data: gs://jjuneja-fde-sandbox-shelf-images/HUL_catalog
+  results: gs://jjuneja-fde-sandbox-shelf-images/results        # run outputs from Cloud Run
 
 # Cloud Run job that executes benchmark runs (shelf-bench cloud-run) and Cloud Run service
 # that hosts the unified backend & UI (shelf-bench cloud-service).

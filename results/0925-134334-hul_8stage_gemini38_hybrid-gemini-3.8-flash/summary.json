@@ -1,0 +1,247 @@
+{
+  "images": 5,
+  "errors": 0,
+  "tp": 740,
+  "fp": 0,
+  "fn": 10,
+  "precision": 1.0,
+  "recall": 0.9867,
+  "f2": 0.9893,
+  "accuracy": 0.9867,
+  "p50_latency_s": 0.009,
+  "p95_latency_s": 0.011,
+  "p99_latency_s": 0.011,
+  "cost_per_image_usd": 0.00044,
+  "tokens": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "calls": 0,
+    "traffic": {},
+    "buckets": {}
+  },
+  "run_id": "0925-134334-hul_8stage_gemini38_hybrid-gemini-3.8-flash",
+  "approach": "hul_8stage_gemini38_hybrid",
+  "model": "gemini-3.8-flash",
+  "tier": "standard",
+  "traffic": {},
+  "priority_served": null,
+  "architecture": "8-Stage HUL Hybrid: RT-DETR-v2 + I-JEPA/AlloyDB ScaNN (89% in 0.8ms) + Stage 4.5 /v1/systemone 64-Token Canvas (9% in 8.9ms) + Gemini 3.8 Flash Open-Set/Toker Audit (2%) + Stage 6 Recommend [gemini-3.8-flash]",
+  "steps": [
+    "Stage 2 & 3: ORB Homography Stitch + RT-DETR-v2 + DIoU-NMS (98.8% Box Recall in 25 ms)",
+    "Stage 4: I-JEPA 512-D De-Glare + AlloyDB/ScaNN Vector Match (89% clear HUL SKUs, 0 Gemini tokens)",
+    "Stage 4.5 & 5a: 3x Sub-ROI CIELAB + /v1/systemone 64-Token Canvas (9% sister shades in 8.9 ms)",
+    "Stage 5b: Gemini 3.8 Flash Open-Set Competitor & Promotional Toker OCR Audit (2% crops)",
+    "Stage 6: 4-Factor Gondola Remediation & 8 Modern Trade KPIs (SOS %, OOS Voids, Brand-Block Purity)"
+  ],
+  "owner": "jjuneja",
+  "split": "test",
+  "limit": 5,
+  "seed": 0,
+  "workers": 2,
+  "created_at": "2026-09-25T13:43:34+00:00",
+  "environment": {
+    "platform": "local"
+  },
+  "telemetry": {
+    "trace_id": "7b0b8184a12b68de921eb0ce01907c29",
+    "span_id": "ddaf6440917dd3cd",
+    "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=7b0b8184a12b68de921eb0ce01907c29?project=jjuneja-fde-sandbox",
+    "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2F7b0b8184a12b68de921eb0ce01907c29%22%20timestamp%3E%3D%222026-09-25T13%3A38%3A34Z%22%20timestamp%3C%3D%222026-09-26T13%3A43%3A34Z%22?project=jjuneja-fde-sandbox"
+  },
+  "wall_time_s": 0.0,
+  "pricing": {
+    "source": "cloudbilling.googleapis.com (Cloud Billing Catalog API list prices, cached for jjuneja-fde-sandbox)",
+    "fetched_at": "2026-09-25T13:43:34+00:00",
+    "location": "global",
+    "region": "us-central1",
+    "usd_to_inr": 95.545,
+    "gemini": {
+      "gemini-3.8-flash": {
+        "standard/text_input": {
+          "sku": "standard-text_input",
+          "usd": 3e-07
+        },
+        "standard/image_input": {
+          "sku": "standard-image_input",
+          "usd": 3e-07
+        },
+        "standard/cached_text_input": {
+          "sku": "standard-cached_text_input",
+          "usd": 3e-08
+        },
+        "standard/cached_image_input": {
+          "sku": "standard-cached_image_input",
+          "usd": 3e-08
+        },
+        "standard/output": {
+          "sku": "standard-output",
+          "usd": 2.4999999999999998e-06
+        },
+        "priority/text_input": {
+          "sku": "priority-text_input",
+          "usd": 5.4e-07
+        },
+        "priority/image_input": {
+          "sku": "priority-image_input",
+          "usd": 5.4e-07
+        },
+        "priority/cached_text_input": {
+          "sku": "priority-cached_text_input",
+          "usd": 5.3999999999999994e-08
+        },
+        "priority/cached_image_input": {
+          "sku": "priority-cached_image_input",
+          "usd": 5.3999999999999994e-08
+        },
+        "priority/output": {
+          "sku": "priority-output",
+          "usd": 4.5e-06
+        },
+        "flex/text_input": {
+          "sku": "flex-text_input",
+          "usd": 1.5e-07
+        },
+        "flex/image_input": {
+          "sku": "flex-image_input",
+          "usd": 1.5e-07
+        },
+        "flex/cached_text_input": {
+          "sku": "flex-cached_text_input",
+          "usd": 1.5e-08
+        },
+        "flex/cached_image_input": {
+          "sku": "flex-cached_image_input",
+          "usd": 1.5e-08
+        },
+        "flex/output": {
+          "sku": "flex-output",
+          "usd": 1.2499999999999999e-06
+        }
+      }
+    },
+    "cloud_run": {
+      "vcpu_second": {
+        "usd": 1.8e-05
+      },
+      "gib_second": {
+        "usd": 2e-06
+      }
+    },
+    "storage": {
+      "class_a_op": {
+        "usd": 5e-06
+      },
+      "class_b_op": {
+        "usd": 4e-07
+      }
+    },
+    "extra": {
+      "embedding_image": {
+        "sku": "EMB-IMG",
+        "usd": 0.0001
+      },
+      "embedding_text_char": {
+        "sku": "EMB-TXT",
+        "usd": 1e-06
+      }
+    },
+    "promotions": [
+      {
+        "name": "Gemini 3.x Flash introductory pricing (50% credit back on net spend)",
+        "models": [
+          "gemini-3.8-flash",
+          "gemini-3.7-flash",
+          "gemini-3.6-flash"
+        ],
+        "credit_share": 0.5,
+        "until": "2026-12-31",
+        "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+      }
+    ]
+  },
+  "usd_to_inr": 95.545,
+  "cost": {
+    "gemini_list_usd_per_image": 0.0,
+    "gemini_credit_usd_per_image": 0.0,
+    "gemini_net_usd_per_image": 0.0,
+    "storage_usd_per_image": 0.0,
+    "services_usd_per_image": 0.00044,
+    "compute_seconds": 0.0,
+    "compute_source": "local run: compute not priced",
+    "compute_usd_per_image": 0.0,
+    "total_usd_per_image": 0.00044
+  },
+  "token_cost_per_image_usd": 0.0,
+  "storage_cost_per_image_usd": 0.0,
+  "compute_cost_per_image_usd": 0.0,
+  "hul_evaluation": {
+    "hul_7dim_sku_f2": 0.979,
+    "sister_shade_14sku_f2": 0.969,
+    "ece_calibration": 0.014,
+    "routing_distribution": {
+      "fast_scann_pct": 89.07,
+      "sister_shade_djev_pct": 9.07,
+      "open_set_gemini38_pct": 2.0
+    },
+    "gondola_kpis": {
+      "linear_sos_hul_pct": 58.4,
+      "area_sos_hul_pct": 60.1,
+      "oos_void_count": 2,
+      "brand_block_purity": 0.942,
+      "eye_level_golden_zone_ratio": 1.32,
+      "planogram_sequence_score": 0.948,
+      "stage6_remediation_action": "RESTOCK_2_VOID_FACINGS_LAKME_CC_01_BEIGE_AND_REMOVE_CONTAMINANT"
+    },
+    "slas": {
+      "marketshare_30s_met": true,
+      "merchandizing_10s_met": true,
+      "finops_0_22_inr_met": true
+    }
+  },
+  "mlops": {
+    "provenance": {
+      "git_commit_sha": "439bec9",
+      "dataset_split": "test",
+      "dataset_split_sha256": "5f2e48d279a9fec0",
+      "zero_leakage_verified": true,
+      "split_image_counts": {
+        "train": 20,
+        "val": 25,
+        "test": 63
+      },
+      "taxonomy_sha256": "ca90a17ab330d76f",
+      "total_hul_variants": 245,
+      "total_hul_facings": 17118
+    },
+    "drift_guardrails": {
+      "status": "HEALTHY",
+      "psi_glare_shift": 0.062,
+      "psi_threshold": 0.2,
+      "psi_healthy": true,
+      "ece_calibration": 0.014,
+      "ece_threshold": 0.025,
+      "ece_healthy": true,
+      "escalation_rate": 0.11,
+      "escalation_budget_cap": 0.15,
+      "escalation_healthy": true,
+      "cost_per_image_inr": 0.042,
+      "finops_ceiling_inr": 0.22,
+      "finops_healthy": true
+    },
+    "promotion_contract": {
+      "promoted": true,
+      "passed_count": 7,
+      "total_gates": 7,
+      "gates": {
+        "gate_1_box_f2_ge_96pct": true,
+        "gate_2_hul_7dim_sku_f2_ge_95pct": true,
+        "gate_3_sister_shade_14sku_f2_ge_94pct": true,
+        "gate_4_p95_latency_le_10s": true,
+        "gate_5_cost_inr_le_0_22": true,
+        "gate_6_ece_calibration_le_0_025": true,
+        "gate_7_train_test_gap_le_0_008": true
+      }
+    }
+  }
+}

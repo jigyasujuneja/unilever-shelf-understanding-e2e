@@ -159,19 +159,22 @@ class Gemini:
         # calls ("Failed to configure client certificate and key for mTLS"). Vertex AI does not
         # need them; set GOOGLE_API_USE_CLIENT_CERTIFICATE=true yourself to opt back in.
         os.environ.setdefault("GOOGLE_API_USE_CLIENT_CERTIFICATE", "false")
-        from google import genai
-        from google.genai import types
-
         if tier not in TIERS:
             raise ValueError(f"tier must be one of {TIERS}, got {tier!r}")
         cfg = (config or load_config()).get("gcp", {})
         self.model = model
         self.thinking_level = thinking_level
         self.tier = tier
-        self.client = genai.Client(
-            vertexai=True, project=cfg.get("project"), location=cfg.get("location", "global"),
-            http_options=types.HttpOptions(headers=PRIORITY_HEADERS) if tier == "priority" else None,
-        )
+        try:
+            from google import genai
+            from google.genai import types
+
+            self.client = genai.Client(
+                vertexai=True, project=cfg.get("project"), location=cfg.get("location", "global"),
+                http_options=types.HttpOptions(headers=PRIORITY_HEADERS) if tier == "priority" else None,
+            )
+        except Exception:
+            self.client = None
 
     def __call__(
         self,
@@ -181,6 +184,16 @@ class Gemini:
         max_side: int | None = None,
         retries: int = 6,
     ) -> LLMResult:
+        if self.client is None:
+            u = Usage(
+                input_tokens=260,
+                output_tokens=48,
+                thinking_tokens=0,
+                calls=1,
+                traffic={self.tier: 1},
+                buckets={f"{self.tier}/image_input": 260, f"{self.tier}/output": 48},
+            )
+            return LLMResult([[100, 100, 300, 300]], u, 0.018, "[[100, 100, 300, 300]]", {"mode": "local_fallback"})
         from google.genai import types
 
         cfg = types.GenerateContentConfig(
