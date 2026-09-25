@@ -28,7 +28,7 @@ echo "[1/4] Configuring Argolis project: ${PROJECT_ID} (${REGION}/${ZONE}) for p
 
 if [[ "${PROFILE}" == "cloudrun-rtx6000" ]]; then
   MODEL_ID="${DJEV_MODEL_ID:-RedHatAI/diffusiongemma-26B-A4B-it-FP8-dynamic}"
-  echo "[2/4] Deploying Serverless Cloud Run Service with 1x NVIDIA RTX PRO 6000 Blackwell (96GB GDDR7, 20 vCPU, 80GiB RAM, min-instances=0) in ${REGION}..."
+  echo "[2/4] Deploying Serverless Cloud Run Service with 1x NVIDIA RTX PRO 6000 Blackwell (96GB GDDR7, 20 vCPU, 80GiB RAM, min-instances=0, max-num-seqs=4) in ${REGION}..."
   gcloud beta run deploy djev-systemone-rtx6000 \
     --project="${PROJECT_ID}" \
     --region="${REGION}" \
@@ -40,9 +40,10 @@ if [[ "${PROFILE}" == "cloudrun-rtx6000" ]]; then
     --no-gpu-zonal-redundancy \
     --min-instances=0 \
     --max-instances=2 \
+    --concurrency=4 \
     --port=8000 \
     --command="vllm" \
-    --args="serve,${MODEL_ID},--diffusion-config={\"canvas_length\":64},--max-logprobs=32,--enable-prefix-caching,--port=8000"
+    --args="serve,${MODEL_ID},--diffusion-config={\"canvas_length\":64},--max-num-seqs=4,--max-num-batched-tokens=2048,--max-logprobs=32,--enable-prefix-caching,--port=8000"
   exit 0
 fi
 
@@ -76,9 +77,12 @@ uv pip install vllm --extra-index-url https://wheels.vllm.ai/nightly
 git clone https://github.com/mmastrac/djev.git /opt/djev
 
 # 1. Start upstream vLLM server with PR #57250 structured diffusion canvas config (Port 8000)
+#    CRITICAL: --max-num-seqs 4 prevents SigLIP vision encoder prefill OOM on 40-crop shelf bursts
 nohup vllm serve "${MODEL_ID}" \\
   --tensor-parallel-size "${TP_SIZE}" \\
   --diffusion-config '{"canvas_length": 64}' \\
+  --max-num-seqs 4 \\
+  --max-num-batched-tokens 2048 \\
   --max-logprobs 32 \\
   --enable-prefix-caching \\
   --port 8000 > /var/log/vllm_diffusiongemma.log 2>&1 &
