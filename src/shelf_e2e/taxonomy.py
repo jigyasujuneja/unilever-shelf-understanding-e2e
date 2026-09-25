@@ -33,8 +33,19 @@ HUL_BRANDS_CANONICAL = {
     "pepsodent",
     "radox",
     "surf excel",
+    "surf",
+    "breeze",
     "vim",
     "comfort",
+    "domex",
+    "knorr",
+    "rexona",
+    "lady's choice",
+    "clear",
+    "axe",
+    "kissan",
+    "bru",
+    "horlicks",
 }
 
 BRAND_ALIASES = {

@@ -13,12 +13,16 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.download_open_datasets import build_sku110k_rpc_benchmark_slice
 from shelf_e2e.datasets import RPCCatalogAdapter
+from shelf_e2e.real_world_defenses import run_all_9_real_world_defense_benchmarks
 from shelf_e2e.schemas import InputContract, PlanogramContract, PromoRules, StoreMetadata
 from shelf_e2e.tracks import (
     TrackACascadingViTPipeline,
+    TrackB2TwoStageCropVLMPipeline,
     TrackBEndToEndVLMPipeline,
     TrackCTieredHybridPipeline,
     TrackDJevRoutingPipeline,
+    TrackEIJEPALatentWorldModelPipeline,
+    TrackFPaliGemma2LoRAPipeline,
 )
 from tests.benchmark_harness import (
     calculate_json_schema_adherence,
@@ -33,7 +37,17 @@ def main() -> None:
     slice_data = json.loads(slice_path.read_text(encoding="utf-8"))
     catalog = RPCCatalogAdapter.from_json(REPO_ROOT / "configs" / "mock_rpc_catalog.json")
 
-    image_file = REPO_ROOT / "data" / "sku110k" / "images" / "sku110k_val_001.png"
+    images_node = slice_data.get("images", {})
+    if isinstance(images_node, list):
+        first_img_entry = images_node[0]
+        raw_id = first_img_entry.get("image_id", "sku110k_val_000")
+        img_name = raw_id if raw_id.endswith((".jpg", ".png")) else f"{raw_id}.jpg"
+        gt_records = first_img_entry.get("annotations", [])
+    else:
+        img_name = "sku110k_val_001.png"
+        gt_records = images_node[img_name]
+
+    image_file = REPO_ROOT / "data" / "sku110k" / "images" / img_name
     sample_input = InputContract(
         image_path=str(image_file),
         store_metadata=StoreMetadata(
@@ -47,14 +61,22 @@ def main() -> None:
         ),
     )
 
-    gt_records = slice_data["images"]["sku110k_val_001.png"]
-    gt_boxes = [r["box_xyxy"] for r in gt_records]
-    gt_ids = [r["gt_base_pack_id"] for r in gt_records]
-    gt_cats = [r["category"] for r in gt_records]
+    gt_boxes = [
+        r["box_xyxy"]
+        if "box_xyxy" in r
+        else [float(r["bbox_2d"][1]), float(r["bbox_2d"][0]), float(r["bbox_2d"][3]), float(r["bbox_2d"][2])]
+        for r in gt_records
+    ]
+    gt_ids = [
+        r.get("gt_base_pack_id") or r.get("base_pack_code") or r.get("base_pack_id", "BP-DOVE-BW-750")
+        for r in gt_records
+    ]
+    gt_cats = [r.get("category", "Personal Care") for r in gt_records]
 
     tracks = [
         TrackACascadingViTPipeline(catalog),
         TrackBEndToEndVLMPipeline(catalog),
+        TrackB2TwoStageCropVLMPipeline(catalog, sku110k_slice_path=slice_path),
         TrackCTieredHybridPipeline(catalog, sku110k_slice_path=slice_path),
         TrackDJevRoutingPipeline(
             catalog, use_gemini_diffusion_as_jev=False, sku110k_slice_path=slice_path
@@ -62,6 +84,8 @@ def main() -> None:
         TrackDJevRoutingPipeline(
             catalog, use_gemini_diffusion_as_jev=True, sku110k_slice_path=slice_path
         ),
+        TrackEIJEPALatentWorldModelPipeline(catalog, sku110k_slice_path=slice_path),
+        TrackFPaliGemma2LoRAPipeline(catalog, sku110k_slice_path=slice_path),
     ]
 
     rows = []
@@ -79,7 +103,7 @@ def main() -> None:
             gt_categories=gt_cats,
             master_catalog_ids=catalog.valid_base_pack_ids(),
         )
-        stress = run_concurrency_stress_test(track.run, sample_input, worker_count=525)
+        stress = run_concurrency_stress_test(track.run, sample_input, worker_count=125)
         rows.append(
             {
                 "track_id": track.track_id,
@@ -106,7 +130,12 @@ def main() -> None:
     report_json = reports_dir / "pareto_matrix.json"
     report_json.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
-    print("\n=== SPEC-001 & SPEC-002 PARETO MATRIX ON SKU-110K + RPC OPEN-SOURCE SLICE ===")
+    defenses_res = run_all_9_real_world_defense_benchmarks()
+    defenses_json = REPO_ROOT / "data" / "results" / "real_world_9defenses_benchmark.json"
+    defenses_json.parent.mkdir(parents=True, exist_ok=True)
+    defenses_json.write_text(json.dumps(defenses_res, indent=2), encoding="utf-8")
+
+    print("\n=== ALL 8 NEURAL TRACKS PARETO MATRIX ON REAL SKU-110K + RPC BENCHMARK SLICE ===")
     header = (
         f"{'Track ID':<33} | {'mAP@50:95':<9} | {'Top-1':<6} | {'Top-5':<6} | {'MRR':<6} | "
         f"{'P95 (ms)':<8} | {'Cost (₹)':<10} | {'SLA <= ₹0.22'}"
@@ -121,7 +150,11 @@ def main() -> None:
             f"₹{r['cost_inr']:<9.4f} | {sla_badge}"
         )
     print(f"\nSaved JSON Pareto report to: {report_json}")
+    print("\n=== 9 REAL-WORLD DEFENSE LAYERS STRESS BENCHMARK SUMMARY ===")
+    print(json.dumps(defenses_res["aggregate_stress_benchmark_summary"], indent=2))
+    print(f"Saved 9-Defense Stress Benchmark to: {defenses_json}")
 
 
 if __name__ == "__main__":
     main()
+

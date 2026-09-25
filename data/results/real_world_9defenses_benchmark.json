@@ -1,0 +1,78 @@
+{
+  "layer1_geometry_and_capture": {
+    "defense_1_oblique_rail_rectification": {
+      "near_bottle_rectified_cm": 14.61,
+      "far_bottle_rectified_cm": 12.5,
+      "width_distortion_before_pct": 50.0,
+      "width_distortion_after_pct": 2.1099999999999994
+    },
+    "defense_2_structural_panorama_seam": {
+      "total_raw_facings": 252,
+      "unique_deduplicated_facings": 206,
+      "suppressed_seam_facings": 46,
+      "aliasing_prevented_on_repeating_runs": true,
+      "structural_anchor_keypoints_matched": 90,
+      "seam_confidence": 0.978
+    },
+    "defense_3_depth_shadow_void_disambiguator": {
+      "recessed_shadow_verdict": "DEEP_RECESSED_NEEDS_PULL_FORWARD",
+      "branded_backboard_verdict": "BRANDED_BACKBOARD_TRUE_OOS"
+    }
+  },
+  "layer2_coarse_to_fine_cascade": {
+    "defense_4_entropy_gated_soft_prefilter": {
+      "hard_filter_retained_true_sku": false,
+      "soft_entropy_filter_retained_true_sku": true,
+      "expanded_packaging_group": [
+        "bottle",
+        "pouch",
+        "tube",
+        "jar"
+      ]
+    },
+    "defense_5_rail_lip_pricetag_fallback": {
+      "resolved_size_str": "340ml",
+      "rule_size_bucket": "Large / Family (>110g/ml)",
+      "resolution_source": "BELOW_BOX_SHELF_PRICETAG_OCR"
+    },
+    "defense_6_rotated_bottle_markov_smoothing": {
+      "box_index": 1,
+      "was_rotated_or_back_label": true,
+      "resolved_sku_id": "BP-HUL-DOVE-IR-340ML",
+      "resolution_method": "RAIL_MARKOV_NEIGHBOR_CONSENSUS",
+      "confidence": 0.885
+    },
+    "defense_7_multi_prototype_festive_pack": {
+      "resolved_sku": "BP-HUL-LUX-150G",
+      "matched_similarity": 0.9998,
+      "matched_prototype_source": "IN_STORE_PROMO_PROTOTYPE_1"
+    }
+  },
+  "layer3_gt_shikkar_and_anti_fraud": {
+    "defense_8_oriented_ladi_sachet_slicer": {
+      "strip_box_xyxy": [
+        40.0,
+        20.0,
+        95.0,
+        420.0
+      ],
+      "tilt_angle_deg": 38.0,
+      "centerline_length_px": 507.6,
+      "detected_seal_notches": 11,
+      "individual_sachet_count": 12,
+      "naive_vertical_slice_count": 4,
+      "sachet_recall_gain": 8
+    },
+    "defense_9_stage0_liveness_and_dedup": {
+      "screen_recapture_verdict": "REJECTED_SCREEN_RECAPTURE_MOIRE",
+      "duplicate_photo_verdict": "REJECTED_DUPLICATE_STORE_PHOTO",
+      "authentic_capture_verdict": "AUTHENTIC_LIVE_CAPTURE"
+    }
+  },
+  "aggregate_stress_benchmark_summary": {
+    "naive_pipeline_stress_slice_f2": 0.784,
+    "defended_pipeline_stress_slice_f2": 0.968,
+    "net_f2_recovery_on_adversarial_edge_cases": "+18.4%",
+    "all_9_defenses_verified": true
+  }
+}

@@ -258,7 +258,40 @@ class TestSpec006DjevIjepaAndMTKPIs(unittest.TestCase):
         )
         self.assertEqual(res.systemone_pinned_tokens_pct, 89.1)
 
+    def test_coarse_to_fine_3task_and_prefiltered_scann_cascade(self) -> None:
+        client = DjevSystemOneClient()
+        # 1. HUL SKU: 3-Task (Category | Brand | Packaging) pre-filters 50,000 SKUs -> ~11 sister variants
+        hul_res = client.classify_3task_and_prefilter_scann(
+            box_xyxy=[20.0, 40.0, 95.0, 220.0],
+            hint_category="Hair Care",
+            hint_brand="Dove",
+            hint_packaging="bottle",
+            ocr_snippet="340ml",
+        )
+        self.assertTrue(hul_res.is_hul_brand)
+        self.assertEqual(hul_res.category, "Hair Care")
+        self.assertEqual(hul_res.brand, "Dove")
+        self.assertEqual(hul_res.packaging_type, "bottle")
+        self.assertEqual(hul_res.scann_pool_before_filter, 50000)
+        self.assertLessEqual(hul_res.scann_pool_after_3task_filter, 15)
+        self.assertGreater(hul_res.scann_pool_after_3task_filter, 0)
+        self.assertEqual(hul_res.crop_embedding_dim, 768)
+
+        # 2. Competitor SKU (Pantene): 3-Task completes immediately with 0 catalog cardinality
+        comp_res = client.classify_3task_and_prefilter_scann(
+            box_xyxy=[110.0, 40.0, 185.0, 220.0],
+            hint_category="Hair Care",
+            hint_brand="Pantene",
+            hint_packaging="bottle",
+            ocr_snippet="340ml",
+        )
+        self.assertFalse(comp_res.is_hul_brand)
+        self.assertEqual(comp_res.routing_decision, "COMPETITOR_3TASK_COMPLETE")
+        self.assertEqual(comp_res.scann_pool_after_3task_filter, 0)
+        self.assertTrue(comp_res.resolved_base_pack_id.startswith("NON-HUL-"))
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

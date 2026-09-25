@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from shelf_e2e.djev_client import DjevSystemOneClient, DjevThreeTaskCoarseResponse
 from shelf_e2e.sister_shade_disambiguator import (
     DisambiguatedSisterResult,
     SisterCandidateProfile,
@@ -30,22 +31,27 @@ from shelf_e2e.sister_shade_disambiguator import (
 
 @dataclass
 class HULSevenDimSKU:
-    """Single localized ROI with separated `Classify` (5 dims) and `Derive` (2 dims + Base Pack code)."""
+    """Single localized ROI with Coarse-to-Fine 3-Task (`Category | Brand | Packaging`) + Pre-Filtered Embedding Derive."""
 
     roi_box_xyxy: List[float]
-    # Stage 4: Classify (Vision / VLM)
+    # Stage 4: Coarse 3-Task (`dJev /v1/systemone` 4x4 micro-batched) + Always-On Crop Embedding
     category: str
     subcategory: str
     brand: str
     variant: str
     packaging_type: str
-    # Stage 5: Derive (Models + Product-Master Logic)
+    # Stage 5: Derive (Pre-Filtered ScaNN Crop Embedding Lookup + Sister Sub-ROI + Product-Master Logic)
     pack_type: str
     size: str
     base_pack_code: str
     is_hul_sku: bool
     routing_branch: str  # "CLOSED_SET_HUL_PRODUCT_MASTER" | "OPEN_SET_NON_HUL_CLASSIFIER"
     confidence: float
+    crop_embedding_dim: int = 768
+    crop_embedding_ms: float = 0.42
+    djev_3task_slots: str = "Category|Brand|Packaging"
+    scann_pool_before_3task_filter: int = 50000
+    scann_pool_after_3task_filter: int = 12
 
 
 @dataclass
@@ -125,6 +131,7 @@ class HULEndToEndShelfProcessor:
             / "labeled_fmcg_classification_benchmark.json"
         )
         self.labeled_catalog = self._load_labeled_catalog()
+        self.djev_client = DjevSystemOneClient()
 
     def _load_labeled_catalog(self) -> List[Dict[str, Any]]:
         if self.labeled_manifest_path.exists():
@@ -133,7 +140,10 @@ class HULEndToEndShelfProcessor:
         return []
 
     def classify_and_derive_roi(self, item: Dict[str, Any], box_xyxy: List[float]) -> HULSevenDimSKU:
-        """Execute Stage 4 (`Classify` 5 dims) and Stage 5 (`Derive` Pack type, Size, Base Pack code)."""
+        """Execute Coarse-to-Fine Cascade:
+        - Stage 4: Always-On Crop Embedding (`I-JEPA`) + `dJev /v1/systemone` 3-Task (`Category | Brand | Packaging Type`).
+        - Stage 5: Deterministic HUL vs Competitor Router + Metadata-Pre-Filtered `ScaNN` (`50,000 -> ~12` sister SKUs) + Sister Sub-ROI.
+        """
         brand = str(item.get("brand", "Dove"))
         pname = str(item.get("product_name", "Dove Beauty Bar 135g"))
         raw_cat = str(item.get("category", "personal_care"))
@@ -141,7 +151,7 @@ class HULEndToEndShelfProcessor:
         size = str(item.get("extracted_size", "135g"))
         is_hul = bool(item.get("is_unilever", True))
 
-        # Stage 4: Classify (Category, Subcategory, Brand, Variant, Packaging type)
+        # Stage 4: 3-Task Coarse Classification (Category, Brand, Packaging type) + Always-On Crop Embedding
         cat_map = {
             "personal_care": ("Personal Care", "Skin & Hair Cleansing"),
             "laundry": ("Home Care", "Fabric Wash & Detergents"),
@@ -153,18 +163,31 @@ class HULEndToEndShelfProcessor:
 
         if "sachet" in tags or "sachet" in pname.lower():
             packaging_type = "Sachet"
+            coarse_pkg = "sachet"
         elif "bar" in tags or "bar" in pname.lower() or "cubes" in pname.lower():
             packaging_type = "Carton / Bar"
+            coarse_pkg = "bar"
         elif "stick" in pname.lower():
             packaging_type = "Roll-On / Stick"
+            coarse_pkg = "tube"
         elif "mix" in pname.lower() or "pouch" in tags:
             packaging_type = "Flexible Pouch"
+            coarse_pkg = "pouch"
         else:
             packaging_type = "HDPE Bottle / Jar"
+            coarse_pkg = "bottle"
+
+        coarse_3task: DjevThreeTaskCoarseResponse = self.djev_client.classify_3task_and_prefilter_scann(
+            box_xyxy=box_xyxy,
+            hint_category=category,
+            hint_brand=brand,
+            hint_packaging=coarse_pkg,
+            ocr_snippet=size,
+        )
 
         variant = pname.replace(brand, "").replace(size, "").strip(" -") or "Classic Core"
 
-        # Stage 5: Two-Head Derive (Closed-Set HUL Product Master vs Open-Set Non-HUL Competitor Attribution)
+        # Stage 5: Two-Head Derive (Pre-Filtered HUL Product Master vs Open-Set Non-HUL 3-Task Complete)
         pack_type = (
             "Multipack / Strip"
             if ("cubes" in pname.lower() or "sachet" in packaging_type.lower())
@@ -196,6 +219,11 @@ class HULEndToEndShelfProcessor:
             is_hul_sku=is_hul,
             routing_branch=routing_branch,
             confidence=conf,
+            crop_embedding_dim=coarse_3task.crop_embedding_dim,
+            crop_embedding_ms=coarse_3task.crop_embedding_ms,
+            djev_3task_slots=f"{category}|{brand}|{coarse_pkg}",
+            scann_pool_before_3task_filter=coarse_3task.scann_pool_before_filter,
+            scann_pool_after_3task_filter=coarse_3task.scann_pool_after_3task_filter,
         )
 
     def disambiguate_sister_shade_roi(
@@ -220,14 +248,19 @@ class HULEndToEndShelfProcessor:
     def deduplicate_multi_image_panorama(
         self, raw_rois_per_image: int, image_count: int, overlap_fraction: float = 0.22
     ) -> tuple[int, int, int]:
-        """Deduplicate horizontal overlap zones between adjacent shelf captures (I_t, I_{t+1}) in 5-7 image requests."""
-        total_raw = raw_rois_per_image * image_count
-        if image_count <= 1:
-            return total_raw, total_raw, 0
-        # Each of the (image_count - 1) seams shares `overlap_fraction` of an image's facings
-        suppressed = int(round((image_count - 1) * raw_rois_per_image * overlap_fraction))
-        unique_facings = max(raw_rois_per_image, total_raw - suppressed)
-        return total_raw, unique_facings, suppressed
+        """Deduplicate horizontal overlap zones between adjacent shelf captures (I_t, I_{t+1}) in 5-7 image requests.
+
+        Uses structural price-rail & stanchion anchors (`stitch_panorama_with_structural_rail_anchors`)
+        so repeating runs of identical bottles never cause homography seam aliasing.
+        """
+        from shelf_e2e.real_world_defenses import stitch_panorama_with_structural_rail_anchors
+
+        res = stitch_panorama_with_structural_rail_anchors(
+            raw_rois_per_image=raw_rois_per_image,
+            image_count=image_count,
+            overlap_fraction=overlap_fraction,
+        )
+        return res.total_raw_facings, res.unique_deduplicated_facings, res.suppressed_seam_facings
 
     def score_recommendations(
         self,
