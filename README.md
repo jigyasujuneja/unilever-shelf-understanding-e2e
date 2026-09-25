@@ -6,6 +6,7 @@
 
 **Documentation Index:**
 * [End-to-End Developer & Argolis Cloud How-To Guide (`HOW_TO_GUIDE.md`)](HOW_TO_GUIDE.md)
+* [High-Cardinality Variant Classification Deep-Dive (`245` to `10,000+` SKUs) (`reports/HIGH_CARDINALITY_VARIANT_DEEP_DIVE.md`)](reports/HIGH_CARDINALITY_VARIANT_DEEP_DIVE.md)
 * [Google-Style Technical Design Document (`TDD_GOOGLE_DESIGN_DOC.md`)](TDD_GOOGLE_DESIGN_DOC.md)
 * [Team Demo Presenter Playbook & Runbook (`DEMO_PLAYBOOK.md`)](DEMO_PLAYBOOK.md)
 * [System Architecture & 10-Edge-Case Taxonomy (`specs/DESIGN.md`)](specs/DESIGN.md)

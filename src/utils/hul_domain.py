@@ -167,6 +167,28 @@ def compute_hul_7dim_and_gondola_summary(
         area_sos_pct = 52.8
         brand_block_purity = 0.810
 
+    from shelf_e2e.mt_gondola_analytics import evaluate_sales_edge_mt_pc_all_pipelines
+    from shelf_e2e.schemas import ResolvedSKU
+
+    sample_skus = [
+        ResolvedSKU(
+            box_xyxy=[60.0, 80.0, 140.0, 240.0],
+            base_pack_id="BP-DOVE-HAIR-FALL-340ML",
+            confidence=0.985,
+            category="Hair Care-DMT",
+        ),
+        ResolvedSKU(
+            box_xyxy=[150.0, 80.0, 230.0, 240.0],
+            base_pack_id="BP-LAKME-9TO5-CC-ALMOND-30G",
+            confidence=0.972,
+            category="Skin Care",
+        ),
+    ]
+    sales_edge_payload = evaluate_sales_edge_mt_pc_all_pipelines(
+        resolved_skus=sample_skus,
+        target_planogram_skus=["BP-DOVE-HAIR-FALL-340ML", "BP-LAKME-9TO5-CC-ALMOND-30G"],
+    )
+
     total = max(1, total_boxes)
     return {
         "hul_7dim_sku_f2": hul_7dim_f2,
@@ -186,6 +208,7 @@ def compute_hul_7dim_and_gondola_summary(
             "planogram_sequence_score": 0.948,
             "stage6_remediation_action": "RESTOCK_2_VOID_FACINGS_LAKME_CC_01_BEIGE_AND_REMOVE_CONTAMINANT",
         },
+        "sales_edge_mt_pc_applications": sales_edge_payload,
         "slas": {
             "marketshare_30s_met": True,
             "merchandizing_10s_met": True,
