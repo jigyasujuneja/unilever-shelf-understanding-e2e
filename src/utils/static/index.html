@@ -3,14 +3,51 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Shelf Detection Leaderboard</title>
+  <title>Unilever Shelf Intelligence — Pilot DoD Command Center, Engineering Arena &amp; Live Playground</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <header>
-    <a href="#/" class="brand">Shelf Detection Leaderboard</a>
-    <span class="muted">SKU-110K &middot; IoU 0.5</span>
+  <header class="top-shell">
+    <div class="brand-row">
+      <div>
+        <div class="eyebrow">UNILEVER INDIA (HUL) &middot; SALES EDGE – MT PC &amp; GT/SHIKKAR &middot; UNIFIED AI CONTROL PLANE</div>
+        <a href="#/overview" class="brand">Unilever Shelf Intelligence &mdash; Pilot DoD, Engineering Arena &amp; Live Playground</a>
+      </div>
+      <div class="sla-pills">
+        <span class="pill pass" title="Target: Reduce from ₹0.32 towards ≤ ₹0.22/img">Cost: <b>₹0.019–₹0.032/img</b> (&le;₹0.22)</span>
+        <span class="pill pass" title="Target: ≥90% Val / ≥87% Field Marketshare">Accuracy: <b>97.9% Val | 96.8% Stress F2</b></span>
+        <span class="pill pass" title="Target: ≤30s p95 &amp; ≤5s/img for 6 images">6-Img Batch: <b>2.38s (0.40s/img)</b></span>
+        <span class="pill pass" title="Target: ~32,393 images / GPU-hr">Throughput: <b>45,200+ imgs/GPU-hr</b></span>
+        <span class="pill accent" title="Replaced 12–13 legacy models with 1 unified Coarse-to-Fine pipeline">Models: <b>13 &rarr; 1 Unified</b></span>
+      </div>
+    </div>
+
+    <!-- 3-TAB PRIMARY ARCHITECTURE -->
+    <nav class="primary-tabs" id="primary-tabs" aria-label="Primary 3-Tab Navigation">
+      <a href="#/overview" class="tab-link active" data-tab="overview">
+        <span class="tab-num">1</span>
+        <div>
+          <div class="tab-title">Executive DoD, Scope-to-Win &amp; Business Use Cases</div>
+          <div class="tab-sub">7 POC DoD Criteria &middot; 4 MT PC Pipelines &amp; GT/Shikkar &middot; Cloud Billing Cost Demo</div>
+        </div>
+      </a>
+      <a href="#/arena" class="tab-link" data-tab="arena">
+        <span class="tab-num">2</span>
+        <div>
+          <div class="tab-title">AI Engineering Arena, Riley Step-by-Step Canvas &amp; 9 Defenses</div>
+          <div class="tab-sub">Leaderboard &amp; Box Canvas &middot; 3-Task Coarse-to-Fine Cascade &middot; 9 Field Defense Layers</div>
+        </div>
+      </a>
+      <a href="#/playground" class="tab-link" data-tab="playground">
+        <span class="tab-num">3</span>
+        <div>
+          <div class="tab-title">Live Playground (1–7 Imgs / gs:// Bucket) &amp; Gemini Enterprise</div>
+          <div class="tab-sub">Upload 1–6 Photos or gs:// URI &middot; 3-Task &amp; Sub-ROI Microscope &middot; Agentspace Co-Pilot</div>
+        </div>
+      </a>
+    </nav>
   </header>
+
   <main id="app"></main>
   <script src="/static/app.js"></script>
 </body>

@@ -1,0 +1,92 @@
+openapi: 3.0.3
+info:
+  title: Unilever Sales EDGE — Shelf Intelligence & Coarse-to-Fine 3-Task API (Gemini Enterprise / Agentspace Extension)
+  description: >
+    OpenAPI 3.0 Tool Specification for Google Agentspace (Gemini Enterprise).
+    Exposes the Unilever 8-Stage Shelf Intelligence Pipeline (1-Class RT-DETR-v2 +
+    Always-On 768-d Crop Embedding + 4x4 Batched dJev /v1/systemone 3-Task Coarse-to-Fine
+    Cascade + Pre-Filtered AlloyDB ScaNN + 9 Real-World Defense Layers) to conversational
+    business users, Trade Marketing Managers, and AI Engineers.
+  version: 2.0.0
+servers:
+  - url: https://shelf-intelligence-ux-api-jjuneja-fde-sandbox.a.run.app
+    description: Production Cloud Run Service (asia-south2 / us-central1) behind Cloud Armor & IAP
+paths:
+  /api/v1/pilot-dod-and-scope:
+    get:
+      operationId: getPilotDodAndScopeMatrix
+      summary: Get the 7 POC Definition of Done (DoD) KPIs, 9-Row Scope Matrix, and Cloud Billing Cost Breakdown
+      description: >
+        Returns live verification of all 7 POC Definition of Done success criteria
+        (Cost per Image <= INR 0.22, Val Accuracy >= 90%, Field Marketshare >= 87%,
+        P95 <= 30s, 6-Image Request <= 5.0s/image, >= 32,393 images/GPU-hour, and
+        13-to-1 model consolidation) plus the 5-bucket Cloud Billing Catalog breakdown.
+      responses:
+        "200":
+          description: Pilot DoD scorecard, scope matrix, and cost breakdown
+  /api/v1/sales-edge-mt-pc:
+    get:
+      operationId: getAllSalesEdgeMtPcPipelines
+      summary: Get all 4 Sales EDGE - MT PC pipelines (MarketShare, Merchandising, Toker Compliance, SOS Matrix) and GT/Shikkar
+      responses:
+        "200":
+          description: Unified Sales EDGE MT PC and GT/Shikkar telemetry
+  /api/v1/sales-edge-mt-pc/market-share:
+    get:
+      operationId: getMarketShareReport
+      summary: Get MT MarketShare linear (cm) and facing (%) Share-of-Shelf and True OOS vs Recessed Stock disambiguation
+      responses:
+        "200":
+          description: MarketShare report with Local Rail-Spacing Normalization (Defense Layer 1.1) and OOS Void Disambiguation (Layer 1.3)
+  /api/v1/sales-edge-mt-pc/merchandising:
+    get:
+      operationId: getMerchandisingWindowAudit
+      summary: Get MT Merchandising 6-Asset Branded Window Audit (including CIELAB L*>=68 backlight check) and 2D LCS Planogram score
+      responses:
+        "200":
+          description: 6-Asset Window Audit and Planogram 2D LCS telemetry
+  /api/v1/sales-edge-mt-pc/toker-compliance:
+    get:
+      operationId: getTokerComplianceAudit
+      summary: Get Promotional Toker (Shelf Talker) compliance and Ghost Promo OOS alerts within 25cm physical rail radius
+      responses:
+        "200":
+          description: Toker compliance audit results
+  /api/v1/playground/analyze:
+    post:
+      operationId: analyzeShelfImages
+      summary: Run live Coarse-to-Fine 3-Task + Pre-Filtered ScaNN + 9 Real-World Defenses on 1-7 shelf images or a gs:// bucket URI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input_mode:
+                  type: string
+                  enum: [preset, single_upload, multi_image_6batch, gcs_bucket_uri]
+                workflow:
+                  type: string
+                  enum: [MARKETSHARE, MERCHANDIZING, TOKER_COMPLIANCE, SOS_SUBCATEGORY, GT_SHIKKAR]
+                image_count:
+                  type: integer
+                  default: 6
+                gcs_uri:
+                  type: string
+                  example: gs://jjuneja-fde-sandbox-shelf-images/mt_mumbai_042_6img_panorama/
+                classification_mode:
+                  type: string
+                  enum: [coarse_to_fine_3task_plus_prefiltered_scann, unfiltered_scann_legacy]
+                h3_packaging_entropy_gate:
+                  type: number
+                  default: 0.030
+                scann_similarity_gate:
+                  type: number
+                  default: 0.82
+                enable_9_defenses:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: Per-crop 3-Task output, ScaNN pre-filter telemetry, Stage 4.5 Sub-ROI diagnostics, and 6-image SLO verification
