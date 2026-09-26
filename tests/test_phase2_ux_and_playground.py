@@ -154,25 +154,76 @@ class TestPhase2UXAndPlayground(unittest.TestCase):
             },
         )
         crops = res["inspected_crops"]
-        self.assertEqual(len(crops), 8)
+        self.assertEqual(len(crops), 28)
         brands = [c["coarse_3task_output"]["slot2_brand"] for c in crops]
-        self.assertIn("Lipton", brands)
-        self.assertIn("Pond's", brands)
-        self.assertIn("Glow & Lovely", brands)
-        self.assertIn("Lakme", brands)
-        self.assertIn("Pears", brands)
-        self.assertIn("Clinic Plus", brands)
+        for expected_brand in ("Red Label", "Lux", "Clinic Plus", "Sunsilk", "Rin", "Surf Excel", "Pond's", "Glow & Lovely", "Lakme", "Pears", "Lipton"):
+            self.assertIn(expected_brand, brands)
 
         resolved_ids = [c["resolved_base_pack_id"] for c in crops]
+        self.assertIn("POSM-HUL-LIPTON-REF-ASSET", resolved_ids)
         self.assertIn("POSM-HUL-LIPTON-WINDOW-HEADER", resolved_ids)
         self.assertIn("BP-HUL-LIPTON-GREEN-TEA-25TB", resolved_ids)
+        self.assertIn("BP-HUL-LIPTON-HONEY-LEMON-25TB", resolved_ids)
+        self.assertIn("BP-HUL-LIPTON-TULSI-NATURO-25TB", resolved_ids)
+        self.assertIn("POSM-HUL-LAKME-PONDS-SHELF-STRIP", resolved_ids)
 
         # Also verify image route for the HUL Examples slide
         with urllib.request.urlopen(f"{self.base_url}/img/sku110k/sku110k_hul_examples_slide.jpg", timeout=10) as r:
             self.assertEqual(r.status, 200)
             self.assertEqual(r.headers.get("Content-Type"), "image/jpeg")
 
+    def test_07_full_unilever_6_domain_taxonomy_and_open_vocab_basepack_synthesis(self) -> None:
+        from shelf_e2e.djev_client import DjevSystemOneClient
+        from shelf_e2e.taxonomy import (
+            CANONICAL_PACKAGING_TYPES,
+            HUL_BRANDS_CANONICAL,
+            MASTER_HUL_CATALOG,
+            UNILEVER_VARIANT_DOMAINS,
+            resolve_or_synthesize_base_pack,
+        )
+
+        self.assertGreaterEqual(len(HUL_BRANDS_CANONICAL), 85)
+        self.assertEqual(len(CANONICAL_PACKAGING_TYPES), 25)
+        self.assertGreaterEqual(len(MASTER_HUL_CATALOG), 65)
+        self.assertEqual(len(UNILEVER_VARIANT_DOMAINS), 7)
+
+        djev = DjevSystemOneClient()
+        # Test across all 6 Unilever Variant Domains + Novel Open-Vocabulary SKU Synthesis
+        domain_cases = [
+            ("Hair Care - DMT", "Indulekha", "bottle", "Bringha Selfie Comb Hair Oil", "100ml", True, "BP-HUL-INDULEKHA-BRINGHA-OIL-100ML"),
+            ("Skin Care", "Minimalist", "dropper_serum", "10% Niacinamide Face Serum", "30ml", True, "BP-HUL-MINIMALIST-NIACINAMIDE-10PCT-30ML"),
+            ("Oral Care", "Closeup", "box", "Everfresh Red Hot Gel Toothpaste", "150g", True, "BP-HUL-CLOSEUP-EVERFRESH-RED-150G"),
+            ("Personal Wash - Laundry", "Rexona", "roll_on", "Powder Dry Underarm Roll-On", "50ml", True, "BP-HUL-REXONA-ROLLON-50ML"),
+            ("Foods - Beverages", "Horlicks", "jar", "Classic Malt Health & Nutrition Drink", "500g", True, "BP-HUL-HORLICKS-CLASSIC-MALT-500G"),
+            ("Non-HUL", "Tata Tea", "box", "Gold Assam Leaf Tea", "250g", False, "NON-HUL-NONH-TATATE-250G"),
+        ]
+        for cat, brand, pkg, var, sz, exp_hul, exp_sku in domain_cases:
+            res = djev.classify_3task_and_prefilter_scann(
+                box_xyxy=[100, 200, 220, 500],
+                hint_category=cat,
+                hint_brand=brand,
+                hint_packaging=pkg,
+                ocr_snippet=sz,
+                hint_variant=var,
+            )
+            self.assertEqual(res.is_hul_brand, exp_hul)
+            self.assertEqual(res.brand, brand)
+            self.assertEqual(res.packaging_type, pkg)
+            self.assertEqual(res.resolved_base_pack_id, exp_sku)
+
+        # Verify Open-Vocabulary Base-Pack synthesis for a newly launched regional HUL variant
+        synth_sku, cands = resolve_or_synthesize_base_pack(
+            brand="Boost",
+            category="Foods - Beverages",
+            packaging_type="sachet_strip_ladi",
+            variant="Choco Almond Malt Ladi",
+            size_text="15g",
+        )
+        self.assertTrue(synth_sku.startswith("BP-HUL-BOOST-"))
+        self.assertIn(synth_sku, cands)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -201,13 +201,31 @@ def disambiguate_oos_void_vs_recessed_or_backboard(
 # ==============================================================================
 
 COMPATIBLE_PACKAGING_GROUPS: Dict[str, List[str]] = {
-    "bottle": ["bottle", "pouch", "tube", "jar"],
-    "pouch": ["pouch", "bottle", "sachet"],
-    "tube": ["tube", "bottle", "pouch"],
-    "jar": ["jar", "bottle", "bar"],
-    "sachet": ["sachet", "pouch", "multipack"],
-    "bar": ["bar", "multipack", "jar"],
-    "multipack": ["multipack", "bar", "sachet", "pouch"],
+    "bottle": ["bottle", "pump_bottle", "pouch", "tube", "jar", "dropper_serum"],
+    "pump_bottle": ["pump_bottle", "bottle", "jar"],
+    "pouch": ["pouch", "spout_pouch", "bottle", "sachet", "sachet_strip_ladi"],
+    "spout_pouch": ["spout_pouch", "pouch", "bottle"],
+    "tube": ["tube", "bottle", "pouch", "box"],
+    "jar": ["jar", "tub", "bottle", "bar", "tin"],
+    "tub": ["tub", "jar", "box"],
+    "sachet": ["sachet", "sachet_strip_ladi", "pouch", "multipack"],
+    "sachet_strip_ladi": ["sachet_strip_ladi", "sachet", "pouch", "multipack"],
+    "box": ["box", "carton", "multipack", "bar", "tetra_pak"],
+    "carton": ["carton", "box", "multipack", "tetra_pak"],
+    "bar": ["bar", "box", "multipack", "jar"],
+    "aerosol_can": ["aerosol_can", "roll_on", "bottle", "tin"],
+    "roll_on": ["roll_on", "aerosol_can", "bottle", "tube"],
+    "tin": ["tin", "jar", "box"],
+    "blister_card": ["blister_card", "box", "tube"],
+    "tetra_pak": ["tetra_pak", "box", "carton", "bottle"],
+    "multipack": ["multipack", "bar", "sachet", "sachet_strip_ladi", "pouch", "box"],
+    "dropper_serum": ["dropper_serum", "bottle", "tube"],
+    "window_header": ["window_header", "side_fin", "shelf_strip", "floor_standee"],
+    "side_fin": ["side_fin", "window_header", "shelf_strip"],
+    "shelf_strip": ["shelf_strip", "toker_talker", "window_header"],
+    "toker_talker": ["toker_talker", "shelf_strip", "parasite_hanger"],
+    "parasite_hanger": ["parasite_hanger", "sachet_strip_ladi", "toker_talker"],
+    "floor_standee": ["floor_standee", "window_header", "side_fin"],
 }
 
 

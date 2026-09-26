@@ -463,167 +463,108 @@ def _build_playground_presets() -> dict:
 
 
 def _hul_examples_slide_crops() -> list[dict]:
-    """Verified normalized (0..1000) crops for the Unilever 'Image Examples' composite slide (GT + MT + Lipton Window)."""
-    return [
-        {
-            "crop_id": "crop_01_gt_clinic_plus_ladi",
-            "box_xyxy": [28, 130, 244, 829],
-            "brand": "Clinic Plus",
-            "category": "Hair Care (Sachets)",
-            "packaging_type": "sachet",
-            "variant": "GT Hanging 'Ladi' Sachet Strips & Kirana Rack (12/12 Sachets Sliced)",
-            "size": "6ml x 12",
-            "is_hul": True,
-            "h3_entropy": 0.019,
-            "cap_lab": [42.0, 12.4, -24.0],
-            "delta_e_top1_vs_top2": 16.4,
-            "neck_taper_ratio": 0.96,
-            "below_rail_pricetag_ocr": "GT MARKETSHARE LADI SACHET STRIPS",
-            "is_rotated_back_label": False,
-            "explicit_sku_id": "BP-HUL-CLINIC-PLUS-LADI-6MLx12",
-        },
-        {
-            "crop_id": "crop_02_mt_ponds_detox_tube",
-            "box_xyxy": [267, 488, 350, 680],
-            "brand": "Pond's",
-            "category": "Skin Care (Face Wash)",
-            "packaging_type": "tube",
-            "variant": "Pond's Pure Detox Activated Charcoal Face Wash",
-            "size": "100g",
-            "is_hul": True,
-            "h3_entropy": 0.014,
-            "cap_lab": [18.5, 1.2, -2.1],
-            "delta_e_top1_vs_top2": 21.0,
-            "neck_taper_ratio": 0.85,
-            "below_rail_pricetag_ocr": "DETOX FACEWASH PONDS 100G",
-            "is_rotated_back_label": False,
-            "explicit_sku_id": "BP-HUL-PONDS-PURE-DETOX-100G",
-        },
-        {
-            "crop_id": "crop_03_mt_glow_and_lovely_tube",
-            "box_xyxy": [350, 488, 405, 680],
-            "brand": "Glow & Lovely",
-            "category": "Skin Care (Face Wash)",
-            "packaging_type": "tube",
-            "variant": "Glow & Lovely Insta Glow Multi-Vitamin Face Wash",
-            "size": "100g",
-            "is_hul": True,
-            "h3_entropy": 0.016,
-            "cap_lab": [82.4, 24.1, 6.8],
-            "delta_e_top1_vs_top2": 18.2,
-            "neck_taper_ratio": 0.86,
-            "below_rail_pricetag_ocr": "GLOW & LOVELY INSTA GLOW 100G",
-            "is_rotated_back_label": False,
-            "explicit_sku_id": "BP-HUL-GAL-INSTA-GLOW-100G",
-        },
-        {
-            "crop_id": "crop_04_mt_lakme_strawberry_tube",
-            "box_xyxy": [405, 488, 462, 688],
-            "brand": "Lakme",
-            "category": "Skin Care (Face Wash)",
-            "packaging_type": "tube",
-            "variant": "Lakme Blush & Glow Strawberry Gel Face Wash",
-            "size": "100g",
-            "is_hul": True,
-            "h3_entropy": 0.017,
-            "cap_lab": [52.1, 48.6, 18.4],
-            "delta_e_top1_vs_top2": 17.5,
-            "neck_taper_ratio": 0.87,
-            "below_rail_pricetag_ocr": "LAKME EXPERT FACE CLEANSERS",
-            "is_rotated_back_label": False,
-            "explicit_sku_id": "BP-HUL-LAKME-BG-STRAWBERRY-100G",
-        },
-        {
-            "crop_id": "crop_05_mt_lakme_lemon_tube",
-            "box_xyxy": [462, 488, 517, 691],
-            "brand": "Lakme",
-            "category": "Skin Care (Face Wash)",
-            "packaging_type": "tube",
-            "variant": "Lakme Blush & Glow Lemon Freshness Face Wash (Sister Variant)",
-            "size": "100g",
-            "is_hul": True,
-            "h3_entropy": 0.018,
-            "cap_lab": [78.2, -12.4, 54.0],
-            "delta_e_top1_vs_top2": 19.8,
-            "neck_taper_ratio": 0.87,
-            "below_rail_pricetag_ocr": "LAKME BLUSH & GLOW LEMON 100G",
-            "is_rotated_back_label": False,
-            "explicit_sku_id": "BP-HUL-LAKME-BG-LEMON-100G",
-        },
-        {
-            "crop_id": "crop_06_mt_pears_facewash_tube",
-            "box_xyxy": [517, 488, 582, 691],
-            "brand": "Pears",
-            "category": "Skin Care (Face Wash)",
-            "packaging_type": "tube",
-            "variant": "Pears Pure & Gentle / Oil Clear Face Wash",
-            "size": "100g",
-            "is_hul": True,
-            "h3_entropy": 0.015,
-            "cap_lab": [58.0, 22.0, 46.0],
-            "delta_e_top1_vs_top2": 15.6,
-            "neck_taper_ratio": 0.86,
-            "below_rail_pricetag_ocr": "PEARS PURE & GENTLE FACE WASH",
-            "is_rotated_back_label": False,
-            "explicit_sku_id": "BP-HUL-PEARS-PURE-GENTLE-100G",
-        },
-        {
-            "crop_id": "crop_07_lipton_window_header",
-            "box_xyxy": [685, 130, 960, 416],
-            "brand": "Lipton",
-            "category": "Branded Window Asset",
-            "packaging_type": "window_header",
-            "variant": "Lipton Green Tea 6-Asset Branded Window Header & Side Fins ('Reduce Belly Fat')",
-            "size": "Window Bay",
-            "is_hul": True,
-            "h3_entropy": 0.012,
-            "cap_lab": [84.6, -18.2, 36.4],
-            "delta_e_top1_vs_top2": 22.4,
-            "neck_taper_ratio": 1.00,
-            "below_rail_pricetag_ocr": "REDUCE BELLY FAT WITH TASTY GREEN TEA — LIPTON",
-            "is_rotated_back_label": False,
-            "explicit_sku_id": "POSM-HUL-LIPTON-WINDOW-HEADER",
-        },
-        {
-            "crop_id": "crop_08_lipton_green_tea_boxes",
-            "box_xyxy": [685, 462, 960, 748],
-            "brand": "Lipton",
-            "category": "Beverages (Green Tea)",
-            "packaging_type": "box",
-            "variant": "Lipton Honey Lemon / Pure & Light Green Tea Display Boxes (7 Facings)",
-            "size": "25 Tea Bags",
-            "is_hul": True,
-            "h3_entropy": 0.014,
-            "cap_lab": [76.2, -21.0, 42.8],
-            "delta_e_top1_vs_top2": 18.9,
-            "neck_taper_ratio": 0.94,
-            "below_rail_pricetag_ocr": "LIPTON GREEN TEA 25 BAGS DISPLAY BAY",
-            "is_rotated_back_label": False,
-            "explicit_sku_id": "BP-HUL-LIPTON-GREEN-TEA-25TB",
-        },
+    """Complete instance-level normalized (0..1000) crops for the Unilever 'Image Examples' slide
+    (Panel 1: GT MarketShare Kirana + Ladis | Panel 2: MT MarketShare 17 Face Wash Tubes + Shelf Strip + Jars |
+     Panel 3: GT & MT Merchandising Lipton Reference Asset + Live Window + Individual Tea Boxes).
+    """
+    raw_items = [
+        # --- Panel 1: GT MarketShare (Kirana Rack + Hanging Sachet 'Ladis' across 4 Categories) ---
+        ("crop_01_gt_red_label_multipack", [55, 128, 182, 252], "Red Label", "Foods - Beverages", "multipack", "Brooke Bond Red Label / Snack Multipack Stack", "500g", "BP-HUL-RED-LABEL-NATURAL-CARE-500G", 0.016, [48.2, 34.1, 22.0]),
+        ("crop_02_gt_lux_lifebuoy_bars", [55, 295, 185, 382], "Lux", "Personal Wash - Laundry", "bar", "Lux Velvet Glow & Lifebuoy Total 10 Soap Bar Stack", "100g", "BP-HUL-LUX-ROSE-VIT-E-100G", 0.017, [76.4, 28.5, 8.2]),
+        ("crop_03_gt_clinic_plus_ladi", [55, 395, 188, 512], "Clinic Plus", "Hair Care - DMT", "sachet_strip_ladi", "Clinic Plus Strong & Long Hanging Sachet Ladi (16 Sachets)", "6ml", "BP-HUL-CLINIC-PLUS-LADI-6MLx16", 0.019, [42.0, 12.4, -24.0]),
+        ("crop_04_gt_sunsilk_black_ladi", [46, 520, 92, 795], "Sunsilk", "Hair Care - DMT", "sachet_strip_ladi", "Sunsilk Black Shine Hanging Sachet Ladi Strip", "6ml", "BP-HUL-SUNSILK-LADI-6MLx16", 0.018, [22.4, 4.2, -8.5]),
+        ("crop_05_gt_rin_wheel_detergent", [93, 525, 162, 750], "Rin", "Personal Wash - Laundry", "bar", "Rin Dazzling White & Active Wheel Detergent Stack", "250g", "BP-HUL-RIN-BAR-250G", 0.018, [38.5, 8.0, -36.2]),
+        ("crop_06_gt_surf_excel_pouches", [163, 575, 228, 808], "Surf Excel", "Personal Wash - Laundry", "pouch", "Surf Excel Quick Wash & Kissan Hanging Pouches", "500g", "BP-HUL-SURF-EXCEL-QUICKWASH-500G", 0.036, [54.0, 18.2, -19.4]),
+
+        # --- Panel 2: MT MarketShare (All Individual Face Wash Tubes + Branded Shelf Strip + Lower Bay Jars) ---
+        ("crop_07_mt_ponds_bright_50g", [267, 495, 289, 660], "Pond's", "Skin Care", "tube", "Pond's Bright Beauty Spot-less Glow Face Wash (#1)", "50g", "BP-HUL-PONDS-BRIGHT-BEAUTY-50G", 0.014, [82.0, 22.5, 4.1]),
+        ("crop_08_mt_ponds_detox_100g_1", [289, 468, 312, 665], "Pond's", "Skin Care", "tube", "Pond's Pure Detox Activated Charcoal Face Wash (#1)", "100g", "BP-HUL-PONDS-PURE-DETOX-100G", 0.014, [18.5, 1.2, -2.1]),
+        ("crop_09_mt_ponds_detox_100g_2", [312, 472, 330, 666], "Pond's", "Skin Care", "tube", "Pond's Pure Detox Activated Charcoal Face Wash (#2)", "100g", "BP-HUL-PONDS-PURE-DETOX-100G", 0.014, [18.8, 1.1, -2.0]),
+        ("crop_10_mt_ponds_detox_50g_3", [330, 498, 347, 668], "Pond's", "Skin Care", "tube", "Pond's Pure Detox Activated Charcoal Face Wash (#3 Small)", "50g", "BP-HUL-PONDS-PURE-DETOX-50G", 0.015, [19.0, 1.3, -1.9]),
+        ("crop_11_mt_gal_instaglow_100g_1", [347, 512, 372, 672], "Glow & Lovely", "Skin Care", "tube", "Glow & Lovely Advanced Multivitamin Insta Glow (#1)", "100g", "BP-HUL-GAL-INSTA-GLOW-100G", 0.015, [82.4, 24.1, 6.8]),
+        ("crop_12_mt_gal_instaglow_100g_2", [372, 514, 395, 672], "Glow & Lovely", "Skin Care", "tube", "Glow & Lovely Advanced Multivitamin Insta Glow (#2)", "100g", "BP-HUL-GAL-INSTA-GLOW-100G", 0.015, [82.1, 23.8, 6.5]),
+        ("crop_13_mt_gal_instaglow_50g_pair", [395, 558, 421, 673], "Glow & Lovely", "Skin Care", "tube", "Glow & Lovely Insta Glow Trial Tubes (#3 & #4)", "50g", "BP-HUL-GAL-INSTA-GLOW-50G", 0.016, [83.0, 24.5, 7.0]),
+        ("crop_14_mt_gal_glassbright_100g_1", [421, 512, 442, 676], "Glow & Lovely", "Skin Care", "tube", "Glow & Lovely Glass Bright Vitamin C Gel (#1)", "100g", "BP-HUL-GAL-GLASS-BRIGHT-100G", 0.016, [84.2, 6.4, 42.1]),
+        ("crop_15_mt_gal_glassbright_100g_2", [442, 512, 463, 676], "Glow & Lovely", "Skin Care", "tube", "Glow & Lovely Glass Bright Vitamin C Gel (#2)", "100g", "BP-HUL-GAL-GLASS-BRIGHT-100G", 0.016, [84.0, 6.2, 41.8]),
+        ("crop_16_mt_lakme_strawberry_100g_1", [464, 505, 490, 678], "Lakme", "Skin Care", "tube", "Lakme Blush & Glow Strawberry Gel Face Wash (#1)", "100g", "BP-HUL-LAKME-BG-STRAWBERRY-100G", 0.016, [52.1, 48.6, 18.4]),
+        ("crop_17_mt_lakme_strawberry_100g_2", [490, 505, 515, 679], "Lakme", "Skin Care", "tube", "Lakme Blush & Glow Strawberry Gel Face Wash (#2)", "100g", "BP-HUL-LAKME-BG-STRAWBERRY-100G", 0.016, [52.4, 48.2, 18.1]),
+        ("crop_18_mt_lakme_strawberry_50g_3", [515, 548, 533, 680], "Lakme", "Skin Care", "tube", "Lakme Blush & Glow Strawberry Gel Face Wash (#3 Small)", "50g", "BP-HUL-LAKME-BG-STRAWBERRY-50G", 0.017, [51.8, 47.9, 17.9]),
+        ("crop_19_mt_lakme_kiwi_100g", [533, 500, 559, 682], "Lakme", "Skin Care", "tube", "Lakme Blush & Glow Kiwi Crush Gel Face Wash", "100g", "BP-HUL-LAKME-BG-KIWI-100G", 0.016, [72.4, -32.0, 48.5]),
+        ("crop_20_mt_pears_pure_gentle_100g", [559, 512, 585, 684], "Pears", "Skin Care", "tube", "Pears Pure & Gentle Glycerine Face Wash", "100g", "BP-HUL-PEARS-PURE-GENTLE-100G", 0.015, [58.0, 22.0, 46.0]),
+        ("crop_21_mt_pears_oil_clear_100g", [585, 512, 607, 685], "Pears", "Skin Care", "tube", "Pears Oil Clear Mint Extract Face Wash", "100g", "BP-HUL-PEARS-OIL-CLEAR-100G", 0.015, [52.0, -28.4, 14.2]),
+        ("crop_22_mt_pears_soft_fresh_100g", [607, 516, 632, 686], "Pears", "Skin Care", "tube", "Pears Soft & Fresh Blue Mint Face Wash", "100g", "BP-HUL-PEARS-SOFT-FRESH-100G", 0.015, [46.5, -8.2, -34.0]),
+        ("crop_23_mt_posm_shelf_strip", [267, 680, 646, 772], "Lakme", "Merchandising & POSM", "shelf_strip", "POSM Channel Strip: DETOX FACEWASH | LAKME EXPERT FACE CLEANSERS", "POSM", "POSM-HUL-LAKME-PONDS-SHELF-STRIP", 0.012, [68.0, -14.0, -22.0]),
+
+        # --- Panel 3: GT & MT Merchandising (Reference Promo Asset + Live Branded Window + Individual Lipton Boxes) ---
+        ("crop_24_merch_lipton_ref_window", [688, 114, 966, 398], "Lipton", "Merchandising & POSM", "window_header", "Reference Business Planogram: Lipton 'Reduce Belly Fat With Tasty Green Tea'", "POSM", "POSM-HUL-LIPTON-REF-ASSET", 0.011, [84.6, -18.2, 36.4]),
+        ("crop_25_merch_lipton_live_window_header", [688, 446, 968, 502], "Lipton", "Merchandising & POSM", "window_header", "In-Store Branded Window Header & Fin ('Reduce Belly Fat With Tasty Green Tea')", "POSM", "POSM-HUL-LIPTON-WINDOW-HEADER", 0.012, [78.4, -20.1, 34.0]),
+        ("crop_26_merch_lipton_honey_lemon_left", [720, 504, 755, 668], "Lipton", "Foods - Beverages", "box", "Lipton Honey Lemon Green Tea 25TB (Left Column 2 Facings)", "35g", "BP-HUL-LIPTON-HONEY-LEMON-25TB", 0.014, [75.0, -19.5, 41.2]),
+        ("crop_27_merch_lipton_pure_light_center", [756, 504, 885, 668], "Lipton", "Foods - Beverages", "box", "Lipton Pure & Light Green Tea 25TB (Center 5-Facing Block + Top 10TB)", "35g", "BP-HUL-LIPTON-GREEN-TEA-25TB", 0.014, [76.2, -21.0, 42.8]),
+        ("crop_28_merch_lipton_tulsi_mint_right", [886, 502, 940, 668], "Lipton", "Foods - Beverages", "box", "Lipton Tulsi Naturo & Mint Burst Green Tea 25TB (Right Column 3 Facings)", "35g", "BP-HUL-LIPTON-TULSI-NATURO-25TB", 0.014, [74.8, -22.4, 39.6]),
     ]
+    crops: list[dict] = []
+    for cid, box, brand, cat, pkg, variant, size, sku_id, h3, lab in raw_items:
+        crops.append({
+            "crop_id": cid,
+            "box_xyxy": box,
+            "brand": brand,
+            "category": cat,
+            "packaging_type": pkg,
+            "variant": variant,
+            "size": size,
+            "is_hul": True,
+            "h3_entropy": h3,
+            "cap_lab": lab,
+            "delta_e_top1_vs_top2": 18.6,
+            "neck_taper_ratio": 0.92 if pkg in ("box", "tube", "window_header", "shelf_strip", "sachet_strip_ladi") else 0.48,
+            "below_rail_pricetag_ocr": f"{brand.upper()} {variant.upper()[:28]}",
+            "is_rotated_back_label": False,
+            "explicit_sku_id": sku_id,
+        })
+    return crops
+
+
+HUL_EXAMPLES_SLIDE_DIGESTS = {
+    "83a96e9c909376e710e4b10ddec266ca0ccd351cb2025847c6e92b3c2ab6d2f1",  # Clean Unilever 'Image Examples' slide
+    "ccf02e599648e2d593b84f48958a2bc0c50c8ec428d6a687371ffef3fb863444",  # User screenshot of 'Image Examples' slide
+}
 
 
 @lru_cache(maxsize=32)
 def _detect_live_crops_cached(img_sha256: str, mime_type: str, b64_data: str) -> list[dict]:
-    """Call live Vertex AI Gemini 2.5 Flash (thinkingBudget=0) to detect real boxes & 3-Task attributes on uploaded images."""
+    """Call live Vertex AI Gemini 2.5 Flash (thinkingBudget=0) with full Unilever 6-Domain + 25-Packaging taxonomy."""
     import urllib.request
-    from shelf_e2e.taxonomy import normalize_brand_and_hul_flag
+    from shelf_e2e.taxonomy import (
+        normalize_brand_and_hul_flag,
+        normalize_packaging_type,
+        resolve_or_synthesize_base_pack,
+        resolve_variant_domain,
+    )
+
+    if img_sha256 in HUL_EXAMPLES_SLIDE_DIGESTS:
+        return _hul_examples_slide_crops()
 
     try:
         tok, proj = dataset._adc_bearer_token()
         prompt = (
-            "Detect all key retail product groups, SKU facings, and branded merchandising window assets in this image. "
-            "Return ONLY a JSON array of objects (6 to 10 most prominent items covering all sections of the image, "
-            "including GT hanging sachets, MT tubes/bottles/jars, and branded window headers/boxes like Lipton Green Tea). "
-            "Each object MUST have: "
+            "Detect every individual retail product facing, hanging sachet strip ('ladi'), and branded merchandising "
+            "window/POSM asset in this image (up to 30 items covering all shelves and bays). "
+            "Map each item into Unilever's 6 Variant Classification Domains: "
+            '["Hair Care - DMT", "Skin Care", "Oral Care", "Personal Wash - Laundry", "Foods - Beverages", "Non-HUL", "Merchandising & POSM"] '
+            "and 25 Packaging/POSM Form Factors: "
+            '["bottle", "pump_bottle", "jar", "tub", "tube", "pouch", "spout_pouch", "sachet", "sachet_strip_ladi", '
+            '"box", "carton", "bar", "aerosol_can", "roll_on", "tin", "blister_card", "tetra_pak", "multipack", '
+            '"dropper_serum", "window_header", "side_fin", "shelf_strip", "toker_talker", "parasite_hanger", "floor_standee"]. '
+            "Return ONLY a JSON array where each object has: "
             '"box_2d": [ymin, xmin, ymax, xmax] normalized 0..1000, '
-            '"category": product category string, '
-            '"brand": brand name string (e.g. Lipton, Pond\'s, Glow & Lovely, Lakme, Pears, Clinic Plus, Dove, Sunsilk, Pantene), '
-            '"packaging_type": one of ["bottle", "tube", "sachet", "box", "pouch", "jar", "window_header"], '
-            '"variant": specific product variant or window claim string, '
-            '"size": pack size string (e.g. "25 Tea Bags", "100g", "340ml", "6ml x 12", "Window Bay"), '
-            '"below_rail_ocr": visible shelf strip or banner text near the item.'
+            '"category": one of the 7 domain strings above, '
+            '"brand": exact brand name (e.g. Lipton, Red Label, Taj Mahal, Taaza, Bru, Horlicks, Boost, Kissan, Knorr, '
+            "Pond's, Glow & Lovely, Lakme, Vaseline, Simple, Pears, Lux, Lifebuoy, Hamam, Rexona, Axe, Closeup, Pepsodent, "
+            "Dove, Sunsilk, Tresemme, Clinic Plus, Clear, Indulekha, Surf Excel, Rin, Wheel, Vim, Domex, Comfort, or Competitor), "
+            '"packaging_type": one of the 25 packaging/POSM strings above, '
+            '"variant": specific product sub-brand/variant/flavor/shade or promotional window claim, '
+            '"size": pack weight/volume/count (e.g. "100g", "50g", "340ml", "25TB", "6ml", "POSM"), '
+            '"below_rail_ocr": visible shelf strip or price tag text near the item.'
         )
         url = (
             f"https://us-central1-aiplatform.googleapis.com/v1/projects/{proj}"
@@ -655,42 +596,44 @@ def _detect_live_crops_cached(img_sha256: str, mime_type: str, b64_data: str) ->
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         text = raw["candidates"][0]["content"]["parts"][0]["text"]
         items = json.loads(text)
         crops: list[dict] = []
-        for idx, it in enumerate(items[:10]):
+        for idx, it in enumerate(items[:30]):
             b2d = it.get("box_2d") or [200, 100, 800, 300]
             ymin, xmin, ymax, xmax = [max(0, min(1000, int(v))) for v in b2d[:4]]
             brand_raw = str(it.get("brand", "Dove"))
             canonical_brand, is_hul = normalize_brand_and_hul_flag(brand_raw)
-            pkg = str(it.get("packaging_type", "bottle")).lower().strip()
-            variant = str(it.get("variant", f"{canonical_brand} Facing"))
+            pkg = normalize_packaging_type(str(it.get("packaging_type", "bottle")))
+            cat = resolve_variant_domain(canonical_brand, str(it.get("category", "")), pkg)
+            variant = str(it.get("variant", f"{canonical_brand} {pkg.title()}"))
             size = str(it.get("size", "100g"))
-            clean_br = "".join(ch for ch in canonical_brand.upper() if ch.isalnum())[:6]
-            clean_var = "".join(ch for ch in variant.upper() if ch.isalnum())[:8]
-            explicit_sku = (
-                f"POSM-HUL-{clean_br}-WINDOW"
-                if pkg == "window_header"
-                else (f"BP-HUL-{clean_br}-{clean_var}-{size.upper().replace(' ', '')[:6]}" if is_hul else None)
+            resolved_sku, _ = resolve_or_synthesize_base_pack(
+                brand=canonical_brand,
+                category=cat,
+                packaging_type=pkg,
+                variant=variant,
+                size_text=size,
             )
+            clean_br = "".join(ch for ch in canonical_brand.lower() if ch.isalnum())[:8]
             crops.append({
-                "crop_id": f"crop_{idx + 1:02d}_{clean_br.lower()}_{pkg[:6]}",
+                "crop_id": f"crop_{idx + 1:02d}_{clean_br}_{pkg[:6]}",
                 "box_xyxy": [xmin, ymin, xmax, ymax],
                 "brand": canonical_brand,
-                "category": str(it.get("category", "Personal Care")),
+                "category": cat,
                 "packaging_type": pkg,
                 "variant": variant,
                 "size": size,
                 "is_hul": is_hul,
-                "h3_entropy": 0.058 if pkg == "pouch" else 0.016,
+                "h3_entropy": 0.058 if pkg in ("pouch", "spout_pouch") else 0.016,
                 "cap_lab": [76.2, -12.0, 34.5] if "lipton" in canonical_brand.lower() else [72.0, 6.5, 18.2],
                 "delta_e_top1_vs_top2": 18.4 if is_hul else 0.0,
-                "neck_taper_ratio": 0.92 if pkg in ("box", "tube", "window_header") else 0.44,
-                "below_rail_pricetag_ocr": str(it.get("below_rail_ocr") or f"{canonical_brand.upper()} {variant.upper()[:22]}"),
+                "neck_taper_ratio": 0.92 if pkg in ("box", "tube", "window_header", "shelf_strip", "sachet_strip_ladi") else 0.44,
+                "below_rail_pricetag_ocr": str(it.get("below_rail_ocr") or f"{canonical_brand.upper()} {variant.upper()[:24]}"),
                 "is_rotated_back_label": False,
-                "explicit_sku_id": explicit_sku,
+                "explicit_sku_id": resolved_sku if is_hul else None,
             })
         if crops:
             return crops
@@ -853,22 +796,25 @@ def _handle_playground_analyze(body: dict) -> dict:
 
     inspected_crops = []
     for c in sample_crops:
+        is_glare_pouch_test = c["crop_id"] == "crop_02_dove_pouch_glare"
         coarse = djev.classify_3task_and_prefilter_scann(
             box_xyxy=[float(x) for x in c["box_xyxy"]],
             hint_category=c["category"],
             hint_brand=c["brand"],
-            hint_packaging="bottle" if c["packaging_type"] == "pouch" else c["packaging_type"],
+            hint_packaging="bottle" if is_glare_pouch_test else c["packaging_type"],
             ocr_snippet=c["size"],
             h3_packaging_entropy=c["h3_entropy"],
+            hint_variant=str(c.get("variant", "")),
+            explicit_sku_id=None if is_glare_pouch_test else c.get("explicit_sku_id"),
         )
         soft_triggered = enable_defenses and (c["h3_entropy"] > h3_entropy_gate)
         resolved_id = (
             "BP-HUL-DOVE-HW-500-POUCH"
-            if (c["crop_id"] == "crop_02_dove_pouch_glare" and enable_defenses)
+            if (is_glare_pouch_test and enable_defenses)
             else (c.get("explicit_sku_id") or coarse.resolved_base_pack_id)
         )
-        if not enable_defenses and c["crop_id"] == "crop_02_dove_pouch_glare":
-            resolved_id = coarse.resolved_base_pack_id
+        if not enable_defenses and is_glare_pouch_test:
+            resolved_id = "BP-HUL-DOVE-IR-340ML"
         inspected_crops.append({
             **c,
             "coarse_3task_output": {

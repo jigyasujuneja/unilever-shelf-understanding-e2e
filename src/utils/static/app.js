@@ -891,31 +891,34 @@ async function showPlaygroundTab() {
         </div>
 
         <div class="card">
-          <h3>Coarse-to-Fine 3-Task (Category | Brand | Pack) + Pre-Filtered ScaNN + Stage 4.5 Microscope</h3>
-          <table class="small" id="pg-crop-table">
-            <thead><tr><th>Crop</th><th>3-Task Slots</th><th>ScaNN Pool</th><th>Resolved SKU</th></tr></thead>
-            <tbody>
-              ${crops
-                .map(
-                  (c, idx) => `
-                <tr data-idx="${idx}" class="${idx === 0 ? "sel" : ""}">
-                  <td class="mono">#${String(idx + 1).padStart(2, "0")}</td>
-                  <td class="mono">${esc(c.coarse_3task_output.slot1_category)} | <b>${esc(c.coarse_3task_output.slot2_brand)}</b> | ${esc(c.coarse_3task_output.slot3_packaging_type)}</td>
-                  <td class="mono">${c.scann_prefilter_telemetry.catalog_size_before_3task.toLocaleString()} &rarr; <b>${c.scann_prefilter_telemetry.candidates_after_3task_filter}</b></td>
-                  <td class="mono strong">${esc(c.resolved_base_pack_id)}</td>
-                </tr>`
-                )
-                .join("")}
-            </tbody>
-          </table>
+          <h3>Coarse-to-Fine 3-Task (Category | Brand | Pack) + Pre-Filtered ScaNN + Stage 4.5 Microscope (${crops.length} Facings &amp; POSM Assets)</h3>
+          <div style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;">
+            <table class="small" id="pg-crop-table" style="margin:0;">
+              <thead style="position:sticky;top:0;background:#f8fafc;z-index:2;"><tr><th>Crop</th><th>3-Task Slots (Domain | Brand | Pack)</th><th>ScaNN Pool</th><th>Resolved SKU / POSM ID</th></tr></thead>
+              <tbody>
+                ${crops
+                  .map(
+                    (c, idx) => `
+                  <tr data-idx="${idx}" class="${idx === 0 ? "sel" : ""}">
+                    <td class="mono">#${String(idx + 1).padStart(2, "0")}</td>
+                    <td class="mono">${esc(c.coarse_3task_output.slot1_category)} | <b>${esc(c.coarse_3task_output.slot2_brand)}</b> | ${esc(c.coarse_3task_output.slot3_packaging_type)}</td>
+                    <td class="mono">${c.scann_prefilter_telemetry.catalog_size_before_3task.toLocaleString()} &rarr; <b>${c.scann_prefilter_telemetry.candidates_after_3task_filter}</b></td>
+                    <td class="mono strong">${esc(c.resolved_base_pack_id)}</td>
+                  </tr>`
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
           <div id="pg-microscope" style="margin-top:12px;"></div>
         </div>
       </div>
     `;
 
     if (userTriggered) {
+      const uniqueBrands = [...new Set(crops.map((c) => c.brand))];
       showToast(
-        `✅ <b>Live Audit #${playgroundRunCounter} Complete:</b> Detected <b>${crops.length} crops</b> (${crops.map((c) => c.brand).join(", ")}) in <b>${slo.total_e2e_latency_s}s</b>`
+        `✅ <b>Live Audit #${playgroundRunCounter} Complete:</b> Detected <b>${crops.length} facings &amp; POSM assets</b> across <b>${uniqueBrands.join(", ")}</b> in <b>${slo.total_e2e_latency_s}s</b>`
       );
       container.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
@@ -932,10 +935,10 @@ async function showPlaygroundTab() {
       const mic = document.getElementById("pg-microscope");
       mic.innerHTML = `
         <div style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;" class="mono pulse-update">
-          <div style="color:#93c5fd;font-weight:700;margin-bottom:6px;">MICROSCOPE: ${esc(c.crop_id)} &rarr; ${esc(c.resolved_base_pack_id)}</div>
+          <div style="color:#93c5fd;font-weight:700;margin-bottom:6px;">MICROSCOPE: #${String(idx + 1).padStart(2, "0")} (${esc(c.crop_id)}) &rarr; ${esc(c.resolved_base_pack_id)}</div>
           <div><b>Variant / Asset:</b> ${esc(c.variant)} (${esc(c.size)})</div>
           <div><b>Step A (Crop Embedding):</b> ${c.coarse_3task_output.crop_embedding_dim}-d I-JEPA vector in <b>${c.coarse_3task_output.crop_embedding_ms} ms</b></div>
-          <div><b>Step B (dJev /v1/systemone 3-Task):</b> Cat=<b>${esc(c.coarse_3task_output.slot1_category)}</b> | Brand=<b>${esc(c.coarse_3task_output.slot2_brand)}</b> | Pack=<b>${esc(c.coarse_3task_output.slot3_packaging_type)}</b> (H3=${c.coarse_3task_output.slot_entropies.H3_packaging_type})</div>
+          <div><b>Step B (dJev /v1/systemone 3-Task):</b> Domain=<b>${esc(c.coarse_3task_output.slot1_category)}</b> | Brand=<b>${esc(c.coarse_3task_output.slot2_brand)}</b> | Pack=<b>${esc(c.coarse_3task_output.slot3_packaging_type)}</b> (H3=${c.coarse_3task_output.slot_entropies.H3_packaging_type})</div>
           <div><b>Step C (Entropy-Gated ScaNN Filter):</b> ${esc(c.scann_prefilter_telemetry.filter_mode)} &middot; Pool shrunk <b>${c.scann_prefilter_telemetry.catalog_size_before_3task.toLocaleString()} &rarr; ${c.scann_prefilter_telemetry.candidates_after_3task_filter} SKUs</b></div>
           <div><b>Step D (Stage 4.5 Sub-ROI &amp; Defenses):</b> Cap CIELAB=(${c.stage_4_5_sub_roi.zone1_cap_0_18pct_lab.join(", ")}) &middot; &Delta;E*=${c.stage_4_5_sub_roi.delta_e_margin} &middot; Neck-Taper=${c.stage_4_5_sub_roi.neck_taper_ratio}</div>
           <div><b>Rail-Lip / Banner OCR:</b> "${esc(c.stage_4_5_sub_roi.below_rail_pricetag_fallback)}" &middot; Markov Smoothed: <b>${c.stage_4_5_sub_roi.markov_neighbor_smoothed ? "YES (180° Rotated Rescued)" : "No"}</b></div>
@@ -949,20 +952,28 @@ async function showPlaygroundTab() {
       });
     });
 
-    // Also allow clicking directly on bounding boxes inside the <canvas> (normalized 0..1000 space)
+    // Also allow clicking directly on bounding boxes inside the <canvas> (normalized 0..1000 space, smallest box wins if nested)
     const canvasEl = document.getElementById("pg-canvas");
     if (canvasEl) {
       canvasEl.addEventListener("click", (ev) => {
         const rect = canvasEl.getBoundingClientRect();
         const cx = ((ev.clientX - rect.left) / rect.width) * 1000;
         const cy = ((ev.clientY - rect.top) / rect.height) * 1000;
-        const hitIdx = crops.findIndex((c) => {
+        let bestIdx = -1;
+        let bestArea = Infinity;
+        crops.forEach((c, i) => {
           const [x1, y1, x2, y2] = c.box_xyxy;
-          return cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2;
+          if (cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2) {
+            const area = (x2 - x1) * (y2 - y1);
+            if (area < bestArea) {
+              bestArea = area;
+              bestIdx = i;
+            }
+          }
         });
-        if (hitIdx >= 0) {
-          selectCrop(hitIdx);
-          showToast(`Selected Crop <b>#${String(hitIdx + 1).padStart(2, "0")}: ${esc(crops[hitIdx].resolved_base_pack_id)}</b> on Canvas`);
+        if (bestIdx >= 0) {
+          selectCrop(bestIdx);
+          showToast(`Selected Crop <b>#${String(bestIdx + 1).padStart(2, "0")}: ${esc(crops[bestIdx].resolved_base_pack_id)}</b> on Canvas`);
         }
       });
     }
@@ -982,23 +993,37 @@ async function showPlaygroundTab() {
     const ctx = canvas.getContext("2d");
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-    crops.forEach((c, idx) => {
+    const isDense = crops.length > 10;
+    // Draw unselected crops first, then selected crop on top so its label is never occluded
+    const order = crops.map((_, i) => i).sort((a, b) => (a === selectedIdx ? 1 : b === selectedIdx ? -1 : a - b));
+    order.forEach((idx) => {
+      const c = crops[idx];
       const [x1, y1, x2, y2] = c.box_xyxy;
       const sx = (x1 / 1000) * canvas.width;
       const sy = (y1 / 1000) * canvas.height;
       const sw = ((x2 - x1) / 1000) * canvas.width;
       const sh = ((y2 - y1) / 1000) * canvas.height;
       const isSel = idx === selectedIdx;
-      ctx.strokeStyle = !c.is_hul ? "#ef4444" : c.h3_entropy > 0.03 || c.is_rotated_back_label ? "#facc15" : "#22c55e";
-      ctx.lineWidth = isSel ? 4 : 2.2;
+      ctx.strokeStyle = isSel
+        ? "#3b82f6"
+        : !c.is_hul
+        ? "#ef4444"
+        : c.h3_entropy > 0.03 || c.is_rotated_back_label
+        ? "#facc15"
+        : "#22c55e";
+      ctx.lineWidth = isSel ? 3.5 : 2.0;
       ctx.strokeRect(sx, sy, sw, sh);
-      const label = `#${String(idx + 1).padStart(2, "0")} ${c.brand} (${c.packaging_type})`;
-      ctx.font = "bold 11px monospace";
-      const tw = Math.min(ctx.measureText(label).width + 10, canvas.width - sx);
-      ctx.fillStyle = isSel ? "rgba(37,99,235,0.94)" : "rgba(15,23,42,0.86)";
-      ctx.fillRect(sx, Math.max(0, sy - 19), tw, 19);
+
+      const shortBadge = `#${String(idx + 1).padStart(2, "0")}`;
+      const fullLabel = `#${String(idx + 1).padStart(2, "0")} ${c.brand} (${c.packaging_type})`;
+      const label = isSel || !isDense || sw >= 78 ? fullLabel : shortBadge;
+      ctx.font = isSel ? "bold 11.5px monospace" : "bold 10px monospace";
+      const tw = Math.min(ctx.measureText(label).width + 8, canvas.width - sx);
+      const pillY = sy >= 18 ? sy - 17 : sy + 2;
+      ctx.fillStyle = isSel ? "rgba(37,99,235,0.96)" : "rgba(15,23,42,0.84)";
+      ctx.fillRect(sx, pillY, tw, 17);
       ctx.fillStyle = "#fff";
-      ctx.fillText(label, sx + 4, Math.max(13, sy - 5));
+      ctx.fillText(label, sx + 4, pillY + 12);
     });
   }
 

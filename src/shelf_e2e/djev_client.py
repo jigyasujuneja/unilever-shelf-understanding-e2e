@@ -108,10 +108,15 @@ class DjevSystemOneClient:
     CANVAS_LENGTH = 64
 
     CANONICAL_CATEGORIES = [
-        "Personal Care",
-        "Hair Care",
+        "Hair Care - DMT",
         "Skin Care",
         "Oral Care",
+        "Personal Wash - Laundry",
+        "Foods - Beverages",
+        "Non-HUL",
+        "Merchandising & POSM",
+        "Personal Care",
+        "Hair Care",
         "Home Care",
         "Foods & Refreshment",
     ]
@@ -120,36 +125,95 @@ class DjevSystemOneClient:
         "Tresemme",
         "Sunsilk",
         "Clinic Plus",
-        "Vaseline",
+        "Clear",
+        "Indulekha",
+        "Love Beauty and Planet",
+        "Simple",
         "Pond's",
+        "Glow & Lovely",
         "Lakme",
+        "Vaseline",
+        "Elle 18",
+        "Minimalist",
+        "Closeup",
+        "Pepsodent",
+        "Signal",
         "Lux",
         "Lifebuoy",
         "Pears",
+        "Hamam",
+        "Liril",
+        "Rexona",
+        "Axe",
+        "Radox",
         "Surf Excel",
+        "Rin",
+        "Wheel",
+        "Sunlight",
         "Vim",
+        "Cif",
         "Domex",
+        "Comfort",
+        "Lipton",
+        "Brooke Bond",
+        "Red Label",
+        "Taj Mahal",
+        "Taaza",
+        "3 Roses",
+        "Bru",
+        "Horlicks",
+        "Boost",
+        "Kissan",
         "Knorr",
+        "Hellmann's",
+        "Kwality Wall's",
+        "Cornetto",
+        "Magnum",
         "Pantene",
         "Head & Shoulders",
         "L'Oreal",
+        "Garnier",
+        "Himalaya",
         "Palmolive",
         "Safeguard",
         "Colgate",
+        "Sensodyne",
         "Nivea",
+        "Dettol",
+        "Santoor",
         "Ariel",
         "Tide",
+        "Tata Tea",
+        "Nescafe",
+        "Bournvita",
+        "Maggi",
     ]
     CANONICAL_PACKAGING_TYPES = [
         "bottle",
+        "pump_bottle",
         "jar",
-        "pouch",
+        "tub",
         "tube",
+        "pouch",
+        "spout_pouch",
         "sachet",
+        "sachet_strip_ladi",
         "box",
+        "carton",
         "bar",
+        "aerosol_can",
+        "roll_on",
+        "tin",
+        "blister_card",
+        "tetra_pak",
         "multipack",
+        "dropper_serum",
         "window_header",
+        "side_fin",
+        "shelf_strip",
+        "toker_talker",
+        "parasite_hanger",
+        "floor_standee",
     ]
 
     def __init__(self, endpoint_url: Optional[str] = None, timeout_sec: float = 1.5):
@@ -324,45 +388,103 @@ class DjevSystemOneClient:
                 pass
 
         # Deterministic 1-step `mmastrac/djev` canvas solver (enforces `diffusion_constrained` 3-task + Top-5 DAG rules)
+        from shelf_e2e.taxonomy import (
+            MASTER_HUL_CATALOG,
+            normalize_packaging_type,
+            resolve_or_synthesize_base_pack,
+            resolve_variant_domain,
+        )
+
         width_px = max(1.0, box_xyxy[2] - box_xyxy[0])
         height_px = max(1.0, box_xyxy[3] - box_xyxy[1])
         aspect_wh = width_px / height_px
         bbox_2d = [int(box_xyxy[1]), int(box_xyxy[0]), int(box_xyxy[3]), int(box_xyxy[2])]
 
-        # Step 1: Resolve 3 Tasks at once (`Category`, `Brand`, `Packaging Type`)
+        # Step 1: Resolve 3 Tasks at once (`Category`, `Brand`, `Packaging Type`) via Master Catalog + Brand Tokens
         top_cand = scann_top5[0] if scann_top5 else "BP-DOVE-BW-500"
         upper_cand = top_cand.upper()
-        if "SUNS" in upper_cand:
-            inferred_brand, inferred_cat = "Sunsilk", "Hair Care"
-        elif "TRES" in upper_cand:
-            inferred_brand, inferred_cat = "Tresemme", "Hair Care"
-        elif "POND" in upper_cand:
-            inferred_brand, inferred_cat = "Pond's", "Skin Care"
-        elif "VASE" in upper_cand:
-            inferred_brand, inferred_cat = "Vaseline", "Skin Care"
-        elif "SURF" in upper_cand or "DOMEX" in upper_cand:
-            inferred_brand, inferred_cat = "Surf Excel", "Home Care"
-        elif "PANT" in upper_cand:
-            inferred_brand, inferred_cat = "Pantene", "Hair Care"
+
+        catalog_hit = next((item for item in MASTER_HUL_CATALOG if item["sku_id"].upper() == upper_cand), None)
+        if catalog_hit:
+            inferred_brand = catalog_hit["brand"]
+            inferred_cat = catalog_hit["category"]
+            pkg = normalize_packaging_type(catalog_hit["packaging_type"])
         else:
-            inferred_brand, inferred_cat = "Dove", "Personal Care"
+            if "SUNS" in upper_cand:
+                inferred_brand, inferred_cat = "Sunsilk", "Hair Care"
+            elif "TRES" in upper_cand:
+                inferred_brand, inferred_cat = "Tresemme", "Hair Care"
+            elif "CLINIC" in upper_cand:
+                inferred_brand, inferred_cat = "Clinic Plus", "Hair Care"
+            elif "POND" in upper_cand:
+                inferred_brand, inferred_cat = "Pond's", "Skin Care"
+            elif "GAL" in upper_cand or "GLOW" in upper_cand or "FAIR" in upper_cand:
+                inferred_brand, inferred_cat = "Glow & Lovely", "Skin Care"
+            elif "LAKM" in upper_cand:
+                inferred_brand, inferred_cat = "Lakme", "Skin Care"
+            elif "PEAR" in upper_cand:
+                inferred_brand, inferred_cat = "Pears", "Skin Care"
+            elif "VASE" in upper_cand:
+                inferred_brand, inferred_cat = "Vaseline", "Skin Care"
+            elif "LIPT" in upper_cand:
+                inferred_brand, inferred_cat = "Lipton", "Foods - Beverages"
+            elif "RED-LABEL" in upper_cand or "REDLABEL" in upper_cand:
+                inferred_brand, inferred_cat = "Red Label", "Foods - Beverages"
+            elif "TAJ" in upper_cand:
+                inferred_brand, inferred_cat = "Taj Mahal", "Foods - Beverages"
+            elif "HORL" in upper_cand:
+                inferred_brand, inferred_cat = "Horlicks", "Foods - Beverages"
+            elif "BRU" in upper_cand:
+                inferred_brand, inferred_cat = "Bru", "Foods - Beverages"
+            elif "KISS" in upper_cand:
+                inferred_brand, inferred_cat = "Kissan", "Foods - Beverages"
+            elif "KNOR" in upper_cand:
+                inferred_brand, inferred_cat = "Knorr", "Foods - Beverages"
+            elif "CLOSE" in upper_cand:
+                inferred_brand, inferred_cat = "Closeup", "Oral Care"
+            elif "PEPSO" in upper_cand:
+                inferred_brand, inferred_cat = "Pepsodent", "Oral Care"
+            elif "LUX" in upper_cand:
+                inferred_brand, inferred_cat = "Lux", "Personal Wash - Laundry"
+            elif "LIFE" in upper_cand:
+                inferred_brand, inferred_cat = "Lifebuoy", "Personal Wash - Laundry"
+            elif "SURF" in upper_cand or "DOMEX" in upper_cand or "WHEEL" in upper_cand or "RIN" in upper_cand or "VIM" in upper_cand:
+                inferred_brand, inferred_cat = "Surf Excel", "Home Care"
+            elif "PANT" in upper_cand:
+                inferred_brand, inferred_cat = "Pantene", "Hair Care"
+            else:
+                inferred_brand, inferred_cat = "Dove", "Personal Care"
+
+            if "LADI" in upper_cand:
+                pkg = "sachet_strip_ladi"
+            elif "SACHET" in upper_cand:
+                pkg = "sachet"
+            elif "POUCH" in upper_cand:
+                pkg = "pouch"
+            elif "JAR" in upper_cand or "CREAM" in upper_cand:
+                pkg = "jar"
+            elif "TUBE" in upper_cand:
+                pkg = "tube"
+            elif "BOX" in upper_cand or "TB" in upper_cand or "CARTON" in upper_cand:
+                pkg = "box"
+            elif "BAR" in upper_cand:
+                pkg = "bar"
+            elif "WINDOW" in upper_cand:
+                pkg = "window_header"
+            elif "STRIP" in upper_cand:
+                pkg = "shelf_strip"
+            else:
+                pkg = "bottle"
 
         canonical_brand, is_hul = normalize_brand_and_hul_flag(inferred_brand)
 
-        if "POUCH" in upper_cand or "SACHET" in upper_cand:
-            pkg = "pouch"
-        elif "JAR" in upper_cand or "CREAM" in upper_cand:
-            pkg = "jar"
-        elif "TUBE" in upper_cand:
-            pkg = "tube"
-        else:
-            pkg = "bottle"
-
         # Step 2: Evaluate `ask_if` DAG condition (`q_size_span` depends on `q_packaging`)
         pruned_questions: List[str] = []
-        match = re.search(r"\b(\d+(?:ml|g|l|kg))\b", ocr_snippet.lower()) if ocr_snippet else None
+        match = re.search(r"\b(\d+(?:ml|g|l|kg|tb))\b", ocr_snippet.lower()) if ocr_snippet else None
         if match:
             size_span = match.group(1)
+        elif catalog_hit and catalog_hit.get("size"):
+            size_span = str(catalog_hit["size"])
         elif width_px >= 40.0 or aspect_wh >= 0.32:
             size_span = "750ml"
         else:
@@ -425,50 +547,37 @@ class DjevSystemOneClient:
         ocr_snippet: str = "340ml",
         candidate_catalog_skus: Optional[List[Dict[str, Any]]] = None,
         h3_packaging_entropy: float = 0.016,
+        hint_variant: str = "",
+        explicit_sku_id: Optional[str] = None,
     ) -> DjevThreeTaskCoarseResponse:
         """Execute Coarse-to-Fine Hybrid with Entropy-Gated Soft vs. Hard ScaNN Pre-Filtering:
         1. Compute Crop Embedding (`I-JEPA` / `SigLIP`, `~0.4ms`) + Run `dJev /v1/systemone` 3-Task (`Category | Brand | Packaging Type`).
         2. If `Brand` is Non-HUL Competitor: stop immediately with `(Category, Brand, Packaging Type, Size)` (`0` catalog cardinality).
         3. If `Brand` is HUL: use `(Category, Brand, Packaging Type)` with Entropy-Gated Soft/Hard Pre-Filtering on `ScaNN`
            (shrinking `50,000` SKUs down to `~8-15` sister variants while expanding compatible form factors when `H3 > 0.030`),
-           then resolve the exact HUL Base Pack.
+           then resolve the exact HUL Base Pack via `MASTER_HUL_CATALOG` + Open-Vocabulary Synthesis.
         """
         from shelf_e2e.real_world_defenses import entropy_gated_3task_scann_prefilter
-        from shelf_e2e.taxonomy import normalize_brand_and_hul_flag
+        from shelf_e2e.taxonomy import (
+            MASTER_HUL_CATALOG,
+            normalize_brand_and_hul_flag,
+            normalize_packaging_type,
+            resolve_or_synthesize_base_pack,
+            resolve_variant_domain,
+        )
 
         canonical_brand, is_hul = normalize_brand_and_hul_flag(hint_brand)
-        pkg = hint_packaging.lower().strip()
-        if pkg not in self.CANONICAL_PACKAGING_TYPES:
-            pkg = "bottle"
+        pkg = normalize_packaging_type(hint_packaging)
+        resolved_cat = hint_category or resolve_variant_domain(canonical_brand, hint_category, pkg)
 
-        catalog = candidate_catalog_skus or [
-            {"sku_id": "BP-HUL-DOVE-IR-340ML", "category": "Hair Care", "brand": "Dove", "packaging_type": "bottle"},
-            {"sku_id": "BP-HUL-DOVE-DS-340ML", "category": "Hair Care", "brand": "Dove", "packaging_type": "bottle"},
-            {"sku_id": "BP-HUL-DOVE-HFR-340ML", "category": "Hair Care", "brand": "Dove", "packaging_type": "bottle"},
-            {"sku_id": "BP-HUL-DOVE-COND-180ML", "category": "Hair Care", "brand": "Dove", "packaging_type": "tube"},
-            {"sku_id": "BP-HUL-DOVE-HW-500-POUCH", "category": "Personal Care", "brand": "Dove", "packaging_type": "pouch"},
-            {"sku_id": "BP-HUL-SUNSILK-BLK-340ML", "category": "Hair Care", "brand": "Sunsilk", "packaging_type": "bottle"},
-            {"sku_id": "BP-HUL-LIPTON-GREEN-TEA-25TB", "category": "Beverages (Green Tea)", "brand": "Lipton", "packaging_type": "box"},
-            {"sku_id": "BP-HUL-LIPTON-HONEY-LEMON-25TB", "category": "Beverages (Green Tea)", "brand": "Lipton", "packaging_type": "box"},
-            {"sku_id": "POSM-HUL-LIPTON-WINDOW-HEADER", "category": "Branded Window Asset", "brand": "Lipton", "packaging_type": "window_header"},
-            {"sku_id": "BP-HUL-PONDS-PURE-DETOX-100G", "category": "Skin Care", "brand": "Pond's", "packaging_type": "tube"},
-            {"sku_id": "BP-HUL-PONDS-BRIGHT-BEAUTY-100G", "category": "Skin Care", "brand": "Pond's", "packaging_type": "tube"},
-            {"sku_id": "BP-HUL-GAL-INSTA-GLOW-100G", "category": "Skin Care", "brand": "Glow & Lovely", "packaging_type": "tube"},
-            {"sku_id": "BP-HUL-LAKME-BG-STRAWBERRY-100G", "category": "Skin Care", "brand": "Lakme", "packaging_type": "tube"},
-            {"sku_id": "BP-HUL-LAKME-BG-LEMON-100G", "category": "Skin Care", "brand": "Lakme", "packaging_type": "tube"},
-            {"sku_id": "BP-HUL-LAKME-CC-ALMOND-30G", "category": "Skin Care", "brand": "Lakme", "packaging_type": "tube"},
-            {"sku_id": "BP-HUL-PEARS-PURE-GENTLE-100G", "category": "Skin Care", "brand": "Pears", "packaging_type": "tube"},
-            {"sku_id": "BP-HUL-PEARS-OIL-CLEAR-100G", "category": "Skin Care", "brand": "Pears", "packaging_type": "tube"},
-            {"sku_id": "BP-HUL-CLINIC-PLUS-LADI-6MLx12", "category": "Hair Care", "brand": "Clinic Plus", "packaging_type": "sachet"},
-            {"sku_id": "BP-HUL-SURF-EXCEL-QUICKWASH-500G", "category": "Home Care", "brand": "Surf Excel", "packaging_type": "pouch"},
-        ]
+        catalog = candidate_catalog_skus or MASTER_HUL_CATALOG
 
         if not is_hul:
-            clean_cat = "".join(ch for ch in hint_category.upper() if ch.isalnum())[:4]
+            clean_cat = "".join(ch for ch in resolved_cat.upper() if ch.isalnum())[:4]
             clean_br = "".join(ch for ch in canonical_brand.upper() if ch.isalnum())[:6]
             clean_sz = "".join(ch for ch in ocr_snippet.upper() if ch.isalnum())[:5] or "STD"
             return DjevThreeTaskCoarseResponse(
-                category=hint_category,
+                category=resolved_cat,
                 brand=canonical_brand,
                 packaging_type=pkg,
                 is_hul_brand=False,
@@ -490,18 +599,31 @@ class DjevSystemOneClient:
             h2_brand_entropy=0.018,
             h3_packaging_entropy=h3_packaging_entropy,
         )
-        filtered = prefilter_res.candidate_skus
-        if not filtered:
-            filtered = [f"BP-HUL-{canonical_brand.upper()[:6].replace(' ', '')}-{pkg.upper()[:4]}-{ocr_snippet.upper()[:6]}"]
+        filtered = list(prefilter_res.candidate_skus)
+        if hint_variant or explicit_sku_id or not filtered:
+            best_sku, synth_candidates = resolve_or_synthesize_base_pack(
+                brand=canonical_brand,
+                category=resolved_cat,
+                packaging_type=pkg,
+                variant=hint_variant,
+                size_text=ocr_snippet,
+                explicit_sku_id=explicit_sku_id,
+            )
+            for cand in reversed(synth_candidates):
+                if cand not in filtered:
+                    filtered.insert(0, cand)
+            if best_sku in filtered:
+                filtered.remove(best_sku)
+            filtered.insert(0, best_sku)
 
         sys1 = self.resolve_crop_systemone(
             box_xyxy=box_xyxy,
-            scann_top5=filtered,
+            scann_top5=filtered[:8],
             raw_similarity=min(0.99, 0.91 + prefilter_res.soft_packaging_logit_bonus),
             ocr_snippet=ocr_snippet,
         )
         return DjevThreeTaskCoarseResponse(
-            category=hint_category,
+            category=resolved_cat,
             brand=canonical_brand,
             packaging_type=pkg,
             is_hul_brand=True,
