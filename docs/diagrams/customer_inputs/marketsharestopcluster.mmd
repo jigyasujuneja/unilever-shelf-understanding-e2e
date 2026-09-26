@@ -1,0 +1,39 @@
+flowchart TD
+  classDef trigger fill:#e8f0fe,stroke:#1a73e8,color:#174ea6
+  classDef step fill:#f1f3f4,stroke:#5f6368,color:#202124
+  classDef cond fill:#fef7e0,stroke:#f9ab00,color:#b06000
+  classDef aks fill:#fce8e6,stroke:#d93025,color:#a50e0e
+
+  TRIG["Recurrence Trigger:<br/>Run_at_the_end_of_the_business_day<br/>Frequency: Daily (Interval: 1)<br/>Schedule: Hours [18, 19], Minute [0] IST"]:::trigger
+
+  INIT["day_-_hour (InitializeVariable)<br/>day = dayOfWeek(IST) [0=Sun..6=Sat]<br/>hour = int(HH in IST) [18 or 19]"]:::step
+
+  COND_WEEKDAY{"Condition_-_Mon-Fri<br/>day in [1..5] AND hour == 18?"}:::cond
+
+  subgraph WEEKDAY_STOP["True: Mon-Fri at 18:00 IST"]
+    direction TB
+    CLUSTERS_MF["Clusters_to_Stop-copy (ParseJson)<br/>['ulafs-msind-aks-P-57426-001',<br/>'ulafs-msind-aks-P-57426-002']"]:::step
+    subgraph FE_MF["For_each_AKS_cluster-Mon-Fri"]
+      STOP_MF["Stop_AKS_cluster_1 (ApiConnection POST via arm)<br/>.../Microsoft.ContainerService/managedClusters/{cluster}/stop<br/>API Version: 2021-03-01"]:::aks
+    end
+    CLUSTERS_MF --> STOP_MF
+  end
+
+  COND_WEEKEND{"Condition-_Sun_and_Sat<br/>hour == 19 AND (day == 0 OR day == 6)?"}:::cond
+
+  subgraph WEEKEND_STOP["True: Sat/Sun at 19:00 IST"]
+    direction TB
+    CLUSTERS_WE["Clusters_to_Stop_-_Sun_and_Sat (ParseJson)<br/>['masked-cluster-001', 'masked-cluster-002']"]:::step
+    subgraph FE_WE["For_each_AKS_cluster_-_Sun_and_Sat"]
+      STOP_WE["Stop_AKS_cluster_2 (ApiConnection POST via arm)<br/>.../Microsoft.ContainerService/managedClusters/{cluster}/stop<br/>API Version: 2021-03-01"]:::aks
+    end
+    CLUSTERS_WE --> STOP_WE
+  end
+
+  NOOP["Else: No Action<br/>(e.g., Mon-Fri at 19:00 or Sat/Sun at 18:00)"]:::step
+
+  TRIG --> INIT --> COND_WEEKDAY
+  COND_WEEKDAY -- "True (Weekday 18:00)" --> CLUSTERS_MF
+  COND_WEEKDAY -- "False (else)" --> COND_WEEKEND
+  COND_WEEKEND -- "True (Weekend 19:00)" --> CLUSTERS_WE
+  COND_WEEKEND -- "False (else)" --> NOOP

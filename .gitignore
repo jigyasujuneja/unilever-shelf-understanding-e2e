@@ -26,3 +26,6 @@ application_default_credentials.json
 *.log
 
 # results/ IS committed: each run is a small JSON folder so the leaderboard is shared.
+
+# Customer Code Azure Samples
+docs/customer_code/
