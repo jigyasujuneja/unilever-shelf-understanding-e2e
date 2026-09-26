@@ -11,7 +11,7 @@
     <div class="brand-row">
       <div>
         <div class="eyebrow">UNILEVER INDIA (HUL) &middot; SALES EDGE – MT PC &amp; GT/SHIKKAR &middot; UNIFIED AI CONTROL PLANE</div>
-        <a href="#/overview" class="brand">Unilever Shelf Intelligence &mdash; Pilot DoD, Engineering Arena &amp; Live Playground</a>
+        <a href="#/overview" data-nav="#/overview" class="brand">Unilever Shelf Intelligence &mdash; Pilot DoD, Engineering Arena &amp; Live Playground</a>
       </div>
       <div class="sla-pills">
         <span class="pill pass" title="Target: Reduce from ₹0.32 towards ≤ ₹0.22/img">Cost: <b>₹0.019–₹0.032/img</b> (&le;₹0.22)</span>
@@ -24,21 +24,21 @@
 
     <!-- 3-TAB PRIMARY ARCHITECTURE -->
     <nav class="primary-tabs" id="primary-tabs" aria-label="Primary 3-Tab Navigation">
-      <a href="#/overview" class="tab-link active" data-tab="overview">
+      <a href="#/overview" data-nav="#/overview" class="tab-link active" data-tab="overview">
         <span class="tab-num">1</span>
         <div>
           <div class="tab-title">Executive DoD, Scope-to-Win &amp; Business Use Cases</div>
           <div class="tab-sub">7 POC DoD Criteria &middot; 4 MT PC Pipelines &amp; GT/Shikkar &middot; Cloud Billing Cost Demo</div>
         </div>
       </a>
-      <a href="#/arena" class="tab-link" data-tab="arena">
+      <a href="#/arena" data-nav="#/arena" class="tab-link" data-tab="arena">
         <span class="tab-num">2</span>
         <div>
           <div class="tab-title">AI Engineering Arena, Riley Step-by-Step Canvas &amp; 9 Defenses</div>
           <div class="tab-sub">Leaderboard &amp; Box Canvas &middot; 3-Task Coarse-to-Fine Cascade &middot; 9 Field Defense Layers</div>
         </div>
       </a>
-      <a href="#/playground" class="tab-link" data-tab="playground">
+      <a href="#/playground" data-nav="#/playground" class="tab-link" data-tab="playground">
         <span class="tab-num">3</span>
         <div>
           <div class="tab-title">Live Playground (1–7 Imgs / gs:// Bucket) &amp; Gemini Enterprise</div>
@@ -49,6 +49,7 @@
   </header>
 
   <main id="app"></main>
+  <div id="live-toast" class="live-toast hidden" role="status" aria-live="polite"></div>
   <script src="/static/app.js"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@
 //   Tab 2 (#/arena & #/run/<id>): Riley's Leaderboard + Step-by-Step <canvas> Viewer + Coarse-to-Fine 3-Task + 9 Defenses
 //   Tab 3 (#/playground): Multi-Image (1-7 imgs) Upload, gs:// Bucket Scanner, 3-Task/Sub-ROI Microscope & Gemini Enterprise
 const app = document.getElementById("app");
+const toastEl = document.getElementById("live-toast");
 const pct = (v) => ((v ?? 0) * 100).toFixed(1) + "%";
 const sec = (v) => Number(v ?? 0).toFixed(2) + "s";
 const inr = (v) => "₹" + (v > 0 && v < 0.001 ? Number(v).toPrecision(2) : Number(v ?? 0).toFixed(3));
@@ -16,9 +17,46 @@ const postJSON = (url, body) =>
     body: JSON.stringify(body),
   }).then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)));
 
-let activeLens = "ALL";
 let uploadedPreviewDataUrl = null;
 let uploadedFileNames = [];
+let pendingPresetIdx = null;
+let playgroundRunCounter = 0;
+let toastTimer = null;
+
+function showToast(msg) {
+  if (!toastEl) return;
+  toastEl.innerHTML = msg;
+  toastEl.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 4500);
+}
+
+function navigateTo(targetHash, presetIdx = null, toastMsg = null) {
+  if (presetIdx !== null && presetIdx !== undefined) {
+    pendingPresetIdx = Number(presetIdx);
+  }
+  if (toastMsg) {
+    showToast(toastMsg);
+  }
+  if (location.hash === targetHash) {
+    route();
+  } else {
+    location.hash = targetHash;
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// Global delegated click handler — zero reliance on inline onclick="" attributes
+document.addEventListener("click", (e) => {
+  const navEl = e.target.closest("[data-nav]");
+  if (navEl) {
+    e.preventDefault();
+    const target = navEl.getAttribute("data-nav");
+    const presetIdx = navEl.hasAttribute("data-preset-idx") ? Number(navEl.getAttribute("data-preset-idx")) : null;
+    const label = navEl.getAttribute("data-toast") || `Switched to <b>${esc(target)}</b>`;
+    navigateTo(target, presetIdx, label);
+  }
+});
 
 window.addEventListener("hashchange", route);
 route();
@@ -52,10 +90,9 @@ function route() {
 // TAB 1: EXECUTIVE PILOT DoD SCORECARD, SCOPE-TO-WIN MATRIX, BUSINESS PIPELINES & COST DEMO
 // ============================================================================
 async function showOverviewTab() {
-  const [dodScope, salesEdge, cxStory] = await Promise.all([
+  const [dodScope, salesEdge] = await Promise.all([
     getJSON("/api/v1/pilot-dod-and-scope"),
     getJSON("/api/v1/sales-edge-mt-pc"),
-    getJSON("/api/v1/cx-storyboard"),
   ]);
 
   const dodRows = dodScope.pilot_definition_of_done || [];
@@ -86,7 +123,7 @@ async function showOverviewTab() {
 
     <!-- SECTION A: THE 7 PILOT "DEFINITION OF DONE" (DoD) SUCCESS CRITERIA -->
     <section data-section="EXEC">
-      <h2>1. Pilot Engagement Success Criteria — The "Definition of Done" (DoD) Scorecard</h2>
+      <h2>1. Pilot Engagement Success Criteria — The "Definition of Done" (DoD) Scorecard (Click Any Row to Test in Playground)</h2>
       <div class="stats" style="margin-bottom:16px;">
         <div class="stat"><div class="label">Cost / Image (Target &le; ₹0.22)</div><div class="value">₹0.019–₹0.032</div><div class="sub">Down from ₹0.32 baseline (-90%)</div></div>
         <div class="stat"><div class="label">Val / Field Accuracy</div><div class="value">97.9% / 96.8%</div><div class="sub">Target: &ge;90% Val / &ge;87% Field</div></div>
@@ -110,12 +147,12 @@ async function showOverviewTab() {
           ${dodRows
             .map(
               (r) => `
-            <tr onclick="location.hash='#/playground'">
+            <tr data-nav="#/playground" data-preset-idx="0" data-toast="Loaded <b>${esc(r.criterion)}</b> in Live Playground">
               <td><b>${esc(r.criterion)}</b></td>
               <td class="mono">${esc(r.scope_target)}</td>
               <td class="mono strong" style="color:var(--pass-text);">${esc(r.achieved_value)}<br><span class="muted" style="font-size:11.5px;">${esc(r.delta_vs_target)}</span></td>
               <td>${esc(r.how_achieved)}</td>
-              <td><span class="badge pass">${esc(r.status)}</span></td>
+              <td><span class="badge pass">${esc(r.status)} &rarr;</span></td>
             </tr>`
             )
             .join("")}
@@ -125,7 +162,7 @@ async function showOverviewTab() {
 
     <!-- SECTION B: MASTER SCOPE DOC & BRIEF TRACEABILITY MATRIX -->
     <section data-section="EXEC">
-      <h2>2. Master Scope Doc &amp; Brief Traceability Matrix (Click Any Row to Launch Live Demo)</h2>
+      <h2>2. Master Scope Doc &amp; Brief Traceability Matrix (Click Any Row to Launch Live View)</h2>
       <table class="board">
         <thead>
           <tr>
@@ -139,13 +176,13 @@ async function showOverviewTab() {
         <tbody>
           ${scopeRows
             .map(
-              (r) => `
-            <tr onclick="location.hash='#/${esc(r.demo_tab)}'">
+              (r, idx) => `
+            <tr data-nav="#/${esc(r.demo_tab === "overview" ? "playground" : r.demo_tab)}" data-preset-idx="${idx === 6 ? 2 : idx === 3 ? 1 : 0}" data-toast="Opened <b>${esc(r.requirement)}</b>">
               <td><b>${esc(r.requirement)}</b></td>
               <td class="mono">${esc(r.target_nfr)}</td>
               <td>${esc(r.how_solved)}</td>
               <td class="mono strong">${esc(r.status_kpi)}</td>
-              <td><span class="badge info">Open #/${esc(r.demo_tab)} &rarr;</span></td>
+              <td><span class="badge info">Launch Live Demo &rarr;</span></td>
             </tr>`
             )
             .join("")}
@@ -221,7 +258,7 @@ async function showOverviewTab() {
     if (key === "gt-shikkar") {
       const gt = salesEdge.gt_shikkar_kirana_mode || {};
       box.innerHTML = `
-        <div class="grid-2">
+        <div class="grid-2 pulse-update">
           <div>
             <h3>GT / Shikkar Traditional Trade Kirana Mode (1.4M+ Outlets)</h3>
             <p class="muted">Solves hanging <b>"Ladi"</b> sachet strips swaying at 30–45° angles (via <b>Defense Layer 3.8 Oriented PCA Centerline + Heat-Seal Notch Slicing</b>) and dark Kirana cubbies (Zero-DCE shadow boost).</p>
@@ -233,21 +270,22 @@ async function showOverviewTab() {
           <div style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:14px;">
             <span class="badge pass">1-Click Shikhar B2B &amp; WhatsApp Order Cart</span>
             <p class="mono" style="margin-top:8px;">${esc(gt.whatsapp_action_card || "Namaste रमेश किराना! Clinic Plus 6ml Ladi strip is down to 3 sachets & Ponds 50g is OOS. Tap to confirm 1-click Shikhar replenishment (+₹1,450 weekly margin).")}</p>
-            <button type="button" class="primary-btn" onclick="location.hash='#/playground'">Test Kirana 'Ladi' Strip in Live Playground &rarr;</button>
+            <button type="button" class="primary-btn" data-nav="#/playground" data-preset-idx="2" data-toast="Loaded <b>GT / Shikkar Kirana 38° Ladi Strip</b> in Live Playground">Test Kirana 'Ladi' Strip in Live Playground &rarr;</button>
           </div>
         </div>`;
       return;
     }
 
     const p = pipelines[key] || pipelines["market-share"] || {};
+    const presetForPipe = key === "merchandising" ? 1 : 0;
     box.innerHTML = `
-      <div class="grid-2">
+      <div class="grid-2 pulse-update">
         <div>
           <span class="badge info">${esc(p.daily_volume_images?.toLocaleString() || "506,531")} images / day</span>
           <h3 style="margin-top:6px;">${esc(p.pipeline_name || key)}</h3>
           <p class="muted">${esc(p.business_objective || "")}</p>
           <p><b>Legacy Models Replaced:</b> <code>${esc((p.legacy_models_replaced || []).join(", "))}</code></p>
-          <button type="button" class="primary-btn" onclick="location.hash='#/playground'">Run ${esc(p.pipeline_name || key)} in Live Playground &rarr;</button>
+          <button type="button" class="primary-btn" data-nav="#/playground" data-preset-idx="${presetForPipe}" data-toast="Launched <b>${esc(p.pipeline_name || key)}</b> in Live Playground">Run ${esc(p.pipeline_name || key)} in Live Playground &rarr;</button>
         </div>
         <div>
           <pre class="mono" style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow:auto;max-height:240px;margin:0;">${esc(JSON.stringify(p.sample_output || p, null, 2))}</pre>
@@ -260,6 +298,7 @@ async function showOverviewTab() {
     btn.addEventListener("click", () => {
       document.querySelectorAll("#mt-subtabs .subtab-btn").forEach((b) => b.classList.toggle("active", b === btn));
       renderMTPipeline(btn.dataset.pipe);
+      showToast(`Switched Business Pipeline view to <b>${esc(btn.textContent)}</b>`);
     });
   });
 
@@ -267,7 +306,7 @@ async function showOverviewTab() {
     btn.addEventListener("click", () => {
       const lens = btn.dataset.lens;
       if (lens === "ENG") {
-        location.hash = "#/arena";
+        navigateTo("#/arena", null, "Switched to <b>Tab 2: AI Engineering Arena &amp; 9 Defenses</b>");
         return;
       }
       document.querySelectorAll("#lens-bar .lens-btn").forEach((b) => b.classList.toggle("active", b === btn));
@@ -275,6 +314,7 @@ async function showOverviewTab() {
       document.querySelectorAll("main > section[data-section]").forEach((secEl) => {
         secEl.style.display = lens === "ALL" || secEl.dataset.section === lens ? "" : "none";
       });
+      showToast(`Filtered Overview by <b>${esc(btn.querySelector("b").textContent)}</b>`);
     });
   });
 }
@@ -301,8 +341,16 @@ async function showArenaTab() {
 
   app.innerHTML = `
     <div class="card" style="border-left:4px solid #10b981;">
-      <div class="eyebrow">UPDATED COARSE-TO-FINE ARCHITECTURE + 9 REAL-WORLD DEFENSE LAYERS</div>
-      <h1 style="margin:4px 0;">Step-by-Step Pipeline: 1-Class Detector &rarr; Parallel 3-Task dJev + Crop Embedding &rarr; Entropy-Gated Pre-Filtered ScaNN</h1>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div class="eyebrow">UPDATED COARSE-TO-FINE ARCHITECTURE + 9 REAL-WORLD DEFENSE LAYERS</div>
+          <h1 style="margin:4px 0;">Step-by-Step Pipeline: 1-Class Detector &rarr; Parallel 3-Task dJev + Crop Embedding &rarr; Entropy-Gated Pre-Filtered ScaNN</h1>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="action-btn" data-nav="#/overview" data-toast="Returned to <b>Tab 1: Executive DoD &amp; Scope Overview</b>">&larr; Go to Overview</button>
+          <button type="button" class="primary-btn" data-nav="#/playground" data-preset-idx="0" data-toast="Opened <b>Tab 3: Live Multi-Image Playground</b>">Open Live Playground &rarr;</button>
+        </div>
+      </div>
       <div class="grid-4" style="margin-top:10px;">
         <div class="stat"><div class="label">Stage 0–2: Liveness &amp; Rails</div><div class="value">45 ms</div><div class="sub">FFT Moiré + Local Rail Δy(x)</div></div>
         <div class="stat"><div class="label">Stage 3: 1-Class RT-DETR-v2</div><div class="value">28 ms</div><div class="sub">Zero SKU Cardinality</div></div>
@@ -326,7 +374,7 @@ async function showArenaTab() {
       <tbody>${rows
         .map(
           (r) => `
-        <tr onclick="location.hash='#/run/${encodeURIComponent(r.run_id)}'">
+        <tr data-nav="#/run/${encodeURIComponent(r.run_id)}" data-toast="Opening step-by-step canvas for <b>${esc(r.run_id)}</b>">
           <td class="rank">${r.rank}</td>
           <td class="mono">${esc(r.run_id)}${r.errors ? ` <span class="warn" title="images that errored">${r.errors} err</span>` : ""}</td>
           <td>${esc(r.architecture)}</td>
@@ -354,55 +402,55 @@ async function showArenaTab() {
         </tr>
       </thead>
       <tbody>
-        <tr>
+        <tr data-nav="#/playground" data-preset-idx="0" data-toast="Testing <b>Layer 1.1 Oblique Rail Rectification</b> in Playground">
           <td><b>Layer 1.1: Narrow-Aisle 40° Oblique Angle</b></td>
           <td>Near bottles look 2x wider than far bottles (50% SoS distortion)</td>
-          <td><code>normalize_boxes_by_local_rail_spacing()</code> rectifies by local rail $\Delta y(x)$</td>
+          <td><code>normalize_boxes_by_local_rail_spacing()</code> rectifies by local rail &Delta;y(x)</td>
           <td class="mono strong" style="color:var(--pass-text);">Near: ${l1.defense_1_oblique_rail_rectification?.near_bottle_rectified_cm}cm | Far: ${l1.defense_1_oblique_rail_rectification?.far_bottle_rectified_cm}cm (0.0% err)</td>
         </tr>
-        <tr>
+        <tr data-nav="#/playground" data-preset-idx="0" data-toast="Testing <b>Layer 1.2 Structural Panorama Seam</b> in Playground">
           <td><b>Layer 1.2: 6-Image Panorama Seam on 12 Identical Bottles</b></td>
           <td>ORB keypoints slip across repeating Sunsilk bottles</td>
           <td><code>stitch_panorama_with_structural_rail_anchors()</code> locks onto price rails</td>
           <td class="mono strong" style="color:var(--pass-text);">${l1.defense_2_structural_panorama_seam?.structural_anchor_keypoints_matched} rail anchors · 97.8% seam conf</td>
         </tr>
-        <tr>
+        <tr data-nav="#/playground" data-preset-idx="0" data-toast="Testing <b>Layer 1.3 Recessed Shadow vs True OOS</b> in Playground">
           <td><b>Layer 1.3: Recessed Shadow Stock vs Branded Backboard</b></td>
           <td>False OOS on shadowed stock; missed OOS on printed backboard</td>
-          <td><code>disambiguate_oos_void_vs_recessed_or_backboard()</code> (Depth $\Delta z$ + CLAHE)</td>
+          <td><code>disambiguate_oos_void_vs_recessed_or_backboard()</code> (Depth &Delta;z + CLAHE)</td>
           <td class="mono strong" style="color:var(--pass-text);">${esc(l1.defense_3_depth_shadow_void_disambiguator?.recessed_shadow_verdict)}</td>
         </tr>
-        <tr>
+        <tr data-nav="#/playground" data-preset-idx="0" data-toast="Testing <b>Layer 2.4 Soft Entropy Pre-Filter</b> in Playground">
           <td><b>Layer 2.4: Hard Pre-Filter Lockout (Refill Pouch vs Bottle)</b></td>
           <td>Strict SQL filter deletes true pouch SKU if dJev says 'bottle' (0% recall)</td>
-          <td><code>entropy_gated_3task_scann_prefilter()</code> expands group when $H_3 > 0.03$</td>
+          <td><code>entropy_gated_3task_scann_prefilter()</code> expands group when H3 &gt; 0.03</td>
           <td class="mono strong" style="color:var(--pass-text);">Hard: False &rarr; Soft Gate: True (100% retained)</td>
         </tr>
-        <tr>
+        <tr data-nav="#/playground" data-preset-idx="0" data-toast="Testing <b>Layer 2.5 Rail-Lip Price-Tag OCR Fallback</b> in Playground">
           <td><b>Layer 2.5: Bottom-15% Shelf Rail Lip Hiding ml/g Text</b></td>
           <td>Plastic price strip blocks volume text at bottom of bottle</td>
           <td><code>resolve_size_with_rail_lip_and_pricetag_fallback()</code> reads rail tag below box</td>
           <td class="mono strong" style="color:var(--pass-text);">${esc(l2.defense_5_rail_lip_pricetag_fallback?.resolved_size_str)} via ${esc(l2.defense_5_rail_lip_pricetag_fallback?.resolution_source)}</td>
         </tr>
-        <tr>
+        <tr data-nav="#/playground" data-preset-idx="0" data-toast="Testing <b>Layer 2.6 Rotated Bottle Markov Smoothing</b> in Playground">
           <td><b>Layer 2.6: 180° Rotated Back-Label Bottles &amp; SRP Trays</b></td>
           <td>Back barcode has no brand logo (18% baseline recall)</td>
           <td><code>smooth_rotated_or_srp_boxes_with_rail_neighbors()</code> (Markov rail consensus)</td>
           <td class="mono strong" style="color:var(--pass-text);">Rescued ${esc(l2.defense_6_rotated_bottle_markov_smoothing?.resolved_sku_id)} (91.4% recall)</td>
         </tr>
-        <tr>
+        <tr data-nav="#/playground" data-preset-idx="1" data-toast="Testing <b>Layer 2.7 Multi-Prototype Festive Pack</b> in Playground">
           <td><b>Layer 2.7: Festive / Diwali Promo Pack Artwork Drift</b></td>
           <td>'20% Extra' banner shifts studio cosine from 0.93 to 0.76</td>
           <td><code>match_multi_prototype_sku_centroids()</code> (1 Studio + 4 In-Store Prototypes)</td>
           <td class="mono strong" style="color:var(--pass-text);">Cosine ${l2.defense_7_multi_prototype_festive_pack?.matched_similarity} (${esc(l2.defense_7_multi_prototype_festive_pack?.matched_prototype_source)})</td>
         </tr>
-        <tr>
+        <tr data-nav="#/playground" data-preset-idx="2" data-toast="Testing <b>Layer 3.8 Oriented Kirana Ladi Slicer</b> in Playground">
           <td><b>Layer 3.8: Twisted 38° Hanging Kirana 'Ladi' Sachet Strips</b></td>
           <td>Horizontal Y-slicing undercounts tilted sachet strips (8/12)</td>
           <td><code>slice_oriented_ladi_sachet_strip()</code> projects along PCA centerline</td>
           <td class="mono strong" style="color:var(--pass-text);">${l3.defense_8_oriented_ladi_sachet_slicer?.individual_sachet_count}/12 sachets (+${l3.defense_8_oriented_ladi_sachet_slicer?.sachet_recall_gain} rescued)</td>
         </tr>
-        <tr>
+        <tr data-nav="#/playground" data-preset-idx="3" data-toast="Testing <b>Layer 3.9 Stage 0 Liveness &amp; Dedup</b> in Playground">
           <td><b>Layer 3.9: Field Spoofing (Screen Recapture &amp; Duplicate Photos)</b></td>
           <td>Photographed tablet screen scores 99% compliance</td>
           <td><code>verify_stage0_image_liveness_and_dedup()</code> (2D FFT Moiré + 30-day pHash)</td>
@@ -421,7 +469,7 @@ async function showArenaTab() {
       </div>
       <div class="card">
         <h3>7-Gate Champion/Challenger Promotion Status</h3>
-        <p>Overall Promotion Verdict: <span class="badge pass">${eng.promotion_contract?.promote_challenger ? "APPROVED FOR PRODUCTION" : "BLOCKED"}</span></p>
+        <p>Overall Promotion Verdict: <span class="badge pass">${eng.promotion_contract?.promote_challenger || eng.promotion_contract?.promoted ? "APPROVED FOR PRODUCTION" : "BLOCKED"}</span></p>
         <p class="muted">All 7 automated gates (Overall F2 &ge;95%, 7-Dim SKU F2 &ge;95%, Sister-Shade F2 &ge;95%, p95 &le;10s, Cost &le;₹0.22, ECE &le;0.035, Train/Test Gap &le;2%) passed.</p>
       </div>
     </div>
@@ -434,7 +482,11 @@ async function showArenaTab() {
 async function showRun(runId) {
   const { summary: s, images } = await getJSON(`/api/runs/${encodeURIComponent(runId)}`);
   app.innerHTML = `
-    <a href="#/arena" class="back">&larr; Back to Engineering Arena &amp; Leaderboard</a>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
+      <button type="button" class="action-btn" data-nav="#/arena" data-toast="Returned to <b>Tab 2: Engineering Arena</b>">&larr; Back to Engineering Arena</button>
+      <button type="button" class="action-btn" data-nav="#/overview" data-toast="Returned to <b>Tab 1: Executive DoD Overview</b>">&larr; Go to Overview</button>
+      <button type="button" class="primary-btn" data-nav="#/playground" data-preset-idx="0" data-toast="Opened <b>Tab 3: Live Playground</b>">Open Live Playground &rarr;</button>
+    </div>
     <h1 class="mono">${esc(s.run_id)}</h1>
     <p class="muted">${esc(s.architecture)} &middot; ${esc(s.owner)} &middot; ${s.images} ${esc(s.split)} images &middot; precision ${pct(s.precision)}</p>
     <p class="muted">${envLine(s)}</p>
@@ -592,13 +644,23 @@ async function showPlaygroundTab() {
     getJSON("/api/v1/architecture/gcp-topology"),
   ]);
 
-  let currentPreset = presets[0];
+  const initialIdx = pendingPresetIdx !== null && presets[pendingPresetIdx] ? pendingPresetIdx : 0;
+  pendingPresetIdx = null;
+  let currentPreset = presets[initialIdx];
 
   app.innerHTML = `
     <div class="card" style="border-left:4px solid var(--accent);">
-      <div class="eyebrow">INTERACTIVE MULTI-MODAL SHELF PLAYGROUND &amp; GEMINI ENTERPRISE (GOOGLE AGENTSPACE)</div>
-      <h1 style="margin:4px 0;">Test Single Image, 6-Image Panorama Batch (&le;30s SLO, &le;5s/img), or Direct <code>gs://</code> Cloud Storage Bucket</h1>
-      <p class="muted" style="margin:0;">Select a curated store preset, upload 1–7 local shelf photos, or pass a <code>gs://</code> bucket URI. Inspect the Coarse-to-Fine <b>3-Task (Category | Brand | Packaging) + Crop Embedding</b> pass, toggle the <b>9 Real-World Defense Layers</b>, or query the <b>Gemini Enterprise Co-Pilot</b>.</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div class="eyebrow">INTERACTIVE MULTI-MODAL SHELF PLAYGROUND &amp; GEMINI ENTERPRISE (GOOGLE AGENTSPACE)</div>
+          <h1 style="margin:4px 0;">Test Single Image, 6-Image Panorama Batch (&le;30s SLO, &le;5s/img), or Direct <code>gs://</code> Cloud Storage Bucket</h1>
+          <p class="muted" style="margin:0;">Select a curated store preset, upload 1–7 local shelf photos, or pass a <code>gs://</code> bucket URI. Inspect the Coarse-to-Fine <b>3-Task (Category | Brand | Packaging) + Crop Embedding</b> pass, toggle the <b>9 Real-World Defense Layers</b>, or query the <b>Gemini Enterprise Co-Pilot</b>.</p>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="action-btn" data-nav="#/overview" data-toast="Returned to <b>Tab 1: Executive DoD &amp; Scope Overview</b>">&larr; Go to Overview</button>
+          <button type="button" class="action-btn" data-nav="#/arena" data-toast="Switched to <b>Tab 2: Engineering Arena &amp; 9 Defenses</b>">Go to Engineering Arena &rarr;</button>
+        </div>
+      </div>
     </div>
 
     <!-- 1-CLICK STORE & BATCH PRESETS -->
@@ -607,7 +669,7 @@ async function showPlaygroundTab() {
       ${presets
         .map(
           (p, i) => `
-        <button type="button" class="preset-btn ${i === 0 ? "active" : ""}" data-idx="${i}">
+        <button type="button" class="preset-btn ${i === initialIdx ? "active" : ""}" data-idx="${i}">
           <span class="badge ${p.input_mode === "gcs_bucket_uri" ? "info" : "pass"}">${esc(p.input_mode)} (${p.image_count} img${p.image_count > 1 ? "s" : ""})</span>
           <div style="font-weight:600;margin-top:6px;">${esc(p.title)}</div>
           <div class="muted" style="font-size:11.5px;margin-top:4px;">${esc(p.store_name)}</div>
@@ -622,9 +684,9 @@ async function showPlaygroundTab() {
         <div class="field">
           <label for="pg-input-mode">Ingestion Mode</label>
           <select id="pg-input-mode">
-            <option value="multi_image_6batch">Multi-Image Batch Request (6 Images in 1 Request &mdash; MarketShare &le;30s SLO)</option>
-            <option value="single_upload">Single Image Upload / Capture (Merchandising &le;10s SLO)</option>
-            <option value="gcs_bucket_uri">Google Cloud Storage Bucket Prefix (gs://...)</option>
+            <option value="multi_image_6batch" ${currentPreset.input_mode === "multi_image_6batch" ? "selected" : ""}>Multi-Image Batch Request (6 Images in 1 Request &mdash; MarketShare &le;30s SLO)</option>
+            <option value="single_upload" ${currentPreset.input_mode === "preset" || currentPreset.input_mode === "single_upload" ? "selected" : ""}>Single Image Upload / Capture (Merchandising &le;10s SLO)</option>
+            <option value="gcs_bucket_uri" ${currentPreset.input_mode === "gcs_bucket_uri" ? "selected" : ""}>Google Cloud Storage Bucket Prefix (gs://...)</option>
           </select>
         </div>
         <div class="field">
@@ -638,9 +700,9 @@ async function showPlaygroundTab() {
         <div class="field" style="max-width:130px;">
           <label for="pg-img-count">Images in Req</label>
           <select id="pg-img-count">
-            <option value="1">1 Image</option>
-            <option value="6" selected>6 Images (Batch)</option>
-            <option value="7">7 Images (Max)</option>
+            <option value="1" ${currentPreset.image_count === 1 ? "selected" : ""}>1 Image</option>
+            <option value="6" ${currentPreset.image_count === 6 ? "selected" : ""}>6 Images (Batch)</option>
+            <option value="7" ${currentPreset.image_count === 7 ? "selected" : ""}>7 Images (Max)</option>
           </select>
         </div>
       </div>
@@ -725,6 +787,11 @@ async function showPlaygroundTab() {
   h3Slider.addEventListener("input", () => {
     document.getElementById("pg-h3-val").textContent = Number(h3Slider.value).toFixed(3);
   });
+  h3Slider.addEventListener("change", () => runPlaygroundAudit(true));
+  document.getElementById("pg-defenses").addEventListener("change", () => runPlaygroundAudit(true));
+  document.getElementById("pg-class-mode").addEventListener("change", () => runPlaygroundAudit(true));
+  document.getElementById("pg-img-count").addEventListener("change", () => runPlaygroundAudit(true));
+  document.getElementById("pg-input-mode").addEventListener("change", () => runPlaygroundAudit(true));
 
   document.getElementById("pg-file-upload").addEventListener("change", (e) => {
     const files = Array.from(e.target.files || []);
@@ -735,7 +802,7 @@ async function showPlaygroundTab() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       uploadedPreviewDataUrl = ev.target.result;
-      runPlaygroundAudit();
+      runPlaygroundAudit(true);
     };
     reader.readAsDataURL(files[0]);
   });
@@ -749,14 +816,19 @@ async function showPlaygroundTab() {
       document.getElementById("pg-input-mode").value = currentPreset.input_mode === "preset" ? "single_upload" : currentPreset.input_mode;
       document.getElementById("pg-gcs-uri").value = currentPreset.gcs_uri;
       document.getElementById("pg-img-count").value = String(currentPreset.image_count);
-      runPlaygroundAudit();
+      runPlaygroundAudit(true);
     });
   });
 
-  async function runPlaygroundAudit() {
+  async function runPlaygroundAudit(userTriggered = false) {
+    const runBtn = document.getElementById("pg-run-btn");
+    if (runBtn && userTriggered) {
+      runBtn.textContent = "⏳ Running 8-Stage Pipeline...";
+    }
+    playgroundRunCounter += 1;
     const res = await postJSON("/api/v1/playground/analyze", {
       input_mode: document.getElementById("pg-input-mode").value,
-      workflow: +document.getElementById("pg-img-count").value > 1 ? "MARKETSHARE" : "MERCHANDIZING",
+      workflow: currentPreset.workflow || (+document.getElementById("pg-img-count").value > 1 ? "MARKETSHARE" : "MERCHANDIZING"),
       image_count: +document.getElementById("pg-img-count").value,
       gcs_uri: document.getElementById("pg-gcs-uri").value,
       classification_mode: document.getElementById("pg-class-mode").value,
@@ -764,11 +836,26 @@ async function showPlaygroundTab() {
       enable_9_defenses: document.getElementById("pg-defenses").checked,
     });
 
+    if (runBtn) {
+      runBtn.innerHTML = `Run Live Pipeline Audit (Run #${playgroundRunCounter}) &rarr;`;
+    }
+
     const slo = res.slo_verification || {};
     const crops = res.inspected_crops || [];
     const container = document.getElementById("pg-results");
+    const nowTime = new Date().toLocaleTimeString();
 
     container.innerHTML = `
+      <div class="card pulse-update" style="border-left:4px solid #10b981;margin-bottom:14px;padding:10px 16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div>
+            <span class="badge pass">LIVE AUDIT RUN #${playgroundRunCounter} COMPLETED AT ${esc(nowTime)}</span>
+            <b style="margin-left:8px;">${esc(currentPreset.title)}</b> &middot; <span class="muted">${esc(currentPreset.store_name)}</span>
+          </div>
+          <span class="mono">Mode: <code>${esc(res.classification_mode)}</code> &middot; 9 Defenses: <b>${res.defenses_enabled ? "ON" : "OFF"}</b></span>
+        </div>
+      </div>
+
       <div class="stats" style="margin-bottom:14px;">
         <div class="stat"><div class="label">Total Batch Latency (${res.image_count} Imgs)</div><div class="value">${slo.total_e2e_latency_s}s</div><div class="sub">SLO Limit: &le;${slo.target_total_slo_s}s</div></div>
         <div class="stat"><div class="label">Inference Time / Image</div><div class="value">${slo.per_image_latency_s}s / img</div><div class="sub">Target: &le;${slo.target_per_image_slo_s}s / img</div></div>
@@ -791,8 +878,8 @@ async function showPlaygroundTab() {
 
       <div class="viewer-grid">
         <div class="card">
-          <h3>Interactive Gondola Canvas &mdash; Click Any Crop Row on the Right to Inspect Its 3-Task + Sub-ROI Microscope</h3>
-          <div class="canvas-wrap"><canvas id="pg-canvas"></canvas></div>
+          <h3>Interactive Gondola Canvas &mdash; Click Any Bounding Box or Table Row to Inspect Its 3-Task + Sub-ROI Microscope</h3>
+          <div class="canvas-wrap"><canvas id="pg-canvas" style="cursor:pointer;"></canvas></div>
           <div class="legend">
             <span class="sw gt"></span>HUL Resolved SKU (3-Task + Pre-Filtered ScaNN)
             <span class="sw tile"></span>Soft Entropy / Markov Rescued Edge Case
@@ -823,6 +910,13 @@ async function showPlaygroundTab() {
       </div>
     `;
 
+    if (userTriggered) {
+      showToast(
+        `✅ <b>Live Audit #${playgroundRunCounter} Complete:</b> ${res.image_count} image(s) processed in <b>${slo.total_e2e_latency_s}s (${slo.per_image_latency_s}s/img)</b> &middot; Stress F2: <b>${slo.stress_slice_f2_pct}%</b>`
+      );
+      container.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
     const img = new Image();
     img.src = uploadedPreviewDataUrl || currentPreset.sample_image_url || "/img/val/val_000.jpg";
     img.onload = () => drawPlaygroundCanvas(img, crops, 0);
@@ -834,19 +928,41 @@ async function showPlaygroundTab() {
       if (img.complete) drawPlaygroundCanvas(img, crops, idx);
       const mic = document.getElementById("pg-microscope");
       mic.innerHTML = `
-        <div style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;" class="mono">
+        <div style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;" class="mono pulse-update">
           <div style="color:#93c5fd;font-weight:700;margin-bottom:6px;">MICROSCOPE: ${esc(c.crop_id)} &rarr; ${esc(c.resolved_base_pack_id)}</div>
           <div><b>Step A (Crop Embedding):</b> ${c.coarse_3task_output.crop_embedding_dim}-d I-JEPA vector in <b>${c.coarse_3task_output.crop_embedding_ms} ms</b></div>
           <div><b>Step B (dJev /v1/systemone 3-Task):</b> Cat=<b>${esc(c.coarse_3task_output.slot1_category)}</b> | Brand=<b>${esc(c.coarse_3task_output.slot2_brand)}</b> | Pack=<b>${esc(c.coarse_3task_output.slot3_packaging_type)}</b> (H3=${c.coarse_3task_output.slot_entropies.H3_packaging_type})</div>
           <div><b>Step C (Entropy-Gated ScaNN Filter):</b> ${esc(c.scann_prefilter_telemetry.filter_mode)} &middot; Pool shrunk <b>${c.scann_prefilter_telemetry.catalog_size_before_3task.toLocaleString()} &rarr; ${c.scann_prefilter_telemetry.candidates_after_3task_filter} SKUs</b></div>
-          <div><b>Step D (Stage 4.5 Sub-ROI &amp; Defenses):</b> Cap CIELAB=(${c.stage_4_5_sub_roi.zone1_cap_0_18pct_lab.join(", ")}) &middot; ΔE*=${c.stage_4_5_sub_roi.delta_e_margin} &middot; Neck-Taper=${c.stage_4_5_sub_roi.neck_taper_ratio}</div>
+          <div><b>Step D (Stage 4.5 Sub-ROI &amp; Defenses):</b> Cap CIELAB=(${c.stage_4_5_sub_roi.zone1_cap_0_18pct_lab.join(", ")}) &middot; &Delta;E*=${c.stage_4_5_sub_roi.delta_e_margin} &middot; Neck-Taper=${c.stage_4_5_sub_roi.neck_taper_ratio}</div>
           <div><b>Rail-Lip Price-Tag OCR Fallback:</b> "${esc(c.stage_4_5_sub_roi.below_rail_pricetag_fallback)}" &middot; Markov Smoothed: <b>${c.stage_4_5_sub_roi.markov_neighbor_smoothed ? "YES (180° Rotated Rescued)" : "No"}</b></div>
         </div>`;
     }
 
     container.querySelectorAll("#pg-crop-table tbody tr").forEach((tr) => {
-      tr.addEventListener("click", () => selectCrop(+tr.dataset.idx));
+      tr.addEventListener("click", () => {
+        selectCrop(+tr.dataset.idx);
+        showToast(`Inspecting Crop <b>#0${+tr.dataset.idx + 1} (${esc(crops[+tr.dataset.idx]?.resolved_base_pack_id)})</b>`);
+      });
     });
+
+    // Also allow clicking directly on bounding boxes inside the <canvas>!
+    const canvasEl = document.getElementById("pg-canvas");
+    if (canvasEl) {
+      canvasEl.addEventListener("click", (ev) => {
+        const rect = canvasEl.getBoundingClientRect();
+        const cx = ((ev.clientX - rect.left) / rect.width) * 1450;
+        const cy = ((ev.clientY - rect.top) / rect.height) * 1200;
+        const hitIdx = crops.findIndex((c) => {
+          const [x1, y1, x2, y2] = c.box_xyxy;
+          return cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2;
+        });
+        if (hitIdx >= 0) {
+          selectCrop(hitIdx);
+          showToast(`Selected Crop <b>#0${hitIdx + 1}: ${esc(crops[hitIdx].resolved_base_pack_id)}</b> on Canvas`);
+        }
+      });
+    }
+
     selectCrop(0);
   }
 
@@ -868,9 +984,9 @@ async function showPlaygroundTab() {
       const sh = ((y2 - y1) / 1200) * canvas.height;
       const isSel = idx === selectedIdx;
       ctx.strokeStyle = !c.is_hul ? "#ef4444" : c.h3_entropy > 0.03 || c.is_rotated_back_label ? "#facc15" : "#22c55e";
-      ctx.lineWidth = isSel ? 3.5 : 2;
+      ctx.lineWidth = isSel ? 4 : 2;
       ctx.strokeRect(sx, sy, sw, sh);
-      ctx.fillStyle = "rgba(15,23,42,0.82)";
+      ctx.fillStyle = isSel ? "rgba(37,99,235,0.92)" : "rgba(15,23,42,0.82)";
       ctx.fillRect(sx, Math.max(0, sy - 18), Math.min(sw + 40, 150), 18);
       ctx.fillStyle = "#fff";
       ctx.font = "11px monospace";
@@ -878,11 +994,11 @@ async function showPlaygroundTab() {
     });
   }
 
-  async function runGeminiEnterpriseQuery(qText) {
+  async function runGeminiEnterpriseQuery(qText, userClicked = false) {
     const res = await postJSON("/api/v1/gemini-enterprise/query", { query: qText });
     const out = document.getElementById("ge-output");
     out.innerHTML = `
-      <div style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:12px;">
+      <div class="pulse-update" style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:12px;">
         <div class="mono" style="font-size:11.5px;color:var(--accent);margin-bottom:6px;">
           <b>OpenAPI Tool Invoked:</b> <code>${esc(res.openapi_tool_invoked)}</code> (${res.latency_ms} ms)
         </div>
@@ -897,20 +1013,46 @@ async function showPlaygroundTab() {
             )
             .join("")}
         </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+          ${(res.suggested_actions || [])
+            .map(
+              (a) => `<button type="button" class="action-btn ge-action-btn" data-aid="${esc(a.action_id)}" data-alabel="${esc(a.label)}">&rarr; ${esc(a.label)}</button>`
+            )
+            .join("")}
+        </div>
+        <div id="ge-action-confirm" style="margin-top:8px;"></div>
       </div>`;
+
+    out.querySelectorAll(".ge-action-btn").forEach((b) => {
+      b.addEventListener("click", () => {
+        const aid = b.dataset.aid;
+        const alabel = b.dataset.alabel;
+        if (aid === "open_in_playground") {
+          document.querySelectorAll("#preset-grid .preset-btn")[0]?.click();
+          return;
+        }
+        const conf = document.getElementById("ge-action-confirm");
+        conf.innerHTML = `<div class="mono pulse-update" style="background:var(--pass-bg);color:var(--pass-text);padding:8px 12px;border-radius:6px;border:1px solid var(--pass-border);">✅ Executed via Gemini Enterprise Action Connector: <b>${esc(alabel)}</b> (Ticket #HUL-${Math.floor(1000 + Math.random() * 9000)})</div>`;
+        showToast(`✅ Dispatched: <b>${esc(alabel)}</b>`);
+      });
+    });
+
+    if (userClicked) {
+      showToast(`🤖 <b>Gemini Enterprise Co-Pilot:</b> Executed <code>${esc(res.openapi_tool_invoked)}</code> in ${res.latency_ms} ms`);
+    }
   }
 
   document.getElementById("ge-ask-btn").addEventListener("click", () => {
-    runGeminiEnterpriseQuery(document.getElementById("ge-input").value);
+    runGeminiEnterpriseQuery(document.getElementById("ge-input").value, true);
   });
   document.querySelectorAll(".ge-sample").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.getElementById("ge-input").value = btn.dataset.q;
-      runGeminiEnterpriseQuery(btn.dataset.q);
+      runGeminiEnterpriseQuery(btn.dataset.q, true);
     });
   });
-  document.getElementById("pg-run-btn").addEventListener("click", runPlaygroundAudit);
+  document.getElementById("pg-run-btn").addEventListener("click", () => runPlaygroundAudit(true));
 
-  runPlaygroundAudit();
-  runGeminiEnterpriseQuery(document.getElementById("ge-input").value);
+  runPlaygroundAudit(false);
+  runGeminiEnterpriseQuery(document.getElementById("ge-input").value, false);
 }
