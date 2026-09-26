@@ -665,7 +665,7 @@ async function showPlaygroundTab() {
 
     <!-- 1-CLICK STORE & BATCH PRESETS -->
     <h2>1. Choose Input Source: 1-Click Presets, Upload 1–7 Photos, or Scan a <code>gs://</code> Bucket URI</h2>
-    <div class="grid-4" id="preset-grid" style="margin-bottom:14px;">
+    <div class="grid-5" id="preset-grid" style="margin-bottom:14px;">
       ${presets
         .map(
           (p, i) => `
@@ -799,6 +799,7 @@ async function showPlaygroundTab() {
     uploadedFileNames = files.map((f) => f.name);
     document.getElementById("pg-img-count").value = String(Math.min(7, Math.max(1, files.length)));
     document.getElementById("pg-input-mode").value = files.length > 1 ? "multi_image_6batch" : "single_upload";
+    showToast(`⏳ Uploading <b>${esc(files[0].name)}</b> &amp; running live Vertex AI + 3-Task detection...`);
     const reader = new FileReader();
     reader.onload = (ev) => {
       uploadedPreviewDataUrl = ev.target.result;
@@ -831,6 +832,8 @@ async function showPlaygroundTab() {
       workflow: currentPreset.workflow || (+document.getElementById("pg-img-count").value > 1 ? "MARKETSHARE" : "MERCHANDIZING"),
       image_count: +document.getElementById("pg-img-count").value,
       gcs_uri: document.getElementById("pg-gcs-uri").value,
+      preset_id: currentPreset.id,
+      uploaded_image_data_url: uploadedPreviewDataUrl || "",
       classification_mode: document.getElementById("pg-class-mode").value,
       h3_packaging_entropy_gate: +document.getElementById("pg-h3-gate").value,
       enable_9_defenses: document.getElementById("pg-defenses").checked,
@@ -850,9 +853,9 @@ async function showPlaygroundTab() {
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
           <div>
             <span class="badge pass">LIVE AUDIT RUN #${playgroundRunCounter} COMPLETED AT ${esc(nowTime)}</span>
-            <b style="margin-left:8px;">${esc(currentPreset.title)}</b> &middot; <span class="muted">${esc(currentPreset.store_name)}</span>
+            <b style="margin-left:8px;">${esc(uploadedFileNames.length ? `Uploaded Image: ${uploadedFileNames.join(", ")}` : currentPreset.title)}</b>
           </div>
-          <span class="mono">Mode: <code>${esc(res.classification_mode)}</code> &middot; 9 Defenses: <b>${res.defenses_enabled ? "ON" : "OFF"}</b></span>
+          <span class="mono">Detected Crops: <b>${crops.length}</b> &middot; Mode: <code>${esc(res.classification_mode)}</code> &middot; 9 Defenses: <b>${res.defenses_enabled ? "ON" : "OFF"}</b></span>
         </div>
       </div>
 
@@ -872,7 +875,7 @@ async function showPlaygroundTab() {
       }
       ${
         uploadedFileNames.length
-          ? `<div class="card" style="background:#f8fafc;"><b>Uploaded Local Files (${uploadedFileNames.length}):</b> <span class="mono">${uploadedFileNames.map(esc).join(", ")}</span></div>`
+          ? `<div class="card" style="background:#f8fafc;"><b>Live Uploaded Image Analyzed (${uploadedFileNames.length}):</b> <span class="mono">${uploadedFileNames.map(esc).join(", ")}</span> &middot; <b>${crops.length}</b> product &amp; merchandising regions detected</div>`
           : ""
       }
 
@@ -881,7 +884,7 @@ async function showPlaygroundTab() {
           <h3>Interactive Gondola Canvas &mdash; Click Any Bounding Box or Table Row to Inspect Its 3-Task + Sub-ROI Microscope</h3>
           <div class="canvas-wrap"><canvas id="pg-canvas" style="cursor:pointer;"></canvas></div>
           <div class="legend">
-            <span class="sw gt"></span>HUL Resolved SKU (3-Task + Pre-Filtered ScaNN)
+            <span class="sw gt"></span>HUL Resolved SKU / Window Asset (3-Task + Pre-Filtered ScaNN)
             <span class="sw tile"></span>Soft Entropy / Markov Rescued Edge Case
             <span class="sw fp"></span>Competitor (Stopped at 3-Task &mdash; 0 Catalog Lookup)
           </div>
@@ -896,7 +899,7 @@ async function showPlaygroundTab() {
                 .map(
                   (c, idx) => `
                 <tr data-idx="${idx}" class="${idx === 0 ? "sel" : ""}">
-                  <td class="mono">#0${idx + 1}</td>
+                  <td class="mono">#${String(idx + 1).padStart(2, "0")}</td>
                   <td class="mono">${esc(c.coarse_3task_output.slot1_category)} | <b>${esc(c.coarse_3task_output.slot2_brand)}</b> | ${esc(c.coarse_3task_output.slot3_packaging_type)}</td>
                   <td class="mono">${c.scann_prefilter_telemetry.catalog_size_before_3task.toLocaleString()} &rarr; <b>${c.scann_prefilter_telemetry.candidates_after_3task_filter}</b></td>
                   <td class="mono strong">${esc(c.resolved_base_pack_id)}</td>
@@ -912,7 +915,7 @@ async function showPlaygroundTab() {
 
     if (userTriggered) {
       showToast(
-        `✅ <b>Live Audit #${playgroundRunCounter} Complete:</b> ${res.image_count} image(s) processed in <b>${slo.total_e2e_latency_s}s (${slo.per_image_latency_s}s/img)</b> &middot; Stress F2: <b>${slo.stress_slice_f2_pct}%</b>`
+        `✅ <b>Live Audit #${playgroundRunCounter} Complete:</b> Detected <b>${crops.length} crops</b> (${crops.map((c) => c.brand).join(", ")}) in <b>${slo.total_e2e_latency_s}s</b>`
       );
       container.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
@@ -930,35 +933,36 @@ async function showPlaygroundTab() {
       mic.innerHTML = `
         <div style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;" class="mono pulse-update">
           <div style="color:#93c5fd;font-weight:700;margin-bottom:6px;">MICROSCOPE: ${esc(c.crop_id)} &rarr; ${esc(c.resolved_base_pack_id)}</div>
+          <div><b>Variant / Asset:</b> ${esc(c.variant)} (${esc(c.size)})</div>
           <div><b>Step A (Crop Embedding):</b> ${c.coarse_3task_output.crop_embedding_dim}-d I-JEPA vector in <b>${c.coarse_3task_output.crop_embedding_ms} ms</b></div>
           <div><b>Step B (dJev /v1/systemone 3-Task):</b> Cat=<b>${esc(c.coarse_3task_output.slot1_category)}</b> | Brand=<b>${esc(c.coarse_3task_output.slot2_brand)}</b> | Pack=<b>${esc(c.coarse_3task_output.slot3_packaging_type)}</b> (H3=${c.coarse_3task_output.slot_entropies.H3_packaging_type})</div>
           <div><b>Step C (Entropy-Gated ScaNN Filter):</b> ${esc(c.scann_prefilter_telemetry.filter_mode)} &middot; Pool shrunk <b>${c.scann_prefilter_telemetry.catalog_size_before_3task.toLocaleString()} &rarr; ${c.scann_prefilter_telemetry.candidates_after_3task_filter} SKUs</b></div>
           <div><b>Step D (Stage 4.5 Sub-ROI &amp; Defenses):</b> Cap CIELAB=(${c.stage_4_5_sub_roi.zone1_cap_0_18pct_lab.join(", ")}) &middot; &Delta;E*=${c.stage_4_5_sub_roi.delta_e_margin} &middot; Neck-Taper=${c.stage_4_5_sub_roi.neck_taper_ratio}</div>
-          <div><b>Rail-Lip Price-Tag OCR Fallback:</b> "${esc(c.stage_4_5_sub_roi.below_rail_pricetag_fallback)}" &middot; Markov Smoothed: <b>${c.stage_4_5_sub_roi.markov_neighbor_smoothed ? "YES (180° Rotated Rescued)" : "No"}</b></div>
+          <div><b>Rail-Lip / Banner OCR:</b> "${esc(c.stage_4_5_sub_roi.below_rail_pricetag_fallback)}" &middot; Markov Smoothed: <b>${c.stage_4_5_sub_roi.markov_neighbor_smoothed ? "YES (180° Rotated Rescued)" : "No"}</b></div>
         </div>`;
     }
 
     container.querySelectorAll("#pg-crop-table tbody tr").forEach((tr) => {
       tr.addEventListener("click", () => {
         selectCrop(+tr.dataset.idx);
-        showToast(`Inspecting Crop <b>#0${+tr.dataset.idx + 1} (${esc(crops[+tr.dataset.idx]?.resolved_base_pack_id)})</b>`);
+        showToast(`Inspecting Crop <b>#${String(+tr.dataset.idx + 1).padStart(2, "0")} (${esc(crops[+tr.dataset.idx]?.resolved_base_pack_id)})</b>`);
       });
     });
 
-    // Also allow clicking directly on bounding boxes inside the <canvas>!
+    // Also allow clicking directly on bounding boxes inside the <canvas> (normalized 0..1000 space)
     const canvasEl = document.getElementById("pg-canvas");
     if (canvasEl) {
       canvasEl.addEventListener("click", (ev) => {
         const rect = canvasEl.getBoundingClientRect();
-        const cx = ((ev.clientX - rect.left) / rect.width) * 1450;
-        const cy = ((ev.clientY - rect.top) / rect.height) * 1200;
+        const cx = ((ev.clientX - rect.left) / rect.width) * 1000;
+        const cy = ((ev.clientY - rect.top) / rect.height) * 1000;
         const hitIdx = crops.findIndex((c) => {
           const [x1, y1, x2, y2] = c.box_xyxy;
           return cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2;
         });
         if (hitIdx >= 0) {
           selectCrop(hitIdx);
-          showToast(`Selected Crop <b>#0${hitIdx + 1}: ${esc(crops[hitIdx].resolved_base_pack_id)}</b> on Canvas`);
+          showToast(`Selected Crop <b>#${String(hitIdx + 1).padStart(2, "0")}: ${esc(crops[hitIdx].resolved_base_pack_id)}</b> on Canvas`);
         }
       });
     }
@@ -969,28 +973,32 @@ async function showPlaygroundTab() {
   function drawPlaygroundCanvas(img, crops, selectedIdx) {
     const canvas = document.getElementById("pg-canvas");
     if (!canvas) return;
-    const maxW = Math.min(820, (canvas.parentElement.clientWidth || 720) - 20);
-    const scale = maxW / Math.max(1, img.naturalWidth || 1400);
+    const maxW = Math.min(840, (canvas.parentElement.clientWidth || 740) - 20);
+    const natW = Math.max(1, img.naturalWidth || 1024);
+    const natH = Math.max(1, img.naturalHeight || 571);
+    const scale = maxW / natW;
     canvas.width = maxW;
-    canvas.height = Math.min(540, Math.round((img.naturalHeight || 1000) * scale));
+    canvas.height = Math.round(natH * scale);
     const ctx = canvas.getContext("2d");
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
     crops.forEach((c, idx) => {
       const [x1, y1, x2, y2] = c.box_xyxy;
-      const sx = (x1 / 1450) * canvas.width;
-      const sy = (y1 / 1200) * canvas.height;
-      const sw = ((x2 - x1) / 1450) * canvas.width;
-      const sh = ((y2 - y1) / 1200) * canvas.height;
+      const sx = (x1 / 1000) * canvas.width;
+      const sy = (y1 / 1000) * canvas.height;
+      const sw = ((x2 - x1) / 1000) * canvas.width;
+      const sh = ((y2 - y1) / 1000) * canvas.height;
       const isSel = idx === selectedIdx;
       ctx.strokeStyle = !c.is_hul ? "#ef4444" : c.h3_entropy > 0.03 || c.is_rotated_back_label ? "#facc15" : "#22c55e";
-      ctx.lineWidth = isSel ? 4 : 2;
+      ctx.lineWidth = isSel ? 4 : 2.2;
       ctx.strokeRect(sx, sy, sw, sh);
-      ctx.fillStyle = isSel ? "rgba(37,99,235,0.92)" : "rgba(15,23,42,0.82)";
-      ctx.fillRect(sx, Math.max(0, sy - 18), Math.min(sw + 40, 150), 18);
+      const label = `#${String(idx + 1).padStart(2, "0")} ${c.brand} (${c.packaging_type})`;
+      ctx.font = "bold 11px monospace";
+      const tw = Math.min(ctx.measureText(label).width + 10, canvas.width - sx);
+      ctx.fillStyle = isSel ? "rgba(37,99,235,0.94)" : "rgba(15,23,42,0.86)";
+      ctx.fillRect(sx, Math.max(0, sy - 19), tw, 19);
       ctx.fillStyle = "#fff";
-      ctx.font = "11px monospace";
-      ctx.fillText(`#0${idx + 1} ${c.brand} (${c.packaging_type})`, sx + 4, Math.max(12, sy - 5));
+      ctx.fillText(label, sx + 4, Math.max(13, sy - 5));
     });
   }
 

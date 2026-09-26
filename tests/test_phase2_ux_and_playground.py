@@ -135,6 +135,44 @@ class TestPhase2UXAndPlayground(unittest.TestCase):
         self.assertTrue(Path(topo["gemini_enterprise_provisioning"]["openapi_spec_path"]).is_file())
         self.assertTrue(Path(topo["gemini_enterprise_provisioning"]["provision_script_path"]).is_file())
 
+    def test_06_hul_examples_slide_preset_and_lipton_detection(self) -> None:
+        presets_resp = self._get_json("/api/v1/playground/presets")
+        preset_ids = [p["id"] for p in presets_resp["presets"]]
+        self.assertIn("preset_hul_scope_slide_examples", preset_ids)
+
+        res = self._post_json(
+            "/api/v1/playground/analyze",
+            {
+                "input_mode": "preset",
+                "preset_id": "preset_hul_scope_slide_examples",
+                "workflow": "MERCHANDISING_6_ASSET",
+                "image_count": 1,
+                "classification_mode": "coarse_to_fine_3task_plus_prefiltered_scann",
+                "h3_packaging_entropy_gate": 0.030,
+                "scann_similarity_gate": 0.82,
+                "enable_9_defenses": True,
+            },
+        )
+        crops = res["inspected_crops"]
+        self.assertEqual(len(crops), 8)
+        brands = [c["coarse_3task_output"]["slot2_brand"] for c in crops]
+        self.assertIn("Lipton", brands)
+        self.assertIn("Pond's", brands)
+        self.assertIn("Glow & Lovely", brands)
+        self.assertIn("Lakme", brands)
+        self.assertIn("Pears", brands)
+        self.assertIn("Clinic Plus", brands)
+
+        resolved_ids = [c["resolved_base_pack_id"] for c in crops]
+        self.assertIn("POSM-HUL-LIPTON-WINDOW-HEADER", resolved_ids)
+        self.assertIn("BP-HUL-LIPTON-GREEN-TEA-25TB", resolved_ids)
+
+        # Also verify image route for the HUL Examples slide
+        with urllib.request.urlopen(f"{self.base_url}/img/sku110k/sku110k_hul_examples_slide.jpg", timeout=10) as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers.get("Content-Type"), "image/jpeg")
+
 
 if __name__ == "__main__":
     unittest.main()
+

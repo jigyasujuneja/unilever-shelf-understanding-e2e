@@ -24,7 +24,10 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PIL import Image
+try:
+    from PIL import Image
+except ImportError:
+    Image = None  # type: ignore[assignment]
 
 import approaches
 from approaches.base import Context, Trace

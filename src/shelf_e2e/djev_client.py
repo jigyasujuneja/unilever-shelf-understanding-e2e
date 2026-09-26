@@ -146,8 +146,10 @@ class DjevSystemOneClient:
         "pouch",
         "tube",
         "sachet",
+        "box",
         "bar",
         "multipack",
+        "window_header",
     ]
 
     def __init__(self, endpoint_url: Optional[str] = None, timeout_sec: float = 1.5):
@@ -446,6 +448,19 @@ class DjevSystemOneClient:
             {"sku_id": "BP-HUL-DOVE-COND-180ML", "category": "Hair Care", "brand": "Dove", "packaging_type": "tube"},
             {"sku_id": "BP-HUL-DOVE-HW-500-POUCH", "category": "Personal Care", "brand": "Dove", "packaging_type": "pouch"},
             {"sku_id": "BP-HUL-SUNSILK-BLK-340ML", "category": "Hair Care", "brand": "Sunsilk", "packaging_type": "bottle"},
+            {"sku_id": "BP-HUL-LIPTON-GREEN-TEA-25TB", "category": "Beverages (Green Tea)", "brand": "Lipton", "packaging_type": "box"},
+            {"sku_id": "BP-HUL-LIPTON-HONEY-LEMON-25TB", "category": "Beverages (Green Tea)", "brand": "Lipton", "packaging_type": "box"},
+            {"sku_id": "POSM-HUL-LIPTON-WINDOW-HEADER", "category": "Branded Window Asset", "brand": "Lipton", "packaging_type": "window_header"},
+            {"sku_id": "BP-HUL-PONDS-PURE-DETOX-100G", "category": "Skin Care", "brand": "Pond's", "packaging_type": "tube"},
+            {"sku_id": "BP-HUL-PONDS-BRIGHT-BEAUTY-100G", "category": "Skin Care", "brand": "Pond's", "packaging_type": "tube"},
+            {"sku_id": "BP-HUL-GAL-INSTA-GLOW-100G", "category": "Skin Care", "brand": "Glow & Lovely", "packaging_type": "tube"},
+            {"sku_id": "BP-HUL-LAKME-BG-STRAWBERRY-100G", "category": "Skin Care", "brand": "Lakme", "packaging_type": "tube"},
+            {"sku_id": "BP-HUL-LAKME-BG-LEMON-100G", "category": "Skin Care", "brand": "Lakme", "packaging_type": "tube"},
+            {"sku_id": "BP-HUL-LAKME-CC-ALMOND-30G", "category": "Skin Care", "brand": "Lakme", "packaging_type": "tube"},
+            {"sku_id": "BP-HUL-PEARS-PURE-GENTLE-100G", "category": "Skin Care", "brand": "Pears", "packaging_type": "tube"},
+            {"sku_id": "BP-HUL-PEARS-OIL-CLEAR-100G", "category": "Skin Care", "brand": "Pears", "packaging_type": "tube"},
+            {"sku_id": "BP-HUL-CLINIC-PLUS-LADI-6MLx12", "category": "Hair Care", "brand": "Clinic Plus", "packaging_type": "sachet"},
+            {"sku_id": "BP-HUL-SURF-EXCEL-QUICKWASH-500G", "category": "Home Care", "brand": "Surf Excel", "packaging_type": "pouch"},
         ]
 
         if not is_hul:
@@ -477,7 +492,7 @@ class DjevSystemOneClient:
         )
         filtered = prefilter_res.candidate_skus
         if not filtered:
-            filtered = [f"BP-HUL-{canonical_brand.upper()[:5]}-{pkg.upper()[:3]}-{ocr_snippet.upper()}"]
+            filtered = [f"BP-HUL-{canonical_brand.upper()[:6].replace(' ', '')}-{pkg.upper()[:4]}-{ocr_snippet.upper()[:6]}"]
 
         sys1 = self.resolve_crop_systemone(
             box_xyxy=box_xyxy,
