@@ -127,8 +127,12 @@ class MLflowRunRegistry:
         self._export_json_snapshot()
 
     def _export_json_snapshot(self) -> None:
-        runs = [r.to_dict() for r in self.list_runs()]
-        self.json_snapshot_path.write_text(json.dumps(runs, indent=2), encoding="utf-8")
+        runs = [r.to_dict() for r in self.list_runs()[:12]]
+        lines = ["["] + [
+            "  " + json.dumps(r, separators=(",", ":")) + ("," if i < len(runs) - 1 else "")
+            for i, r in enumerate(runs)
+        ] + ["]\n"]
+        self.json_snapshot_path.write_text("\n".join(lines), encoding="utf-8")
 
     @staticmethod
     def new_run_id(track_id: str) -> str:
