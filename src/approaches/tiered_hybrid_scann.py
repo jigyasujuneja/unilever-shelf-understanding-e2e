@@ -14,6 +14,8 @@ from utils import embeddings, hul_domain, maxvit_clustering
 @register
 class TieredHybridScann(Approach):
     name = "tiered_hybrid_scann"
+    task = "combined"
+    epic = "MT Market Share - Combined Classification"
     architecture = (
         "3-tier hybrid: Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) -> Stage 4 gemini-embedding-001 / "
         "AlloyDB ScaNN match (sim>=0.82, 89% crops) -> Gemini 3.8 Flash fallback on 11% low-margin cluster medoids"

@@ -15,6 +15,8 @@ from utils import embeddings, hul_domain, maxvit_clustering
 @register
 class DjevSystemOneSisterShade(Approach):
     name = "djev_systemone_sister_shade"
+    task = "combined"
+    epic = "MT Market Share - Combined Classification"
     architecture = (
         "Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) + Stage 4 gemini-embedding-001 ScaNN (89%) "
         "+ Stage 4.5 Sister-Shade Sub-ROI CIELAB + Stage 5 /v1/systemone (64-Token Canvas, 8.9 ms Jacobi)"

@@ -15,6 +15,8 @@ from utils import embeddings, hul_domain
 @register
 class CascadingViTTrackA(Approach):
     name = "track_a_cascading_vit"
+    task = "combined"
+    epic = "MT Market Share - Combined Classification"
     architecture = (
         "Track A (Legacy GEAP): RT-DETR + 8-Model Supervised MaxViT-Small (Block+Grid Attention) / EfficientNet-B4 Hierarchy"
     )
@@ -38,6 +40,8 @@ class CascadingViTTrackA(Approach):
 @register
 class OpenVocabGroundingTrackE(Approach):
     name = "track_e_open_vocab"
+    task = "combined"
+    epic = "MT Market Share - Combined Classification"
     architecture = "Track E: Open-Vocabulary Grounding (OWL-v2 / GroundingDINO + SigLIP-So400m Zero-Shot)"
     steps = [
         "Stage 3: OWL-v2 / GroundingDINO text-conditioned shelf box grounding",
@@ -57,6 +61,8 @@ class OpenVocabGroundingTrackE(Approach):
 @register
 class Sam2MaskScannTrackF(Approach):
     name = "track_f_sam2_scann"
+    task = "combined"
+    epic = "MT Market Share - Combined Classification"
     architecture = "Track F: SAM-3 Instance Mask + Background-Zeroed gemini-embedding-001 + ScaNN (ADR-004/006)"
     steps = [
         "Stage 3: RT-DETR-v2 + SAM-3 pixel-accurate instance segmentation",
@@ -78,6 +84,8 @@ class MaxViTClusteredDjevApproach(Approach):
     """ADR-007 + ADR-008 Benchmark Ablation: MaxViT Multi-Scale (Block+Grid) Attention + Complete-Linkage Clustering + dJev."""
 
     name = "maxvit_clustered_djev"
+    task = "combined"
+    epic = "MT Market Share - Combined Classification"
     architecture = (
         "MaxViT Multi-Scale Block+Grid Attention (ADR-007) + Complete-Linkage High-Purity Clustering (ADR-008) "
         "+ Dynamic HUL Catalog ScaNN + Stage 5 /v1/systemone 64-Token Canvas"

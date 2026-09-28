@@ -20,6 +20,8 @@ from utils import embeddings, hul_domain, maxvit_clustering, mlops_pipeline
 @register
 class HUL8StageGemini38Hybrid(Approach):
     name = "hul_8stage_gemini38_hybrid"
+    task = "combined"
+    epic = "MT Market Share - Combined Classification"
     architecture = (
         "8-Stage HUL Hybrid: RT-DETR-v2 + Complete-Linkage Clustering (ADR-008) + gemini-embedding-001/AlloyDB ScaNN "
         "(89% in 0.8ms) + Stage 4.5 /v1/systemone 64-Token Canvas (9% in 8.9ms) + Gemini 3.8 Flash Open-Set (2%)"
