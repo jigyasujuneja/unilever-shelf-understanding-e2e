@@ -176,15 +176,17 @@ class TestPhase2UXAndPlayground(unittest.TestCase):
         from shelf_e2e.djev_client import DjevSystemOneClient
         from shelf_e2e.taxonomy import (
             CANONICAL_PACKAGING_TYPES,
+            COMPETITOR_BRANDS_NON_HUL,
             HUL_BRANDS_CANONICAL,
             MASTER_HUL_CATALOG,
             UNILEVER_VARIANT_DOMAINS,
             resolve_or_synthesize_base_pack,
         )
 
-        self.assertGreaterEqual(len(HUL_BRANDS_CANONICAL), 85)
+        self.assertGreaterEqual(len(HUL_BRANDS_CANONICAL), 300)
+        self.assertGreaterEqual(len(COMPETITOR_BRANDS_NON_HUL), 160)
         self.assertEqual(len(CANONICAL_PACKAGING_TYPES), 25)
-        self.assertGreaterEqual(len(MASTER_HUL_CATALOG), 65)
+        self.assertGreaterEqual(len(MASTER_HUL_CATALOG), 220)
         self.assertEqual(len(UNILEVER_VARIANT_DOMAINS), 7)
 
         djev = DjevSystemOneClient()
@@ -222,8 +224,47 @@ class TestPhase2UXAndPlayground(unittest.TestCase):
         self.assertTrue(synth_sku.startswith("BP-HUL-BOOST-"))
         self.assertIn(synth_sku, cands)
 
+    def test_08_open_internet_catalog_and_live_web_grounding_endpoints(self) -> None:
+        cat_summary = self._get_json("/api/v1/taxonomy/catalog")
+        self.assertIsInstance(cat_summary, dict)
+        assert isinstance(cat_summary, dict)
+        self.assertGreaterEqual(cat_summary["total_unilever_brand_entries"], 300)
+        self.assertGreaterEqual(cat_summary["total_competitor_brand_entries"], 160)
+        self.assertEqual(cat_summary["total_packaging_form_factors"], 25)
+        self.assertGreaterEqual(cat_summary["total_master_base_packs"], 220)
+
+        # Resolve HUL digital-first masstige brand scraped from hul.co.in/brands/ (Novology)
+        res_novology = self._post_json(
+            "/api/v1/taxonomy/open-web-resolve",
+            {"query": "Novology Acne Deep Clearing Cleanser 100ml", "packaging_type": "tube"},
+        )
+        self.assertTrue(res_novology["is_hul_brand"])
+        self.assertEqual(res_novology["brand"], "Novology")
+        self.assertEqual(res_novology["unilever_domain"], "Skin Care")
+        self.assertEqual(res_novology["base_pack_id"], "BP-HUL-NOVOLOGY-ACNE-CLEANSER-100ML")
+
+        # Resolve Acne Squad (HUL digital-first acne brand)
+        res_acne = self._post_json(
+            "/api/v1/taxonomy/open-web-resolve",
+            {"query": "Acne Squad Kick Start Cleanser Salicylic Acid 100ml", "packaging_type": "tube"},
+        )
+        self.assertTrue(res_acne["is_hul_brand"])
+        self.assertEqual(res_acne["brand"], "Acne Squad")
+        self.assertEqual(res_acne["unilever_domain"], "Skin Care")
+
+        # Resolve Liquid I.V. (Unilever Functional Hydration brand)
+        res_liv = self._post_json(
+            "/api/v1/taxonomy/open-web-resolve",
+            {"query": "Liquid I.V. Hydration Multiplier Lemon Lime 160g", "packaging_type": "box"},
+        )
+        self.assertTrue(res_liv["is_hul_brand"])
+        self.assertEqual(res_liv["brand"], "Liquid I.V.")
+        self.assertEqual(res_liv["unilever_domain"], "Foods - Beverages")
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
 
 

@@ -111,6 +111,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(_build_playground_presets())
             if parts == ["api", "v1", "architecture", "gcp-topology"]:
                 return self._json(_build_gcp_topology())
+            if parts in (["api", "v1", "taxonomy", "catalog"], ["api", "taxonomy", "catalog"]):
+                from shelf_e2e.taxonomy import get_open_internet_taxonomy_summary
+
+                return self._json(get_open_internet_taxonomy_summary())
             if parts[:2] == ["api", "runs"] and len(parts) == 3:
                 summary, images = runner.load_run(parts[2], self.results_dir)
                 return self._json({"summary": summary,
@@ -143,6 +147,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_handle_playground_analyze(body))
         if parts == ["api", "v1", "gemini-enterprise", "query"]:
             return self._json(_handle_gemini_enterprise_query(body))
+        if parts in (["api", "v1", "taxonomy", "open-web-resolve"], ["api", "taxonomy", "open-web-resolve"]):
+            from shelf_e2e.taxonomy import resolve_brand_and_sku_via_open_web_grounding
+
+            return self._json(
+                resolve_brand_and_sku_via_open_web_grounding(
+                    query_text=str(body.get("query", "")),
+                    hint_category=str(body.get("category", "")),
+                    hint_packaging=str(body.get("packaging_type", "bottle")),
+                    force_live_web=bool(body.get("force_live_web", False)),
+                )
+            )
         return self._json({"error": "not found"}, 404)
 
 
@@ -535,8 +550,10 @@ def _detect_live_crops_cached(img_sha256: str, mime_type: str, b64_data: str) ->
     """Call live Vertex AI Gemini 2.5 Flash (thinkingBudget=0) with full Unilever 6-Domain + 25-Packaging taxonomy."""
     import urllib.request
     from shelf_e2e.taxonomy import (
+        COMPETITOR_BRANDS_NON_HUL,
         normalize_brand_and_hul_flag,
         normalize_packaging_type,
+        resolve_brand_and_sku_via_open_web_grounding,
         resolve_or_synthesize_base_pack,
         resolve_variant_domain,
     )
@@ -559,8 +576,9 @@ def _detect_live_crops_cached(img_sha256: str, mime_type: str, b64_data: str) ->
             '"box_2d": [ymin, xmin, ymax, xmax] normalized 0..1000, '
             '"category": one of the 7 domain strings above, '
             '"brand": exact brand name (e.g. Lipton, Red Label, Taj Mahal, Taaza, Bru, Horlicks, Boost, Kissan, Knorr, '
-            "Pond's, Glow & Lovely, Lakme, Vaseline, Simple, Pears, Lux, Lifebuoy, Hamam, Rexona, Axe, Closeup, Pepsodent, "
-            "Dove, Sunsilk, Tresemme, Clinic Plus, Clear, Indulekha, Surf Excel, Rin, Wheel, Vim, Domex, Comfort, or Competitor), "
+            "Pond's, Glow & Lovely, Lakme, Vaseline, Simple, Minimalist, Novology, Acne Squad, OZiva, Liquid I.V., "
+            "Pears, Lux, Lifebuoy, Hamam, Liril, Moti, Rexona, Axe, Closeup, Pepsodent, "
+            "Dove, Sunsilk, Tresemme, Clinic Plus, Clear, Indulekha, Love Beauty and Planet, Surf Excel, Rin, Wheel, Vim, Cif, Domex, Comfort, or Competitor), "
             '"packaging_type": one of the 25 packaging/POSM strings above, '
             '"variant": specific product sub-brand/variant/flavor/shade or promotional window claim, '
             '"size": pack weight/volume/count (e.g. "100g", "50g", "340ml", "25TB", "6ml", "POSM"), '
@@ -607,9 +625,17 @@ def _detect_live_crops_cached(img_sha256: str, mime_type: str, b64_data: str) ->
             brand_raw = str(it.get("brand", "Dove"))
             canonical_brand, is_hul = normalize_brand_and_hul_flag(brand_raw)
             pkg = normalize_packaging_type(str(it.get("packaging_type", "bottle")))
-            cat = resolve_variant_domain(canonical_brand, str(it.get("category", "")), pkg)
             variant = str(it.get("variant", f"{canonical_brand} {pkg.title()}"))
             size = str(it.get("size", "100g"))
+            if not is_hul and canonical_brand.lower() not in COMPETITOR_BRANDS_NON_HUL:
+                web_res = resolve_brand_and_sku_via_open_web_grounding(
+                    query_text=f"{brand_raw} {variant} {size}",
+                    hint_category=str(it.get("category", "")),
+                    hint_packaging=pkg,
+                )
+                canonical_brand = str(web_res.get("brand", canonical_brand))
+                is_hul = bool(web_res.get("is_hul_brand", is_hul))
+            cat = resolve_variant_domain(canonical_brand, str(it.get("category", "")), pkg)
             resolved_sku, _ = resolve_or_synthesize_base_pack(
                 brand=canonical_brand,
                 category=cat,
