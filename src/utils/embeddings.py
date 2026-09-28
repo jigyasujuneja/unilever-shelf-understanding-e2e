@@ -1,4 +1,4 @@
-"""Vertex AI multimodal embeddings client (``multimodalembedding@001``).
+"""Vertex AI / Gemini Enterprise embeddings client (``gemini-embedding-001``).
 
 Crops and text share one vector space, so a shelf crop can be matched against catalog product
 photos or names. An approach creates one in ``setup()`` and calls ``image(crop, ctx)``; passing
@@ -16,6 +16,7 @@ from PIL import Image
 from utils.llm import image_to_jpeg, load_config
 
 VERTEX_AI = "C7E2-9256-1C43"  # Billing Catalog service id
+DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 
 # Billable unit -> (Billing Catalog service, SKU description). Add to Approach.skus.
 SKUS = {"embedding_image": (VERTEX_AI, "Embeddings for multimodal - Image (input)"),
@@ -23,7 +24,7 @@ SKUS = {"embedding_image": (VERTEX_AI, "Embeddings for multimodal - Image (input
 
 
 class VertexEmbeddings:
-    def __init__(self, config: dict | None = None, model: str = "multimodalembedding@001",
+    def __init__(self, config: dict | None = None, model: str = DEFAULT_EMBEDDING_MODEL,
                  dimension: int = 512):
         import google.auth
         from google.auth.transport.requests import AuthorizedSession

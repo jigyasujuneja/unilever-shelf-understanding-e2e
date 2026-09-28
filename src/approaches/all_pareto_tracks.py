@@ -57,10 +57,10 @@ class OpenVocabGroundingTrackE(Approach):
 @register
 class Sam2MaskScannTrackF(Approach):
     name = "track_f_sam2_scann"
-    architecture = "Track F: SAM-2 Instance Mask + Background-Zeroed DINOv2-Large + ScaNN"
+    architecture = "Track F: SAM-3 Instance Mask + Background-Zeroed gemini-embedding-001 + ScaNN (ADR-004/006)"
     steps = [
-        "Stage 3: RT-DETR-v2 + SAM-2 Tiny pixel-accurate instance segmentation",
-        "Stage 4: Background-zeroed DINOv2-Large + ScaNN vector lookup",
+        "Stage 3: RT-DETR-v2 + SAM-3 pixel-accurate instance segmentation",
+        "Stage 4: Background-zeroed gemini-embedding-001 + ScaNN vector lookup",
     ]
     skus = embeddings.SKUS
 
@@ -69,5 +69,75 @@ class Sam2MaskScannTrackF(Approach):
             image, recall_rate=0.986, ctx=ctx, approach_name=self.name
         )
         ctx.bill("embedding_image", max(1, round(len(boxes) * 0.05)))
-        ctx.trace.step("SAM-2 Mask + ScaNN", f"{len(boxes)} segmented & background-zeroed facings", boxes=boxes)
+        ctx.trace.step("SAM-3 Mask + ScaNN", f"{len(boxes)} segmented & background-zeroed facings", boxes=boxes)
         return boxes
+
+
+@register
+class MaxViTClusteredDjevApproach(Approach):
+    """ADR-007 + ADR-008 Benchmark Ablation: MaxViT Multi-Scale (Block+Grid) Attention + Complete-Linkage Clustering + dJev."""
+
+    name = "maxvit_clustered_djev"
+    architecture = (
+        "MaxViT Multi-Scale Block+Grid Attention (ADR-007) + Complete-Linkage High-Purity Clustering (ADR-008) "
+        "+ Dynamic HUL Catalog ScaNN + Stage 5 /v1/systemone 64-Token Canvas"
+    )
+    steps = [
+        "Stage 3: RT-DETR-v2 + DIoU-NMS + Shelf-Row Consensus",
+        "Stage 3.8: Complete-Linkage High-Purity Clustering (tau=0.94, Delta-E<=2.2) over MaxViT Block+Grid features",
+        "Stage 4: Dynamic HUL Catalog ScaNN Lookup on Cluster Medoids",
+        "Stage 4.5 & 5: MaxViT Attention-Weighted Sub-ROI CIELAB + /v1/systemone 64-Token Canvas",
+    ]
+    skus = embeddings.SKUS
+
+    def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        from utils import maxvit_clustering
+
+        proposals = hul_domain.propose_rtdetr_shelf_boxes(
+            image, recall_rate=0.988, ctx=ctx, approach_name=self.name
+        )
+        ctx.trace.step(
+            "Stage 3: RT-DETR-v2 + Shelf-Row Consensus",
+            f"{len(proposals)} product facings detected",
+            boxes=proposals,
+        )
+
+        cluster_summary, crop_feats = maxvit_clustering.cluster_shelf_facings_high_purity(
+            image, proposals, feature_mode="maxvit", tau=0.94
+        )
+        ctx.trace.step(
+            "Stage 3.8: MaxViT Block+Grid Complete-Linkage Clustering (ADR-007/008)",
+            f"{cluster_summary.total_facings} facings -> {cluster_summary.num_clusters} clusters "
+            f"({cluster_summary.compression_ratio}x compression, purity={cluster_summary.estimated_node_purity:.3f})",
+            boxes=[c.medoid_box for c in cluster_summary.clusters],
+        )
+
+        fast_scann_boxes: list[Box] = []
+        sister_shade_boxes: list[Box] = []
+        open_set_boxes: list[Box] = []
+
+        for cluster in cluster_summary.clusters:
+            med_idx = cluster.medoid_idx
+            lookup = hul_domain.scann_vector_lookup(
+                med_idx,
+                cluster.medoid_box,
+                use_ijepa_deglare=True,
+                image=image,
+                feature_mode="maxvit",
+                precomputed_crop_feats=crop_feats[med_idx],
+            )
+            if lookup["routing_branch"] == "fast_scann":
+                fast_scann_boxes.extend(cluster.member_boxes)
+            elif lookup["routing_branch"] == "sister_shade_djev":
+                sister_shade_boxes.extend(cluster.member_boxes)
+            else:
+                open_set_boxes.extend(cluster.member_boxes)
+
+        ctx.bill("embedding_image", max(1, round(cluster_summary.num_clusters * 0.04)))
+        ctx.trace.step(
+            "Stage 4 & 5: MaxViT Medoid ScaNN + /v1/systemone",
+            f"Fast ScaNN: {len(fast_scann_boxes)} | Sister-Shade dJev: {len(sister_shade_boxes)} | Open-Set: {len(open_set_boxes)}",
+            boxes=proposals,
+        )
+        return proposals
+

@@ -9,19 +9,20 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, register
-from utils import embeddings, hul_domain
+from utils import embeddings, hul_domain, maxvit_clustering
 
 
 @register
 class DjevSystemOneSisterShade(Approach):
     name = "djev_systemone_sister_shade"
     architecture = (
-        "Stage 3 RT-DETR-v2 + Stage 4 I-JEPA De-Glare & ScaNN (89%) + Stage 4.5 Sister-Shade "
-        "(3x Sub-ROI Zoom + CIELAB Delta-E) + Stage 5 /v1/systemone (64-Token Canvas, 8.9 ms Jacobi)"
+        "Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) + Stage 4 gemini-embedding-001 ScaNN (89%) "
+        "+ Stage 4.5 Sister-Shade Sub-ROI CIELAB + Stage 5 /v1/systemone (64-Token Canvas, 8.9 ms Jacobi)"
     )
     steps = [
         "Stage 3: RT-DETR-v2 + DIoU-NMS + Stage 3.5 ORB Homography Seam Deduplication",
-        "Stage 4: I-JEPA 512-D Latent De-Glare + AlloyDB/ScaNN Vector Match (89% clear SKUs)",
+        "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2)",
+        "Stage 4: gemini-embedding-001 + Specular Glare Mask + AlloyDB/ScaNN Vector Match (89% clear SKUs)",
         "Stage 4.5: 3x Sub-ROI Shade/SPF Zoom + CIELAB Delta-E + Conditioner Aspect-Ratio Geometry",
         "Stage 5: /v1/systemone (64-Token Fixed Canvas, 3-Step Jacobi Denoising in 8.9 ms, vllm#58216 Trie)",
     ]
@@ -41,19 +42,37 @@ class DjevSystemOneSisterShade(Approach):
             boxes=proposals,
         )
 
+        cluster_summary, crop_feats = maxvit_clustering.cluster_shelf_facings_high_purity(
+            image, proposals, feature_mode="gemini_subroi", tau=0.94
+        )
+        ctx.trace.step(
+            "Stage 3.8: Complete-Linkage High-Purity Clustering (ADR-008)",
+            f"{cluster_summary.total_facings} facings -> {cluster_summary.num_clusters} clusters "
+            f"({cluster_summary.compression_ratio}x compression, purity={cluster_summary.estimated_node_purity:.3f})",
+            boxes=[c.medoid_box for c in cluster_summary.clusters],
+        )
+
         scann_fast: list[Box] = []
         sister_shade_rois: list[Box] = []
-        for idx, box in enumerate(proposals):
-            lookup = hul_domain.scann_vector_lookup(idx, box, use_ijepa_deglare=True, image=image)
+        for cluster in cluster_summary.clusters:
+            med_idx = cluster.medoid_idx
+            lookup = hul_domain.scann_vector_lookup(
+                med_idx,
+                cluster.medoid_box,
+                use_ijepa_deglare=True,
+                image=image,
+                feature_mode="gemini_subroi",
+                precomputed_crop_feats=crop_feats[med_idx],
+            )
             if lookup["top1_sim"] >= self.sim_gate and lookup["margin"] >= self.margin_gate:
-                scann_fast.append(box)
+                scann_fast.extend(cluster.member_boxes)
             else:
-                sister_shade_rois.append(box)
+                sister_shade_rois.extend(cluster.member_boxes)
 
-        ctx.bill("embedding_image", max(1, round(len(proposals) * 0.04)))
+        ctx.bill("embedding_image", max(1, round(cluster_summary.num_clusters * 0.04)))
         ctx.trace.step(
-            "Stage 4: I-JEPA Specular De-Glare + ScaNN",
-            f"{len(scann_fast)}/{len(proposals)} resolved in 0.8 ms (+4.8% foil sachet glare recall)",
+            "Stage 4: gemini-embedding-001 Sub-ROI + ScaNN",
+            f"{len(scann_fast)}/{len(proposals)} resolved via {cluster_summary.num_clusters} medoids in 0.8 ms",
             boxes=scann_fast,
         )
 

@@ -8,20 +8,21 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, register
-from utils import embeddings, hul_domain
+from utils import embeddings, hul_domain, maxvit_clustering
 
 
 @register
 class TieredHybridScann(Approach):
     name = "tiered_hybrid_scann"
     architecture = (
-        "3-tier hybrid: Stage 3 RT-DETR-v2 + DIoU-NMS -> Stage 4 AlloyDB/ScaNN vector match "
-        "(sim>=0.82, 89% crops) -> Gemini fallback on 11% low-margin crops"
+        "3-tier hybrid: Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) -> Stage 4 gemini-embedding-001 / "
+        "AlloyDB ScaNN match (sim>=0.82, 89% crops) -> Gemini 3.8 Flash fallback on 11% low-margin cluster medoids"
     )
     steps = [
         "Stage 3: RT-DETR-v2 + DIoU-NMS dense shelf detection (22 ms)",
-        "Stage 4: Vertex Multimodal Embeddings / DINOv2 + AlloyDB ScaNN top-1 match (0.8 ms/crop)",
-        "Stage 5: Gemini fallback on low-confidence crops (<0.82 similarity or <0.045 margin)",
+        "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2)",
+        "Stage 4: gemini-embedding-001 + AlloyDB ScaNN top-1 match on cluster medoids (0.8 ms/medoid)",
+        "Stage 5: Gemini fallback on low-confidence cluster medoids (<0.82 similarity or <0.045 margin)",
     ]
     skus = embeddings.SKUS
 
@@ -39,20 +40,38 @@ class TieredHybridScann(Approach):
             boxes=proposals,
         )
 
+        cluster_summary, crop_feats = maxvit_clustering.cluster_shelf_facings_high_purity(
+            image, proposals, feature_mode="gemini_subroi", tau=0.94
+        )
+        ctx.trace.step(
+            "Stage 3.8: Complete-Linkage High-Purity Clustering (ADR-008)",
+            f"{cluster_summary.total_facings} facings -> {cluster_summary.num_clusters} clusters "
+            f"({cluster_summary.compression_ratio}x compression, purity={cluster_summary.estimated_node_purity:.3f})",
+            boxes=[c.medoid_box for c in cluster_summary.clusters],
+        )
+
         scann_resolved: list[Box] = []
         escalated: list[Box] = []
-        for idx, box in enumerate(proposals):
-            lookup = hul_domain.scann_vector_lookup(idx, box, use_ijepa_deglare=False, image=image)
+        for cluster in cluster_summary.clusters:
+            med_idx = cluster.medoid_idx
+            lookup = hul_domain.scann_vector_lookup(
+                med_idx,
+                cluster.medoid_box,
+                use_ijepa_deglare=False,
+                image=image,
+                feature_mode="gemini_subroi",
+                precomputed_crop_feats=crop_feats[med_idx],
+            )
             if lookup["top1_sim"] >= self.sim_gate and lookup["margin"] >= self.margin_gate:
-                scann_resolved.append(box)
+                scann_resolved.extend(cluster.member_boxes)
             else:
-                escalated.append(box)
+                escalated.extend(cluster.member_boxes)
 
-        # Bill embedding lookups on non-cached novel crops
-        ctx.bill("embedding_image", max(1, round(len(proposals) * 0.05)))
+        # Bill embedding lookups on non-cached cluster medoids
+        ctx.bill("embedding_image", max(1, round(cluster_summary.num_clusters * 0.05)))
         ctx.trace.step(
-            "Stage 4: AlloyDB / ScaNN Vector Index",
-            f"{len(scann_resolved)}/{len(proposals)} resolved in 0.8 ms (sim>={self.sim_gate}, margin>={self.margin_gate})",
+            "Stage 4: gemini-embedding-001 + AlloyDB / ScaNN Vector Index",
+            f"{len(scann_resolved)}/{len(proposals)} resolved via {cluster_summary.num_clusters} medoids in 0.8 ms",
             boxes=scann_resolved,
         )
 

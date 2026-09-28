@@ -191,6 +191,42 @@ class UnifiedCloudArchitectureTests(unittest.TestCase):
             "gs://jjuneja-argolis-sandbox-shelf-images/results",
         )
 
+    def test_maxvit_and_high_purity_clustering_ablation(self) -> None:
+        from utils import embeddings, maxvit_clustering
+
+        self.assertEqual(embeddings.DEFAULT_EMBEDDING_MODEL, "gemini-embedding-001")
+        catalog = maxvit_clustering.load_dynamic_hul_catalog_index()
+        self.assertGreaterEqual(len(catalog), 12)
+
+        img = Image.new("RGB", (400, 300), (210, 40, 50))
+        boxes = [
+            (50, 100, 120, 220),
+            (125, 100, 195, 220),
+            (200, 100, 270, 220),
+            (280, 100, 380, 280),
+        ]
+        f_gem = maxvit_clustering.extract_gemini_subroi_embedding(img, boxes[0])
+        f_mv = maxvit_clustering.extract_maxvit_multiscale_features(img, boxes[0])
+        self.assertEqual(f_gem["feature_mode"], "gemini_subroi")
+        self.assertEqual(f_mv["feature_mode"], "maxvit")
+        self.assertEqual(len(f_gem["embedding"]), 64)
+        self.assertEqual(len(f_mv["embedding"]), 64)
+
+        clustered_gem, feats_gem = maxvit_clustering.cluster_shelf_facings_high_purity(
+            img, boxes, feature_mode="gemini_subroi", tau=0.94
+        )
+        clustered_mv, feats_mv = maxvit_clustering.cluster_shelf_facings_high_purity(
+            img, boxes, feature_mode="maxvit", tau=0.94
+        )
+        self.assertEqual(clustered_gem.total_facings, 4)
+        self.assertLessEqual(clustered_gem.num_clusters, 2)
+        self.assertGreaterEqual(clustered_gem.compression_ratio, 2.0)
+        self.assertGreaterEqual(clustered_gem.estimated_node_purity, 0.99)
+        self.assertEqual(len(feats_gem), 4)
+        self.assertEqual(clustered_mv.total_facings, 4)
+        self.assertEqual(len(feats_mv), 4)
+
 
 if __name__ == "__main__":
     unittest.main()
+

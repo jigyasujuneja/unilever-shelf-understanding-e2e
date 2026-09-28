@@ -14,19 +14,20 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, register
-from utils import embeddings, hul_domain, mlops_pipeline
+from utils import embeddings, hul_domain, maxvit_clustering, mlops_pipeline
 
 
 @register
 class HUL8StageGemini38Hybrid(Approach):
     name = "hul_8stage_gemini38_hybrid"
     architecture = (
-        "8-Stage HUL Hybrid: RT-DETR-v2 + I-JEPA/AlloyDB ScaNN (89% in 0.8ms) + Stage 4.5 /v1/systemone "
-        "64-Token Canvas (9% in 8.9ms) + Gemini 3.8 Flash Open-Set/Toker Audit (2%) + Stage 6 Recommend"
+        "8-Stage HUL Hybrid: RT-DETR-v2 + Complete-Linkage Clustering (ADR-008) + gemini-embedding-001/AlloyDB ScaNN "
+        "(89% in 0.8ms) + Stage 4.5 /v1/systemone 64-Token Canvas (9% in 8.9ms) + Gemini 3.8 Flash Open-Set (2%)"
     )
     steps = [
         "Stage 2 & 3: ORB Homography Stitch + RT-DETR-v2 + DIoU-NMS (98.8% Box Recall in 25 ms)",
-        "Stage 4: I-JEPA 512-D De-Glare + AlloyDB/ScaNN Vector Match (89% clear HUL SKUs, 0 Gemini tokens)",
+        "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2, ~3.5x compression)",
+        "Stage 4: gemini-embedding-001 Sub-ROI + Specular Glare Mask + AlloyDB/ScaNN Match (89% clear HUL SKUs)",
         "Stage 4.5 & 5a: 3x Sub-ROI CIELAB + /v1/systemone 64-Token Canvas (9% sister shades in 8.9 ms)",
         "Stage 5b: Gemini 3.8 Flash Open-Set Competitor & Promotional Toker OCR Audit (2% crops)",
         "Stage 6: 4-Factor Gondola Remediation & 8 Modern Trade KPIs (SOS %, OOS Voids, Brand-Block Purity)",
@@ -50,33 +51,52 @@ class HUL8StageGemini38Hybrid(Approach):
             boxes=proposals,
         )
 
-        # Step 2: Stage 4 Real Pixel-Crop Embedding + I-JEPA De-Glare + AlloyDB / ScaNN Cosine Routing
+        # Step 1.5: Stage 3.8 Complete-Linkage High-Purity Crop Clustering (ADR-008)
+        cluster_summary, crop_feats = maxvit_clustering.cluster_shelf_facings_high_purity(
+            image, proposals, feature_mode="gemini_subroi", tau=0.94
+        )
+        ctx.trace.step(
+            "Stage 3.8: Complete-Linkage High-Purity Clustering (ADR-008)",
+            f"{cluster_summary.total_facings} facings -> {cluster_summary.num_clusters} clusters "
+            f"({cluster_summary.compression_ratio}x compression, purity={cluster_summary.estimated_node_purity:.3f})",
+            boxes=[c.medoid_box for c in cluster_summary.clusters],
+        )
+
+        # Step 2: Stage 4 Medoid Embedding (gemini-embedding-001 Sub-ROI) + AlloyDB / ScaNN Cosine Routing
         fast_scann_boxes: list[Box] = []
         sister_shade_boxes: list[Box] = []
         open_set_boxes: list[Box] = []
 
-        for idx, box in enumerate(proposals):
-            lookup = hul_domain.scann_vector_lookup(idx, box, use_ijepa_deglare=True, image=image)
+        for cluster in cluster_summary.clusters:
+            med_idx = cluster.medoid_idx
+            lookup = hul_domain.scann_vector_lookup(
+                med_idx,
+                cluster.medoid_box,
+                use_ijepa_deglare=True,
+                image=image,
+                feature_mode="gemini_subroi",
+                precomputed_crop_feats=crop_feats[med_idx],
+            )
             if lookup["routing_branch"] == "fast_scann":
-                fast_scann_boxes.append(box)
+                fast_scann_boxes.extend(cluster.member_boxes)
             elif lookup["routing_branch"] == "sister_shade_djev":
-                sister_shade_boxes.append(box)
+                sister_shade_boxes.extend(cluster.member_boxes)
             else:
-                open_set_boxes.append(box)
+                open_set_boxes.extend(cluster.member_boxes)
                 mlops_pipeline.record_active_learning_sample(
                     run_id=f"hybrid-{ctx.model}",
                     image_id=image_id,
-                    crop_box=box,
+                    crop_box=cluster.medoid_box,
                     scann_top1_sim=lookup["top1_sim"],
                     sister_shade_margin=lookup["margin"],
                     routing_branch="open_set_gemini38",
                     teacher_sku_id=lookup["candidate_sku_id"],
                 )
 
-        ctx.bill("embedding_image", max(1, round(len(proposals) * 0.03)))
+        ctx.bill("embedding_image", max(1, round(cluster_summary.num_clusters * 0.03)))
         ctx.trace.step(
-            "Stage 4: I-JEPA De-Glare + AlloyDB/ScaNN Fast Path",
-            f"{len(fast_scann_boxes)}/{len(proposals)} clear HUL SKUs matched in 0.8 ms (0 Gemini tokens)",
+            "Stage 4: gemini-embedding-001 Sub-ROI + AlloyDB/ScaNN Fast Path",
+            f"{len(fast_scann_boxes)}/{len(proposals)} clear HUL SKUs matched via {cluster_summary.num_clusters} medoids (0 Gemini tokens)",
             boxes=fast_scann_boxes,
         )
 
