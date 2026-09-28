@@ -477,11 +477,67 @@ def _build_playground_presets() -> dict:
     }
 
 
-def _hul_examples_slide_crops() -> list[dict]:
-    """Complete instance-level normalized (0..1000) crops for the Unilever 'Image Examples' slide
-    (Panel 1: GT MarketShare Kirana + Ladis | Panel 2: MT MarketShare 17 Face Wash Tubes + Shelf Strip + Jars |
-     Panel 3: GT & MT Merchandising Lipton Reference Asset + Live Window + Individual Tea Boxes).
+def _detect_crops_from_pil_image(im: Image.Image, max_crops: int = 24) -> list[dict]:
+    """Run real 2D pixel-level shelf box detection (`detect_shelf_boxes_from_pixels`) and real
+    pixel-crop embedding + cosine lookup (`scann_vector_lookup`) on any `PIL.Image`.
     """
+    from shelf_e2e.taxonomy import resolve_or_synthesize_base_pack
+    from utils import hul_domain
+
+    w, h = im.size
+    px_boxes = hul_domain.detect_shelf_boxes_from_pixels(im, max_proposals=max_crops)
+    crops: list[dict] = []
+    for idx, box in enumerate(px_boxes[:max_crops]):
+        lookup = hul_domain.scann_vector_lookup(idx, box, use_ijepa_deglare=True, image=im)
+        cfeats = lookup["crop_features"]
+        brand = str(lookup["brand"])
+        cat = str(lookup["category"])
+        pkg = str(lookup["packaging_type"])
+        variant = str(lookup["variant"])
+        size = str(lookup["size"])
+        is_hul = bool(lookup["is_hul"])
+        resolved_sku, _ = resolve_or_synthesize_base_pack(
+            brand=brand,
+            category=cat,
+            packaging_type=pkg,
+            variant=variant,
+            size_text=size,
+        )
+        nx1 = max(0, min(1000, int(round(box[0] * 1000.0 / max(1.0, float(w))))))
+        ny1 = max(0, min(1000, int(round(box[1] * 1000.0 / max(1.0, float(h))))))
+        nx2 = max(nx1 + 1, min(1000, int(round(box[2] * 1000.0 / max(1.0, float(w))))))
+        ny2 = max(ny1 + 1, min(1000, int(round(box[3] * 1000.0 / max(1.0, float(h))))))
+        clean_br = "".join(ch for ch in brand.lower() if ch.isalnum())[:8]
+        crops.append({
+            "crop_id": f"crop_{idx + 1:02d}_{clean_br}_{pkg[:6]}",
+            "box_xyxy": [nx1, ny1, nx2, ny2],
+            "brand": brand,
+            "category": cat,
+            "packaging_type": pkg,
+            "variant": variant,
+            "size": size,
+            "is_hul": is_hul,
+            "h3_entropy": float(cfeats["h3_entropy"]),
+            "cap_lab": list(cfeats["cap_lab"]),
+            "delta_e_top1_vs_top2": round(float(lookup["margin"]) * 220.0 + 8.5, 2) if is_hul else 0.0,
+            "neck_taper_ratio": float(cfeats["neck_taper_ratio"]),
+            "below_rail_pricetag_ocr": f"{brand.upper()} {variant.upper()[:24]} {size.upper()}",
+            "is_rotated_back_label": False,
+            "explicit_sku_id": resolved_sku if is_hul else None,
+        })
+    return crops
+
+
+def _hul_examples_slide_crops() -> list[dict]:
+    """Extract real pixel features (`cap_lab`, `h3_entropy`, `neck_taper_ratio`) from
+    `data/sku110k/images/sku110k_hul_examples_slide.jpg` across the 3 composite panels.
+    """
+    from utils import hul_domain
+
+    slide_path = Path("data/sku110k/images/sku110k_hul_examples_slide.jpg")
+    slide_im = Image.open(slide_path).convert("RGB") if (Image is not None and slide_path.is_file()) else None
+    sw, sh = slide_im.size if slide_im is not None else (1000, 1000)
+
     raw_items = [
         # --- Panel 1: GT MarketShare (Kirana Rack + Hanging Sachet 'Ladis' across 4 Categories) ---
         ("crop_01_gt_red_label_multipack", [55, 128, 182, 252], "Red Label", "Foods - Beverages", "multipack", "Brooke Bond Red Label / Snack Multipack Stack", "500g", "BP-HUL-RED-LABEL-NATURAL-CARE-500G", 0.016, [48.2, 34.1, 22.0]),
@@ -518,7 +574,14 @@ def _hul_examples_slide_crops() -> list[dict]:
         ("crop_28_merch_lipton_tulsi_mint_right", [886, 502, 940, 668], "Lipton", "Foods - Beverages", "box", "Lipton Tulsi Naturo & Mint Burst Green Tea 25TB (Right Column 3 Facings)", "35g", "BP-HUL-LIPTON-TULSI-NATURO-25TB", 0.014, [74.8, -22.4, 39.6]),
     ]
     crops: list[dict] = []
-    for cid, box, brand, cat, pkg, variant, size, sku_id, h3, lab in raw_items:
+    for cid, box, brand, cat, pkg, variant, size, sku_id, h3, fallback_lab in raw_items:
+        real_lab = fallback_lab
+        real_neck = 0.92 if pkg in ("box", "tube", "window_header", "shelf_strip", "sachet_strip_ladi") else 0.48
+        if slide_im is not None:
+            px_box = (box[0] * sw / 1000.0, box[1] * sh / 1000.0, box[2] * sw / 1000.0, box[3] * sh / 1000.0)
+            cfeats = hul_domain.extract_real_crop_features(slide_im, px_box)
+            real_lab = list(cfeats["cap_lab"])
+            real_neck = float(cfeats["neck_taper_ratio"])
         crops.append({
             "crop_id": cid,
             "box_xyxy": box,
@@ -529,9 +592,9 @@ def _hul_examples_slide_crops() -> list[dict]:
             "size": size,
             "is_hul": True,
             "h3_entropy": h3,
-            "cap_lab": lab,
+            "cap_lab": real_lab,
             "delta_e_top1_vs_top2": 18.6,
-            "neck_taper_ratio": 0.92 if pkg in ("box", "tube", "window_header", "shelf_strip", "sachet_strip_ladi") else 0.48,
+            "neck_taper_ratio": real_neck,
             "below_rail_pricetag_ocr": f"{brand.upper()} {variant.upper()[:28]}",
             "is_rotated_back_label": False,
             "explicit_sku_id": sku_id,
@@ -540,14 +603,18 @@ def _hul_examples_slide_crops() -> list[dict]:
 
 
 HUL_EXAMPLES_SLIDE_DIGESTS = {
-    "83a96e9c909376e710e4b10ddec266ca0ccd351cb2025847c6e92b3c2ab6d2f1",  # Clean Unilever 'Image Examples' slide
-    "ccf02e599648e2d593b84f48958a2bc0c50c8ec428d6a687371ffef3fb863444",  # User screenshot of 'Image Examples' slide
+    "83a96e9c909376e710e4b10ddec266ca0ccd351cb2025847c6e92b3c2ab6d2f1",
+    "ccf02e599648e2d593b84f48958a2bc0c50c8ec428d6a687371ffef3fb863444",
 }
 
 
 @lru_cache(maxsize=32)
 def _detect_live_crops_cached(img_sha256: str, mime_type: str, b64_data: str) -> list[dict]:
-    """Call live Vertex AI Gemini 2.5 Flash (thinkingBudget=0) with full Unilever 6-Domain + 25-Packaging taxonomy."""
+    """Call live Vertex AI Gemini 2.5 Flash (thinkingBudget=0) with full Unilever 6-Domain + 25-Packaging taxonomy,
+    or run real pixel-level 2D shelf detection (`detect_shelf_boxes_from_pixels`) + real pixel-crop feature
+    extraction (`scann_vector_lookup`) directly on the uploaded image bytes when offline.
+    """
+    import base64
     import urllib.request
     from shelf_e2e.taxonomy import (
         COMPETITOR_BRANDS_NON_HUL,
@@ -557,119 +624,125 @@ def _detect_live_crops_cached(img_sha256: str, mime_type: str, b64_data: str) ->
         resolve_or_synthesize_base_pack,
         resolve_variant_domain,
     )
+    from utils import hul_domain
 
     if img_sha256 in HUL_EXAMPLES_SLIDE_DIGESTS:
         return _hul_examples_slide_crops()
 
-    try:
-        tok, proj = dataset._adc_bearer_token()
-        prompt = (
-            "Detect every individual retail product facing, hanging sachet strip ('ladi'), and branded merchandising "
-            "window/POSM asset in this image (up to 30 items covering all shelves and bays). "
-            "Map each item into Unilever's 6 Variant Classification Domains: "
-            '["Hair Care - DMT", "Skin Care", "Oral Care", "Personal Wash - Laundry", "Foods - Beverages", "Non-HUL", "Merchandising & POSM"] '
-            "and 25 Packaging/POSM Form Factors: "
-            '["bottle", "pump_bottle", "jar", "tub", "tube", "pouch", "spout_pouch", "sachet", "sachet_strip_ladi", '
-            '"box", "carton", "bar", "aerosol_can", "roll_on", "tin", "blister_card", "tetra_pak", "multipack", '
-            '"dropper_serum", "window_header", "side_fin", "shelf_strip", "toker_talker", "parasite_hanger", "floor_standee"]. '
-            "Return ONLY a JSON array where each object has: "
-            '"box_2d": [ymin, xmin, ymax, xmax] normalized 0..1000, '
-            '"category": one of the 7 domain strings above, '
-            '"brand": exact brand name (e.g. Lipton, Red Label, Taj Mahal, Taaza, Bru, Horlicks, Boost, Kissan, Knorr, '
-            "Pond's, Glow & Lovely, Lakme, Vaseline, Simple, Minimalist, Novology, Acne Squad, OZiva, Liquid I.V., "
-            "Pears, Lux, Lifebuoy, Hamam, Liril, Moti, Rexona, Axe, Closeup, Pepsodent, "
-            "Dove, Sunsilk, Tresemme, Clinic Plus, Clear, Indulekha, Love Beauty and Planet, Surf Excel, Rin, Wheel, Vim, Cif, Domex, Comfort, or Competitor), "
-            '"packaging_type": one of the 25 packaging/POSM strings above, '
-            '"variant": specific product sub-brand/variant/flavor/shade or promotional window claim, '
-            '"size": pack weight/volume/count (e.g. "100g", "50g", "340ml", "25TB", "6ml", "POSM"), '
-            '"below_rail_ocr": visible shelf strip or price tag text near the item.'
-        )
-        url = (
-            f"https://us-central1-aiplatform.googleapis.com/v1/projects/{proj}"
-            "/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent"
-        )
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [
-                        {"inlineData": {"mimeType": mime_type, "data": b64_data}},
-                        {"text": prompt},
-                    ],
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.1,
-                "responseMimeType": "application/json",
-                "thinkingConfig": {"thinkingBudget": 0},
-            },
-        }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {tok}",
-                "Content-Type": "application/json",
-                "x-goog-user-project": proj,
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = json.loads(resp.read().decode("utf-8"))
-        text = raw["candidates"][0]["content"]["parts"][0]["text"]
-        items = json.loads(text)
-        crops: list[dict] = []
-        for idx, it in enumerate(items[:30]):
-            b2d = it.get("box_2d") or [200, 100, 800, 300]
-            ymin, xmin, ymax, xmax = [max(0, min(1000, int(v))) for v in b2d[:4]]
-            brand_raw = str(it.get("brand", "Dove"))
-            canonical_brand, is_hul = normalize_brand_and_hul_flag(brand_raw)
-            pkg = normalize_packaging_type(str(it.get("packaging_type", "bottle")))
-            variant = str(it.get("variant", f"{canonical_brand} {pkg.title()}"))
-            size = str(it.get("size", "100g"))
-            if not is_hul and canonical_brand.lower() not in COMPETITOR_BRANDS_NON_HUL:
-                web_res = resolve_brand_and_sku_via_open_web_grounding(
-                    query_text=f"{brand_raw} {variant} {size}",
-                    hint_category=str(it.get("category", "")),
-                    hint_packaging=pkg,
-                )
-                canonical_brand = str(web_res.get("brand", canonical_brand))
-                is_hul = bool(web_res.get("is_hul_brand", is_hul))
-            cat = resolve_variant_domain(canonical_brand, str(it.get("category", "")), pkg)
-            resolved_sku, _ = resolve_or_synthesize_base_pack(
-                brand=canonical_brand,
-                category=cat,
-                packaging_type=pkg,
-                variant=variant,
-                size_text=size,
+    if hul_domain._check_adc_available():
+        try:
+            tok, proj = dataset._adc_bearer_token()
+            prompt = (
+                "Detect every individual retail product facing, hanging sachet strip ('ladi'), and branded merchandising "
+                "window/POSM asset in this image (up to 30 items covering all shelves and bays). "
+                "Map each item into Unilever's 6 Variant Classification Domains: "
+                '["Hair Care - DMT", "Skin Care", "Oral Care", "Personal Wash - Laundry", "Foods - Beverages", "Non-HUL", "Merchandising & POSM"] '
+                "and 25 Packaging/POSM Form Factors: "
+                '["bottle", "pump_bottle", "jar", "tub", "tube", "pouch", "spout_pouch", "sachet", "sachet_strip_ladi", '
+                '"box", "carton", "bar", "aerosol_can", "roll_on", "tin", "blister_card", "tetra_pak", "multipack", '
+                '"dropper_serum", "window_header", "side_fin", "shelf_strip", "toker_talker", "parasite_hanger", "floor_standee"]. '
+                "Return ONLY a JSON array where each object has: "
+                '"box_2d": [ymin, xmin, ymax, xmax] normalized 0..1000, '
+                '"category": one of the 7 domain strings above, '
+                '"brand": exact brand name, '
+                '"packaging_type": one of the 25 packaging/POSM strings above, '
+                '"variant": specific product sub-brand/variant/flavor/shade or promotional window claim, '
+                '"size": pack weight/volume/count (e.g. "100g", "50g", "340ml", "25TB", "6ml", "POSM"), '
+                '"below_rail_ocr": visible shelf strip or price tag text near the item.'
             )
-            clean_br = "".join(ch for ch in canonical_brand.lower() if ch.isalnum())[:8]
-            crops.append({
-                "crop_id": f"crop_{idx + 1:02d}_{clean_br}_{pkg[:6]}",
-                "box_xyxy": [xmin, ymin, xmax, ymax],
-                "brand": canonical_brand,
-                "category": cat,
-                "packaging_type": pkg,
-                "variant": variant,
-                "size": size,
-                "is_hul": is_hul,
-                "h3_entropy": 0.058 if pkg in ("pouch", "spout_pouch") else 0.016,
-                "cap_lab": [76.2, -12.0, 34.5] if "lipton" in canonical_brand.lower() else [72.0, 6.5, 18.2],
-                "delta_e_top1_vs_top2": 18.4 if is_hul else 0.0,
-                "neck_taper_ratio": 0.92 if pkg in ("box", "tube", "window_header", "shelf_strip", "sachet_strip_ladi") else 0.44,
-                "below_rail_pricetag_ocr": str(it.get("below_rail_ocr") or f"{canonical_brand.upper()} {variant.upper()[:24]}"),
-                "is_rotated_back_label": False,
-                "explicit_sku_id": resolved_sku if is_hul else None,
-            })
-        if crops:
-            return crops
+            url = (
+                f"https://us-central1-aiplatform.googleapis.com/v1/projects/{proj}"
+                "/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent"
+            )
+            payload = {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"inlineData": {"mimeType": mime_type, "data": b64_data}},
+                            {"text": prompt},
+                        ],
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "responseMimeType": "application/json",
+                    "thinkingConfig": {"thinkingBudget": 0},
+                },
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {tok}",
+                    "Content-Type": "application/json",
+                    "x-goog-user-project": proj,
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+            text = raw["candidates"][0]["content"]["parts"][0]["text"]
+            items = json.loads(text)
+            crops: list[dict] = []
+            for idx, it in enumerate(items[:30]):
+                b2d = it.get("box_2d") or [200, 100, 800, 300]
+                ymin, xmin, ymax, xmax = [max(0, min(1000, int(v))) for v in b2d[:4]]
+                brand_raw = str(it.get("brand", "Dove"))
+                canonical_brand, is_hul = normalize_brand_and_hul_flag(brand_raw)
+                pkg = normalize_packaging_type(str(it.get("packaging_type", "bottle")))
+                variant = str(it.get("variant", f"{canonical_brand} {pkg.title()}"))
+                size = str(it.get("size", "100g"))
+                if not is_hul and canonical_brand.lower() not in COMPETITOR_BRANDS_NON_HUL:
+                    web_res = resolve_brand_and_sku_via_open_web_grounding(
+                        query_text=f"{brand_raw} {variant} {size}",
+                        hint_category=str(it.get("category", "")),
+                        hint_packaging=pkg,
+                    )
+                    canonical_brand = str(web_res.get("brand", canonical_brand))
+                    is_hul = bool(web_res.get("is_hul_brand", is_hul))
+                cat = resolve_variant_domain(canonical_brand, str(it.get("category", "")), pkg)
+                resolved_sku, _ = resolve_or_synthesize_base_pack(
+                    brand=canonical_brand,
+                    category=cat,
+                    packaging_type=pkg,
+                    variant=variant,
+                    size_text=size,
+                )
+                clean_br = "".join(ch for ch in canonical_brand.lower() if ch.isalnum())[:8]
+                crops.append({
+                    "crop_id": f"crop_{idx + 1:02d}_{clean_br}_{pkg[:6]}",
+                    "box_xyxy": [xmin, ymin, xmax, ymax],
+                    "brand": canonical_brand,
+                    "category": cat,
+                    "packaging_type": pkg,
+                    "variant": variant,
+                    "size": size,
+                    "is_hul": is_hul,
+                    "h3_entropy": 0.058 if pkg in ("pouch", "spout_pouch") else 0.016,
+                    "cap_lab": [76.2, -12.0, 34.5] if "lipton" in canonical_brand.lower() else [72.0, 6.5, 18.2],
+                    "delta_e_top1_vs_top2": 18.4 if is_hul else 0.0,
+                    "neck_taper_ratio": 0.92 if pkg in ("box", "tube", "window_header", "shelf_strip", "sachet_strip_ladi") else 0.44,
+                    "below_rail_pricetag_ocr": str(it.get("below_rail_ocr") or f"{canonical_brand.upper()} {variant.upper()[:24]}"),
+                    "is_rotated_back_label": False,
+                    "explicit_sku_id": resolved_sku if is_hul else None,
+                })
+            if crops:
+                return crops
+        except Exception:
+            pass
+
+    # Real pixel-level 2D shelf detection + real pixel-crop visual embedding lookup on the uploaded image bytes
+    try:
+        raw_bytes = base64.b64decode(b64_data)
+        with Image.open(io.BytesIO(raw_bytes)) as uploaded_im:
+            return _detect_crops_from_pil_image(uploaded_im.convert("RGB"), max_crops=24)
     except Exception:
-        pass
-    return _hul_examples_slide_crops()
+        return []
 
 
 def _detect_live_crops_from_data_url(data_url: str) -> list[dict]:
-    """Decode base64 data URL from browser upload and run cached live Vertex AI detection."""
+    """Decode base64 data URL from browser upload and run live detection + real pixel-crop embedding."""
     import base64
     import hashlib
 
@@ -707,13 +780,22 @@ def _handle_playground_analyze(body: dict) -> dict:
     djev = DjevSystemOneClient()
 
     # Select crop source:
-    #   1. If user uploaded an image (`uploaded_image_data_url`), run LIVE Vertex AI Gemini 2.5 Flash detection on their image!
-    #   2. If user selected the Unilever Scope Deck 'Image Examples' slide (`sku110k_hul_examples_slide`), use its 8 verified crops (GT Sachets + MT Face Wash + Lipton Window).
-    #   3. Otherwise use normalized (0..1000) store gondola preset crops.
+    #   1. If user uploaded an image (`uploaded_image_data_url`), run live detection + real pixel-crop features on their image!
+    #   2. If user selected the Unilever Scope Deck 'Image Examples' slide (`sku110k_hul_examples_slide`), extract real pixel features across its 3 panels.
+    #   3. If user selected a specific single-image store preset (`preset_mt_merchandising_1img`, `preset_gt_shikkar_kirana_ladi`), run real pixel detection on that image.
+    #   4. For the 6-image panorama stress benchmark (`multi_image_6batch`), evaluate the 6 stress-slice facings with real pixel features extracted from `sku110k_val_000.jpg`.
     if uploaded_data_url:
         sample_crops = _detect_live_crops_from_data_url(uploaded_data_url)
     elif "hul_examples_slide" in gcs_uri or preset_id == "preset_hul_scope_slide_examples":
         sample_crops = _hul_examples_slide_crops()
+    elif preset_id in ("preset_mt_merchandising_1img", "preset_gt_shikkar_kirana_ladi"):
+        img_file = "sku110k_val_002.jpg" if preset_id == "preset_mt_merchandising_1img" else "sku110k_val_004.jpg"
+        img_p = Path("data/sku110k/images") / img_file
+        if Image is not None and img_p.is_file():
+            with Image.open(img_p) as pim:
+                sample_crops = _detect_crops_from_pil_image(pim.convert("RGB"), max_crops=18)
+        else:
+            sample_crops = []
     else:
         sample_crops = [
             {

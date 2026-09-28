@@ -59,7 +59,7 @@ def _fake_sheet(models: list[str]) -> dict:
 class _MockLLM:
     def __call__(self, image: Image.Image, prompt: str, **kw) -> LLMResult:
         u = Usage(200, 40, 0, 1, {"standard": 1}, {"standard/image_input": 200, "standard/output": 40})
-        return LLMResult([[100, 100, 300, 300]], u, 0.02)
+        return LLMResult([[33, 25, 300, 150], [33, 175, 300, 300]], u, 0.02)
 
 
 class UnifiedCloudArchitectureTests(unittest.TestCase):

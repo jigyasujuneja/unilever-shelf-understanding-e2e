@@ -32,8 +32,9 @@ class DjevSystemOneSisterShade(Approach):
         self.margin_gate = config.get("hul_slas", {}).get("sister_shade_margin_gate", 0.045)
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
-        known_boxes = getattr(ctx.sample, "boxes", None) if ctx.sample is not None else None
-        proposals = hul_domain.propose_rtdetr_shelf_boxes(image, known_boxes=known_boxes, recall_rate=0.988)
+        proposals = hul_domain.propose_rtdetr_shelf_boxes(
+            image, recall_rate=0.988, ctx=ctx, approach_name=self.name
+        )
         ctx.trace.step(
             "Stage 3: RT-DETR-v2 + ORB Seam Dedup",
             f"{len(proposals)} deduplicated facings across shelf panorama in 25 ms",
@@ -43,7 +44,7 @@ class DjevSystemOneSisterShade(Approach):
         scann_fast: list[Box] = []
         sister_shade_rois: list[Box] = []
         for idx, box in enumerate(proposals):
-            lookup = hul_domain.scann_vector_lookup(idx, box, use_ijepa_deglare=True)
+            lookup = hul_domain.scann_vector_lookup(idx, box, use_ijepa_deglare=True, image=image)
             if lookup["top1_sim"] >= self.sim_gate and lookup["margin"] >= self.margin_gate:
                 scann_fast.append(box)
             else:

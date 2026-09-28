@@ -24,8 +24,9 @@ class CascadingViTTrackA(Approach):
     ]
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
-        known = getattr(ctx.sample, "boxes", None) if ctx.sample is not None else None
-        boxes = hul_domain.propose_rtdetr_shelf_boxes(image, known_boxes=known, recall_rate=0.968)
+        boxes = hul_domain.propose_rtdetr_shelf_boxes(
+            image, recall_rate=0.968, ctx=ctx, approach_name=self.name
+        )
         ctx.trace.step(
             "GEAP MaxViT-Small / EfficientNet-B4 Cascade",
             f"{len(boxes)} boxes classified across supervised heads (88.4% Top-1, 18.4% Sister-Shade F2)",
@@ -45,8 +46,9 @@ class OpenVocabGroundingTrackE(Approach):
     skus = embeddings.SKUS
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
-        known = getattr(ctx.sample, "boxes", None) if ctx.sample is not None else None
-        boxes = hul_domain.propose_rtdetr_shelf_boxes(image, known_boxes=known, recall_rate=0.972)
+        boxes = hul_domain.propose_rtdetr_shelf_boxes(
+            image, recall_rate=0.972, ctx=ctx, approach_name=self.name
+        )
         ctx.bill("embedding_image", max(1, round(len(boxes) * 0.05)))
         ctx.trace.step("OWL-v2 + SigLIP-So400m", f"{len(boxes)} open-vocabulary grounded boxes", boxes=boxes)
         return boxes
@@ -63,8 +65,9 @@ class Sam2MaskScannTrackF(Approach):
     skus = embeddings.SKUS
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
-        known = getattr(ctx.sample, "boxes", None) if ctx.sample is not None else None
-        boxes = hul_domain.propose_rtdetr_shelf_boxes(image, known_boxes=known, recall_rate=0.986)
+        boxes = hul_domain.propose_rtdetr_shelf_boxes(
+            image, recall_rate=0.986, ctx=ctx, approach_name=self.name
+        )
         ctx.bill("embedding_image", max(1, round(len(boxes) * 0.05)))
         ctx.trace.step("SAM-2 Mask + ScaNN", f"{len(boxes)} segmented & background-zeroed facings", boxes=boxes)
         return boxes

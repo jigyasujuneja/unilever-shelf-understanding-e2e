@@ -38,12 +38,11 @@ class HUL8StageGemini38Hybrid(Approach):
         self.margin_gate = config.get("hul_slas", {}).get("sister_shade_margin_gate", 0.045)
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
-        known_boxes = getattr(ctx.sample, "boxes", None) if ctx.sample is not None else None
         image_id = getattr(ctx.sample, "image_id", "shelf_frame.jpg") if ctx.sample is not None else "shelf_frame.jpg"
 
-        # Step 1: Stage 2 ORB Seam Dedup + Stage 3 RT-DETR-v2 + DIoU-NMS
+        # Step 1: Stage 2 ORB Seam Dedup + Stage 3 RT-DETR-v2 + DIoU-NMS (ZERO ground-truth leakage)
         proposals = hul_domain.propose_rtdetr_shelf_boxes(
-            image, known_boxes=known_boxes, recall_rate=0.988, ctx=ctx
+            image, recall_rate=0.988, ctx=ctx, approach_name=self.name
         )
         ctx.trace.step(
             "Stage 3: RT-DETR-v2 + DIoU-NMS + ORB Seam Dedup",
@@ -51,13 +50,13 @@ class HUL8StageGemini38Hybrid(Approach):
             boxes=proposals,
         )
 
-        # Step 2: Stage 4 I-JEPA De-Glare + AlloyDB / ScaNN Cosine Similarity & Margin Routing
+        # Step 2: Stage 4 Real Pixel-Crop Embedding + I-JEPA De-Glare + AlloyDB / ScaNN Cosine Routing
         fast_scann_boxes: list[Box] = []
         sister_shade_boxes: list[Box] = []
         open_set_boxes: list[Box] = []
 
         for idx, box in enumerate(proposals):
-            lookup = hul_domain.scann_vector_lookup(idx, box, use_ijepa_deglare=True)
+            lookup = hul_domain.scann_vector_lookup(idx, box, use_ijepa_deglare=True, image=image)
             if lookup["routing_branch"] == "fast_scann":
                 fast_scann_boxes.append(box)
             elif lookup["routing_branch"] == "sister_shade_djev":
