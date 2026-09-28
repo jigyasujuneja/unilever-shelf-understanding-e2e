@@ -1,263 +1,329 @@
-# End-to-End Operations and Developer How-To Guide
+# Developer Guide: Repository Architecture, Task Contracts, and Cloud Execution
 
-**Owners:** Jigyasu Juneja (`jjuneja@google.com`), Riley Gavigan (`rgavigan@google.com`)  
-**Repository:** `https://github.com/jigyasujuneja/unilever-shelf-understanding-e2e`  
-**Standalone Reference Archive:** Tag `v1.0-standalone-reference` | Branch `reference/standalone-v1`
+Engineers use this repository to build, evaluate, and compare retail shelf detection and product classification models on a shared benchmark. Contributors add models in isolated files under `src/approaches/` or `src/stages/` while sharing the same dataset splits, evaluation metrics, cost ledger, and Cloud Run job runner.
 
-This guide covers local execution, one-command Argolis GCP bootstrapping, Cloud Run benchmark submission, MLOps lifecycle management, and developer extension rules for the unified Unilever Shelf Understanding repository.
-
-## 1. Repository Architecture and Directory Rules
-
-The repository merges the `shelf-bench` Cloud Run execution harness (`cloud-gtm/unilever-shelf-understanding-with-cv`) with the 8-Stage Hindustan Unilever (`HUL`) Gondola Intelligence engine (`src/shelf_e2e/`).
-
-To keep the codebase modular for multiple contributors, enforce two placement rules:
-1. **Approaches live exclusively in `src/approaches/`**: Every model architecture or routing pipeline is a self-contained module registered with `@register("name")` in `src/approaches/`.
-2. **Shared logic lives in `src/utils/` and `src/runner.py`**: Dataset loading, Vertex AI clients, Cloud Run submission, MLOps drift gates, and the HUL 8-stage domain bridge reside in `src/utils/` and `src/runner.py`.
+## Repository Layout and Boundaries
 
 ```text
-unilever-shelf-understanding-e2e/
-├── Dockerfile                        # Cloud Run container packaging src/, configs/, data/splits/, results/
-├── pyproject.toml                    # Package definition and shelf-bench CLI entrypoint
-├── config.yaml                       # Default model, split, and run parameters
+unilever-shelf-understanding/
+├── config.yaml                       # Default GCP project, bucket URIs, models, and split settings
+├── Dockerfile                        # Container image definition for Cloud Run jobs and web UI
 ├── src/
-│   ├── cli.py                        # Unified CLI: list, run, submit, bootstrap, serve, leaderboard
-│   ├── runner.py                     # Parallel evaluation harness, IoU matching, FinOps billing, MLOps gates
-│   ├── approaches/                   # EXCLUSIVELY registered shelf-understanding approaches (@register)
-│   │   ├── hul_8stage_gemini38_hybrid.py   # #1 Production Winner: RT-DETR + ScaNN (89%) + /v1/systemone (9%) + Gemini 3.8 (2%)
-│   │   ├── djev_systemone_sister_shade.py  # #2 Track D2/D3: RT-DETR + I-JEPA + Stage 4.5 Sister-Shade + /v1/systemone
-│   │   ├── tiered_hybrid_scann.py          # #3 Track C/D1: RT-DETR + AlloyDB ScaNN + Gemini fallback
-│   │   ├── all_pareto_tracks.py            # Track A (Cascading ViT), Track E (OWL-v2 + SigLIP), Track F (SAM-2 + ScaNN)
-│   │   ├── single_pass.py                  # Baseline B1: 1-Pass Full-Shelf Gemini VLM
-│   │   └── detect_classify.py              # Baseline B2: 2-Pass Gemini Detect + Crop Classify
-│   ├── utils/                        # Shared cloud, dataset, domain, MLOps, and API utilities
-│   │   ├── cloud.py                  # Dynamic Argolis project resolution, UBLA bucket bootstrap, Cloud Build & Run
-│   │   ├── dataset.py                # 3-way stratified Train/Val/Test split builder + GCS/local loader
-│   │   ├── hul_domain.py             # Shared bridge to Stage 1-8 HUL engine, I-JEPA, Stage 4.5, and 8 Gondola KPIs
-│   │   ├── mlops_pipeline.py         # Hot-swap SKU onboarding, Active Learning queue, PSI/ECE drift, 7-Gate CI/CD
-│   │   ├── storyboard_api.py         # Dual-persona REST APIs (/api/v1/cx-storyboard and /api/v1/eng-workbench)
-│   │   ├── llm.py                    # Keyless Vertex AI Gemini client with dynamic project resolution
-│   │   ├── pricing.py                # Live Cloud Billing Catalog SKU lookup + INR/USD FinOps ledger
-│   │   └── _local_shims/             # Offline fallback shims appended at the end of sys.path for bare Python runs
-│   └── shelf_e2e/                    # Full 8-Stage HUL Gondola Intelligence library (I-JEPA, dJev, 8 KPIs, Arena UI)
+│   ├── cli.py                        # CLI entry point (list, run, cloud-run, pull, leaderboard, serve)
+│   ├── runner.py                     # Evaluation loop, IoU box matching, F2 scoring, and cost ledger
+│   ├── approaches/                   # Self-contained benchmark approaches (@register)
+│   │   ├── base.py                   # Base Approach class, Context, Box type, and registry helpers
+│   │   ├── _detector_template.py     # Starter template for task="detection"
+│   │   ├── _classifier_template.py   # Starter template for task="classification"
+│   │   ├── _detect_retrieve_template.py # Starter template for vector DB retrieval
+│   │   ├── _combined_pipeline_template.py # Starter template for task="combined"
+│   │   └── modular_e2e_pipeline.py   # Configurable end-to-end pipeline composing approaches and stages
+│   ├── stages/                       # Pluggable internal pipeline stages (StageSpec registry)
+│   │   ├── registry.py               # StageSpec dataclass, register_stage(), and get_stage()
+│   │   ├── stage1_rectification.py   # Image quality check and perspective homography
+│   │   ├── stage2_3_detection.py     # Post-detection NMS and hanging sachet strip splitting
+│   │   ├── stage3_5_clustering.py    # Adjacent crop deduplication before VLM classification
+│   │   ├── stage4_retrieval.py       # Glare compensation and vector catalog lookup
+│   │   ├── stage5_compound_vlm.py    # CIELAB color distance and VLM shade disambiguation
+│   │   └── stage6_shelf_metrics.py   # Share-of-shelf, out-of-stock, and planogram metrics
+│   └── utils/                        # Shared dataset, Vertex AI, AlloyDB, billing, and web server modules
 ├── data/
-│   ├── splits/dataset_splits_manifest.json # Cryptographically locked (SHA-256: 5f2e48d279a9fec0) Train/Val/Test splits
-│   └── *.jpg                         # Real HUL and SKU-110K validation and test shelf photographs
-├── results/                          # Persisted JSON/HTML run scorecards and active_learning_queue.jsonl
-└── tests/
-    ├── test_shelf_bench.py           # Core shelf-bench harness unit tests
-    └── test_unified_cloud_mlops_and_approaches.py # End-to-end unified approaches, MLOps, splits, and Argolis tests
+│   └── splits/dataset_splits_manifest.json # SHA-256 locked train, val, and test split manifest
+├── results/                          # Saved run directories (<run_id>/summary.json and images.jsonl)
+└── tests/                            # Unit and integration test suite
 ```
 
-## 2. Local Setup and Authentication
+To keep accuracy, latency, and cost numbers comparable across runs, do not modify the core evaluation files:
 
-Install dependencies using `uv` (or run directly with `PYTHONPATH=src:. python3 src/cli.py`):
+| Scope | Files | Modification Policy |
+| :--- | :--- | :--- |
+| **Frozen Core** | `src/runner.py`, `src/utils/metrics.py`, `src/utils/dataset.py`, `src/utils/pricing.py`, `src/utils/llm.py`, `src/approaches/base.py`, `data/splits/` | Do not modify `IoU=0.50` matching, F2 formulas, dataset split definitions, or GCP Billing Catalog price lookups. |
+| **Task Approaches** | `src/approaches/<approach_name>.py` | Add new detection, classification, retrieval, or end-to-end approaches here. Any file not prefixed with `_` is auto-registered at import time. |
+| **Pipeline Stages** | `src/stages/stage*.py` | Register new stage functions (`rectifier`, `post_detector`, `clusterer`, `retriever`, `tiebreaker`, `shelf_metrics`) with `register_stage(StageSpec(...))`. |
 
-```bash
-uv sync
-```
+## Dataset Splits and Leaderboard Rules
 
-Authenticate with Google Cloud Application Default Credentials (`ADC`). The codebase complies with Argolis organization policies (`constraints/iam.disableServiceAccountKeyCreation`) and never uses downloaded JSON service account keys:
+The benchmark defines three non-overlapping splits in `src/utils/dataset.py`:
 
-```bash
-gcloud auth application-default login
-export GOOGLE_CLOUD_PROJECT="<YOUR_ARGOLIS_PROJECT_ID>"
-export GOOGLE_CLOUD_REGION="us-central1"
-```
+| Split | Image Count | Purpose | Leaderboard & Web UI (`#/arena`) Behavior |
+| :--- | :--- | :--- | :--- |
+| `train` | 8,219 (SKU-110K) / 20 (HUL) | Model fine-tuning, vector index population, and few-shot prompt selection. | Not displayed on the leaderboard. |
+| `val` | 588 (SKU-110K) / 25 (HUL) | Local iteration on prompts, thresholds, and model weights (`--split val --limit 25 --seed 0`). | Displayed in the UI with `rank = "dev"` below official runs. |
+| `test` | 2,936 (SKU-110K) / 50 (HUL) | Locked benchmark evaluation (`--split test --limit 50 --seed 0`). | Displayed with a numeric rank (`#1, #2, ...`) when executed on Cloud Run. |
 
-List all registered approaches and supported Vertex AI models:
+The web UI loads `summary.json` files from `results/` for both `test` and `val` runs. In `src/runner.py`, `leaderboard()` assigns a numbered rank only when `platform == "cloud-run"` and `(split, limit, seed) == ("test", 50, 0)`. All local runs and `val` runs are labeled `dev` so engineers can inspect experimental runs in the UI without affecting official rankings.
 
-```bash
-PYTHONPATH=src:. python3 src/cli.py list
-```
+## Task Contracts and Benchmark Epics
 
-## 3. How to Bootstrap Any New Argolis GCP Project
+Every approach in `src/approaches/` subclasses `Approach` from `src/approaches/base.py`, applies the `@register` decorator, and declares `name`, `task`, `epic`, and `target_field`:
 
-When moving to a new Argolis environment, run a single command to provision all required Google Cloud infrastructure, upload the datasets, build the container image, and register the Cloud Run Job:
+| Epic Name | `task` | `target_field` | Required Method Signature | Starter Template |
+| :--- | :--- | :--- | :--- | :--- |
+| `MT Market Share - SKU Detection` | `"detection"` | `"box"` | `detect(image, ctx) -> list[Box]` | `src/approaches/_detector_template.py` |
+| `MT Market Share - Other (Category, Brand and Package Type) Classifiers` | `"classification"` | `"compound"` | `classify(image, boxes, ctx, prior=None) -> list[dict]` | `src/approaches/_classifier_template.py` |
+| `MT Market Share - Variant Classification` | `"classification"` | `"variant"` | `classify(image, boxes, ctx, prior=None) -> list[dict]` | `src/approaches/_classifier_template.py` or `_detect_retrieve_template.py` |
+| `MT Market Share - Combined Classification` | `"combined"` | `"variant"` | `detect_and_classify(image, ctx) -> tuple[list[Box], list[dict]]` | `src/approaches/_combined_pipeline_template.py` |
+| `MT Merchandising - Promotion Asset Detection` | `"detection"` | `"box"` | `detect(image, ctx) -> list[Box]` | `src/approaches/_detector_template.py` |
+| `MT Merchandising - Promotion Product Detection` | `"combined"` | `"variant"` | `detect_and_classify(image, ctx) -> tuple[list[Box], list[dict]]` | `src/approaches/_combined_pipeline_template.py` |
 
-```bash
-PYTHONPATH=src:. python3 src/cli.py bootstrap \
-  --project <YOUR_ARGOLIS_PROJECT_ID> \
-  --region us-central1
-```
+Data types passed into and out of these methods:
+- `image`: A `PIL.Image.Image` in RGB format.
+- `Box`: A 4-tuple `(x1, y1, x2, y2)` in absolute pixel coordinates of the input image.
+- `label` dictionary (returned per box by `classify` and `detect_and_classify`):
+  ```python
+  {
+      "sku_id": str,          # Catalog SKU code, e.g. "UL-DOVE-BW-500ML"
+      "category": str,        # e.g. "Skin Care", "Hair Care", "Personal Care"
+      "brand": str,           # e.g. "Dove", "Lakme", "Pond's"
+      "packaging_type": str,  # e.g. "bottle", "tube", "jar", "box", "sachet"
+      "variant": str,         # e.g. "Deeply Nourishing Body Wash 500ml"
+      "is_hul": bool,         # True for HUL products, False for competitor products
+  }
+  ```
+- `ctx`: A `Context` instance providing `ctx.ask(image, prompt, schema=...)` for metered Gemini calls, `ctx.bill(service, units)` for metered non-LLM services, and `ctx.trace.step(title, detail, boxes=..., labels=...)` for UI step inspection.
 
-What `shelf-bench bootstrap` executes in order:
-1. **Project Resolution**: Resolves the target GCP project via `--project`, `SHELF_BENCH_PROJECT`, `GOOGLE_CLOUD_PROJECT`, `gcloud config get-value project`, or `google.auth.default()`.
-2. **Service Enablement**: Enables `aiplatform.googleapis.com`, `run.googleapis.com`, `cloudbuild.googleapis.com`, `artifactregistry.googleapis.com`, `storage.googleapis.com`, and `cloudbilling.googleapis.com` via the Service Usage API.
-3. **Org-Policy Compliant Storage**: Creates `gs://<YOUR_ARGOLIS_PROJECT_ID>-shelf-images` and `gs://run-sources-<YOUR_ARGOLIS_PROJECT_ID>-us-central1` with `uniformBucketLevelAccess.enabled = True` (`constraints/storage.uniformBucketLevelAccess`).
-4. **Dataset and Split Upload**: Uploads local `SKU110K_fixed/` images and annotations (if present in `--data-dir`), HUL reference shelf images from `data/`, and `data/splits/dataset_splits_manifest.json` to `gs://<YOUR_ARGOLIS_PROJECT_ID>-shelf-images/`.
-5. **Cloud Build Packaging**: Archives `pyproject.toml`, `README.md`, `config.yaml`, `src/`, `configs/`, `data/splits/`, and `results/`, submits the tarball to Cloud Build, and pushes `gcr.io/<YOUR_ARGOLIS_PROJECT_ID>/shelf-bench:latest`.
-6. **Cloud Run Job Creation**: Creates or updates the `shelf-bench` Cloud Run Job (`4 vCPU`, `8 GiB RAM`, `3600s` timeout) with `GOOGLE_CLOUD_PROJECT`, `SHELF_BENCH_BUCKET`, and `SHELF_BENCH_RESULTS` pre-wired.
+## Adding a New Task Approach (`src/approaches/`)
 
-If you only need to check infrastructure readiness without uploading local datasets, pass `--skip-data-upload`.
+Choose the pattern below that matches your task, copy the corresponding template into `src/approaches/<your_approach>.py` (without a leading underscore), and implement the method for your task.
 
-## 4. How to Run Benchmarks (Local and Cloud Run)
+### Pattern 1: Bounding-Box Detector (`task = "detection"`)
 
-### Run Locally Against Any Split (`train`, `val`, `test`)
-
-```bash
-# Run the #1 Production Hybrid approach on 50 test images
-PYTHONPATH=src:. python3 src/cli.py run hul_8stage_gemini38_hybrid \
-  --model gemini-3.8-flash \
-  --split test \
-  --limit 50 \
-  --workers 8
-
-# Run Track D2/D3 (/v1/systemone + Stage 4.5 Sister-Shade) on the validation split
-PYTHONPATH=src:. python3 src/cli.py run djev_systemone_sister_shade \
-  --model gemini-3.8-flash \
-  --split val \
-  --limit 25
-```
-
-### Submit a Benchmark Job to Cloud Run (`shelf-bench submit`)
-
-```bash
-PYTHONPATH=src:. python3 src/cli.py submit hul_8stage_gemini38_hybrid \
-  --project <YOUR_ARGOLIS_PROJECT_ID> \
-  --region us-central1 \
-  --model gemini-3.8-flash \
-  --split test \
-  --limit 50 \
-  --workers 8
-```
-
-When `--sync` is omitted, `submit` returns immediately with the Cloud Run execution ID and console URL while the job writes `summary.json`, `report.html`, and annotated bounding-box PNGs to `gs://<YOUR_ARGOLIS_PROJECT_ID>-shelf-images/results/<run_id>/`.
-
-### View the Unified Leaderboard
-
-```bash
-PYTHONPATH=src:. python3 src/cli.py leaderboard
-```
-
-This prints a comparative table across all saved runs in `results/`, including 2D Box `F2` (`IoU >= 0.50`), 7-Dimension HUL SKU `F2`, 14-SKU Sister-Shade `F2`, `P95` latency, total INR cost, and 7-Gate CI/CD promotion status.
-
-## 5. How to Add a New Approach (`src/approaches/`)
-
-To add a new computer vision or VLM pipeline without touching the runner or CLI:
-
-1. Create a new file in `src/approaches/my_new_approach.py`.
-2. Decorate your entry function with `@register("my_new_approach")`.
-3. Import your module in `src/approaches/__init__.py`.
+Use this pattern for YOLO, RT-DETR, GroundingDINO, AutoML Object Detection, or VLM bounding-box detectors.
 
 ```python
 from PIL import Image
-from approaches import Box, Detections, register
-from utils.llm import Usage
+from approaches.base import Approach, Box, Context, register
 
-@register("my_new_approach")
-def run(image: Image.Image, model: str, ctx: dict, **kwargs) -> Detections:
-    """Detect and classify shelf products."""
-    llm = ctx["llm"]
-    res = llm(image, "Detect all visible facings as [ymin, xmin, ymax, xmax].")
-    boxes = [
-        Box(ymin=b[0], xmin=b[1], ymax=b[2], xmax=b[3], label="HUL_DOVE_180ML", conf=0.95)
-        for b in (res.parsed or [])
-    ]
-    return Detections(boxes=boxes, usage=res.usage, meta={"custom_metric": 1.0})
+@register
+class CustomShelfDetector(Approach):
+    name = "custom_shelf_detector"
+    task = "detection"
+    epic = "MT Market Share - SKU Detection"
+    target_field = "box"
+    architecture = "Custom detector description shown in the leaderboard"
+    steps = ["Run detector inference", "Apply non-maximum suppression"]
+
+    def setup(self, config: dict) -> None:
+        # Load model weights or initialize endpoint client once per run.
+        pass
+
+    def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        boxes: list[Box] = [
+            # Return (x1, y1, x2, y2) in pixel coordinates of `image`.
+        ]
+        ctx.trace.step("Detect products", f"{len(boxes)} boxes", boxes=boxes)
+        return boxes
 ```
 
-Your approach immediately becomes available to `shelf-bench list`, `shelf-bench run my_new_approach`, `shelf-bench submit my_new_approach`, and `shelf-bench leaderboard`.
+### Pattern 2: VLM or Fine-Tuned Endpoint Classifier (`task = "classification"`)
 
-## 6. How to Use the MLOps and GenAIOps Pipeline
+Use this pattern for Category/Brand/Packaging classifiers (`target_field = "compound"`) or Variant classifiers (`target_field = "variant"`). During standalone classification runs, the runner passes ground-truth bounding boxes into `boxes` so classifier accuracy is measured independently of detector errors.
 
-All MLOps primitives live in `src/utils/mlops_pipeline.py` and run automatically during `runner.run()`.
+```python
+from typing import Any
+from PIL import Image
+from approaches.base import Approach, Box, Context, label_counts, register
 
-### Verify Dataset Splits and Zero Data Leakage (`Train / Val / Test`)
+OUTPUT_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "sku_id": {"type": "STRING"},
+        "category": {"type": "STRING"},
+        "brand": {"type": "STRING"},
+        "packaging_type": {"type": "STRING"},
+        "variant": {"type": "STRING"},
+    },
+    "required": ["sku_id", "category", "brand", "packaging_type", "variant"],
+}
 
-Rebuild or verify the cryptographically locked (`SHA-256: 5f2e48d279a9fec0`) 3-way split manifest (`20` `train`, `25` `val`, `63` `test` images):
+@register
+class CustomCropClassifier(Approach):
+    name = "custom_crop_classifier"
+    task = "classification"
+    epic = "MT Market Share - Variant Classification"
+    target_field = "variant"  # Set to "compound" for Epic 2 (Category, Brand, Packaging)
+    architecture = "Structured JSON crop classifier on Vertex AI"
+    steps = ["Crop each bounding box", "Decode product attributes with structured JSON schema"]
 
-```bash
-PYTHONPATH=src:. python3 -c "
-from utils.dataset import build_stratified_splits_manifest
-manifest = build_stratified_splits_manifest()
-print('Manifest Hash:', manifest['manifest_sha256'])
-print('Zero Leakage Verified:', manifest['zero_leakage_verified'])
-print('Counts:', {k: v['count'] for k, v in manifest['splits'].items()})
-"
+    def classify(
+        self,
+        image: Image.Image,
+        boxes: list[Box],
+        ctx: Context,
+        prior: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        predictions: list[dict[str, Any]] = []
+        for idx, box in enumerate(boxes):
+            hint = prior[idx] if prior and idx < len(prior) else {}
+            prompt = (
+                f"Classify this product crop. "
+                f"Optional prior: category={hint.get('category', 'any')}, "
+                f"brand={hint.get('brand', 'any')}, packaging={hint.get('packaging_type', 'any')}."
+            )
+            res = ctx.ask(image.crop(box), prompt, schema=OUTPUT_SCHEMA, max_side=512)
+            data = res.data or {}
+            predictions.append({
+                "sku_id": data.get("sku_id", "UNKNOWN"),
+                "category": data.get("category") or hint.get("category", "Unknown"),
+                "brand": data.get("brand") or hint.get("brand", "Unknown"),
+                "packaging_type": data.get("packaging_type") or hint.get("packaging_type", "bottle"),
+                "variant": data.get("variant", "Unknown"),
+                "is_hul": True,
+            })
+        ctx.trace.step("Classify crops", label_counts(predictions), boxes=boxes, labels=predictions)
+        return predictions
 ```
 
-### Zero-Retrain Hot-Swap SKU Onboarding (`< 60s`)
-
-When HUL launches a new SKU or updates packaging artwork, onboard the SKU directly into the `AlloyDB / Vertex AI ScaNN` vector index without retraining `RT-DETR-v2`:
-
+To evaluate a fine-tuned Vertex AI model endpoint without changing code, pass the endpoint resource path to `-m`:
 ```bash
-PYTHONPATH=src:. python3 -c "
-from pathlib import Path
-from utils.mlops_pipeline import hot_swap_onboard_sku
+PYTHONPATH=src python3 src/cli.py run -a custom_crop_classifier \
+  -m projects/<PROJECT_ID>/locations/us-central1/endpoints/<ENDPOINT_ID> \
+  --split val --limit 25
+```
 
-entry = hot_swap_onboard_sku(
-    sku_id='HUL_NOVOLOGY_ACNE_SERUM_30ML',
-    base_pack_code='BP-HUL-NOV-019',
-    brand='Novology',
-    category='Skin Care',
-    variant='Bi-Phasic Hyper Pigmentation Serum 30ml',
-    reference_images=[Path('data/grocery282_unilever_shelf_val_000.jpg')],
-    cielab_reference=(64.2, 8.1, 14.5),
+### Pattern 3: Vector Database Retriever (`task = "classification"`)
+
+Use this pattern when embedding product crops (`gemini-embedding-001` or `SigLIP`) and querying AlloyDB `pgvector` / `ScaNN`. Include `skus = embeddings.SKUS` on the class so the runner bills embedding calls automatically.
+
+```python
+from typing import Any
+from PIL import Image
+from approaches.base import Approach, Box, Context, label_counts, register
+from utils import embeddings
+from utils.alloydb import AlloyDB, pgvector
+
+VECTOR_SQL = """
+    SELECT sku_id, category, brand, packaging_type, variant
+    FROM products
+    WHERE (%s IS NULL OR brand = %s)
+    ORDER BY embedding <=> %s::vector
+    LIMIT 1
+"""
+
+@register
+class CustomVectorRetriever(Approach):
+    name = "custom_vector_retriever"
+    task = "classification"
+    epic = "MT Market Share - Variant Classification"
+    target_field = "variant"
+    architecture = "Vertex multimodal crop embeddings + AlloyDB pgvector/ScaNN retrieval"
+    steps = ["Embed each crop", "Query AlloyDB vector index for nearest SKU"]
+    skus = embeddings.SKUS
+
+    def setup(self, config: dict) -> None:
+        self.embed = embeddings.VertexEmbeddings(config)
+        self.db = AlloyDB(**config["alloydb"])
+
+    def classify(
+        self,
+        image: Image.Image,
+        boxes: list[Box],
+        ctx: Context,
+        prior: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        predictions: list[dict[str, Any]] = []
+        for idx, box in enumerate(boxes):
+            brand_filter = prior[idx].get("brand") if prior and idx < len(prior) else None
+            vec = pgvector(self.embed.image(image.crop(box), ctx))
+            rows = self.db.query(VECTOR_SQL, (brand_filter, brand_filter, vec))
+            sku_id, cat, brand, pkg, var = rows[0] if rows else ("UNKNOWN", "Unknown", "Unknown", "bottle", "Unknown")
+            predictions.append({
+                "sku_id": sku_id,
+                "category": cat,
+                "brand": brand,
+                "packaging_type": pkg,
+                "variant": var,
+                "is_hul": not str(sku_id).startswith("COMP"),
+            })
+        ctx.trace.step("Vector lookup", label_counts(predictions), boxes=boxes, labels=predictions)
+        return predictions
+```
+
+## Adding or Swapping an Internal Pipeline Stage (`src/stages/`)
+
+If you want to experiment with an internal processing step (such as perspective rectification, post-detection NMS, crop clustering, catalog filtering, shade tie-breaking, or shelf metric calculation) without writing a full approach class, register a `StageSpec` in `src/stages/`:
+
+```python
+from stages.registry import StageSpec, register_stage
+
+def my_custom_clusterer(boxes: list[tuple[float, float, float, float]]) -> dict:
+    return {
+        "mode": "my_custom_clusterer",
+        "input_crops": len(boxes),
+        "medoid_calls": max(1, len(boxes) // 5),
+        "compression_ratio": 5.0,
+        "cluster_purity": 0.995,
+    }
+
+register_stage(
+    StageSpec(
+        stage_group="clusterer",  # rectifier | post_detector | clusterer | retriever | tiebreaker | shelf_metrics
+        name="my_custom_clusterer",
+        title="Custom Crop Clusterer",
+        description="Groups adjacent crops on the same shelf row before VLM calls.",
+        f2_delta=0.001,
+        latency_delta_s=-0.05,
+        cost_delta_inr=-0.004,
+        default=False,
+        fn=my_custom_clusterer,
+    )
 )
-print('Onboarded in:', entry['onboarding_latency_s'], 's | Status:', entry['status'])
-"
 ```
 
-### 7-Gate Champion/Challenger Promotion Contract
+Once registered, the stage appears in `shelf-bench list`, `/api/stages`, the web UI simulator dropdowns, and can be passed to `modular_e2e_pipeline` via `--with-clusterer my_custom_clusterer`.
 
-Every `test` split run evaluates 7 automated release gates in `summary["mlops"]["promotion_contract"]`:
-1. `box_f2_gte_095`: 2D Localization `F2 >= 0.950`
-2. `hul_7dim_f2_gte_095`: 7-Dimension HUL SKU `F2 >= 0.950`
-3. `sister_shade_f2_gte_092`: 14-SKU Sister-Shade `F2 >= 0.920`
-4. `latency_p95_lte_20s`: Server `P95 <= 20.0s`
-5. `cost_inr_lte_022`: Unit cost `<= INR 0.22 / image`
-6. `zero_erp_hallucination`: `0.0%` invalid ERP Base Pack codes (`vllm#58216`)
-7. `zero_split_leakage`: Cryptographic verification that `train`, `val`, and `test` have zero overlap
+## End-to-End Composition and CLI Workflow
 
-## 7. How to Run the Dual-Persona Storyboard APIs and Arena Server
+Follow this five-step sequence for any change:
 
-### Start the Dual-Persona Cloud Run API Server (`shelf-bench serve`)
-
-To keep executive views simple and give ML engineers full diagnostic telemetry, the backend exposes two separate JSON contracts:
-
+### 1. Authenticate and inspect available approaches and stages
 ```bash
-PYTHONPATH=src:. python3 src/cli.py serve --port 8080
+gcloud auth application-default login
+export GOOGLE_CLOUD_PROJECT="<YOUR_GCP_PROJECT_ID>"
+
+PYTHONPATH=src python3 src/cli.py list
 ```
 
-Query the **CX / Leadership Storyboard API** (returns 3 non-technical cards: Overall Shelf Health Score, Weekly Store Revenue Recovery in `INR`, and Top 3 Field Merchandiser Actions):
-
+### 2. Iterate locally on the validation split (`val`)
 ```bash
-curl -s http://127.0.0.1:8080/api/v1/cx-storyboard | python3 -m json.tool
+PYTHONPATH=src python3 src/cli.py run -a <your_approach> -m gemini-3.8-flash \
+  --split val --limit 25 --seed 0 --owner $USER
 ```
 
-Query the **AI & ML Engineer Workbench API** (returns the `Train/Val/Test` KPI matrix across all 8 approaches, `89% ScaNN / 9% SystemOne / 2% Gemini` cascade routing ratios, `PSI`/`ECE` drift metrics, and 7-Gate CI/CD contract status):
+### 3. Test your component inside the full end-to-end pipeline
+Swap your detector, attribute classifier, variant classifier, or stage function into `modular_e2e_pipeline` to measure its impact on end-to-end 7-attribute F2, share-of-shelf accuracy, latency, and cost:
 
 ```bash
-curl -s http://127.0.0.1:8080/api/v1/eng-workbench | python3 -m json.tool
+PYTHONPATH=src python3 src/cli.py run -a modular_e2e_pipeline -m gemini-3.1-flash-lite \
+  --with-detector yolo_n26_sku110k \
+  --with-attr-classifier djev_diffusiongemma_compound \
+  --with-variant-classifier ft_gemini31_variant_compound \
+  --with-rectifier depth_anything_v2 \
+  --with-clusterer maxvit_agglomerative \
+  --with-retriever siglip_multiprototype \
+  --with-tiebreaker cielab_delta_e_and_systemone \
+  --with-shelf-metrics dual_mt_marketshare_and_merchandising \
+  --split val --limit 25
 ```
 
-### Start the Standalone 8-Tab Interactive Control Plane UI
-
-To inspect our standalone 8-tab Gondola Intelligence visual debugger locally:
-
+### 4. Run the test suite
 ```bash
-PYTHONPATH=src:. python3 src/shelf_e2e/platform/server.py --host 0.0.0.0 --port 8765
+PYTHONPATH=src python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-## 8. How to Run the Automated Verification Suite
-
-Run both the unified cloud/MLOps test suite and the standalone 8-stage HUL test suite:
-
+### 5. Submit official `test` evaluation to Cloud Run and view the leaderboard
 ```bash
-PYTHONPATH=src:. python3 -m unittest discover -s tests -p "test_*.py" -v
-```
+# Provision GCP buckets, Artifact Registry, and Cloud Run job on a new project (one-time)
+PYTHONPATH=src python3 src/cli.py bootstrap --project <YOUR_GCP_PROJECT_ID> --region us-central1
 
-## 9. Accessing the Preserved Standalone v1.0 Reference
+# Execute on Cloud Run against the locked 50-image test split
+PYTHONPATH=src python3 src/cli.py cloud-run -a <your_approach> -m gemini-3.8-flash \
+  --split test --limit 50 --seed 0 --owner $USER
 
-Our standalone pre-merge repository (`99` files, all reports, specs, and standalone servers) is permanently frozen and available at any time:
+# Pull finished Cloud Run results from GCS into local results/
+PYTHONPATH=src python3 src/cli.py pull
 
-```bash
-# Inspect or checkout the standalone reference tag
-git checkout v1.0-standalone-reference
-
-# Or switch to the preserved reference branch
-git checkout reference/standalone-v1
-
-# Return to the unified cloud main branch
-git checkout main
+# Print the CLI leaderboard or launch the local web UI at http://127.0.0.1:8080/#/arena
+PYTHONPATH=src python3 src/cli.py leaderboard
+PYTHONPATH=src python3 src/cli.py serve --port 8080
 ```

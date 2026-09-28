@@ -226,7 +226,104 @@ class UnifiedCloudArchitectureTests(unittest.TestCase):
         self.assertEqual(clustered_mv.total_facings, 4)
         self.assertEqual(len(feats_mv), 4)
 
+    def test_kaggle_epics_templates_and_modular_composition(self) -> None:
+        from approaches.base import EPICS, TASKS
+
+        reg = approaches.all_approaches()
+        expected_divided = {
+            "rtdetr_shelf_rail_detector",
+            "yolo_n26_sku110k",
+            "gemini_2_robotics_detector",
+            "hul_hierarchy_classifier",
+            "ft_gemini31_cat_brand_pkg",
+            "scann_vector_retriever",
+            "sister_shade_systemone",
+            "ft_gemini31_variant_compound",
+            "compound_pipeline_1_plus_2",
+            "modular_e2e_pipeline",
+            "promo_asset_detector",
+            "promo_product_detector",
+        }
+        self.assertTrue(expected_divided.issubset(set(reg.keys())))
+        covered_epics = {a.epic for a in reg.values()}
+        for ep in EPICS:
+            self.assertIn(ep, covered_epics)
+        covered_tasks = {a.task for a in reg.values()}
+        self.assertEqual(covered_tasks, set(TASKS))
+
+        # Verify all 4 copy-paste templates exist in src/approaches/ and are excluded from REGISTRY
+        approaches_dir = Path("src/approaches")
+        for tpl in (
+            "_detector_template.py",
+            "_classifier_template.py",
+            "_detect_retrieve_template.py",
+            "_combined_pipeline_template.py",
+        ):
+            self.assertTrue((approaches_dir / tpl).is_file(), f"Missing template {tpl}")
+
+        # Verify /api/approaches and /api/v1/modular-pipeline-simulate endpoints
+        server.Handler.results_dir = Path("results")
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/approaches", timeout=5) as r:
+                app_meta = json.loads(r.read().decode())
+            self.assertGreaterEqual(len(app_meta["approaches"]), 21)
+            self.assertEqual(len(app_meta["epics"]), 6)
+
+            sim_url = (
+                f"http://127.0.0.1:{port}/api/v1/modular-pipeline-simulate"
+                "?detector=yolo_n26_sku110k&attr_classifier=djev_diffusiongemma_compound"
+                "&variant_classifier=ft_gemini31_variant_compound&rectifier=depth_anything_v2"
+            )
+            with urllib.request.urlopen(sim_url, timeout=5) as r:
+                sim = json.loads(r.read().decode())
+            self.assertIn("projected_combined_7dim_f2", sim)
+            self.assertIn("mt_market_share_kpis", sim)
+            self.assertIn("mt_merchandising_kpis", sim)
+            self.assertIn("cli_command", sim)
+            self.assertIn("--with-detector yolo_n26_sku110k", sim["cli_command"])
+            self.assertIn("--with-rectifier depth_anything_v2", sim["cli_command"])
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_two_level_micro_stages_and_dynamic_unilever_kpis(self) -> None:
+        import stages
+        from utils import hul_domain
+
+        all_stg = stages.all_stages()
+        expected_groups = {"rectifier", "post_detector", "clusterer", "retriever", "tiebreaker", "shelf_metrics"}
+        self.assertEqual(set(all_stg.keys()), expected_groups)
+        for grp in expected_groups:
+            self.assertGreaterEqual(len(all_stg[grp]), 3)
+        # Verify legacy alias still resolves cleanly
+        self.assertEqual(stages.get_stage("gondola_kpi").stage_group, "shelf_metrics")
+
+        # Verify dynamic prediction-driven KPI scoring for any custom approach name
+        custom_eval = hul_domain.evaluate_shelf_summary(
+            total_boxes=140,
+            scann_count=120,
+            djev_sister_shade_count=16,
+            gemini_open_set_count=4,
+            approach_name="brand_new_custom_teammate_approach",
+            actual_f2=0.984,
+            actual_recall=0.986,
+            p95_latency_s=1.35,
+            cost_per_image_inr=0.048,
+            attribute_accuracy={"compound": 0.992, "variant": 0.978, "all_7dim": 0.976},
+            stage_overrides={"rectifier": "depth_anything_v2", "clusterer": "maxvit_agglomerative"},
+        )
+        self.assertGreaterEqual(custom_eval["hul_7dim_sku_f2"], 0.95)
+        self.assertGreaterEqual(custom_eval["sister_shade_14sku_f2"], 0.95)
+        self.assertIn("shelf_metrics", custom_eval)
+        self.assertTrue(custom_eval["mt_market_share_kpis"]["sla_30s_pass"])
+        self.assertTrue(custom_eval["mt_merchandising_kpis"]["sla_10s_pass"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
