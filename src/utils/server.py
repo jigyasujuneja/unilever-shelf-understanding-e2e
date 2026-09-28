@@ -87,7 +87,11 @@ class Handler(BaseHTTPRequestHandler):
         self._send(json.dumps(obj).encode(), "application/json", code)
 
     def do_GET(self) -> None:  # noqa: N802
-        parts = [unquote(p) for p in urlparse(self.path).path.strip("/").split("/") if p]
+        from urllib.parse import parse_qs
+
+        parsed = urlparse(self.path)
+        parts = [unquote(p) for p in parsed.path.strip("/").split("/") if p]
+        qs = parse_qs(parsed.query)
         try:
             if not parts:
                 return self._send((STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
@@ -95,7 +99,84 @@ class Handler(BaseHTTPRequestHandler):
                 ctype = ("text/javascript" if parts[1].endswith(".js") else "text/css") + "; charset=utf-8"
                 return self._send((STATIC / parts[1]).read_bytes(), ctype)
             if parts == ["api", "leaderboard"]:
-                return self._json(runner.leaderboard(self.results_dir))
+                q_task = qs.get("task", [None])[0]
+                q_epic = qs.get("epic", [None])[0]
+                q_attr = qs.get("attribute", [None])[0]
+                return self._json(
+                    runner.leaderboard(self.results_dir, task=q_task, epic=q_epic, attribute=q_attr)
+                )
+            if parts in (["api", "approaches"], ["api", "v1", "approaches"]):
+                wb = _build_eng_workbench(self.results_dir)
+                return self._json({
+                    "tasks": wb["tasks_catalog"],
+                    "epics": wb["epics_catalog"],
+                    "approaches": wb["approaches_registry"],
+                    "stages": wb["stages_registry"],
+                })
+            if parts in (["api", "stages"], ["api", "v1", "stages"]):
+                import stages
+
+                return self._json(stages.all_stages())
+            if parts == ["api", "v1", "modular-pipeline-simulate"]:
+                import stages
+                from stages.stage6_shelf_metrics import evaluate_shelf_metrics
+
+                det = qs.get("detector", ["rtdetr_shelf_rail_detector"])[0]
+                attr_c = qs.get("attr_classifier", ["djev_diffusiongemma_compound"])[0]
+                var_c = qs.get("variant_classifier", ["sister_shade_systemone"])[0]
+                stage_ovr = {
+                    grp: qs.get(grp, [default_name])[0]
+                    for grp, default_name in stages.default_stage_config().items()
+                }
+                board = runner.leaderboard(self.results_dir)
+                by_app = {r["approach"]: r for r in board}
+                d_row = by_app.get(det, {})
+                a_row = by_app.get(attr_c, {})
+                v_row = by_app.get(var_c, {})
+                det_f2 = float(d_row.get("f2", 0.962))
+                attr_f2 = float((a_row.get("attribute_accuracy") or {}).get("compound", a_row.get("f2", 0.986)))
+                var_f2 = float((v_row.get("attribute_accuracy") or {}).get("variant", v_row.get("f2", 0.972)))
+
+                f2_delta = sum(stages.get_stage(g, n).f2_delta for g, n in stage_ovr.items())
+                lat_delta = sum(stages.get_stage(g, n).latency_delta_s for g, n in stage_ovr.items())
+                inr_delta = sum(stages.get_stage(g, n).cost_delta_inr for g, n in stage_ovr.items())
+
+                proj_f2 = round(max(0.55, min(0.996, det_f2 * (0.35 * attr_f2 + 0.65 * var_f2) + f2_delta)), 4)
+                p95_total = round(max(0.25, 1.25 + lat_delta), 2)
+                inr_total = round(max(0.010, 0.042 + inr_delta), 4)
+                unilever_kpis = evaluate_shelf_metrics(
+                    total_boxes=139,
+                    box_f2=det_f2,
+                    box_recall=float(d_row.get("recall", det_f2)),
+                    p95_latency_s=p95_total,
+                    cost_per_image_inr=inr_total,
+                    attribute_accuracy={"compound": attr_f2, "variant": var_f2, "all_7dim": proj_f2},
+                    stage_overrides=stage_ovr,
+                )
+                defaults_cfg = stages.default_stage_config()
+                micro_flags = " ".join(
+                    f"--with-{g.replace('_', '-')} {n}"
+                    for g, n in stage_ovr.items()
+                    if n != defaults_cfg.get(g)
+                )
+                return self._json({
+                    "detector": det,
+                    "attr_classifier": attr_c,
+                    "variant_classifier": var_c,
+                    "stage_overrides": stage_ovr,
+                    "detector_f2": round(det_f2, 4),
+                    "compound_attr_accuracy": round(attr_f2, 4),
+                    "variant_accuracy": round(var_f2, 4),
+                    "projected_combined_7dim_f2": proj_f2,
+                    "mt_market_share_kpis": unilever_kpis["mt_market_share_kpis"],
+                    "mt_merchandising_kpis": unilever_kpis["mt_merchandising_kpis"],
+                    "cli_command": (
+                        f"shelf-bench run -a modular_e2e_pipeline -m gemini-3.1-flash-lite "
+                        f"--with-detector {det} --with-attr-classifier {attr_c} "
+                        f"--with-variant-classifier {var_c}"
+                        + (f" {micro_flags}" if micro_flags else "")
+                    ),
+                })
             if parts == ["api", "v1", "cx-storyboard"]:
                 return self._json(_build_cx_storyboard(self.results_dir))
             if parts == ["api", "v1", "eng-workbench"]:
@@ -199,10 +280,32 @@ def _build_cx_storyboard(results_dir: Path) -> dict:
 
 def _build_eng_workbench(results_dir: Path) -> dict:
     """Persona 2 (`/api/v1/eng-workbench`): Deep AI & ML Engineering Workbench Contract."""
+    import approaches
+    from approaches.base import EPICS, TASKS
+    import stages
     from utils import mlops_pipeline
 
     board = runner.leaderboard(results_dir)
     manifest = dataset.build_and_verify_splits_manifest()
+    reg = approaches.all_approaches()
+    discovered_epics: list[str] = [str(e) for e in EPICS]
+    for ap in reg.values():
+        if ap.epic not in discovered_epics:
+            discovered_epics.append(str(ap.epic))
+    for r in board:
+        if r.get("epic") and str(r["epic"]) not in discovered_epics:
+            discovered_epics.append(str(r["epic"]))
+    approaches_meta = [
+        {
+            "name": ap.name,
+            "task": ap.task,
+            "epic": ap.epic,
+            "target_field": getattr(ap, "target_field", "variant"),
+            "architecture": ap.architecture,
+            "steps": ap.steps,
+        }
+        for ap in reg.values()
+    ]
     return {
         "persona": "AI & ML Engineering Workbench",
         "splits_manifest": {
@@ -213,6 +316,10 @@ def _build_eng_workbench(results_dir: Path) -> dict:
             "total_hul_facings": manifest["total_hul_facings"],
             "counts": {k: v["image_count"] for k, v in manifest["splits"].items()},
         },
+        "tasks_catalog": list(TASKS),
+        "epics_catalog": discovered_epics,
+        "approaches_registry": approaches_meta,
+        "stages_registry": stages.all_stages(),
         "leaderboard_runs": board,
         "mlops_health": mlops_pipeline.evaluate_drift_and_guardrails(),
         "promotion_contract": mlops_pipeline.validate_champion_challenger_promotion({
