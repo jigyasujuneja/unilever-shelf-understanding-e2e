@@ -1,0 +1,48 @@
+flowchart TD
+  classDef config fill:#f1f3f4,stroke:#5f6368,color:#202124
+  classDef db fill:#e6f4ea,stroke:#188038,color:#0d652d
+  classDef compute fill:#fef7e0,stroke:#f9ab00,color:#b06000
+  classDef blob fill:#e8f0fe,stroke:#1a73e8,color:#174ea6
+
+  INIT["1. Initialization & Local Directory Cleanup<br/>Categories = ['Hair', 'Beverages']<br/>Container = 'new-p2p'<br/>Create/clean local folders: ./p2p_Hair/, ./p2p_Beverages/"]:::config
+
+  MYSQL[("Azure MySQL Database<br/>Table: past_roi_data")]:::db
+
+  subgraph CAT_LOOP["2. For Each Category in ['Hair', 'Beverages']"]
+    direction TB
+    GET_SEG["Query Distinct Segments:<br/>SELECT DISTINCT ol_segment FROM past_roi_data<br/>WHERE category = Category"]:::db
+
+    subgraph PARALLEL["3. ThreadPool Parallel Execution (Chunks of 100 Segments)"]
+      direction TB
+      CALC_SEG["calculate_segment_level(Category, segments, p)<br/>Sliding window of 5 segments: segments[i : i+5]"]:::compute
+      BRAND_CALC["Brand_calculation(seg, Category)<br/>1. Query brand, outlet_hul_code FROM past_roi_data<br/>   (exclude 'Others', 'Model_Output', 'MODEL_OUTPUT')<br/>2. Build Outlet x Brand occurrence count matrix<br/>3. For each pair (brand1, brand2):<br/>   - If brand1 != brand2: cosine_similarity(v1, v2)<br/>   - If brand1 == brand2: score_cal (count>=2 / count>=1)"]:::compute
+      CSV_SEG["Write Local Segment CSV:<br/>./p2p_{Category}/{segment}__{Category}.csv<br/>Columns: Segment_id, brand1, brand2, Score, rn"]:::config
+
+      CALC_SEG --> BRAND_CALC --> CSV_SEG
+    end
+
+    subgraph COMBINED["4. Combined Sub-Category Calculation"]
+      direction TB
+      SUB_COMB["Sub_category_Combined(Category)<br/>1. Query sub_category, outlet_hul_code FROM past_roi_data<br/>2. Build Outlet x Sub-Category count matrix<br/>3. Compute pairwise cosine_similarity & score_cal"]:::compute
+      CSV_COMB["Write Local Combined CSV:<br/>./p2p_{Category}/Combined__{Category}.csv"]:::config
+
+      SUB_COMB --> CSV_COMB
+    end
+
+    subgraph BLOB_SYNC["5. Azure Blob Storage Sync"]
+      direction TB
+      CLEAN_BLOB["list_all_files(Category) & delete_files()<br/>Delete existing CSV blobs in new-p2p/Brands/{Category}/"]:::blob
+      UPLOAD_BLOB["Upload All Local CSVs:<br/>Upload ./p2p_{Category}/*.csv to<br/>Azure Blob: new-p2p/Brands/{Category}/{file}.csv"]:::blob
+
+      CLEAN_BLOB --> UPLOAD_BLOB
+    end
+
+    GET_SEG --> CALC_SEG
+    CSV_SEG --> SUB_COMB
+    CSV_COMB --> CLEAN_BLOB
+  end
+
+  INIT --> GET_SEG
+  MYSQL <--> GET_SEG
+  MYSQL <--> BRAND_CALC
+  MYSQL <--> SUB_COMB
