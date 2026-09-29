@@ -466,8 +466,9 @@ class UnifiedCloudArchitectureTests(unittest.TestCase):
                 self.assertIn("identification_detections", audits[0])
                 self.assertIn("pipeline_trace", audits[0])
 
+            first_audit_id = audits[0]["audit_id"]
             req = urllib.request.Request(
-                f"http://127.0.0.1:{port}/api/v1/audits/AUD-MT-2026-0929-01/review",
+                f"http://127.0.0.1:{port}/api/v1/audits/{first_audit_id}/review",
                 data=json.dumps({
                     "review_status": "APPROVED",
                     "review_notes": "Verified Lakme CC Honey sister shade override",
