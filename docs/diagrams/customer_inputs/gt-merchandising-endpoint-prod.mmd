@@ -1,0 +1,50 @@
+flowchart TD
+  classDef trigger fill:#e8f0fe,stroke:#1a73e8,color:#174ea6
+  classDef step fill:#f1f3f4,stroke:#5f6368,color:#202124
+  classDef cond fill:#fef7e0,stroke:#f9ab00,color:#b06000
+  classDef ml fill:#fce8e6,stroke:#d93025,color:#a50e0e
+  classDef ok fill:#e6f4ea,stroke:#188038,color:#0d652d
+
+  TRIG["HTTP Request Trigger (manual)<br/>Schema Validation Enabled<br/>Required: Image_Names, Outlet_Code, Outlet_PLG, RSCode,<br/>AWP_Code, Channel, Asset_Type, Tier, Request_ID,<br/>Salesman_Code, image_string (Optional: user_input)"]:::trigger
+
+  ENV["Environement_Variables (ParseJson)<br/>ACCESS_TOKEN_API, API_KEY, AZUREML_API,<br/>DYNAMIC_TASK_API, USER_NAME, PASSWORD"]:::step
+
+  HAS_IMG{"Has_Images<br/>length(Image_Names) > 0?"}:::cond
+
+  RESP_404["Response (HTTP 404)<br/>{message: 'No Images', messagecode: 404}"]:::ml
+  ACK_200["Acknowledgement (HTTP 200)<br/>{message: 'Success', messagecode: 200}"]:::ok
+  AML["Azure_ML_Call (HTTP POST)<br/>URI: AZUREML_API<br/>Header: Bearer API_KEY<br/>Body: @triggerBody()"]:::ml
+
+  TRIG --> ENV --> HAS_IMG
+  HAS_IMG -- "False (else)" --> RESP_404
+  HAS_IMG -- "True" --> ACK_200
+  HAS_IMG -- "True" --> AML
+
+  subgraph SUCCESS_SCOPE["Success Scope (runAfter: Azure_ML_Call SUCCEEDED)"]
+    direction TB
+    TOK_S["Get_Access_Token_-_Success (HTTP GET)<br/>URI: ACCESS_TOKEN_API<br/>Headers: USER, PASSWORD, REQID"]:::step
+    PARSE_S["Parse_JSON_Get_Access_Token_-_Success<br/>Extract token"]:::step
+    TASK_S["Create_Dynamic_Task_-_Success (HTTP POST)<br/>URI: DYNAMIC_TASK_API<br/>Header: TOKEN<br/>Body: @body('Azure_ML_Call')"]:::ok
+
+    TOK_S --> PARSE_S --> TASK_S
+  end
+
+  subgraph EXC_SCOPE["Exception Scope (runAfter: Azure_ML_Call TIMEDOUT or FAILED)"]
+    direction TB
+    TIME_CHECK{"Condition: Business Hours?<br/>IST between 07:30 and 18:00"}:::cond
+    NOOP["Else: No Action"]:::step
+    subgraph FE_IMG["For_each Image in triggerBody()['Image_Names']"]
+      direction TB
+      TOK_E["Get_Access_Token_-_Exception (HTTP GET)<br/>URI: ACCESS_TOKEN_API"]:::step
+      PARSE_E["Parse_JSON_Get_Access_Token_-_Exception<br/>Extract token"]:::step
+      TASK_E["Create_Dynamic_Task_-_Exception (HTTP POST)<br/>URI: DYNAMIC_TASK_API<br/>Body: Fallback payload per image<br/>(output_type: 'partial_output', AWP_Presence: 'N',<br/>AWP_Sim_Score: '0', Earning: '0')"]:::ml
+
+      TOK_E --> PARSE_E --> TASK_E
+    end
+
+    TIME_CHECK -- "True" --> TOK_E
+    TIME_CHECK -- "False" --> NOOP
+  end
+
+  AML -- "SUCCEEDED" --> TOK_S
+  AML -- "TIMEDOUT / FAILED" --> TIME_CHECK

@@ -1,0 +1,44 @@
+flowchart TD
+  classDef gcs fill:#e8f0fe,stroke:#1a73e8,color:#174ea6
+  classDef adf fill:#f1f3f4,stroke:#5f6368,color:#202124
+  classDef cond fill:#fef7e0,stroke:#f9ab00,color:#b06000
+  classDef db fill:#e6f4ea,stroke:#188038,color:#0d652d
+
+  subgraph VARS["Pipeline Variables"]
+    direction LR
+    V1["PrevModifiedDate<br/>default: '1990-01-01T05:12:22Z'"]:::adf
+    V2["LatestFileName<br/>type: String"]:::adf
+  end
+
+  GCS_SRC[("Google Cloud Storage<br/>Dataset: ROI_Source_data<br/>Filter: Past_ROI_Data_*.csv")]:::gcs
+  GM1["Get Metadata1 (GetMetadata)<br/>fieldList: childItems<br/>recursive: true"]:::adf
+
+  GCS_SRC --> GM1
+
+  subgraph FE["ForEach1 (Sequential Loop over childItems)"]
+    direction TB
+    GM2["Get Metadata2 (GetMetadata)<br/>Dataset: ROI_DS_InputFolder_Dynamic<br/>FileName: @item().name<br/>Fields: itemName, lastModified"]:::adf
+    IF1{"If Condition1<br/>lastModified > PrevModifiedDate?"}:::cond
+    SV1["Set variable1 (SetVariable)<br/>LatestFileName = @activity('Get Metadata2').output.itemName"]:::adf
+    SV2["Set variable2 (SetVariable)<br/>PrevModifiedDate = @activity('Get Metadata2').output.lastModified"]:::adf
+
+    GM2 --> IF1
+    IF1 -- "True" --> SV1 --> SV2
+    IF1 -- "False" --> SV2
+  end
+
+  GM1 -- "Succeeded" --> GM2
+
+  subgraph COPY["Copy data2 (Copy Activity)"]
+    direction TB
+    SRC["Source: DelimitedTextSource (GCS)<br/>Dataset: ROI_DS_InputFolder_Dynamic<br/>FileName: @variables('LatestFileName')"]:::gcs
+    PRE["Pre-Copy SQL Script on Azure MySQL:<br/>1. DROP TABLE IF EXISTS temp_Past_ROI_Data<br/>2. ALTER TABLE Past_ROI_Data RENAME TO temp_Past_ROI_Data<br/>3. CREATE TABLE Past_ROI_Data LIKE temp_Past_ROI_Data"]:::adf
+    MAP["TabularTranslator (12 Columns):<br/>row_num, ol_segment, outlet_hul_code, category,<br/>sub category -> sub_category, brand, variant, size,<br/>manufacturer, packaging type -> packaging_type,<br/>basepack code -> basepack, occurance -> occ (Int32)"]:::adf
+    SINK[("Sink: AzureMySqlSink<br/>Dataset: ROI_AzureMySqlTable<br/>Table: Past_ROI_Data (Batch: 2,000)")]:::db
+
+    SRC --> MAP
+    PRE --> SINK
+    MAP --> SINK
+  end
+
+  SV2 -- "ForEach1 Succeeded" --> SRC

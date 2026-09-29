@@ -1,10 +1,33 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
 .venv/
 .pytest_cache/
-*.egg-info/
-dist/
+.ruff_cache/
 build/
+dist/
+
+# Large raw dataset archives (keep lightweight manifests and benchmark slices tracked)
 data/SKU110K_fixed/
 data/raw/
+
+# Credentials
+.env
+*.pem
+*.key
+*service-account*.json
+application_default_credentials.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log
+
+# results/ IS committed: each run is a small JSON folder so the leaderboard is shared.
+
+# Customer Code Azure Samples
+docs/customer_code/

@@ -110,7 +110,7 @@ gantt
 
     section Phase 1: POC <br/>for Model Migration Assessment
     Environment Access, Preparation and Setup          :active, p1_env, 2026-09-21, 7d
-    Kickoff                                            :crit, milestone, p1_kickoff, 2026-09-23, 0d
+    Kickoff                                            :crit, milestone, p1_kickoff, 2026-09-28, 0d
     MT MarketShare Assessment                          :p1_ms, 2026-09-28, 14d
     MT Merchandising Assessment                        :p1_merch, 2026-10-05, 14d
     Compile and Report Project Results                 :p1_report, 2026-10-19, 2026-10-23
