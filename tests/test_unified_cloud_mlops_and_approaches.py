@@ -439,10 +439,51 @@ class UnifiedCloudArchitectureTests(unittest.TestCase):
             self.assertIn(img_name, loaded)
             self.assertEqual(len(loaded[img_name].boxes), 1)
 
+    def test_epic_core_pillars_and_decision_first_audit_ui(self) -> None:
+        import core
+        from core import detection
+
+        self.assertEqual(
+            set(core.__all__),
+            {"detect_shelf_skus", "match_sku_vectors", "resolve_ambiguous_skus"},
+        )
+        merged = detection.merge_overlapping_detections([(10, 10, 100, 100), (12, 12, 102, 102)])
+        self.assertEqual(len(merged), 1)
+
+        server.Handler.results_dir = Path("results")
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/audits") as resp:
+                self.assertEqual(resp.status, 200)
+                audits = json.loads(resp.read().decode())
+                self.assertGreaterEqual(len(audits), 2)
+                channels = {a["store_metadata"]["channel_type"] for a in audits}
+                self.assertEqual(channels, {"MT", "GT"})
+                self.assertIn("compliance_scorecard", audits[0])
+                self.assertIn("identification_detections", audits[0])
+                self.assertIn("pipeline_trace", audits[0])
+
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v1/audits/AUD-MT-2026-0929-01/review",
+                data=json.dumps({
+                    "review_status": "APPROVED",
+                    "review_notes": "Verified Lakme CC Honey sister shade override",
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as post_resp:
+                self.assertEqual(post_resp.status, 200)
+                updated = json.loads(post_resp.read().decode())
+                self.assertEqual(updated["review_status"], "APPROVED")
+                self.assertEqual(updated["review_notes"], "Verified Lakme CC Honey sister shade override")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
-
