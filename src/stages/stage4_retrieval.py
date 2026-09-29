@@ -48,12 +48,9 @@ def run_retrieval_stage(
         h3_packaging_entropy=0.016,
     )
     if mode == "siglip_multiprototype":
-        multi_view = match_multi_prototype_sku_centroids(
-            crop_full_vec=[0.6] * 8,
-            crop_upper65_vec=[0.7] * 8,
-            sku_prototypes={"front_0": [0.62] * 8, "promo_20pct_extra": [0.64] * 8},
-            sku_upper65_prototypes={"front_0": [0.69] * 8, "promo_20pct_extra": [0.70] * 8},
-            promo_band_detected=True,
+        _, _, best_view = match_multi_prototype_sku_centroids(
+            crop_embedding=[0.6] * 8,
+            sku_prototypes={"BP-DOVE-BW-500ML": [[0.62] * 8, [0.64] * 8]},
         )
         return {
             "mode": mode,
@@ -61,7 +58,7 @@ def run_retrieval_stage(
             "scann_pool_before": 50000,
             "scann_pool_after": max(11, len(prefilter.candidate_skus)),
             "cosine_gain": round(deglare_result.latent_cosine_gain, 4),
-            "multiprototype_best_view": multi_view.matched_prototype_view,
+            "multiprototype_best_view": best_view,
         }
     return {
         "mode": mode,

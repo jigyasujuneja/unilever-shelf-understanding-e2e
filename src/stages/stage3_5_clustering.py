@@ -28,7 +28,7 @@ def run_crop_clustering(
             "compression_ratio": 1.0,
             "cluster_purity": 1.0,
         }
-    ablation = maxvit_clustering.run_clustering_ablation_study()
+    catalog = maxvit_clustering.load_dynamic_hul_catalog_index()
     medoids = max(1, num_boxes // 4)
     return {
         "mode": mode,
@@ -36,7 +36,7 @@ def run_crop_clustering(
         "medoid_calls": medoids,
         "compression_ratio": round(num_boxes / max(1, medoids), 2),
         "cluster_purity": 0.996 if mode == "maxvit_agglomerative" else 0.994,
-        "ablation_ref": ablation.get("recommended_champion", mode),
+        "catalog_size": len(catalog),
     }
 
 

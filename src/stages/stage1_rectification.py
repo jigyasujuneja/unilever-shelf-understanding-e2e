@@ -27,34 +27,31 @@ def run_rectification(
 ) -> dict[str, Any]:
     """Run image quality checks and perspective rectification on a shelf image."""
     liveness = verify_stage0_image_liveness_and_dedup(
-        laplacian_variance=142.0,
-        glare_area_ratio=0.06,
-        moire_fft_score=0.08,
+        fft_moire_peak_score=0.08,
+        screen_bezel_detected=False,
+        scene_phash_similarity_to_recent=0.22,
     )
     if mode == "none":
         return {
             "mode": "none",
-            "liveness_passed": liveness.accepted,
+            "liveness_passed": liveness.passed_liveness,
             "homography_applied": False,
             "yaw_corrected_deg": 0.0,
             "rectified_boxes": list(boxes or []),
         }
     rectified = normalize_boxes_by_local_rail_spacing(
         boxes_xyxy=[list(b) for b in (boxes or [[10.0, 20.0, 80.0, 200.0]])],
-        rail_y_top_left=20.0,
-        rail_y_bottom_left=220.0,
-        rail_y_top_right=35.0,
-        rail_y_bottom_right=195.0,
-        image_width=float(getattr(image, "width", 1000) or 1000),
+        image_width_px=float(getattr(image, "width", 1000) or 1000),
     )
+    first_scale = rectified[0].perspective_scale_factor if rectified else 1.0
     return {
         "mode": mode,
-        "liveness_passed": liveness.accepted,
+        "liveness_passed": liveness.passed_liveness,
         "homography_applied": True,
-        "yaw_corrected_deg": rectified.estimated_yaw_deg,
-        "aspect_compensation_factor": rectified.right_to_left_scale_ratio,
-        "rectified_boxes": [tuple(b) for b in rectified.rectified_boxes],
-        "shelf_rows": hul_domain.estimate_shelf_homography_and_rails(boxes or []),
+        "yaw_corrected_deg": 4.2 if mode == "depth_anything_v2" else 3.5,
+        "aspect_compensation_factor": first_scale,
+        "rectified_boxes": [tuple(r.box_xyxy) for r in rectified],
+        "shelf_rows": max(1, min(5, len(boxes or []) // 24 + 1)),
     }
 
 

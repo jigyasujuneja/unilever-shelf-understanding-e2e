@@ -33,17 +33,14 @@ def run_post_detection(
         keep_count = max(1, int(round(len(boxes) * 0.979)))
         return list(boxes[:keep_count])
     _ = resolve_size_with_rail_lip_and_pricetag_fallback(
-        box_xyxy=[10.0, 20.0, 60.0, 140.0],
-        rail_y=142.0,
-        rail_lip_height_px=14.0,
-        pack_ocr_text="",
-        rail_pricetag_ocr_text="340ml Rs 245",
-        local_rail_spacing_px=150.0,
+        pack_ocr_snippet="",
+        below_box_shelf_strip_ocr="340ml Rs 245",
+        rectified_height_cm=18.5,
     )
     _ = slice_oriented_ladi_sachet_strip(
-        strip_xyxy=[10.0, 20.0, 65.0, 420.0],
+        strip_box_xyxy=[10.0, 20.0, 65.0, 420.0],
         tilt_angle_deg=8.0,
-        single_sachet_height_px=48.0,
+        single_sachet_length_px=48.0,
     )
     return list(boxes)
 

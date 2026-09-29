@@ -19,8 +19,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import google.auth
-from google.auth.transport.requests import AuthorizedSession
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any
 
 import runner
 from utils import dataset
@@ -28,11 +31,84 @@ from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "configs", "data/splits", "results", "src"]
+AuthorizedSession = Any
 
 
-def _session() -> AuthorizedSession:
-    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    return AuthorizedSession(creds)
+class _StdlibResponse:
+    def __init__(self, status_code: int, content: bytes, url: str, method: str):
+        self.status_code = status_code
+        self.content = content
+        self.text = content.decode("utf-8", errors="replace")
+        self.request = type("Req", (), {"method": method, "url": url})()
+
+    def json(self) -> Any:
+        return json.loads(self.text) if self.text.strip() else {}
+
+
+class _StdlibAuthorizedSession:
+    """Zero-dependency HTTP session using ADC bearer token when google-auth is not installed."""
+
+    def __init__(self) -> None:
+        self._tok, self._proj = dataset._adc_bearer_token()
+
+    def _req(
+        self,
+        method: str,
+        url: str,
+        params: dict | None = None,
+        json_body: Any = None,
+        data: bytes | None = None,
+        headers: dict | None = None,
+    ) -> _StdlibResponse:
+        if params:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}{urllib.parse.urlencode(params)}"
+        hdrs = {
+            "Authorization": f"Bearer {self._tok}",
+            "x-goog-user-project": self._proj,
+            **(headers or {}),
+        }
+        body_bytes = data
+        if json_body is not None:
+            body_bytes = json.dumps(json_body).encode("utf-8")
+            hdrs.setdefault("Content-Type", "application/json")
+        req = urllib.request.Request(url, data=body_bytes, headers=hdrs, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return _StdlibResponse(resp.status, resp.read(), url, method)
+        except urllib.error.HTTPError as e:
+            return _StdlibResponse(e.code, e.read(), url, method)
+
+    def get(self, url: str, params: dict | None = None, headers: dict | None = None, **_) -> _StdlibResponse:
+        return self._req("GET", url, params=params, headers=headers)
+
+    def post(
+        self,
+        url: str,
+        params: dict | None = None,
+        json: Any = None,
+        data: bytes | None = None,
+        headers: dict | None = None,
+        **_,
+    ) -> _StdlibResponse:
+        return self._req("POST", url, params=params, json_body=json, data=data, headers=headers)
+
+    def patch(self, url: str, params: dict | None = None, json: Any = None, headers: dict | None = None, **_) -> _StdlibResponse:
+        return self._req("PATCH", url, params=params, json_body=json, headers=headers)
+
+    def put(self, url: str, data: bytes | None = None, headers: dict | None = None, **_) -> _StdlibResponse:
+        return self._req("PUT", url, data=data, headers=headers)
+
+
+def _session():
+    try:
+        import google.auth
+        from google.auth.transport.requests import AuthorizedSession
+
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        return AuthorizedSession(creds)
+    except ImportError:
+        return _StdlibAuthorizedSession()
 
 
 def _ok(r):
@@ -76,6 +152,7 @@ def task_seconds(env: dict, session: AuthorizedSession | None = None) -> float:
 
 REQUIRED_ARGOLIS_APIS = [
     "aiplatform.googleapis.com",
+    "sqladmin.googleapis.com",
     "run.googleapis.com",
     "cloudbuild.googleapis.com",
     "artifactregistry.googleapis.com",
