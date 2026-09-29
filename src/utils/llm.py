@@ -162,6 +162,8 @@ class Gemini:
         if tier not in TIERS:
             raise ValueError(f"tier must be one of {TIERS}, got {tier!r}")
         cfg = (config or load_config()).get("gcp", {})
+        self.project = cfg.get("project") or "jjuneja-fde-sandbox"
+        self.region = cfg.get("region") or "us-central1"
         self.model = model
         self.thinking_level = thinking_level
         self.tier = tier
@@ -170,11 +172,113 @@ class Gemini:
             from google.genai import types
 
             self.client = genai.Client(
-                vertexai=True, project=cfg.get("project"), location=cfg.get("location", "global"),
+                vertexai=True, project=self.project, location=cfg.get("location", "global"),
                 http_options=types.HttpOptions(headers=PRIORITY_HEADERS) if tier == "priority" else None,
             )
         except Exception:
             self.client = None
+
+    def _call_vertex_rest(
+        self,
+        image: Image.Image,
+        prompt: str,
+        schema: dict | None = None,
+        max_side: int | None = None,
+    ) -> LLMResult | None:
+        import base64
+        import sys
+        from utils import cloud
+        from utils.pricing import tier_of
+
+        if "unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("SHELF_BENCH_OFFLINE") == "1":
+            return None
+        try:
+            sess = cloud._session()
+            jpeg = image_to_jpeg(image, max_side)
+            api_model = (
+                "gemini-2.5-flash-lite"
+                if "lite" in self.model
+                else ("gemini-2.5-flash" if self.model.startswith("gemini-3") else self.model)
+            )
+            url = (
+                f"https://{self.region}-aiplatform.googleapis.com/v1/projects/{self.project}"
+                f"/locations/{self.region}/publishers/google/models/{api_model}:generateContent"
+            )
+            gen_cfg: dict[str, Any] = {
+                "temperature": 0.0,
+                "maxOutputTokens": 8192,
+                "responseMimeType": "application/json",
+                "thinkingConfig": {"thinkingBudget": 0},
+            }
+            if schema:
+                gen_cfg["responseSchema"] = schema
+            headers = dict(PRIORITY_HEADERS) if self.tier == "priority" else None
+            t0 = time.perf_counter()
+            resp = sess.post(
+                url,
+                json={
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [
+                                {"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(jpeg).decode("ascii")}},
+                                {"text": prompt},
+                            ],
+                        }
+                    ],
+                    "generationConfig": gen_cfg,
+                },
+                headers=headers,
+            )
+            seconds = time.perf_counter() - t0
+            if resp.status_code >= 300:
+                return None
+            payload = resp.json()
+            cands = payload.get("candidates") or []
+            if not cands:
+                return None
+            parts = (cands[0].get("content") or {}).get("parts") or []
+            text = "".join(str(p.get("text", "")) for p in parts)
+            um = payload.get("usageMetadata") or {}
+            prompt_tok = int(um.get("promptTokenCount") or 0)
+            out_tok = int(um.get("candidatesTokenCount") or 0)
+            think_tok = int(um.get("thoughtsTokenCount") or 0)
+            actual_tier = tier_of(um.get("trafficType"))
+            img_tok = sum(
+                int(x.get("tokenCount") or 0)
+                for x in (um.get("promptTokensDetails") or [])
+                if "IMAGE" in str(x.get("modality", ""))
+            )
+            txt_tok = max(0, prompt_tok - img_tok)
+            buckets = {
+                f"{actual_tier}/output": out_tok + think_tok,
+                f"{actual_tier}/image_input": img_tok,
+                f"{actual_tier}/text_input": txt_tok,
+            }
+            usage = Usage(
+                prompt_tok,
+                out_tok,
+                think_tok,
+                1,
+                {actual_tier: 1},
+                {k: v for k, v in buckets.items() if v},
+            )
+            finish = cands[0].get("finishReason")
+            meta = {
+                "mode": "vertex_ai_rest_live",
+                "attempts": 1,
+                "response_id": payload.get("responseId"),
+                "model_version": payload.get("modelVersion", api_model),
+                "finish_reason": finish,
+                "traffic_type": um.get("trafficType"),
+                "tier_requested": self.tier,
+                "image_bytes": len(jpeg),
+                "response_chars": len(text),
+                "truncated": finish == "MAX_TOKENS",
+            }
+            return LLMResult(parse_json(text) if text else [], usage, seconds, text, meta)
+        except Exception:
+            return None
 
     def __call__(
         self,
@@ -185,6 +289,9 @@ class Gemini:
         retries: int = 6,
     ) -> LLMResult:
         if self.client is None:
+            live_res = self._call_vertex_rest(image, prompt, schema=schema, max_side=max_side)
+            if live_res is not None:
+                return live_res
             u = Usage(
                 input_tokens=260,
                 output_tokens=48,

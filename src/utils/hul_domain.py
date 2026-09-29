@@ -588,10 +588,10 @@ def propose_rtdetr_shelf_boxes(
     w, h = image.size
     image_id = getattr(getattr(ctx, "sample", None), "image_id", None) if ctx is not None else None
 
-    # Path 1: Custom test LLM (`_MockLLM`) or live authenticated Vertex AI Gemini
+    # Path 1: Custom test LLM (`_MockLLM`) injected by unit tests
     if ctx is not None and hasattr(ctx, "ask") and getattr(ctx, "llm", None) is not None:
         llm_cls_name = type(ctx.llm).__name__
-        if llm_cls_name != "Gemini" or _check_adc_available():
+        if llm_cls_name != "Gemini":
             try:
                 from approaches.base import BOX_LIST_SCHEMA, DETECT_PROMPT, to_pixels
 

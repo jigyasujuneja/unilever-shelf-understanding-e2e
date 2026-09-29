@@ -52,7 +52,7 @@ def propose_shelf_boxes(
     post_detector_mode: str = "shelf_rail_soft_nms",
 ) -> list[tuple[float, float, float, float]]:
     """Detect product bounding boxes and apply post-detection filtering."""
-    raw_boxes = hul_domain.propose_rtdetr_shelf_boxes(image, ctx=ctx, mode=detector_mode)
+    raw_boxes = hul_domain.propose_rtdetr_shelf_boxes(image, ctx=ctx, approach_name=detector_mode)
     return run_post_detection(image, raw_boxes, mode=post_detector_mode)
 
 

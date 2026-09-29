@@ -60,7 +60,7 @@ models:
 #   - `gcs_inmemory`: Fast-path in-memory NumPy/ScaNN catalog loaded from GCS
 vector_store:
   backend: cloudsql_pgvector
-  instance: unilever-shelf-understanding:us-central1:shelf-catalog-pg
+  instance: jjuneja-fde-sandbox:us-central1:shelf-catalog-pg
   database: postgres
   ip_type: PRIVATE       # PRIVATE | PUBLIC | PSC
   index_endpoint: projects/jjuneja-fde-sandbox/locations/us-central1/indexEndpoints/INDEX_ENDPOINT
@@ -71,13 +71,13 @@ vector_store:
 
 # Cloud SQL alias block for approaches reading `config["cloudsql"]` (or legacy `config["alloydb"]`).
 cloudsql:
-  instance: unilever-shelf-understanding:us-central1:shelf-catalog-pg
+  instance: jjuneja-fde-sandbox:us-central1:shelf-catalog-pg
   database: postgres
   ip_type: PRIVATE
   fallback_local_scann: true
 
 alloydb:
-  instance: unilever-shelf-understanding:us-central1:shelf-catalog-pg
+  instance: jjuneja-fde-sandbox:us-central1:shelf-catalog-pg
   database: postgres
   ip_type: PRIVATE
   fallback_local_scann: true

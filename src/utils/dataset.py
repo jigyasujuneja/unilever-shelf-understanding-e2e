@@ -399,15 +399,20 @@ def upload(local_root: str, gcs_root: str, workers: int = 32, dataset_target: st
     """Copy datasets (`SKU110K_fixed`, `HUL_labeled_benchmarks`, `HUL_catalog`, and `splits`) to Argolis GCS.
     Resumable: files already present in GCS are skipped.
     """
-    from google.cloud.storage import transfer_manager
     from utils.llm import load_config
+
+    try:
+        from google.cloud.storage import transfer_manager  # type: ignore[import]
+    except ImportError:
+        transfer_manager = None
 
     cfg_gcp = load_config().get("gcp", {})
     build_and_verify_splits_manifest()
 
     targets: list[tuple[Path, str]] = []
     if dataset_target in ("all", "sku110k"):
-        ensure_local_sku110k_splits(local_root)
+        if Path(local_root).name != "results":
+            ensure_local_sku110k_splits(local_root)
         targets.append((Path(local_root), gcs_root))
     if dataset_target in ("all", "hul_labeled") and Path("data/labeled_retail_benchmarks").is_dir():
         hul_gcs = cfg_gcp.get("hul_labeled_data", "gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks")
@@ -417,6 +422,13 @@ def upload(local_root: str, gcs_root: str, workers: int = 32, dataset_target: st
         targets.append((Path("configs"), cat_gcs))
 
     for src_dir, dest_uri in targets:
+        if transfer_manager is None:
+            print(f"[{src_dir} -> {dest_uri}] syncing via gcloud storage rsync ...")
+            subprocess.run(
+                ["gcloud", "storage", "rsync", "-r", str(src_dir), dest_uri.rstrip("/")],
+                check=True,
+            )
+            continue
         bucket_name, prefix = _split_gs(dest_uri.rstrip("/"))
         bucket = _gcs().bucket(bucket_name)
         existing = {b.name for b in _gcs().list_blobs(bucket_name, prefix=prefix + "/")}

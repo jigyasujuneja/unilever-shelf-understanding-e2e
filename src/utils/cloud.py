@@ -218,12 +218,12 @@ def bootstrap_argolis_project(
     project: str | None = None,
     region: str | None = None,
     upload_datasets: bool = True,
-    seed_results: bool = True,
+    seed_results: bool | None = None,
     log=print,
 ) -> dict:
     """One-command Argolis Setup (`shelf-bench bootstrap --project <ANY_ARGOLIS_PROJECT>`):
     1. Dynamically sets `SHELF_BENCH_PROJECT` and `SHELF_BENCH_REGION`.
-    2. Enables all 8 GCP APIs (`Vertex AI`, `Cloud Run`, `Cloud Build`, `Artifact Registry`, `GCS`, `Billing`, `Trace`, `Logging`).
+    2. Enables all 9 GCP APIs (`Vertex AI`, `Cloud SQL Admin`, `Cloud Run`, `Cloud Build`, `Artifact Registry`, `GCS`, `Billing`, `Trace`, `Logging`).
     3. Creates Argolis-compliant GCS buckets (`gs://<project>-shelf-images` and `gs://run-sources-<project>-<region>`).
     4. Uploads `SKU110K_fixed` (`train/val/test`), `HUL_labeled_benchmarks` (`59` real images), `HUL_catalog` (`184/245` SKUs),
        `dataset_splits_manifest.json`, and existing `results/` to `gs://<project>-shelf-images/`.
@@ -241,11 +241,12 @@ def bootstrap_argolis_project(
         log(f"[Argolis Bootstrap] Uploading all datasets (SKU-110K train/val/test, HUL labeled benchmarks, HUL 245-SKU catalog, splits) to {infra['data_bucket']} ...")
         dataset.upload(dataset.LOCAL_ROOT, cfg["gcp"]["data"], dataset_target="all")
 
-    if seed_results and Path("results").is_dir():
+    should_seed_results = upload_datasets if seed_results is None else seed_results
+    if should_seed_results and Path("results").is_dir():
         log(f"[Argolis Bootstrap] Syncing committed benchmark results to {cfg['gcp']['results']} ...")
         dataset.upload("results", cfg["gcp"]["results"], dataset_target="sku110k")
 
-    log(f"[Argolis Bootstrap] Project {proj!r} is 100% ready for `shelf-bench cloud-run` and `shelf-bench cloud-service`!")
+    log(f"[Argolis Bootstrap] Project {proj!r} is 100% ready for `shelf-bench vertex-job`, `shelf-bench cloud-run`, and `shelf-bench cloud-service`!")
     return infra
 
 
