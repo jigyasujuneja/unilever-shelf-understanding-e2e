@@ -1,6 +1,6 @@
 # Developer Guide: Repository Architecture, Task Contracts, and Cloud Execution
 
-Engineers use this repository to build, evaluate, and compare retail shelf detection and product classification models on a shared benchmark. Contributors add models in isolated files under `src/approaches/` or `src/stages/` while sharing the same dataset splits, evaluation metrics, cost ledger, and Cloud Run job runner.
+Engineers use this repository to build, evaluate, and compare retail shelf detection and product classification models on a shared benchmark. Contributors add models in isolated files under `src/approaches/` or `src/stages/` while sharing the same dataset splits, evaluation metrics, cost ledger, and Cloud Run job runner. For web UI architecture, navigation across all 4 views, and Cloud Run service deployment, see [`UI_HOW_TO_GUIDE.md`](UI_HOW_TO_GUIDE.md).
 
 ## Repository Layout and Boundaries
 
@@ -9,7 +9,7 @@ unilever-shelf-understanding/
 ├── config.yaml                       # Default GCP project, bucket URIs, models, and split settings
 ├── Dockerfile                        # Container image definition for Cloud Run jobs and web UI
 ├── src/
-│   ├── cli.py                        # CLI entry point (list, run, cloud-run, pull, leaderboard, serve)
+│   ├── cli.py                        # CLI entry point (list, run, cloud, cloud-service, pull, leaderboard, serve)
 │   ├── runner.py                     # Evaluation loop, IoU box matching, F2 scoring, and cost ledger
 │   ├── approaches/                   # Self-contained benchmark approaches (@register)
 │   │   ├── base.py                   # Base Approach class, Context, Box type, and registry helpers
@@ -316,8 +316,8 @@ PYTHONPATH=src python3 -m unittest discover -s tests -p "test_*.py" -v
 # Provision GCP buckets, Artifact Registry, and Cloud Run job on a new project (one-time)
 PYTHONPATH=src python3 src/cli.py bootstrap --project <YOUR_GCP_PROJECT_ID> --region us-central1
 
-# Execute on Cloud Run against the locked 50-image test split
-PYTHONPATH=src python3 src/cli.py cloud-run -a <your_approach> -m gemini-3.8-flash \
+# Execute on Cloud Run Jobs against the locked 50-image test split
+PYTHONPATH=src python3 src/cli.py cloud -a <your_approach> -m gemini-3.8-flash \
   --split test --limit 50 --seed 0 --owner $USER
 
 # Pull finished Cloud Run results from GCS into local results/
@@ -326,4 +326,8 @@ PYTHONPATH=src python3 src/cli.py pull
 # Print the CLI leaderboard or launch the local web UI at http://127.0.0.1:8080/#/arena
 PYTHONPATH=src python3 src/cli.py leaderboard
 PYTHONPATH=src python3 src/cli.py serve --port 8080
+
+# Deploy the web UI as a shared Cloud Run service (see UI_HOW_TO_GUIDE.md)
+PYTHONPATH=src python3 src/cli.py cloud-service --port 8080
 ```
+
