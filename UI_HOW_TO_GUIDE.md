@@ -64,6 +64,8 @@ The application has 3 primary tabs in the top navigation bar plus a per-run dril
 
 Use `#/overview` for stakeholder reviews, pilot sign-off tracking, and unit-economics verification.
 
+![Tab 1 Overview: Executive DoD Scorecard, Scope Matrix, and Cloud Billing Cost Demo](docs/images/ui/01_overview_dod_and_scope.png)
+
 * **Audience Stakeholder Filter Bar**: Filter the page cards by stakeholder focus:
   * `Show All Sections (Complete 360° View)`
   * `Executive & Leadership (7 DoD Sign-Off Criteria)`
@@ -78,6 +80,8 @@ Use `#/overview` for stakeholder reviews, pilot sign-off tracking, and unit-econ
 ### View 2: `#/arena` (Tab 2: Engineering Arena, 4 KPI Lenses & Pipeline Simulator)
 
 Use `#/arena` to compare approaches across tasks, filter by benchmark epic, switch between ML and business KPI views, and simulate end-to-end pipeline combinations.
+
+![Tab 2 Engineering Arena: Task Tabs, 4 KPI Lenses, and Ranked Leaderboard](docs/images/ui/02_arena_leaderboard_and_kpi_lenses.png)
 
 #### A. Leaderboard Controls and Filters
 
@@ -106,6 +110,8 @@ Switch the leaderboard columns between 4 evaluation lenses without reloading the
 
 Located directly above the leaderboard in `#/arena`, the simulator lets you test how swapping any task approach or internal stage affects end-to-end accuracy, latency, and cost:
 
+![Tab 2 Interactive 2-Level Pipeline Impact Simulator](docs/images/ui/03_arena_pipeline_simulator.png)
+
 * **Level 1 (Macro Task Selectors)**:
   * `Stage 1: Bounding-Box Detector` (`--with-detector`)
   * `Stage 2: Category + Brand + Packaging Classifier` (`--with-attr-classifier`)
@@ -118,9 +124,11 @@ Located directly above the leaderboard in `#/arena`, the simulator lets you test
   * `Stage 5: Fine-Grained Variant Tiebreaker` (`--with-tiebreaker`)
 * **Live Output & CLI Generator**: Changing any dropdown recalculates projected `7-Dim SKU F2`, `MT Market Share (<=30s)` SoS and latency, `MT Merchandising (<=10s)` planogram compliance and latency, net INR cost per image, and outputs the exact `shelf-bench run -a modular_e2e_pipeline ...` CLI command to execute that configuration.
 
-### View 3: `#/run/<run_id>` (Per-Run & Per-Image Canvas Debugger)
+### View 3: `#/run/<run_id>` (Per-Run & Per-Image Canvas Debugger) and View 4: `#/playground` (Live Multi-Modal Shelf Playground)
 
-Click any row in the `#/arena` leaderboard table to open `#/run/<run_id>`.
+![View 3 Per-Image Canvas Debugger and View 4 Live Shelf Playground & Microscope](docs/images/ui/04_run_canvas_and_playground.png)
+
+Click any row in the `#/arena` leaderboard table to open `#/run/<run_id>` (shown on the left above):
 
 * **Run Header & Cloud Telemetry**: Shows `run_id`, architecture, owner, dataset split, image count, environment (`local` vs. `cloud-run`), Cloud Billing Catalog breakdown, and direct links to Cloud Trace and Cloud Logging when run on GCP.
 * **Pipeline Steps Summary**: Ordered list of pipeline stages executed during the run.
@@ -131,7 +139,7 @@ Click any row in the `#/arena` leaderboard table to open `#/run/<run_id>`.
 
 ### View 4: `#/playground` (Tab 3: Live Multi-Modal Shelf Playground & Co-Pilot)
 
-Use `#/playground` to test single shelf photos, 6-image panorama batches, or `gs://` bucket prefixes interactively and inspect crop-level classification traces.
+Use `#/playground` (shown on the right above) to test single shelf photos, 6-image panorama batches, or `gs://` bucket prefixes interactively and inspect crop-level classification traces.
 
 1. **Input Source Selection**:
    * **1-Click Store Presets**: Select curated Modern Trade and General Trade store presets at the top of the tab.
