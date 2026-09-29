@@ -211,6 +211,14 @@ def main(argv: list[str] | None = None) -> int:
     cloud_service_parser = subparsers.add_parser("cloud-service", help="deploy the Cloud Run web service")
     cloud_service_parser.add_argument("--port", type=int, default=8080)
 
+    cloud_proxy_parser = subparsers.add_parser(
+        "cloud-proxy",
+        help="start an authenticated local proxy to the live Cloud Run web service",
+    )
+    cloud_proxy_parser.add_argument("--port", type=int, default=8080)
+    cloud_proxy_parser.add_argument("--host", default="127.0.0.1")
+    cloud_proxy_parser.add_argument("--url", default=None, help="override Cloud Run service URL")
+
     subparsers.add_parser("pull", help="copy finished Vertex AI / Cloud Run results from GCS into results/")
 
     leaderboard_parser = subparsers.add_parser("leaderboard", help="print the benchmark leaderboard")
@@ -387,6 +395,10 @@ def main(argv: list[str] | None = None) -> int:
         from utils import cloud
 
         cloud.deploy_cloud_service(port=args.port)
+    elif args.cmd == "cloud-proxy":
+        from utils import cloud
+
+        cloud.proxy_cloud_service(port=args.port, host=args.host, target_url=args.url)
     elif args.cmd == "pull":
         print(f"Pulled {runner.pull(config['gcp']['results'])} new run(s) into results/")
     elif args.cmd == "leaderboard":

@@ -424,3 +424,82 @@ def deploy_cloud_service(port: int = 8080, log=print) -> str:
     log(f"Deployed Cloud Run Service: {uri}")
     return uri
 
+
+def proxy_cloud_service(port: int = 8080, host: str = "127.0.0.1", target_url: str | None = None, log=print) -> None:
+    """Start an authenticated local HTTP proxy forwarding to the live Cloud Run Service.
+
+    Replaces `gcloud run services proxy` on workstations where the
+    `google-cloud-cli-cloud-run-proxy` apt component is not installed.
+    """
+    import subprocess
+    import urllib.error
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    cfg = load_config()
+    gcp = cfg["gcp"]
+    cr = cfg.get("cloud_run", {})
+    project, region = gcp["project"], gcp["region"]
+    service_name = cr.get("service", "perfect-store-control-plane")
+
+    if not target_url:
+        s = _session()
+        svc = _ok(s.get(f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services/{service_name}"))
+        target_url = svc.get("uri", "").rstrip("/")
+        if not target_url:
+            raise RuntimeError(f"Cloud Run service {service_name!r} has no URI in {project}/{region}")
+
+    token_cache = {"token": "", "expires": 0.0}
+
+    def _get_id_token() -> str:
+        now = time.time()
+        if token_cache["token"] and now < token_cache["expires"]:
+            return token_cache["token"]
+        tok = subprocess.check_output(["gcloud", "auth", "print-identity-token"], text=True).strip()
+        token_cache["token"] = tok
+        token_cache["expires"] = now + 1800.0
+        return tok
+
+    class _CloudRunProxyHandler(BaseHTTPRequestHandler):
+        def _proxy(self, method: str) -> None:
+            upstream = f"{target_url}{self.path}"
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            body = self.rfile.read(length) if length > 0 else None
+            headers = {
+                "Authorization": f"Bearer {_get_id_token()}",
+                "Accept": self.headers.get("Accept", "*/*"),
+            }
+            if self.headers.get("Content-Type"):
+                headers["Content-Type"] = self.headers["Content-Type"]
+            req = urllib.request.Request(upstream, data=body, headers=headers, method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=180) as resp:
+                    payload = resp.read()
+                    self.send_response(resp.status)
+                    for k, v in resp.headers.items():
+                        if k.lower() not in ("transfer-encoding", "content-encoding", "content-length", "connection"):
+                            self.send_header(k, v)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+            except urllib.error.HTTPError as err:
+                payload = err.read()
+                self.send_response(err.code)
+                self.send_header("Content-Type", err.headers.get("Content-Type", "text/plain"))
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        def do_GET(self) -> None:
+            self._proxy("GET")
+
+        def do_POST(self) -> None:
+            self._proxy("POST")
+
+        def log_message(self, format: str, *args) -> None:  # noqa: A002
+            return
+
+    log(f"Proxying {target_url} -> http://{host}:{port} (Decision-First Reviewer: http://{host}:{port}/#/audit)")
+    with ThreadingHTTPServer((host, port), _CloudRunProxyHandler) as httpd:
+        httpd.serve_forever()
+
