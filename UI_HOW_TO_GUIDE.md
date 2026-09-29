@@ -12,15 +12,15 @@ The web application is a zero-dependency Python + vanilla JavaScript application
 | **HTML Shell & Navigation** | [`src/utils/static/index.html`](src/utils/static/index.html) | Top navigation bar with 3 main tabs (`#/overview`, `#/arena`, `#/playground`), breadcrumb status bar, and `<main id="app">` mount point. |
 | **Client-Side Router & Views** | [`src/utils/static/app.js`](src/utils/static/app.js) | Hash-based router (`#/overview`, `#/arena`, `#/run/<run_id>`, `#/playground`), interactive leaderboard filters, 2-level pipeline simulator, HTML5 `<canvas>` bounding-box renderer, and live Playground client. |
 | **Styling** | [`src/utils/static/styles.css`](src/utils/static/styles.css) | Responsive grid layout, table styles, status badges, and canvas overlays. |
-| **Cloud Deployment** | [`src/utils/cloud.py`](src/utils/cloud.py) | Container build via Cloud Build and deployment to Google Cloud Run (`deploy_cloud_service`). |
+| **Cloud & Vertex AI Deployment** | [`src/utils/vertex_platform.py`](src/utils/vertex_platform.py), [`src/utils/cloud.py`](src/utils/cloud.py) | Container build via Cloud Build and deployment to Vertex AI (`CustomJob`, `TuningJob`, `ReasoningEngine` Agent Platform) or Google Cloud Run (`deploy_cloud_service`). |
 
 ### How Data Reaches the UI
 
-1. **Benchmark Runs (`results/<run_id>/`)**: Every time `shelf-bench run` completes, [`src/runner.py`](src/runner.py) writes `summary.json` (run-level accuracy, recall, F2, latency, Cloud Billing cost, and Unilever shelf KPIs) and `images.jsonl` (per-image bounding boxes, ground truth matches, and step traces).
+1. **Benchmark Runs (`results/<run_id>/`)**: Every time `shelf-bench run` or `shelf-bench vertex-job` completes, [`src/runner.py`](src/runner.py) writes `summary.json` (run-level accuracy, recall, F2, latency, Cloud Billing cost, and Unilever shelf KPIs) and `images.jsonl` (per-image bounding boxes, ground truth matches, and step traces).
 2. **Auto-Discovery (`src/approaches/` and `src/stages/`)**: When the UI loads `#/arena`, it queries `/api/v1/eng-workbench` and `/api/stages`. New approaches or stage functions added to the codebase appear automatically in the leaderboard filters and Pipeline Impact Simulator without editing frontend code.
 3. **Dataset Splits Shown in the UI**: All leaderboard rankings in `#/arena` and `#/overview` evaluate the **validation split (`val`)** by default so engineers can compare runs without touching the held-out `test` split. The exact split used by each run (`val` or `test`) is recorded in `summary.json` and displayed in the `#/run/<run_id>` header.
 
-## 2. Running Locally and Deploying on Cloud Run
+## 2. Running Locally and Deploying on Vertex AI / Cloud Run
 
 ### Run Locally
 
@@ -35,19 +35,23 @@ PYTHONPATH=src python3 src/cli.py serve \
   --port 8080
 ```
 
-### Pull Cloud Run Job Results into Local UI
+### Pull Vertex AI and Cloud Run Job Results into Local UI
 
-When benchmark runs execute on Cloud Run Jobs (`shelf-bench cloud`), results are written to the GCS bucket configured in [`config.yaml`](config.yaml) (`gs://<project>-shelf-images/results`). Pull those scorecards locally before starting or refreshing the UI:
+When benchmark runs execute on Vertex AI Custom Jobs (`shelf-bench vertex-job`) or Cloud Run Jobs (`shelf-bench cloud`), results are written to the GCS bucket configured in [`config.yaml`](config.yaml) (`gs://<project>-shelf-images/results`). Pull those scorecards locally before starting or refreshing the UI:
 
 ```bash
 PYTHONPATH=src python3 src/cli.py pull
 ```
 
-### Deploy as an Always-On Cloud Run Web Service
+### Deploy to Vertex AI Agent Platform or Cloud Run Web Service
 
-To deploy the web UI as a shared Cloud Run service (`perfect-store-control-plane` by default in `config.yaml`):
+To deploy the shelf-audit agent to Vertex AI Agent Platform (`ReasoningEngine`) or deploy the web UI as a shared Cloud Run service (`perfect-store-control-plane` by default in `config.yaml`):
 
 ```bash
+# Deploy the shelf-audit agent to Vertex AI Agent Platform (ReasoningEngine)
+PYTHONPATH=src python3 src/cli.py vertex-deploy --display-name hul-perfect-store-agent
+
+# Deploy the web UI as an always-on Cloud Run service
 PYTHONPATH=src python3 src/cli.py cloud-service --port 8080
 ```
 

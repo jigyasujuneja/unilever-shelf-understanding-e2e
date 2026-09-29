@@ -147,10 +147,32 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--results", default=str(runner.RESULTS_DIR), help="local directory or gs:// URI")
     _add_pipeline_override_flags(run_parser)
 
-    cloud_run_parser = subparsers.add_parser("cloud-run", help="run approach and model combinations on Cloud Run")
-    cloud_run_parser.add_argument("-a", "--approach", nargs="+", required=True)
-    cloud_run_parser.add_argument("-m", "--model", nargs="+", required=True)
-    cloud_run_parser.add_argument(
+    for cloud_cmd in ("cloud-run", "cloud"):
+        cloud_run_parser = subparsers.add_parser(cloud_cmd, help="run approach and model combinations on Cloud Run")
+        cloud_run_parser.add_argument("-a", "--approach", nargs="+", required=True)
+        cloud_run_parser.add_argument("-m", "--model", nargs="+", required=True)
+        cloud_run_parser.add_argument(
+            "-t",
+            "--tier",
+            nargs="+",
+            choices=TIERS,
+            default=defaults.get("tier", ["standard"]),
+            help="Gemini PayGo tier(s): standard and/or priority",
+        )
+        cloud_run_parser.add_argument("--split", default=defaults.get("split", "test"), choices=dataset.SPLITS)
+        cloud_run_parser.add_argument("--limit", type=int, default=defaults.get("limit", 50), help="0 = full split")
+        cloud_run_parser.add_argument("--seed", type=int, default=defaults.get("seed", 0))
+        cloud_run_parser.add_argument("--workers", type=int, default=defaults.get("workers", 4))
+        cloud_run_parser.add_argument("--owner", default=None, help="defaults to $USER")
+        _add_pipeline_override_flags(cloud_run_parser)
+
+    vertex_job_parser = subparsers.add_parser(
+        "vertex-job",
+        help="run approach and model combinations on Vertex AI Custom Jobs",
+    )
+    vertex_job_parser.add_argument("-a", "--approach", nargs="+", required=True)
+    vertex_job_parser.add_argument("-m", "--model", nargs="+", required=True)
+    vertex_job_parser.add_argument(
         "-t",
         "--tier",
         nargs="+",
@@ -158,17 +180,38 @@ def main(argv: list[str] | None = None) -> int:
         default=defaults.get("tier", ["standard"]),
         help="Gemini PayGo tier(s): standard and/or priority",
     )
-    cloud_run_parser.add_argument("--split", default=defaults.get("split", "test"), choices=dataset.SPLITS)
-    cloud_run_parser.add_argument("--limit", type=int, default=defaults.get("limit", 50), help="0 = full split")
-    cloud_run_parser.add_argument("--seed", type=int, default=defaults.get("seed", 0))
-    cloud_run_parser.add_argument("--workers", type=int, default=defaults.get("workers", 4))
-    cloud_run_parser.add_argument("--owner", default=None, help="defaults to $USER")
-    _add_pipeline_override_flags(cloud_run_parser)
+    vertex_job_parser.add_argument("--split", default=defaults.get("split", "test"), choices=dataset.SPLITS)
+    vertex_job_parser.add_argument("--limit", type=int, default=defaults.get("limit", 50), help="0 = full split")
+    vertex_job_parser.add_argument("--seed", type=int, default=defaults.get("seed", 0))
+    vertex_job_parser.add_argument("--workers", type=int, default=defaults.get("workers", 4))
+    vertex_job_parser.add_argument("--owner", default=None, help="defaults to $USER")
+    vertex_job_parser.add_argument("--machine-type", default=None, help="Vertex AI machine type (default: n1-standard-4)")
+    vertex_job_parser.add_argument("--accelerator-type", default=None, help="optional GPU type (e.g. NVIDIA_L4)")
+    vertex_job_parser.add_argument("--accelerator-count", type=int, default=None, help="optional GPU count")
+    _add_pipeline_override_flags(vertex_job_parser)
+
+    vertex_train_parser = subparsers.add_parser(
+        "vertex-train",
+        help="submit a Vertex AI Supervised Fine-Tuning job on the train split",
+    )
+    vertex_train_parser.add_argument("-m", "--model", default="gemini-2.5-flash", help="base Gemini model to fine-tune")
+    vertex_train_parser.add_argument("--train-uri", default=None, help="GCS URI of training JSONL dataset")
+    vertex_train_parser.add_argument("--val-uri", default=None, help="GCS URI of validation JSONL dataset")
+    vertex_train_parser.add_argument("--display-name", default=None, help="tuned model display name")
+    vertex_train_parser.add_argument("--epochs", type=int, default=4, help="number of training epochs")
+    vertex_train_parser.add_argument("--dry-run", action="store_true", help="print payload without calling Vertex AI")
+
+    vertex_deploy_parser = subparsers.add_parser(
+        "vertex-deploy",
+        help="deploy the Shelf Intelligence Agent on Vertex AI Agent Engine (ReasoningEngine)",
+    )
+    vertex_deploy_parser.add_argument("--display-name", default=None, help="Agent Engine display name")
+    vertex_deploy_parser.add_argument("--dry-run", action="store_true", help="print payload without calling Vertex AI")
 
     cloud_service_parser = subparsers.add_parser("cloud-service", help="deploy the Cloud Run web service")
     cloud_service_parser.add_argument("--port", type=int, default=8080)
 
-    subparsers.add_parser("pull", help="copy finished Cloud Run results from GCS into results/")
+    subparsers.add_parser("pull", help="copy finished Vertex AI / Cloud Run results from GCS into results/")
 
     leaderboard_parser = subparsers.add_parser("leaderboard", help="print the benchmark leaderboard")
     leaderboard_parser.add_argument("--results", type=Path, default=runner.RESULTS_DIR)
@@ -281,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
                 failed += 1
                 print(f"[{name} x {model} x {tier}] FAILED: {err}", file=sys.stderr)
         return 1 if failed else 0
-    elif args.cmd == "cloud-run":
+    elif args.cmd in ("cloud-run", "cloud"):
         from utils import cloud
 
         for name in args.approach:
@@ -296,6 +339,48 @@ def main(argv: list[str] | None = None) -> int:
             args.workers,
             args.owner or getpass.getuser(),
         )
+    elif args.cmd == "vertex-job":
+        from utils import vertex_platform
+
+        for name in args.approach:
+            approaches.get(name)
+        return vertex_platform.run_on_vertex(
+            args.approach,
+            args.model,
+            args.tier,
+            args.split,
+            args.limit,
+            args.seed,
+            args.workers,
+            args.owner or getpass.getuser(),
+            machine_type=args.machine_type,
+            accelerator_type=args.accelerator_type,
+            accelerator_count=args.accelerator_count,
+        )
+    elif args.cmd == "vertex-train":
+        import json
+        from utils import vertex_platform
+
+        res = vertex_platform.submit_vertex_tuning_job(
+            base_model=args.model,
+            train_dataset_uri=args.train_uri,
+            validation_dataset_uri=args.val_uri,
+            tuned_model_display_name=args.display_name,
+            epoch_count=args.epochs,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            print(json.dumps(res, indent=2))
+    elif args.cmd == "vertex-deploy":
+        import json
+        from utils import vertex_platform
+
+        res = vertex_platform.deploy_vertex_agent(
+            display_name=args.display_name,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            print(json.dumps(res, indent=2))
     elif args.cmd == "cloud-service":
         from utils import cloud
 

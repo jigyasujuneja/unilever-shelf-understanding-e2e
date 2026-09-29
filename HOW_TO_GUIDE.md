@@ -1,21 +1,21 @@
 # Developer Guide: Repository Architecture, Task Contracts, and Cloud Execution
 
-Engineers use this repository to build, evaluate, and compare retail shelf detection and product classification models on a shared benchmark. Contributors add models in isolated files under `src/approaches/` or `src/stages/` while sharing the same dataset splits, evaluation metrics, cost ledger, and Cloud Run job runner. For web UI architecture, navigation across all 4 views, and Cloud Run service deployment, see [`UI_HOW_TO_GUIDE.md`](UI_HOW_TO_GUIDE.md).
+Engineers use this repository to build, evaluate, and compare retail shelf detection and product classification models on a shared benchmark. Contributors add models in isolated files under `src/approaches/` or `src/stages/` while sharing the same dataset splits, evaluation metrics, cost ledger, and cloud runners (`Vertex AI CustomJob` and `Cloud Run Jobs`). For web UI architecture, navigation across all 4 views, and service deployment, see [`UI_HOW_TO_GUIDE.md`](UI_HOW_TO_GUIDE.md).
 
 ## Repository Layout and Boundaries
 
 ```text
 unilever-shelf-understanding/
-├── config.yaml                       # Default GCP project, bucket URIs, models, and split settings
-├── Dockerfile                        # Container image definition for Cloud Run jobs and web UI
+├── config.yaml                       # Default GCP project, Vertex AI, Cloud SQL, vector store, and split settings
+├── Dockerfile                        # Container image definition for Vertex AI jobs, Cloud Run jobs, and web UI
 ├── src/
-│   ├── cli.py                        # CLI entry point (list, run, cloud, cloud-service, pull, leaderboard, serve)
+│   ├── cli.py                        # CLI entry point (list, run, vertex-job, vertex-train, vertex-deploy, cloud, pull, leaderboard, serve)
 │   ├── runner.py                     # Evaluation loop, IoU box matching, F2 scoring, and cost ledger
 │   ├── approaches/                   # Self-contained benchmark approaches (@register)
 │   │   ├── base.py                   # Base Approach class, Context, Box type, and registry helpers
 │   │   ├── _detector_template.py     # Starter template for task="detection"
 │   │   ├── _classifier_template.py   # Starter template for task="classification"
-│   │   ├── _detect_retrieve_template.py # Starter template for vector DB retrieval
+│   │   ├── _detect_retrieve_template.py # Starter template for vector DB retrieval (Cloud SQL pgvector / Vertex Vector Search)
 │   │   ├── _combined_pipeline_template.py # Starter template for task="combined"
 │   │   └── modular_e2e_pipeline.py   # Configurable end-to-end pipeline composing approaches and stages
 │   ├── stages/                       # Pluggable internal pipeline stages (StageSpec registry)
@@ -26,7 +26,7 @@ unilever-shelf-understanding/
 │   │   ├── stage4_retrieval.py       # Glare compensation and vector catalog lookup
 │   │   ├── stage5_compound_vlm.py    # CIELAB color distance and VLM shade disambiguation
 │   │   └── stage6_shelf_metrics.py   # Share-of-shelf, out-of-stock, and planogram metrics
-│   └── utils/                        # Shared dataset, Vertex AI, AlloyDB, billing, and web server modules
+│   └── utils/                        # Shared dataset, Vertex AI platform, Cloud SQL pgvector, VectorCatalog, billing, and web server modules
 ├── data/
 │   └── splits/dataset_splits_manifest.json # SHA-256 locked train, val, and test split manifest
 ├── results/                          # Saved run directories (<run_id>/summary.json and images.jsonl)
@@ -47,11 +47,11 @@ The benchmark defines three non-overlapping splits in `src/utils/dataset.py`:
 
 | Split | Image Count | Purpose | Leaderboard & Web UI (`#/arena`) Behavior |
 | :--- | :--- | :--- | :--- |
-| `train` | 8,219 (SKU-110K) / 20 (HUL) | Model fine-tuning, vector index population, and few-shot prompt selection. | Not displayed on the leaderboard. |
+| `train` | 8,219 (SKU-110K) / 20 (HUL) | Model fine-tuning (`shelf-bench vertex-train`), vector index population, and few-shot prompt selection. | Not displayed on the leaderboard. |
 | `val` | 588 (SKU-110K) / 25 (HUL) | Local iteration on prompts, thresholds, and model weights (`--split val --limit 25 --seed 0`). | Displayed in the UI with `rank = "dev"` below official runs. |
-| `test` | 2,936 (SKU-110K) / 50 (HUL) | Locked benchmark evaluation (`--split test --limit 50 --seed 0`). | Displayed with a numeric rank (`#1, #2, ...`) when executed on Cloud Run. |
+| `test` | 2,936 (SKU-110K) / 50 (HUL) | Locked benchmark evaluation (`--split test --limit 50 --seed 0`). | Displayed with a numeric rank (`#1, #2, ...`) when executed on Vertex AI (`vertex-ai`) or Cloud Run (`cloud-run`). |
 
-The web UI loads `summary.json` files from `results/` for both `test` and `val` runs. In `src/runner.py`, `leaderboard()` assigns a numbered rank only when `platform == "cloud-run"` and `(split, limit, seed) == ("test", 50, 0)`. All local runs and `val` runs are labeled `dev` so engineers can inspect experimental runs in the UI without affecting official rankings.
+The web UI loads `summary.json` files from `results/` for both `test` and `val` runs. In `src/runner.py`, `leaderboard()` assigns a numbered rank only when `platform in ("vertex-ai", "cloud-run")` and `(split, limit, seed) == ("test", 50, 0)`. All local runs and `val` runs are labeled `dev` so engineers can inspect experimental runs in the UI without affecting official rankings.
 
 ## Task Contracts and Benchmark Epics
 
@@ -183,14 +183,15 @@ PYTHONPATH=src python3 src/cli.py run -a custom_crop_classifier \
 
 ### Pattern 3: Vector Database Retriever (`task = "classification"`)
 
-Use this pattern when embedding product crops (`gemini-embedding-001` or `SigLIP`) and querying AlloyDB `pgvector` / `ScaNN`. Include `skus = embeddings.SKUS` on the class so the runner bills embedding calls automatically.
+Use this pattern when embedding product crops (`gemini-embedding-001` or `SigLIP`) and querying Cloud SQL for PostgreSQL (`pgvector`), Vertex AI Vector Search (`ScaNN`), or BigQuery Vector Search through `VectorCatalog` or `CloudSQL`. Include `skus = embeddings.SKUS` on the class so the runner bills embedding calls automatically.
 
 ```python
 from typing import Any
 from PIL import Image
 from approaches.base import Approach, Box, Context, label_counts, register
 from utils import embeddings
-from utils.alloydb import AlloyDB, pgvector
+from utils.cloudsql import CloudSQL, pgvector
+from utils.vector_store import VectorCatalog
 
 VECTOR_SQL = """
     SELECT sku_id, category, brand, packaging_type, variant
@@ -206,13 +207,14 @@ class CustomVectorRetriever(Approach):
     task = "classification"
     epic = "MT Market Share - Variant Classification"
     target_field = "variant"
-    architecture = "Vertex multimodal crop embeddings + AlloyDB pgvector/ScaNN retrieval"
-    steps = ["Embed each crop", "Query AlloyDB vector index for nearest SKU"]
+    architecture = "Vertex multimodal crop embeddings + Cloud SQL pgvector / Vertex Vector Search retrieval"
+    steps = ["Embed each crop", "Query Cloud SQL pgvector or VectorCatalog for nearest SKU"]
     skus = embeddings.SKUS
 
     def setup(self, config: dict) -> None:
         self.embed = embeddings.VertexEmbeddings(config)
-        self.db = AlloyDB(**config["alloydb"])
+        self.db = CloudSQL(**config.get("cloudsql", config.get("alloydb", {})))
+        self.catalog = VectorCatalog(config)
 
     def classify(
         self,
@@ -308,26 +310,32 @@ PYTHONPATH=src python3 src/cli.py run -a modular_e2e_pipeline -m gemini-3.1-flas
 
 ### 4. Run the test suite
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -p "test_*.py" -v
+PYTHONPATH=src python3 -m unittest discover -s tests -p "test_unified_*.py" -v
 ```
 
-### 5. Submit official `test` evaluation to Cloud Run and view the leaderboard
+### 5. Submit Vertex AI Training, Evaluation Jobs, and Agent Platform Deployment
 ```bash
-# Provision GCP buckets, Artifact Registry, and Cloud Run job on a new project (one-time)
+# Provision GCP buckets, Artifact Registry, and Cloud Run / Vertex AI resources (one-time)
 PYTHONPATH=src python3 src/cli.py bootstrap --project <YOUR_GCP_PROJECT_ID> --region us-central1
 
-# Execute on Cloud Run Jobs against the locked 50-image test split
-PYTHONPATH=src python3 src/cli.py cloud -a <your_approach> -m gemini-3.8-flash \
+# Submit a supervised Gemini fine-tuning job on Vertex AI (TuningJob)
+PYTHONPATH=src python3 src/cli.py vertex-train -m gemini-3.1-flash-lite \
+  --display-name hul-variant-ft --epochs 4
+
+# Execute benchmark evaluation on Vertex AI CustomJob against the locked 50-image test split
+PYTHONPATH=src python3 src/cli.py vertex-job -a <your_approach> -m gemini-3.8-flash \
   --split test --limit 50 --seed 0 --owner $USER
 
-# Pull finished Cloud Run results from GCS into local results/
+# Pull finished Vertex AI / Cloud Run results from GCS into local results/
 PYTHONPATH=src python3 src/cli.py pull
 
 # Print the CLI leaderboard or launch the local web UI at http://127.0.0.1:8080/#/arena
 PYTHONPATH=src python3 src/cli.py leaderboard
 PYTHONPATH=src python3 src/cli.py serve --port 8080
 
-# Deploy the web UI as a shared Cloud Run service (see UI_HOW_TO_GUIDE.md)
+# Deploy the shelf-audit agent to Vertex AI Agent Platform (ReasoningEngine) or web UI to Cloud Run
+PYTHONPATH=src python3 src/cli.py vertex-deploy --display-name hul-perfect-store-agent
 PYTHONPATH=src python3 src/cli.py cloud-service --port 8080
 ```
+
 

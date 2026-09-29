@@ -107,7 +107,7 @@ def record_active_learning_sample(
         "routing_branch": routing_branch,
         "teacher_sku_id": teacher_sku_id,
         "trace_url": trace_url,
-        "distillation_target": "AlloyDB_ScaNN_Reference_Bank",
+        "distillation_target": "CloudSQL_pgvector_and_Vertex_Vector_Search_Bank",
     }
     queue_path.parent.mkdir(parents=True, exist_ok=True)
     with queue_path.open("a", encoding="utf-8") as f:

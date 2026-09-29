@@ -1,4 +1,4 @@
-"""Track C (`tiered_hybrid_scann`): RT-DETR-v2 + Vertex Embeddings / ScaNN / AlloyDB + Gemini Fallback.
+"""Track C (`tiered_hybrid_scann`): RT-DETR-v2 + Vertex Embeddings / Cloud SQL pgvector / Vertex Vector Search + Gemini Fallback.
 
 Registered exclusively in `src/approaches/` via `@register` and backed by `src/utils/hul_domain.py`.
 """
@@ -18,12 +18,12 @@ class TieredHybridScann(Approach):
     epic = "MT Market Share - Combined Classification"
     architecture = (
         "3-tier hybrid: Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) -> Stage 4 gemini-embedding-001 / "
-        "AlloyDB ScaNN match (sim>=0.82, 89% crops) -> Gemini 3.8 Flash fallback on 11% low-margin cluster medoids"
+        "Cloud SQL pgvector & Vertex Vector Search match (sim>=0.82, 89% crops) -> Gemini 3.8 Flash fallback on 11% low-margin cluster medoids"
     )
     steps = [
         "Stage 3: RT-DETR-v2 + DIoU-NMS dense shelf detection (22 ms)",
         "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2)",
-        "Stage 4: gemini-embedding-001 + AlloyDB ScaNN top-1 match on cluster medoids (0.8 ms/medoid)",
+        "Stage 4: gemini-embedding-001 + Cloud SQL pgvector / Vertex Vector Search top-1 match on cluster medoids (0.8 ms/medoid)",
         "Stage 5: Gemini fallback on low-confidence cluster medoids (<0.82 similarity or <0.045 margin)",
     ]
     skus = embeddings.SKUS

@@ -39,7 +39,20 @@ _T_PROCESS = time.time()  # container start (Cloud Run bills from instance start
 
 
 def environment(config: dict) -> dict:
-    """Where this run executes. Compute is only priced on Cloud Run, where we know the shape."""
+    """Where this run executes. Compute is priced on Vertex AI Custom Jobs and Cloud Run Jobs."""
+    if os.environ.get("VERTEX_AI_CUSTOM_JOB") or os.environ.get("CLOUD_ML_JOB_ID"):
+        vx = config.get("vertex_ai", {})
+        job_id = os.environ.get("CLOUD_ML_JOB_ID") or os.environ.get("VERTEX_AI_CUSTOM_JOB")
+        return {
+            "platform": "vertex-ai",
+            "region": config.get("gcp", {}).get("region"),
+            "job": job_id,
+            "execution": job_id,
+            "task_index": int(os.environ.get("CLOUD_ML_TASK_INDEX", 0)),
+            "machine_type": os.environ.get("VERTEX_MACHINE_TYPE") or vx.get("machine_type", "n1-standard-4"),
+            "cpu": vx.get("cpu", 4),
+            "memory_gib": vx.get("memory_gib", 15),
+        }
     if os.environ.get("CLOUD_RUN_JOB"):
         cr = config.get("cloud_run", {})
         return {"platform": "cloud-run", "region": config.get("gcp", {}).get("region"),
@@ -51,10 +64,13 @@ def environment(config: dict) -> dict:
 
 
 def set_compute(summary: dict, seconds: float, source: str) -> dict:
-    """(Re)price Cloud Run compute for ``seconds`` of task time and update the totals."""
+    """(Re)price Vertex AI or Cloud Run compute for ``seconds`` of task time and update the totals."""
     env, sheet = summary["environment"], summary["pricing"]
-    usd = pricing.cloud_run_cost(seconds, env["cpu"], env["memory_gib"], sheet) \
-        if env.get("platform") == "cloud-run" else 0.0
+    usd = (
+        pricing.cloud_run_cost(seconds, env.get("cpu", 2), env.get("memory_gib", 4), sheet)
+        if env.get("platform") in ("vertex-ai", "cloud-run")
+        else 0.0
+    )
     c = summary["cost"]
     c.update({"compute_seconds": round(seconds, 1), "compute_source": source,
               "compute_usd_per_image": usd / summary["images"]})
@@ -375,14 +391,20 @@ def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] =
             n += 1
         summary = json.loads((dest / "summary.json").read_text())
         if "provisional" in summary.get("cost", {}).get("compute_source", ""):
-            from utils import cloud
+            from utils import cloud, vertex_platform
 
+            plat = summary.get("environment", {}).get("platform")
             try:
-                seconds = cloud.task_seconds(summary["environment"])
+                if plat == "vertex-ai":
+                    seconds = vertex_platform.vertex_job_seconds(summary["environment"])
+                    src_label = "Vertex AI CustomJob start->end (Vertex AI API)"
+                else:
+                    seconds = cloud.task_seconds(summary["environment"])
+                    src_label = "Cloud Run task start->completion (Admin API)"
             except Exception as e:  # task not finished yet / API error: keep provisional
                 log(f"  {run_id}: compute stays provisional ({e})")
                 continue
-            set_compute(summary, seconds, "Cloud Run task start->completion (Admin API)")
+            set_compute(summary, seconds, src_label)
             (dest / "summary.json").write_text(json.dumps(summary, indent=2))
             gcs.blob(blob.name).upload_from_filename(str(dest / "summary.json"))
     return n
@@ -527,7 +549,7 @@ def leaderboard(
         runs.append(s)
 
     def official(r: dict) -> bool:
-        return (r.get("environment", {}).get("platform") == "cloud-run"
+        return (r.get("environment", {}).get("platform") in ("vertex-ai", "cloud-run")
                 and (r["split"], r.get("limit"), r.get("seed")) == board_set)
 
     def sort_score(r: dict) -> float:

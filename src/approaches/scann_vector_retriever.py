@@ -1,9 +1,10 @@
-"""Divided Stage 4 Variant Retriever: I-JEPA Specular De-Glare + gemini-embedding-001 + AlloyDB ScaNN.
+"""Divided Stage 4 Variant Retriever: I-JEPA Specular De-Glare + gemini-embedding-001 + Cloud SQL pgvector / Vertex Vector Search.
 
 Epic: ``MT Market Share - Variant Classification`` (``task = "classification"``)
 Divided from Stage 4 of our 8-stage HUL architecture to benchmark pure vector retrieval
-(``gemini-embedding-001`` 4-zone Sub-ROI + ``I-JEPA`` glare compensation + ``AlloyDB ScaNN`` cosine
-margin lookup) standalone on Variant Classification without Sister-Shade VLM disambiguation.
+(``gemini-embedding-001`` 4-zone Sub-ROI + ``I-JEPA`` glare compensation + ``Cloud SQL pgvector`` /
+``Vertex AI Vector Search`` cosine margin lookup) standalone on Variant Classification without
+Sister-Shade VLM disambiguation.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
 from utils import embeddings, hul_domain
+from utils.vector_store import VectorCatalog
 
 
 @register
@@ -24,13 +26,16 @@ class ScaNNVectorRetriever(Approach):
     target_field = "variant"
     architecture = (
         "Divided Stage 4: I-JEPA Specular De-Glare + 4-Zone Sub-ROI gemini-embedding-001 "
-        "+ AlloyDB pgvector/ScaNN Cosine Margin Retrieval"
+        "+ Cloud SQL pgvector / Vertex AI Vector Search Cosine Margin Retrieval"
     )
     steps = [
         "Stage 4A: 4-Zone Sub-ROI Crop Embedding & I-JEPA Specular Glare Compensation",
-        "Stage 4B: AlloyDB ScaNN Top-2 Cosine Similarity & Margin Lookup",
+        "Stage 4B: Cloud SQL pgvector / Vertex AI Vector Search Top-2 Cosine Similarity & Margin Lookup",
     ]
     skus = embeddings.SKUS
+
+    def setup(self, config: dict) -> None:
+        self.catalog = VectorCatalog(config)
 
     def classify(
         self,
@@ -51,8 +56,8 @@ class ScaNNVectorRetriever(Approach):
         )
         ctx.trace.labels = preds
         ctx.trace.step(
-            "Stage 4B: AlloyDB ScaNN Variant Retrieval",
-            f"Retrieved Top-1 SKU variants via ScaNN cosine lookup ({label_counts(preds)})",
+            "Stage 4B: Cloud SQL pgvector / Vertex Vector Search Variant Retrieval",
+            f"Retrieved Top-1 SKU variants via vector cosine lookup ({label_counts(preds)})",
             boxes=boxes,
             labels=preds,
         )

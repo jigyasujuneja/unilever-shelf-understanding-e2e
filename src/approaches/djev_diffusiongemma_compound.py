@@ -99,9 +99,9 @@ class DjevDiffusionGemmaCompoundClassifier(Approach):
         avg_pool = round(sum(prefiltered_pools) / max(1, len(prefiltered_pools)), 1)
         ctx.trace.labels = preds
         ctx.trace.step(
-            "Step 3: H3 Packaging-Entropy Gate & ScaNN Candidate Pool Pre-Filter",
+            "Step 3: H3 Packaging-Entropy Gate & Vector Candidate Pool Pre-Filter",
             (
-                f"Shrank AlloyDB ScaNN search space from 50,000 SKUs -> avg {avg_pool} candidate SKUs "
+                f"Shrank Cloud SQL pgvector / Vertex Vector Search space from 50,000 SKUs -> avg {avg_pool} candidate SKUs "
                 "via (Category, Brand, Packaging Type) compound pre-filter"
             ),
             boxes=boxes,

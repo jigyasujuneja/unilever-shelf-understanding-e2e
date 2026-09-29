@@ -322,8 +322,82 @@ class UnifiedCloudArchitectureTests(unittest.TestCase):
         self.assertTrue(custom_eval["mt_market_share_kpis"]["sla_30s_pass"])
         self.assertTrue(custom_eval["mt_merchandising_kpis"]["sla_10s_pass"])
 
+    def test_cloudsql_vector_catalog_and_vertex_platform(self) -> None:
+        import os
+        from utils import alloydb, cloudsql, vector_store, vertex_platform
+        from utils.llm import load_config
+
+        cfg = load_config()
+        self.assertIn("cloudsql", cfg)
+        self.assertIn("vector_store", cfg)
+        self.assertIn("vertex_ai", cfg)
+        self.assertEqual(cfg["vector_store"]["backend"], "cloudsql_pgvector")
+
+        # Verify CloudSQL and backward-compatible AlloyDB alias
+        self.assertTrue(issubclass(alloydb.AlloyDB, cloudsql.CloudSQL))
+        db = cloudsql.CloudSQL(**cfg["cloudsql"])
+        vec = cloudsql.pgvector([0.25, -0.5, 0.75])
+        self.assertEqual(vec, "[0.250000,-0.500000,0.750000]")
+        rows = db.query(
+            "SELECT sku_id, category, brand, packaging_type, variant FROM products WHERE (%s IS NULL OR brand = %s) ORDER BY embedding <=> %s::vector LIMIT 2",
+            ("Dove", "Dove", vec),
+        )
+        self.assertGreaterEqual(len(rows), 1)
+        self.assertEqual(rows[0][2], "Dove")
+
+        # Verify VectorCatalog across backends (with automatic local fallback)
+        for backend_name in ("cloudsql_pgvector", "vertex_vector_search", "bigquery", "gcs_inmemory"):
+            cat_cfg = dict(cfg)
+            cat_cfg["vector_store"] = dict(cfg["vector_store"], backend=backend_name)
+            vc = vector_store.VectorCatalog(cat_cfg)
+            matches = vc.search([0.1, 0.2, 0.3], brand="Lakme", top_k=2)
+            self.assertGreaterEqual(len(matches), 1)
+            self.assertEqual(matches[0].brand, "Lakme")
+
+        # Verify Vertex AI CustomJob, TuningJob, and ReasoningEngine payload builders
+        job_payload = vertex_platform.build_custom_job_payload(
+            display_name="test-vertex-job",
+            image_uri="gcr.io/test-project/shelf-bench:latest",
+            args=["run", "-a", "hul_8stage_gemini38_hybrid", "-m", "gemini-3.8-flash", "--split", "test"],
+            machine_type="n1-standard-4",
+            staging_bucket=cfg["gcp"]["results"],
+        )
+        self.assertEqual(job_payload["displayName"], "test-vertex-job")
+        self.assertIn("workerPoolSpecs", job_payload["jobSpec"])
+
+        tune_res = vertex_platform.submit_vertex_tuning_job(
+            base_model="gemini-3.1-flash-lite",
+            tuned_model_display_name="hul-variant-ft",
+            epoch_count=4,
+            dry_run=True,
+        )
+        self.assertEqual(tune_res["status"], "DRY_RUN")
+        self.assertEqual(tune_res["payload"]["baseModel"], "gemini-3.1-flash-lite")
+        self.assertEqual(tune_res["payload"]["supervisedTuningSpec"]["hyperParameters"]["epochCount"], 4)
+
+        agent_res = vertex_platform.deploy_vertex_agent(
+            display_name="hul-shelf-agent",
+            dry_run=True,
+        )
+        self.assertEqual(agent_res["status"], "DRY_RUN")
+        self.assertEqual(agent_res["payload"]["displayName"], "hul-shelf-agent")
+
+        # Verify runner.environment() detects Vertex AI CustomJob environment
+        prev_job = os.environ.get("VERTEX_AI_CUSTOM_JOB")
+        try:
+            os.environ["VERTEX_AI_CUSTOM_JOB"] = "hul-shelf-custom-job-001"
+            env = runner.environment(cfg)
+            self.assertEqual(env["platform"], "vertex-ai")
+            self.assertEqual(env["job"], "hul-shelf-custom-job-001")
+        finally:
+            if prev_job is None:
+                os.environ.pop("VERTEX_AI_CUSTOM_JOB", None)
+            else:
+                os.environ["VERTEX_AI_CUSTOM_JOB"] = prev_job
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

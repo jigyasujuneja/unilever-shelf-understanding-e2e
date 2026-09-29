@@ -14,7 +14,7 @@ authors = [
     { name = "Anil Sener", email = "anilsener@google.com" }
 ]
 dependencies = [
-    "google-cloud-alloydb-connector[pg8000]>=1.4.0",
+    "cloud-sql-python-connector[pg8000]>=1.11.0",
     "google-cloud-logging>=3.10.0",
     "google-cloud-storage>=2.14.0",
     "google-genai>=1.5.0",

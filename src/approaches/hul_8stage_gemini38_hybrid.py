@@ -23,13 +23,13 @@ class HUL8StageGemini38Hybrid(Approach):
     task = "combined"
     epic = "MT Market Share - Combined Classification"
     architecture = (
-        "8-Stage HUL Hybrid: RT-DETR-v2 + Complete-Linkage Clustering (ADR-008) + gemini-embedding-001/AlloyDB ScaNN "
+        "8-Stage HUL Hybrid: RT-DETR-v2 + Complete-Linkage Clustering (ADR-008) + gemini-embedding-001 / Cloud SQL pgvector & Vertex Vector Search "
         "(89% in 0.8ms) + Stage 4.5 /v1/systemone 64-Token Canvas (9% in 8.9ms) + Gemini 3.8 Flash Open-Set (2%)"
     )
     steps = [
         "Stage 2 & 3: ORB Homography Stitch + RT-DETR-v2 + DIoU-NMS (98.8% Box Recall in 25 ms)",
         "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2, ~3.5x compression)",
-        "Stage 4: gemini-embedding-001 Sub-ROI + Specular Glare Mask + AlloyDB/ScaNN Match (89% clear HUL SKUs)",
+        "Stage 4: gemini-embedding-001 Sub-ROI + Specular Glare Mask + Cloud SQL pgvector / Vertex Vector Search Match (89% clear HUL SKUs)",
         "Stage 4.5 & 5a: 3x Sub-ROI CIELAB + /v1/systemone 64-Token Canvas (9% sister shades in 8.9 ms)",
         "Stage 5b: Gemini 3.8 Flash Open-Set Competitor & Promotional Toker OCR Audit (2% crops)",
         "Stage 6: 4-Factor Gondola Remediation & 8 Modern Trade KPIs (SOS %, OOS Voids, Brand-Block Purity)",

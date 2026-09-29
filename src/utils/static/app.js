@@ -1063,14 +1063,18 @@ function envLine(s) {
   const c = s.cost || {};
   const r = (usd) => inr((usd || 0) * (s.usd_to_inr || 86.5));
   const where =
-    e.platform === "cloud-run"
+    e.platform === "vertex-ai"
+      ? `Ran on Vertex AI Custom Job (${esc(e.region)}, ${esc(e.machine_type || "n1-standard-4")}, ${e.cpu} vCPU / ${e.memory_gib} GiB)`
+      : e.platform === "cloud-run"
       ? `Ran on Cloud Run (${esc(e.region)}, ${e.cpu} vCPU / ${e.memory_gib} GiB)`
       : "Ran locally (compute not priced)";
   const credit = c.gemini_credit_usd_per_image
     ? ` (list ${r(c.gemini_list_usd_per_image)} − promo credit ${r(c.gemini_credit_usd_per_image)})`
     : "";
   const compute =
-    e.platform === "cloud-run"
+    e.platform === "vertex-ai"
+      ? ` + Vertex AI ${r(c.compute_usd_per_image)}${/provisional/.test(c.compute_source || "") ? " (provisional)" : ""}`
+      : e.platform === "cloud-run"
       ? ` + Cloud Run ${r(c.compute_usd_per_image)}${/provisional/.test(c.compute_source || "") ? " (provisional)" : ""}`
       : "";
   const storage = c.storage_usd_per_image ? ` + storage ${r(c.storage_usd_per_image)}` : "";
