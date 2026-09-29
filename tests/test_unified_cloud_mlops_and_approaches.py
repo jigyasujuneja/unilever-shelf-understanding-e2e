@@ -395,9 +395,59 @@ class UnifiedCloudArchitectureTests(unittest.TestCase):
             else:
                 os.environ["VERTEX_AI_CUSTOM_JOB"] = prev_job
 
+    def test_labelme_v5_annotation_schema_support(self) -> None:
+        labelme_example = {
+            "version": "5.2.1",
+            "flags": {},
+            "shapes": [
+                {
+                    "label": "Promotion",
+                    "points": [
+                        [975.5862068965516, 651.5172413793102],
+                        [3658.3448275862074, 2572.206896551724],
+                    ],
+                    "group_id": None,
+                    "description": "",
+                    "shape_type": "rectangle",
+                    "flags": {},
+                }
+            ],
+            "imagePath": "1.HUL-215274D-P0432_600017036_2026-06-08_1780907585648.png",
+            "imageData": "",
+            "imageHeight": 3072,
+            "imageWidth": 4096,
+        }
+        sample = dataset.parse_labelme_annotation(labelme_example)
+        self.assertEqual(sample.image_id, "1.HUL-215274D-P0432_600017036_2026-06-08_1780907585648.png")
+        self.assertEqual(sample.width, 4096)
+        self.assertEqual(sample.height, 3072)
+        self.assertEqual(len(sample.boxes), 1)
+        x1, y1, x2, y2 = sample.boxes[0]
+        self.assertAlmostEqual(x1, 975.5862068965516, places=4)
+        self.assertAlmostEqual(y1, 651.5172413793102, places=4)
+        self.assertAlmostEqual(x2, 3658.3448275862074, places=4)
+        self.assertAlmostEqual(y2, 2572.206896551724, places=4)
+        self.assertEqual(sample.labels[0]["class"], "Promotion")
+        self.assertEqual(sample.labels[0]["category"], "Merchandising")
+        self.assertEqual(sample.dataset_source, "labelme")
+
+        # Verify directory auto-discovery in dataset.load_split
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            img_name = "1.HUL-215274D-P0432_600017036_2026-06-08_1780907585648.png"
+            Image.new("RGB", (400, 300), "white").save(tmp_dir / img_name)
+            (tmp_dir / "1.HUL-215274D-P0432_600017036_2026-06-08_1780907585648.json").write_text(
+                json.dumps(labelme_example), encoding="utf-8"
+            )
+            dataset.load_split.cache_clear()
+            loaded = dataset.load_split("val", str(tmp_dir))
+            self.assertIn(img_name, loaded)
+            self.assertEqual(len(loaded[img_name].boxes), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

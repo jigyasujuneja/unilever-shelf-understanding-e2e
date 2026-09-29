@@ -453,14 +453,153 @@ _CANONICAL_7DIM_CATALOG: list[dict[str, object]] = [
 _CANONICAL_BY_CODE = {str(item["sku_id"]): item for item in _CANONICAL_7DIM_CATALOG}
 
 
+def parse_labelme_annotation(data: dict, root_str: str = "") -> Sample:
+    """Parse a LabelMe v5.x JSON annotation dict into a ``Sample``.
+
+    Supports ``shape_type == "rectangle"`` (2 points) and ``"polygon"`` (N points), normalizing
+    point order to ``(x1, y1, x2, y2)`` with ``x1 <= x2`` and ``y1 <= y2`` in absolute pixels.
+    Maps ``label``, ``description``, ``group_id``, and ``flags`` into the benchmark label schema.
+    """
+    import json
+
+    raw_img_path = str(data.get("imagePath") or "unknown.png")
+    image_id = Path(raw_img_path).name
+    width = int(data.get("imageWidth") or 0)
+    height = int(data.get("imageHeight") or 0)
+    img_path = join(root_str, "images", image_id) if root_str else raw_img_path
+    if root_str and not str(root_str).startswith("gs://") and not Path(img_path).exists():
+        candidate = Path(root_str) / image_id
+        if candidate.exists():
+            img_path = str(candidate)
+
+    boxes: list[Box] = []
+    labels: list[dict] = []
+    for shape in data.get("shapes", []):
+        pts = shape.get("points") or []
+        if len(pts) < 2:
+            continue
+        xs = [float(p[0]) for p in pts if len(p) >= 2]
+        ys = [float(p[1]) for p in pts if len(p) >= 2]
+        if len(xs) < 2 or len(ys) < 2:
+            continue
+        x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+        boxes.append((x1, y1, x2, y2))
+
+        raw_label = str(shape.get("label") or "object").strip()
+        desc = str(shape.get("description") or "").strip()
+        flags = shape.get("flags") if isinstance(shape.get("flags"), dict) else {}
+        group_id = shape.get("group_id")
+
+        desc_meta: dict = {}
+        if desc.startswith("{") and desc.endswith("}"):
+            try:
+                desc_meta = json.loads(desc)
+            except Exception:
+                desc_meta = {}
+
+        if raw_label.lower() in ("promotion", "promo", "posm", "banner", "display"):
+            labels.append({
+                "class": raw_label,
+                "sku_id": str(desc_meta.get("sku_id") or flags.get("sku_id") or "PROMO_ASSET"),
+                "category": str(desc_meta.get("category") or flags.get("category") or "Merchandising"),
+                "brand": str(desc_meta.get("brand") or flags.get("brand") or "HUL"),
+                "packaging_type": str(desc_meta.get("packaging_type") or "promotion_display"),
+                "variant": str(desc_meta.get("variant") or desc or raw_label),
+                "is_hul": bool(desc_meta.get("is_hul", True)),
+                "group_id": group_id,
+                "shape_type": shape.get("shape_type", "rectangle"),
+            })
+        elif "|" in raw_label:
+            parts = [p.strip() for p in raw_label.split("|")]
+            cat = parts[0] if len(parts) > 0 and parts[0] else "Personal Care"
+            brd = parts[1] if len(parts) > 1 and parts[1] else "HUL"
+            pkg = parts[2] if len(parts) > 2 and parts[2] else "bottle"
+            var = parts[3] if len(parts) > 3 and parts[3] else (desc or "Standard")
+            sku_id = parts[4] if len(parts) > 4 and parts[4] else f"HUL-{brd.upper()}-{pkg.upper()}"
+            labels.append({
+                "class": raw_label,
+                "sku_id": sku_id,
+                "category": cat,
+                "brand": brd,
+                "packaging_type": pkg,
+                "variant": var,
+                "is_hul": not sku_id.upper().startswith(("COMP", "NON-HUL")),
+                "group_id": group_id,
+                "shape_type": shape.get("shape_type", "rectangle"),
+            })
+        elif raw_label in _CANONICAL_BY_CODE:
+            meta = _CANONICAL_BY_CODE[raw_label]
+            labels.append({
+                "class": raw_label,
+                "sku_id": str(meta["sku_id"]),
+                "category": str(meta["category"]),
+                "brand": str(meta["brand"]),
+                "packaging_type": str(meta["packaging_type"]),
+                "variant": str(meta["variant"]),
+                "is_hul": bool(meta["is_hul"]),
+                "group_id": group_id,
+                "shape_type": shape.get("shape_type", "rectangle"),
+            })
+        else:
+            labels.append({
+                "class": raw_label,
+                "sku_id": str(desc_meta.get("sku_id") or flags.get("sku_id") or raw_label),
+                "category": str(desc_meta.get("category") or flags.get("category") or "Personal Care"),
+                "brand": str(desc_meta.get("brand") or flags.get("brand") or "HUL"),
+                "packaging_type": str(desc_meta.get("packaging_type") or flags.get("packaging_type") or "bottle"),
+                "variant": str(desc_meta.get("variant") or flags.get("variant") or desc or raw_label),
+                "is_hul": not raw_label.upper().startswith(("COMP", "NON-HUL")),
+                "group_id": group_id,
+                "shape_type": shape.get("shape_type", "rectangle"),
+            })
+
+    return Sample(
+        image_id=image_id,
+        path=img_path,
+        width=width,
+        height=height,
+        boxes=boxes,
+        labels=labels,
+        dataset_source="labelme",
+    )
+
+
+def load_labelme_samples(directory: str | Path) -> dict[str, Sample]:
+    """Load all LabelMe v5.x ``*.json`` annotation files from a local directory into ``{image_id: Sample}``."""
+    import json
+
+    dir_path = Path(directory)
+    samples: dict[str, Sample] = {}
+    if not dir_path.is_dir():
+        return samples
+    for jf in sorted(dir_path.rglob("*.json")):
+        try:
+            payload = json.loads(jf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict) or "shapes" not in payload or "imagePath" not in payload:
+            continue
+        sample = parse_labelme_annotation(payload, root_str=str(dir_path))
+        samples[sample.image_id] = sample
+    return samples
+
+
 @lru_cache(maxsize=8)
 def load_split(split: str, root: str = DEFAULT_ROOT) -> dict[str, Sample]:
-    """Parse ``annotations_<split>.csv`` into ``{image_id: Sample}``."""
+    """Parse ``annotations_<split>.csv`` or LabelMe ``*.json`` files into ``{image_id: Sample}``."""
     import re
 
     if split not in SPLITS:
         raise ValueError(f"split must be one of {SPLITS}, got {split!r}")
     root_str = str(root)
+    if not root_str.startswith("gs://"):
+        root_p = Path(root_str)
+        # Auto-detect LabelMe JSON directory if annotations_<split>.csv is not present
+        if root_p.is_dir() and not (root_p / "annotations" / f"annotations_{split}.csv").exists():
+            split_sub = root_p / split
+            labelme_samples = load_labelme_samples(split_sub if split_sub.is_dir() else root_p)
+            if labelme_samples:
+                return labelme_samples
     if root_str == LOCAL_ROOT and not (Path(root_str) / "annotations" / f"annotations_{split}.csv").exists():
         ensure_local_sku110k_splits(root_str)
     csv_path = join(root_str, "annotations", f"annotations_{split}.csv")
