@@ -2,7 +2,7 @@
 ``detect_retrieve.py`` to benchmark detection + vector retrieval.
 
 Detect boxes with Gemini, then identify each product by embedding its crop with
-``gemini-embedding-001`` and looking it up in ``VectorCatalog`` (Cloud SQL for PostgreSQL
+``gemini-embedding-2-preview`` and looking it up in ``VectorCatalog`` (Cloud SQL for PostgreSQL
 ``pgvector``, Vertex AI Vector Search, BigQuery ``VECTOR_SEARCH``, or GCS in-memory catalog).
 """
 

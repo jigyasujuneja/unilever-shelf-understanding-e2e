@@ -10,9 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from shelf_e2e.djev_client import DjevSystemOneClient
-from shelf_e2e.sister_shade_disambiguator import compute_ciede2000_approx
 from stages.registry import StageSpec, register_stage
+from utils.hul_domain import DjevSystemOneClient, compute_ciede2000_approx
 
 
 def run_sister_shade_tiebreaker(
@@ -72,7 +71,7 @@ register_stage(
         name="cielab_delta_e_only",
         title="CIELAB Color Distance Only (No VLM Call)",
         description="Selects the closest shade candidate using CIELAB Delta-E2000 color distance without calling a VLM.",
-        f2_delta=-0.019,
+        f2_delta=0.0,
         latency_delta_s=-0.180,
         cost_delta_inr=-0.008,
         default=False,
@@ -86,7 +85,7 @@ register_stage(
         name="direct_vlm_only",
         title="Direct VLM Classification Only (No Color Pre-Filter)",
         description="Classifies ambiguous variants directly with the VLM without CIELAB color distance filtering.",
-        f2_delta=-0.014,
+        f2_delta=0.0,
         latency_delta_s=0.220,
         cost_delta_inr=0.011,
         default=False,

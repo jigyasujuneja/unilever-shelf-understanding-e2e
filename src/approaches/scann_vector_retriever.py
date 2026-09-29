@@ -1,8 +1,8 @@
-"""Divided Stage 4 Variant Retriever: I-JEPA Specular De-Glare + gemini-embedding-001 + Cloud SQL pgvector / Vertex Vector Search.
+"""Divided Stage 4 Variant Retriever: I-JEPA Specular De-Glare + gemini-embedding-2-preview + Cloud SQL pgvector / Vertex Vector Search.
 
 Epic: ``MT Market Share - Variant Classification`` (``task = "classification"``)
 Divided from Stage 4 of our 8-stage HUL architecture to benchmark pure vector retrieval
-(``gemini-embedding-001`` 4-zone Sub-ROI + ``I-JEPA`` glare compensation + ``Cloud SQL pgvector`` /
+(``gemini-embedding-2-preview`` 4-zone Sub-ROI + ``I-JEPA`` glare compensation + ``Cloud SQL pgvector`` /
 ``Vertex AI Vector Search`` cosine margin lookup) standalone on Variant Classification without
 Sister-Shade VLM disambiguation.
 """
@@ -25,7 +25,7 @@ class ScaNNVectorRetriever(Approach):
     epic = "MT Market Share - Variant Classification"
     target_field = "variant"
     architecture = (
-        "Divided Stage 4: I-JEPA Specular De-Glare + 4-Zone Sub-ROI gemini-embedding-001 "
+        "Divided Stage 4: I-JEPA Specular De-Glare + 4-Zone Sub-ROI gemini-embedding-2-preview "
         "+ Cloud SQL pgvector / Vertex AI Vector Search Cosine Margin Retrieval"
     )
     steps = [

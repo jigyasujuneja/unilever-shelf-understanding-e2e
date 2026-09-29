@@ -116,7 +116,7 @@ def match_classification(
     n_gt = len(gt_labels)
     matched: list[int] = []
     attr_hits = {k: 0 for k in ("category", "brand", "packaging_type", "variant", "is_hul", "compound", "all_7dim")}
-    for i, (p, g) in enumerate(zip(pred_labels, gt_labels)):
+    for i, (p, g) in enumerate(zip(pred_labels, gt_labels, strict=False)):
         ok, per_k = _labels_match(p, g, target_field=target_field)
         if ok:
             matched.append(i)

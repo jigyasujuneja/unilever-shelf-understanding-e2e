@@ -33,7 +33,6 @@ One-time Cloud SQL for PostgreSQL setup::
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import threading
@@ -76,15 +75,6 @@ def iam_user() -> str:
     return email.removesuffix(".gserviceaccount.com")
 
 
-def _deterministic_sku_vector(sku_id: str, dim: int = 512) -> list[float]:
-    """Generate a deterministic unit-normalized anchor vector for local/GCS catalog fallback."""
-    digest = hashlib.sha256(sku_id.encode("utf-8")).digest()
-    repeats = (dim + len(digest) - 1) // len(digest)
-    raw = [((b / 127.5) - 1.0) for b in (digest * repeats)[:dim]]
-    norm = math.sqrt(sum(x * x for x in raw)) or 1.0
-    return [x / norm for x in raw]
-
-
 def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     """Compute cosine similarity between two numeric vectors."""
     n = min(len(vec_a), len(vec_b))
@@ -124,10 +114,22 @@ class CloudSQL:
     def _get_connection(self):
         if getattr(self._local, "conn", None) is not None:
             return self._local.conn
+        connector = getattr(self, "connector", None) or getattr(self, "_connector", None)
+        if connector is not None:
+            resolved_user = self.user or iam_user()
+            self._local.conn = connector.connect(
+                self.instance,
+                "pg8000",
+                user=resolved_user,
+                db=self.database,
+                enable_iam_auth=True,
+                ip_type=self.ip_type,
+            )
+            return self._local.conn
+
         from google.cloud.sql.connector import Connector, IPTypes
 
-        if self._connector is None:
-            self._connector = Connector(refresh_strategy="lazy")
+        self._connector = Connector(refresh_strategy="lazy")
         resolved_user = self.user or iam_user()
         ipt = IPTypes[self.ip_type] if hasattr(IPTypes, self.ip_type) else IPTypes.PRIVATE
         self._local.conn = self._connector.connect(
@@ -148,7 +150,7 @@ class CloudSQL:
             cur.execute(sql, params)
             return list(cur.fetchall())
         except Exception:
-            if not self.fallback_local:
+            if not getattr(self, "fallback_local", True):
                 raise
             if self._fallback_catalog is None:
                 self._fallback_catalog = VectorCatalog(backend="gcs_inmemory")
@@ -203,30 +205,18 @@ class VectorCatalog:
     def _ensure_inmemory_catalog(self) -> list[dict[str, Any]]:
         if self._inmemory_entries is not None:
             return self._inmemory_entries
-        from shelf_e2e.taxonomy import MASTER_HUL_CATALOG
+        from utils import hul_domain
 
         entries: list[dict[str, Any]] = []
-        for item in MASTER_HUL_CATALOG:
-            if isinstance(item, dict):
-                sku_id = str(item.get("base_pack_id") or item.get("sku_id") or "HUL-SKU-001")
-                cat = str(item.get("category") or "Personal Care")
-                brd = str(item.get("brand") or "Dove")
-                pkg = str(item.get("packaging_type") or "bottle")
-                var = str(item.get("variant") or "Deeply Nourishing")
-            else:
-                sku_id = str(getattr(item, "base_pack_id", None) or getattr(item, "sku_id", "HUL-SKU-001"))
-                cat = str(getattr(item, "category", "Personal Care"))
-                brd = str(getattr(item, "brand", "Dove"))
-                pkg = str(getattr(item, "packaging_type", "bottle"))
-                var = str(getattr(item, "variant", "Deeply Nourishing"))
+        for item in hul_domain._build_real_catalog_prototype_bank():
             entries.append(
                 {
-                    "sku_id": sku_id,
-                    "category": cat,
-                    "brand": brd,
-                    "packaging_type": pkg,
-                    "variant": var,
-                    "embedding": _deterministic_sku_vector(sku_id, dim=64),
+                    "sku_id": str(item["sku_id"]),
+                    "category": str(item["category"]),
+                    "brand": str(item["brand"]),
+                    "packaging_type": str(item["packaging_type"]),
+                    "variant": str(item["variant"]),
+                    "embedding": list(item["embedding"]),
                 }
             )
         self._inmemory_entries = entries
@@ -251,8 +241,7 @@ class VectorCatalog:
         scored: list[VectorMatch] = []
         for e in candidates:
             raw_sim = _cosine_similarity(vector, e["embedding"])
-            # Map [-1, 1] to calibrated shelf similarity range [0.84, 0.98]
-            sim = round(0.91 + 0.06 * raw_sim, 4)
+            sim = round(max(0.0, min(1.0, raw_sim)), 4)
             scored.append(
                 VectorMatch(
                     sku_id=e["sku_id"],

@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from utils.vector_store import CloudSQL, VectorCatalog, iam_user, pgvector
+from utils.vector_store import CloudSQL, VectorCatalog, iam_user
+
+
+def pgvector(vector: list[float]) -> str:
+    """A Python list as a pgvector literal; use as ``%s::vector`` in SQL."""
+    return "[" + ",".join(map(str, vector)) + "]"
 
 
 class AlloyDB(CloudSQL):

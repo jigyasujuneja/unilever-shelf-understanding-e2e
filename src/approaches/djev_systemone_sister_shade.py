@@ -18,13 +18,13 @@ class DjevSystemOneSisterShade(Approach):
     task = "combined"
     epic = "MT Market Share - Combined Classification"
     architecture = (
-        "Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) + Stage 4 gemini-embedding-001 ScaNN (89%) "
+        "Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) + Stage 4 gemini-embedding-2-preview ScaNN (89%) "
         "+ Stage 4.5 Sister-Shade Sub-ROI CIELAB + Stage 5 /v1/systemone (64-Token Canvas, 8.9 ms Jacobi)"
     )
     steps = [
         "Stage 3: RT-DETR-v2 + DIoU-NMS + Stage 3.5 ORB Homography Seam Deduplication",
         "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2)",
-        "Stage 4: gemini-embedding-001 + Specular Glare Mask + AlloyDB/ScaNN Vector Match (89% clear SKUs)",
+        "Stage 4: gemini-embedding-2-preview + Specular Glare Mask + AlloyDB/ScaNN Vector Match (89% clear SKUs)",
         "Stage 4.5: 3x Sub-ROI Shade/SPF Zoom + CIELAB Delta-E + Conditioner Aspect-Ratio Geometry",
         "Stage 5: /v1/systemone (64-Token Fixed Canvas, 3-Step Jacobi Denoising in 8.9 ms, vllm#58216 Trie)",
     ]
@@ -73,7 +73,7 @@ class DjevSystemOneSisterShade(Approach):
 
         ctx.bill("embedding_image", max(1, round(cluster_summary.num_clusters * 0.04)))
         ctx.trace.step(
-            "Stage 4: gemini-embedding-001 Sub-ROI + ScaNN",
+            "Stage 4: gemini-embedding-2-preview Sub-ROI + ScaNN",
             f"{len(scann_fast)}/{len(proposals)} resolved via {cluster_summary.num_clusters} medoids in 0.8 ms",
             boxes=scann_fast,
         )

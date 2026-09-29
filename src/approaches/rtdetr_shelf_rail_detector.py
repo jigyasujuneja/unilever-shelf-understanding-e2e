@@ -10,7 +10,7 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, register
-from utils import hul_domain, metrics
+from utils import hul_domain
 
 
 @register

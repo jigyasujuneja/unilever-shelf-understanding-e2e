@@ -23,13 +23,13 @@ class HUL8StageGemini38Hybrid(Approach):
     task = "combined"
     epic = "MT Market Share - Combined Classification"
     architecture = (
-        "8-Stage HUL Hybrid: RT-DETR-v2 + Complete-Linkage Clustering (ADR-008) + gemini-embedding-001 / Cloud SQL pgvector & Vertex Vector Search "
+        "8-Stage HUL Hybrid: RT-DETR-v2 + Complete-Linkage Clustering (ADR-008) + gemini-embedding-2-preview / Cloud SQL pgvector & Vertex Vector Search "
         "(89% in 0.8ms) + Stage 4.5 /v1/systemone 64-Token Canvas (9% in 8.9ms) + Gemini 3.8 Flash Open-Set (2%)"
     )
     steps = [
         "Stage 2 & 3: ORB Homography Stitch + RT-DETR-v2 + DIoU-NMS (98.8% Box Recall in 25 ms)",
         "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2, ~3.5x compression)",
-        "Stage 4: gemini-embedding-001 Sub-ROI + Specular Glare Mask + Cloud SQL pgvector / Vertex Vector Search Match (89% clear HUL SKUs)",
+        "Stage 4: gemini-embedding-2-preview Sub-ROI + Specular Glare Mask + Cloud SQL pgvector / Vertex Vector Search Match (89% clear HUL SKUs)",
         "Stage 4.5 & 5a: 3x Sub-ROI CIELAB + /v1/systemone 64-Token Canvas (9% sister shades in 8.9 ms)",
         "Stage 5b: Gemini 3.8 Flash Open-Set Competitor & Promotional Toker OCR Audit (2% crops)",
         "Stage 6: 4-Factor Gondola Remediation & 8 Modern Trade KPIs (SOS %, OOS Voids, Brand-Block Purity)",
@@ -64,7 +64,7 @@ class HUL8StageGemini38Hybrid(Approach):
             boxes=[c.medoid_box for c in cluster_summary.clusters],
         )
 
-        # Step 2: Stage 4 Medoid Embedding (gemini-embedding-001 Sub-ROI) + AlloyDB / ScaNN Cosine Routing
+        # Step 2: Stage 4 Medoid Embedding (gemini-embedding-2-preview Sub-ROI) + AlloyDB / ScaNN Cosine Routing
         fast_scann_boxes: list[Box] = []
         sister_shade_boxes: list[Box] = []
         open_set_boxes: list[Box] = []
@@ -97,7 +97,7 @@ class HUL8StageGemini38Hybrid(Approach):
 
         ctx.bill("embedding_image", max(1, round(cluster_summary.num_clusters * 0.03)))
         ctx.trace.step(
-            "Stage 4: gemini-embedding-001 Sub-ROI + AlloyDB/ScaNN Fast Path",
+            "Stage 4: gemini-embedding-2-preview Sub-ROI + AlloyDB/ScaNN Fast Path",
             f"{len(fast_scann_boxes)}/{len(proposals)} clear HUL SKUs matched via {cluster_summary.num_clusters} medoids (0 Gemini tokens)",
             boxes=fast_scann_boxes,
         )

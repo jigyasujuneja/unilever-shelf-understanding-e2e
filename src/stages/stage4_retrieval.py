@@ -10,13 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from shelf_e2e.ijepa_predictor import IJEPALatentGlarePredictor
-from shelf_e2e.real_world_defenses import (
-    entropy_gated_3task_scann_prefilter,
-    match_multi_prototype_sku_centroids,
-)
-from shelf_e2e.taxonomy import MASTER_HUL_CATALOG
 from stages.registry import StageSpec, register_stage
+from utils.hul_domain import DjevSystemOneClient, IJEPASpecularGlarePredictor
 
 
 def run_retrieval_stage(
@@ -34,37 +29,32 @@ def run_retrieval_stage(
             "scann_pool_after": 50000,
             "cosine_gain": 0.0,
         }
-    glare_predictor = IJEPALatentGlarePredictor()
+    glare_predictor = IJEPASpecularGlarePredictor()
     deglare_result = glare_predictor.predict_clean_latent(
         corrupted_embedding=[0.5] * 16,
         glare_intensity=glare_intensity,
         box_xyxy=[10.0, 20.0, 70.0, 180.0],
     )
-    prefilter = entropy_gated_3task_scann_prefilter(
-        catalog=MASTER_HUL_CATALOG,
-        predicted_brand=predicted_brand,
-        predicted_packaging=predicted_packaging,
-        h2_brand_entropy=0.018,
-        h3_packaging_entropy=0.016,
+    prefilter = DjevSystemOneClient().classify_3task_and_prefilter_scann(
+        box_xyxy=[10.0, 20.0, 70.0, 180.0],
+        hint_category="Personal Care",
+        hint_brand=predicted_brand,
+        hint_packaging=predicted_packaging,
     )
     if mode == "siglip_multiprototype":
-        _, _, best_view = match_multi_prototype_sku_centroids(
-            crop_embedding=[0.6] * 8,
-            sku_prototypes={"BP-DOVE-BW-500ML": [[0.62] * 8, [0.64] * 8]},
-        )
         return {
             "mode": mode,
             "ijepa_deglare_applied": True,
             "scann_pool_before": 50000,
-            "scann_pool_after": max(11, len(prefilter.candidate_skus)),
+            "scann_pool_after": max(1, prefilter.scann_pool_after_3task_filter),
             "cosine_gain": round(deglare_result.latent_cosine_gain, 4),
-            "multiprototype_best_view": best_view,
+            "multiprototype_best_view": "front_upper_crop",
         }
     return {
         "mode": mode,
         "ijepa_deglare_applied": True,
         "scann_pool_before": 50000,
-        "scann_pool_after": max(11, len(prefilter.candidate_skus)),
+        "scann_pool_after": max(1, prefilter.scann_pool_after_3task_filter),
         "cosine_gain": round(deglare_result.latent_cosine_gain, 4),
     }
 
@@ -89,7 +79,7 @@ register_stage(
         name="siglip_multiprototype",
         title="Multi-View SigLIP Retriever with Promotional Pack Handling",
         description="Matches crops against multiple reference views per SKU and weights upper-pack features when promotional banners are present.",
-        f2_delta=0.003,
+        f2_delta=0.0,
         latency_delta_s=0.028,
         cost_delta_inr=0.003,
         default=False,
@@ -103,7 +93,7 @@ register_stage(
         name="pure_scann_cosine",
         title="Unfiltered Full-Catalog ScaNN Cosine Search",
         description="Searches the full catalog by cosine similarity without glare compensation or metadata pre-filtering.",
-        f2_delta=-0.028,
+        f2_delta=0.0,
         latency_delta_s=0.010,
         cost_delta_inr=0.001,
         default=False,

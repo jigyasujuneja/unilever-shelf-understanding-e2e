@@ -30,22 +30,32 @@ CONFIG_PATH = Path(os.environ.get("SHELF_BENCH_CONFIG")
 def load_config(path: Path = CONFIG_PATH, project_override: str | None = None) -> dict:
     cfg = yaml.safe_load(Path(path).read_text()) if Path(path).exists() else {}
     gcp = cfg.setdefault("gcp", {})
-    proj = (
-        project_override
-        or os.environ.get("SHELF_BENCH_PROJECT")
-        or os.environ.get("GOOGLE_CLOUD_PROJECT")
-        or gcp.get("project")
-        or "unilever-shelf-understanding"
-    )
+    proj_env = project_override or os.environ.get("SHELF_BENCH_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if not proj_env and (os.environ.get("CLOUD_RUN_JOB") or os.environ.get("K_SERVICE")):
+        try:
+            import google.auth
+
+            _, proj_env = google.auth.default()
+        except Exception:
+            proj_env = None
+    proj = proj_env or gcp.get("project") or "unilever-shelf-understanding"
     region = os.environ.get("SHELF_BENCH_REGION") or gcp.get("region") or "us-central1"
     gcp["project"] = proj
     gcp["region"] = region
-    bucket = os.environ.get("SHELF_BENCH_BUCKET") or f"{proj}-shelf-images"
-    gcp["bucket"] = bucket
-    gcp["data"] = f"gs://{bucket}/SKU110K_fixed"
-    gcp["hul_labeled_data"] = f"gs://{bucket}/HUL_labeled_benchmarks"
-    gcp["hul_catalog_data"] = f"gs://{bucket}/HUL_catalog"
-    gcp["results"] = f"gs://{bucket}/results"
+    if proj_env or "data" not in gcp:
+        bucket = os.environ.get("SHELF_BENCH_BUCKET") or f"{proj}-shelf-images"
+        gcp["bucket"] = bucket
+        gcp["data"] = f"gs://{bucket}/SKU110K_fixed"
+        gcp["hul_labeled_data"] = f"gs://{bucket}/HUL_labeled_benchmarks"
+        gcp["hul_catalog_data"] = f"gs://{bucket}/HUL_catalog"
+        gcp["results"] = f"gs://{bucket}/results"
+    if proj_env:
+        for db_key in ("vector_store", "cloudsql", "alloydb"):
+            if isinstance(cfg.get(db_key), dict):
+                inst = str(cfg[db_key].get("instance", ""))
+                if ":" in inst:
+                    _, _, inst_name = inst.rpartition(":")
+                    cfg[db_key]["instance"] = f"{proj}:{region}:{inst_name}"
     return cfg
 
 
@@ -159,126 +169,19 @@ class Gemini:
         # calls ("Failed to configure client certificate and key for mTLS"). Vertex AI does not
         # need them; set GOOGLE_API_USE_CLIENT_CERTIFICATE=true yourself to opt back in.
         os.environ.setdefault("GOOGLE_API_USE_CLIENT_CERTIFICATE", "false")
+        from google import genai
+        from google.genai import types
+
         if tier not in TIERS:
             raise ValueError(f"tier must be one of {TIERS}, got {tier!r}")
         cfg = (config or load_config()).get("gcp", {})
-        self.project = cfg.get("project") or "jjuneja-fde-sandbox"
-        self.region = cfg.get("region") or "us-central1"
         self.model = model
         self.thinking_level = thinking_level
         self.tier = tier
-        try:
-            from google import genai
-            from google.genai import types
-
-            self.client = genai.Client(
-                vertexai=True, project=self.project, location=cfg.get("location", "global"),
-                http_options=types.HttpOptions(headers=PRIORITY_HEADERS) if tier == "priority" else None,
-            )
-        except Exception:
-            self.client = None
-
-    def _call_vertex_rest(
-        self,
-        image: Image.Image,
-        prompt: str,
-        schema: dict | None = None,
-        max_side: int | None = None,
-    ) -> LLMResult | None:
-        import base64
-        import sys
-        from utils import cloud
-        from utils.pricing import tier_of
-
-        if "unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("SHELF_BENCH_OFFLINE") == "1":
-            return None
-        try:
-            sess = cloud._session()
-            jpeg = image_to_jpeg(image, max_side)
-            api_model = (
-                "gemini-2.5-flash-lite"
-                if "lite" in self.model
-                else ("gemini-2.5-flash" if self.model.startswith("gemini-3") else self.model)
-            )
-            url = (
-                f"https://{self.region}-aiplatform.googleapis.com/v1/projects/{self.project}"
-                f"/locations/{self.region}/publishers/google/models/{api_model}:generateContent"
-            )
-            gen_cfg: dict[str, Any] = {
-                "temperature": 0.0,
-                "maxOutputTokens": 8192,
-                "responseMimeType": "application/json",
-                "thinkingConfig": {"thinkingBudget": 0},
-            }
-            if schema:
-                gen_cfg["responseSchema"] = schema
-            headers = dict(PRIORITY_HEADERS) if self.tier == "priority" else None
-            t0 = time.perf_counter()
-            resp = sess.post(
-                url,
-                json={
-                    "contents": [
-                        {
-                            "role": "user",
-                            "parts": [
-                                {"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(jpeg).decode("ascii")}},
-                                {"text": prompt},
-                            ],
-                        }
-                    ],
-                    "generationConfig": gen_cfg,
-                },
-                headers=headers,
-            )
-            seconds = time.perf_counter() - t0
-            if resp.status_code >= 300:
-                return None
-            payload = resp.json()
-            cands = payload.get("candidates") or []
-            if not cands:
-                return None
-            parts = (cands[0].get("content") or {}).get("parts") or []
-            text = "".join(str(p.get("text", "")) for p in parts)
-            um = payload.get("usageMetadata") or {}
-            prompt_tok = int(um.get("promptTokenCount") or 0)
-            out_tok = int(um.get("candidatesTokenCount") or 0)
-            think_tok = int(um.get("thoughtsTokenCount") or 0)
-            actual_tier = tier_of(um.get("trafficType"))
-            img_tok = sum(
-                int(x.get("tokenCount") or 0)
-                for x in (um.get("promptTokensDetails") or [])
-                if "IMAGE" in str(x.get("modality", ""))
-            )
-            txt_tok = max(0, prompt_tok - img_tok)
-            buckets = {
-                f"{actual_tier}/output": out_tok + think_tok,
-                f"{actual_tier}/image_input": img_tok,
-                f"{actual_tier}/text_input": txt_tok,
-            }
-            usage = Usage(
-                prompt_tok,
-                out_tok,
-                think_tok,
-                1,
-                {actual_tier: 1},
-                {k: v for k, v in buckets.items() if v},
-            )
-            finish = cands[0].get("finishReason")
-            meta = {
-                "mode": "vertex_ai_rest_live",
-                "attempts": 1,
-                "response_id": payload.get("responseId"),
-                "model_version": payload.get("modelVersion", api_model),
-                "finish_reason": finish,
-                "traffic_type": um.get("trafficType"),
-                "tier_requested": self.tier,
-                "image_bytes": len(jpeg),
-                "response_chars": len(text),
-                "truncated": finish == "MAX_TOKENS",
-            }
-            return LLMResult(parse_json(text) if text else [], usage, seconds, text, meta)
-        except Exception:
-            return None
+        self.client = genai.Client(
+            vertexai=True, project=cfg.get("project"), location=cfg.get("location", "global"),
+            http_options=types.HttpOptions(headers=PRIORITY_HEADERS) if tier == "priority" else None,
+        )
 
     def __call__(
         self,
@@ -288,19 +191,6 @@ class Gemini:
         max_side: int | None = None,
         retries: int = 6,
     ) -> LLMResult:
-        if self.client is None:
-            live_res = self._call_vertex_rest(image, prompt, schema=schema, max_side=max_side)
-            if live_res is not None:
-                return live_res
-            u = Usage(
-                input_tokens=260,
-                output_tokens=48,
-                thinking_tokens=0,
-                calls=1,
-                traffic={self.tier: 1},
-                buckets={f"{self.tier}/image_input": 260, f"{self.tier}/output": 48},
-            )
-            return LLMResult([[100, 100, 300, 300]], u, 0.018, "[[100, 100, 300, 300]]", {"mode": "local_fallback"})
         from google.genai import types
 
         cfg = types.GenerateContentConfig(

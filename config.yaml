@@ -1,13 +1,13 @@
 # shelf-bench configuration. This is the only config file.
 
 gcp:
-  project: jjuneja-fde-sandbox
+  project: unilever-shelf-understanding
   location: global                 # Vertex AI Gemini endpoint
   region: us-central1              # Vertex AI + Cloud SQL + Cloud Build + bucket region
-  data: gs://jjuneja-fde-sandbox-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
-  hul_labeled_data: gs://jjuneja-fde-sandbox-shelf-images/HUL_labeled_benchmarks
-  hul_catalog_data: gs://jjuneja-fde-sandbox-shelf-images/HUL_catalog
-  results: gs://jjuneja-fde-sandbox-shelf-images/results        # run outputs from Vertex AI / Cloud Run
+  data: gs://unilever-shelf-understanding-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
+  hul_labeled_data: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks
+  hul_catalog_data: gs://unilever-shelf-understanding-shelf-images/HUL_catalog
+  results: gs://unilever-shelf-understanding-shelf-images/results        # run outputs from Vertex AI / Cloud Run
 
 # Vertex AI & Vertex AI Agent Platform configuration for training, evaluation jobs, and agent deployment:
 #   - `shelf-bench vertex-job`: runs evaluation splits on Vertex AI Custom Jobs (`CustomJob`)
@@ -21,8 +21,8 @@ vertex_ai:
   cpu: 4
   memory_gib: 15
   agent_engine_name: perfect-store-shelf-agent
-  tuning_train_uri: gs://jjuneja-fde-sandbox-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_train.jsonl
-  tuning_val_uri: gs://jjuneja-fde-sandbox-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_val.jsonl
+  tuning_train_uri: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_train.jsonl
+  tuning_val_uri: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_val.jsonl
 
 # Cloud Run job/service configuration (retained for lightweight web UI hosting via `shelf-bench cloud-service`).
 cloud_run:
@@ -60,10 +60,10 @@ models:
 #   - `gcs_inmemory`: Fast-path in-memory NumPy/ScaNN catalog loaded from GCS
 vector_store:
   backend: cloudsql_pgvector
-  instance: jjuneja-fde-sandbox:us-central1:shelf-catalog-pg
+  instance: unilever-shelf-understanding:us-central1:shelf-catalog-pg
   database: postgres
   ip_type: PRIVATE       # PRIVATE | PUBLIC | PSC
-  index_endpoint: projects/jjuneja-fde-sandbox/locations/us-central1/indexEndpoints/INDEX_ENDPOINT
+  index_endpoint: projects/unilever-shelf-understanding/locations/us-central1/indexEndpoints/INDEX_ENDPOINT
   deployed_index_id: hul_sku_scann_index
   bq_dataset: hul_shelf_analytics
   bq_table: sku_catalog
@@ -71,13 +71,13 @@ vector_store:
 
 # Cloud SQL alias block for approaches reading `config["cloudsql"]` (or legacy `config["alloydb"]`).
 cloudsql:
-  instance: jjuneja-fde-sandbox:us-central1:shelf-catalog-pg
+  instance: unilever-shelf-understanding:us-central1:shelf-catalog-pg
   database: postgres
   ip_type: PRIVATE
   fallback_local_scann: true
 
 alloydb:
-  instance: jjuneja-fde-sandbox:us-central1:shelf-catalog-pg
+  instance: unilever-shelf-understanding:us-central1:shelf-catalog-pg
   database: postgres
   ip_type: PRIVATE
   fallback_local_scann: true

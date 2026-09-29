@@ -384,9 +384,11 @@ def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] =
         run_id = blob.name.split("/")[-2]
         dest = Path(results_dir) / run_id
         if not (dest / "summary.json").exists():
+            img_blob = gcs.blob(f"{prefix}/{run_id}/images.jsonl")
+            if not img_blob.exists():
+                continue
             dest.mkdir(parents=True, exist_ok=True)
-            gcs.blob(f"{prefix}/{run_id}/images.jsonl").download_to_filename(
-                str(dest / "images.jsonl"))
+            img_blob.download_to_filename(str(dest / "images.jsonl"))
             blob.download_to_filename(str(dest / "summary.json"))
             n += 1
         summary = json.loads((dest / "summary.json").read_text())

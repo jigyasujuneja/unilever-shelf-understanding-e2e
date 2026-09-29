@@ -19,8 +19,8 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
-from shelf_e2e.djev_client import DjevSystemOneClient
 from utils import embeddings, hul_domain
+from utils.hul_domain import DjevSystemOneClient
 
 
 @register
@@ -69,7 +69,7 @@ class DjevDiffusionGemmaCompoundClassifier(Approach):
 
         # Execute the real 64-token canvas + 3-task ScaNN prefilter protocol on each crop
         prefiltered_pools: list[int] = []
-        for idx, (box, pred) in enumerate(zip(boxes, preds)):
+        for box, pred in zip(boxes, preds, strict=False):
             three_task = djev_client.classify_3task_and_prefilter_scann(
                 box_xyxy=list(box),
                 hint_category=str(pred.get("category", "Personal Care")),

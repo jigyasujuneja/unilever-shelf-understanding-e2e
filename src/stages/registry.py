@@ -12,8 +12,9 @@ so callers can swap a single step via CLI flags or configuration dicts.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Any, Callable
+from typing import Any
 
 STAGE_GROUP_ALIASES: dict[str, str] = {
     "gondola_kpi": "shelf_metrics",

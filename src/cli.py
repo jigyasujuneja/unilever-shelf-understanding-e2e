@@ -15,17 +15,17 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 _SRC_DIR = str(Path(__file__).resolve().parent)
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-import approaches
-import runner
-from utils import dataset
-from utils.llm import TIERS, load_config
+import approaches  # noqa: E402
+import runner  # noqa: E402
+from utils import dataset  # noqa: E402
+from utils.llm import TIERS, load_config  # noqa: E402
 
 
 def _add_pipeline_override_flags(subparser: argparse.ArgumentParser) -> None:
@@ -359,6 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.cmd == "vertex-train":
         import json
+
         from utils import vertex_platform
 
         res = vertex_platform.submit_vertex_tuning_job(
@@ -373,6 +374,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(res, indent=2))
     elif args.cmd == "vertex-deploy":
         import json
+
         from utils import vertex_platform
 
         res = vertex_platform.deploy_vertex_agent(

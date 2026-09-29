@@ -28,6 +28,9 @@ application_default_credentials.json
 *.log
 
 # results/ IS committed: each run is a small JSON folder so the leaderboard is shared.
+results/active_learning_queue.jsonl
+reports/*.sqlite
+reports/*.json
 
 # Customer Code Azure Samples
 docs/customer_code/

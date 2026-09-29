@@ -56,20 +56,15 @@ def init(config: dict) -> bool:
     with _lock:
         if _provider is not None:
             return True
+        from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
         _project = config.get("gcp", {}).get("project")
         provider = _new_provider()
-        try:
-            from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-            provider.add_span_processor(BatchSpanProcessor(_Loud(CloudTraceSpanExporter(project_id=_project))))
-            _handler = _cloud_log_handler(_project)
-            LOG.addHandler(_handler)
-            LOG.propagate = False  # keep the JSON entries out of the console output
-        except ImportError:
-            from opentelemetry.sdk.trace.export import InMemorySpanExporter, SimpleSpanProcessor
-
-            provider.add_span_processor(SimpleSpanProcessor(InMemorySpanExporter()))
+        provider.add_span_processor(BatchSpanProcessor(_Loud(CloudTraceSpanExporter(project_id=_project))))
+        _handler = _cloud_log_handler(_project)
+        LOG.addHandler(_handler)
+        LOG.propagate = False  # keep the JSON entries out of the console output
         _provider = provider
     return True
 

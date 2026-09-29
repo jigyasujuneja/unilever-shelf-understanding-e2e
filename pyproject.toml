@@ -15,9 +15,11 @@ authors = [
 ]
 dependencies = [
     "cloud-sql-python-connector[pg8000]>=1.11.0",
+    "google-cloud-alloydb-connector[pg8000]>=1.4.0",
     "google-cloud-logging>=3.10.0",
     "google-cloud-storage>=2.14.0",
     "google-genai>=1.5.0",
+    "numpy>=1.26.0",
     "opentelemetry-exporter-gcp-trace>=1.9.0",
     "opentelemetry-sdk>=1.30.0",
     "pillow>=10.2.0",
@@ -34,11 +36,10 @@ shelf-bench = "cli:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 py-modules = ["cli", "runner"]
-packages = ["approaches", "utils", "shelf_e2e", "shelf_e2e.tracks", "shelf_e2e.platform"]
+packages = ["approaches", "stages", "utils"]
 
 [tool.setuptools.package-data]
 utils = ["static/*"]
-shelf_e2e = ["platform/static/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]

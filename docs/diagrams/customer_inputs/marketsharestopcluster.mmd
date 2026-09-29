@@ -12,7 +12,7 @@ flowchart TD
 
   subgraph WEEKDAY_STOP["True: Mon-Fri at 18:00 IST"]
     direction TB
-    CLUSTERS_MF["Clusters_to_Stop-copy (ParseJson)<br/>['ulafs-msind-aks-P-57426-001',<br/>'ulafs-msind-aks-P-57426-002']"]:::step
+    CLUSTERS_MF["Clusters_to_Stop-copy (ParseJson)<br/>['masked-cluster-001',<br/>'masked-cluster-002']"]:::step
     subgraph FE_MF["For_each_AKS_cluster-Mon-Fri"]
       STOP_MF["Stop_AKS_cluster_1 (ApiConnection POST via arm)<br/>.../Microsoft.ContainerService/managedClusters/{cluster}/stop<br/>API Version: 2021-03-01"]:::aks
     end

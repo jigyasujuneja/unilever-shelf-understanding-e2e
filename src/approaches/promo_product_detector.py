@@ -12,7 +12,7 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
-from utils import hul_domain, metrics
+from utils import hul_domain
 
 
 @register

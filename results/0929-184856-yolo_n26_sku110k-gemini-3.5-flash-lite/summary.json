@@ -1,0 +1,347 @@
+{
+  "images": 3,
+  "errors": 0,
+  "tp": 339,
+  "fp": 76,
+  "fn": 46,
+  "precision": 0.8169,
+  "recall": 0.8805,
+  "f2": 0.867,
+  "accuracy": 0.7354,
+  "p50_latency_s": 12.795,
+  "p95_latency_s": 15.734,
+  "p99_latency_s": 15.734,
+  "cost_per_image_usd": 0.009166933333333334,
+  "tokens": {
+    "input_tokens": 7386,
+    "output_tokens": 10114,
+    "thinking_tokens": 0,
+    "calls": 6,
+    "traffic": {
+      "standard": 6
+    },
+    "buckets": {
+      "standard/output": 10114,
+      "standard/text_input": 774,
+      "standard/image_input": 6612
+    }
+  },
+  "run_id": "0929-184856-yolo_n26_sku110k-gemini-3.5-flash-lite",
+  "approach": "yolo_n26_sku110k",
+  "task": "detection",
+  "epic": "MT Market Share - SKU Detection",
+  "target_field": "variant",
+  "model": "gemini-3.5-flash-lite",
+  "tier": "standard",
+  "traffic": {
+    "standard": 6
+  },
+  "priority_served": null,
+  "architecture": "110K SKU Pre-Trained YOLO-N26 Single-Stage Dense Detector (1280px Multi-Scale Anchor-Free Head + DIoU-NMS thr=0.55) [gemini-3.5-flash-lite]",
+  "steps": [
+    "Pass 1: YOLO-N26 SKU-110K Pre-Trained Backbone Forward Pass",
+    "Pass 2: Anchor-Free Dense Box Decode & DIoU-NMS (thr=0.55)"
+  ],
+  "owner": "jjuneja",
+  "split": "test",
+  "limit": 3,
+  "seed": 0,
+  "workers": 3,
+  "created_at": "2026-09-29T18:48:56+00:00",
+  "environment": {
+    "platform": "local"
+  },
+  "telemetry": {
+    "trace_id": "edc8f580e0a27eadc53e841344eaeafc",
+    "span_id": "e754cbc71bef68ab",
+    "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=edc8f580e0a27eadc53e841344eaeafc?project=jjuneja-fde-sandbox",
+    "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2Fedc8f580e0a27eadc53e841344eaeafc%22%20timestamp%3E%3D%222026-09-29T18%3A43%3A58Z%22%20timestamp%3C%3D%222026-09-30T18%3A48%3A58Z%22?project=jjuneja-fde-sandbox"
+  },
+  "wall_time_s": 15.7,
+  "pricing": {
+    "source": "cloudbilling.googleapis.com (Cloud Billing Catalog API, list prices)",
+    "fetched_at": "2026-09-29T18:48:55+00:00",
+    "location": "global",
+    "region": "us-central1",
+    "usd_to_inr": 95.54500000065303,
+    "gemini": {
+      "gemini-3.5-flash-lite": {
+        "standard/text_input": {
+          "sku": "255D-4FF7-8DB3",
+          "description": "Gemini 3.5 Flash Lite Global Text Input - Predictions",
+          "usd": 3e-07,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "standard/image_input": {
+          "sku": "ABEF-E0AA-A223",
+          "description": "Gemini 3.5 Flash Lite Global Image Input - Predictions",
+          "usd": 3e-07,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "standard/cached_text_input": {
+          "sku": "D1E7-04AD-E5B2",
+          "description": "Gemini 3.5 Flash Lite Global Text Input Caching",
+          "usd": 3e-08,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "standard/cached_image_input": {
+          "sku": "894C-9AC4-FC86",
+          "description": "Gemini 3.5 Flash Lite Global Image Input Caching",
+          "usd": 3e-08,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "standard/output": {
+          "sku": "EF3E-6ED9-3CD1",
+          "description": "Gemini 3.5 Flash Lite Global Text Output - Predictions",
+          "usd": 2.5e-06,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "priority/text_input": {
+          "sku": "8AFE-F2A6-5966",
+          "description": "Gemini 3.5 Flash Lite Global Text Input Priority - Predictions",
+          "usd": 5.4e-07,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "priority/image_input": {
+          "sku": "A2BB-5D97-C5A2",
+          "description": "Gemini 3.5 Flash Lite Global Image Input Priority - Predictions",
+          "usd": 5.4e-07,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "priority/cached_text_input": {
+          "sku": "A909-DA58-491D",
+          "description": "Gemini 3.5 Flash Lite Global Text Input Caching Priority",
+          "usd": 5.4e-08,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "priority/cached_image_input": {
+          "sku": "8D91-5614-B572",
+          "description": "Gemini 3.5 Flash Lite Global Image Input Caching Priority",
+          "usd": 5.4e-08,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "priority/output": {
+          "sku": "9331-9BC3-A888",
+          "description": "Gemini 3.5 Flash Lite Global Text Output Priority - Predictions",
+          "usd": 4.5e-06,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "flex/text_input": {
+          "sku": "DEA6-C2F5-9043",
+          "description": "Gemini 3.5 Flash Lite Global Text Input Flex - Predictions",
+          "usd": 1.5e-07,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "flex/image_input": {
+          "sku": "2FF5-D8DC-B329",
+          "description": "Gemini 3.5 Flash Lite Global Image Input Flex - Predictions",
+          "usd": 1.5e-07,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "flex/cached_text_input": {
+          "sku": "8EF0-4667-568E",
+          "description": "Gemini 3.5 Flash Lite Global Text Input Caching Flex",
+          "usd": 1.5e-08,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "flex/cached_image_input": {
+          "sku": "9599-8AA0-B621",
+          "description": "Gemini 3.5 Flash Lite Global Image Input Caching Flex",
+          "usd": 1.5e-08,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        },
+        "flex/output": {
+          "sku": "DA90-EDA5-321D",
+          "description": "Gemini 3.5 Flash Lite Global Text Output Flex - Predictions",
+          "usd": 1.25e-06,
+          "unit": "count",
+          "effective": "2026-09-29T07:00:00Z"
+        }
+      }
+    },
+    "extra": {},
+    "cloud_run": {
+      "vcpu_second": {
+        "sku": "257B-2A84-3396",
+        "description": "Jobs CPU in us-central1",
+        "usd": 1.8e-05,
+        "unit": "s",
+        "effective": "2026-09-29T07:00:00Z"
+      },
+      "gib_second": {
+        "sku": "8A79-9F45-5F32",
+        "description": "Jobs Memory in us-central1",
+        "usd": 2e-06,
+        "unit": "GiBy.s",
+        "effective": "2026-09-29T07:00:00Z"
+      }
+    },
+    "storage": {
+      "class_a_op": {
+        "sku": "4DBF-185F-A415",
+        "description": "Regional Standard Class A Operations",
+        "usd": 5e-06,
+        "unit": "count",
+        "effective": "2026-09-29T07:00:00Z"
+      },
+      "class_b_op": {
+        "sku": "7870-010B-2763",
+        "description": "Regional Standard Class B Operations",
+        "usd": 4e-07,
+        "unit": "count",
+        "effective": "2026-09-29T07:00:00Z"
+      }
+    },
+    "promotions": [
+      {
+        "name": "Gemini 3.x Flash introductory pricing (50% credit back on net spend)",
+        "models": [
+          "gemini-3.8-flash",
+          "gemini-3.7-flash",
+          "gemini-3.6-flash"
+        ],
+        "credit_share": 0.5,
+        "until": "2026-12-31",
+        "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+      }
+    ]
+  },
+  "usd_to_inr": 95.54500000065303,
+  "cost": {
+    "gemini_list_usd_per_image": 0.009166933333333334,
+    "gemini_credit_usd_per_image": 0.0,
+    "gemini_net_usd_per_image": 0.009166933333333334,
+    "storage_usd_per_image": 0.0,
+    "services_usd_per_image": 0.0,
+    "compute_seconds": 0.0,
+    "compute_source": "local run: compute not priced",
+    "compute_usd_per_image": 0.0,
+    "total_usd_per_image": 0.009166933333333334
+  },
+  "token_cost_per_image_usd": 0.009166933333333334,
+  "storage_cost_per_image_usd": 0.0,
+  "compute_cost_per_image_usd": 0.0,
+  "attribute_accuracy": {
+    "box_iou": 0.867
+  },
+  "hul_evaluation": {
+    "hul_7dim_sku_f2": 0.867,
+    "sister_shade_14sku_f2": 0.867,
+    "ece_calibration": 0.0186,
+    "routing_distribution": {
+      "fast_scann_pct": 89.09,
+      "sister_shade_djev_pct": 9.09,
+      "open_set_gemini38_pct": 2.08
+    },
+    "shelf_metrics": {
+      "linear_sos_hul_pct": 56.95,
+      "area_sos_hul_pct": 58.89,
+      "oos_void_count": 1,
+      "brand_block_purity": 0.8952,
+      "eye_level_golden_zone_ratio": 1.32,
+      "planogram_sequence_score": 0.909,
+      "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+    },
+    "gondola_kpis": {
+      "linear_sos_hul_pct": 56.95,
+      "area_sos_hul_pct": 58.89,
+      "oos_void_count": 1,
+      "brand_block_purity": 0.8952,
+      "eye_level_golden_zone_ratio": 1.32,
+      "planogram_sequence_score": 0.909,
+      "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+    },
+    "mt_market_share_kpis": {
+      "use_case": "Market Share (6-Image Shelf Stitch)",
+      "sla_target_s": 30.0,
+      "panorama_6img_latency_s": 33.83,
+      "sla_30s_pass": false,
+      "hul_7dim_sku_f2": 0.867,
+      "sister_shade_14sku_f2": 0.867,
+      "hul_linear_sos_pct": 56.95,
+      "hul_area_sos_pct": 58.89,
+      "sos_mae_pct": 1.55,
+      "panorama_dedup_dropped": 50,
+      "cost_per_6img_aisle_inr": 5.255
+    },
+    "mt_merchandising_kpis": {
+      "use_case": "Merchandising & Planogram Compliance (Single Image)",
+      "sla_target_s": 10.0,
+      "single_img_p95_s": 15.73,
+      "sla_10s_pass": false,
+      "box_detection_f2": 0.867,
+      "oos_voids_detected": 1,
+      "oos_void_recall": 0.8717,
+      "oos_classification": "TRUE_OOS_VOID",
+      "planogram_compliance_pct": 90.9,
+      "brand_block_purity_pct": 89.5,
+      "eye_level_sos_pct": 61.5,
+      "competitor_intrusion_count": 1,
+      "cost_per_image_inr": 0.8759
+    },
+    "slas": {
+      "marketshare_30s_met": false,
+      "merchandizing_10s_met": false,
+      "finops_0_22_inr_met": false
+    }
+  },
+  "mlops": {
+    "provenance": {
+      "git_commit_sha": "aecb183",
+      "dataset_split": "test",
+      "dataset_split_sha256": "7d967bb24f609381",
+      "zero_leakage_verified": true,
+      "split_image_counts": {
+        "train": 20,
+        "val": 25,
+        "test": 60
+      },
+      "taxonomy_sha256": "2e48deb7e567e4aa",
+      "total_hul_variants": 245,
+      "total_hul_facings": 17118
+    },
+    "drift_guardrails": {
+      "status": "DRIFT_ALERT",
+      "psi_glare_shift": 0.062,
+      "psi_threshold": 0.2,
+      "psi_healthy": true,
+      "ece_calibration": 0.0186,
+      "ece_threshold": 0.025,
+      "ece_healthy": true,
+      "escalation_rate": 0.11,
+      "escalation_budget_cap": 0.15,
+      "escalation_healthy": true,
+      "cost_per_image_inr": 0.8759,
+      "finops_ceiling_inr": 0.22,
+      "finops_healthy": false
+    },
+    "promotion_contract": {
+      "promoted": false,
+      "passed_count": 2,
+      "total_gates": 7,
+      "gates": {
+        "gate_1_box_f2_ge_96pct": false,
+        "gate_2_hul_7dim_sku_f2_ge_95pct": false,
+        "gate_3_sister_shade_14sku_f2_ge_94pct": false,
+        "gate_4_p95_latency_le_10s": false,
+        "gate_5_cost_inr_le_0_22": false,
+        "gate_6_ece_calibration_le_0_025": true,
+        "gate_7_train_test_gap_le_0_008": true
+      }
+    }
+  }
+}

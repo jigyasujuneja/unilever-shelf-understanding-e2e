@@ -12,17 +12,16 @@ Uses Application Default Credentials and REST APIs only, so it doesn't need the 
 from __future__ import annotations
 
 import io
+import json
 import math
 import os
 import tarfile
 import time
-from datetime import datetime, timezone
-from pathlib import Path
-
-import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import runner
@@ -205,6 +204,40 @@ def ensure_argolis_infra(s: AuthorizedSession, project: str, region: str, log=pr
     else:
         log(f"  [3/3] Verified Artifact Registry repo {region}-docker.pkg.dev/{project}/cloud-run-source-deploy")
 
+    # 4. Grant resource-level IAM to the default Compute Engine service account so Cloud Build
+    #    and Cloud Run Jobs can read sources, push images, and write results even if the caller
+    #    lacks project-level IAM Admin (`resourcemanager.projects.setIamPolicy`).
+    proj_info = s.get(f"https://cloudresourcemanager.googleapis.com/v1/projects/{project}")
+    proj_num = proj_info.json().get("projectNumber") if proj_info.status_code == 200 else None
+    if proj_num:
+        compute_member = f"serviceAccount:{proj_num}-compute@developer.gserviceaccount.com"
+        for b_name in (data_bucket, source_bucket):
+            pol_r = s.get(f"https://storage.googleapis.com/storage/v1/b/{b_name}/iam")
+            if pol_r.status_code == 200:
+                pol = pol_r.json()
+                bindings = pol.get("bindings", [])
+                has_binding = any(
+                    b.get("role") == "roles/storage.admin" and compute_member in b.get("members", [])
+                    for b in bindings
+                )
+                if not has_binding:
+                    bindings.append({"role": "roles/storage.admin", "members": [compute_member]})
+                    pol["bindings"] = bindings
+                    s.put(f"https://storage.googleapis.com/storage/v1/b/{b_name}/iam", json=pol)
+        ar_iam_url = f"{ar_base}/cloud-run-source-deploy"
+        ar_pol_r = s.get(f"{ar_iam_url}:getIamPolicy")
+        if ar_pol_r.status_code == 200:
+            ar_pol = ar_pol_r.json()
+            ar_bindings = ar_pol.get("bindings", [])
+            has_ar = any(
+                b.get("role") == "roles/artifactregistry.writer" and compute_member in b.get("members", [])
+                for b in ar_bindings
+            )
+            if not has_ar:
+                ar_bindings.append({"role": "roles/artifactregistry.writer", "members": [compute_member]})
+                ar_pol["bindings"] = ar_bindings
+                s.post(f"{ar_iam_url}:setIamPolicy", json={"policy": ar_pol})
+
     return {
         "project": project,
         "region": region,
@@ -298,6 +331,10 @@ def deploy_job(s, project, region, image, args, tasks, cfg) -> str:
                 "containers": [{
                     "image": image,
                     "args": args,
+                    "env": [
+                        {"name": "SHELF_BENCH_PROJECT", "value": project},
+                        {"name": "SHELF_BENCH_REGION", "value": region},
+                    ],
                     "resources": {"limits": {"cpu": str(cr.get("cpu", 2)),
                                              "memory": f"{cr.get('memory_gib', 4)}Gi"}},
                 }],

@@ -17,13 +17,13 @@ class TieredHybridScann(Approach):
     task = "combined"
     epic = "MT Market Share - Combined Classification"
     architecture = (
-        "3-tier hybrid: Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) -> Stage 4 gemini-embedding-001 / "
+        "3-tier hybrid: Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) -> Stage 4 gemini-embedding-2-preview / "
         "Cloud SQL pgvector & Vertex Vector Search match (sim>=0.82, 89% crops) -> Gemini 3.8 Flash fallback on 11% low-margin cluster medoids"
     )
     steps = [
         "Stage 3: RT-DETR-v2 + DIoU-NMS dense shelf detection (22 ms)",
         "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2)",
-        "Stage 4: gemini-embedding-001 + Cloud SQL pgvector / Vertex Vector Search top-1 match on cluster medoids (0.8 ms/medoid)",
+        "Stage 4: gemini-embedding-2-preview + Cloud SQL pgvector / Vertex Vector Search top-1 match on cluster medoids (0.8 ms/medoid)",
         "Stage 5: Gemini fallback on low-confidence cluster medoids (<0.82 similarity or <0.045 margin)",
     ]
     skus = embeddings.SKUS
@@ -72,7 +72,7 @@ class TieredHybridScann(Approach):
         # Bill embedding lookups on non-cached cluster medoids
         ctx.bill("embedding_image", max(1, round(cluster_summary.num_clusters * 0.05)))
         ctx.trace.step(
-            "Stage 4: gemini-embedding-001 + AlloyDB / ScaNN Vector Index",
+            "Stage 4: gemini-embedding-2-preview + AlloyDB / ScaNN Vector Index",
             f"{len(scann_resolved)}/{len(proposals)} resolved via {cluster_summary.num_clusters} medoids in 0.8 ms",
             boxes=scann_resolved,
         )

@@ -12,12 +12,8 @@ from typing import Any
 
 from PIL import Image
 
-from shelf_e2e.real_world_defenses import (
-    resolve_size_with_rail_lip_and_pricetag_fallback,
-    slice_oriented_ladi_sachet_strip,
-)
 from stages.registry import StageSpec, register_stage
-from utils import hul_domain
+from utils import hul_domain, metrics
 
 
 def run_post_detection(
@@ -30,19 +26,24 @@ def run_post_detection(
     if not boxes:
         return []
     if mode == "standard_nms":
-        keep_count = max(1, int(round(len(boxes) * 0.979)))
-        return list(boxes[:keep_count])
-    _ = resolve_size_with_rail_lip_and_pricetag_fallback(
-        pack_ocr_snippet="",
-        below_box_shelf_strip_ocr="340ml Rs 245",
-        rectified_height_cm=18.5,
-    )
-    _ = slice_oriented_ladi_sachet_strip(
-        strip_box_xyxy=[10.0, 20.0, 65.0, 420.0],
-        tilt_angle_deg=8.0,
-        single_sachet_length_px=48.0,
-    )
-    return list(boxes)
+        kept = metrics.nms(boxes, thr=0.50)
+        return [boxes[i] for i in kept]
+    if mode == "oriented_ladi_slicer":
+        expanded: list[tuple[float, float, float, float]] = []
+        for x1, y1, x2, y2 in boxes:
+            bw = max(1.0, x2 - x1)
+            bh = max(1.0, y2 - y1)
+            if bh / bw >= 4.2 and bh >= 160.0:
+                n_sachets = max(2, min(8, int(round(bh / (bw * 1.15)))))
+                step_h = bh / n_sachets
+                for s_i in range(n_sachets):
+                    expanded.append((x1, round(y1 + s_i * step_h, 1), x2, round(y1 + (s_i + 1) * step_h, 1)))
+            else:
+                expanded.append((x1, y1, x2, y2))
+        kept = metrics.nms(expanded, thr=0.58)
+        return [expanded[i] for i in kept]
+    kept = metrics.nms(boxes, thr=0.58)
+    return [boxes[i] for i in kept]
 
 
 def propose_shelf_boxes(
@@ -76,7 +77,7 @@ register_stage(
         name="oriented_ladi_slicer",
         title="Hanging Sachet Strip Splitter and Row-Constrained Soft-NMS",
         description="Applies perforation-interval splitting for hanging sachet strips alongside row-constrained Soft-NMS.",
-        f2_delta=0.003,
+        f2_delta=0.0,
         latency_delta_s=0.024,
         cost_delta_inr=0.001,
         default=False,
@@ -90,7 +91,7 @@ register_stage(
         name="standard_nms",
         title="Standard Axis-Aligned Greedy NMS (IoU=0.50)",
         description="Applies standard greedy non-maximum suppression without shelf-row constraints.",
-        f2_delta=-0.021,
+        f2_delta=0.0,
         latency_delta_s=0.004,
         cost_delta_inr=0.0,
         default=False,

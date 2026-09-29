@@ -40,7 +40,7 @@ class MyClassifier(Approach):
         prior: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         preds: list[dict[str, Any]] = []
-        for idx, b in enumerate(boxes):
+        for idx, _b in enumerate(boxes):
             hint = prior[idx] if prior and idx < len(prior) else {}
             preds.append({
                 "category": hint.get("category", "Hair Care - DMT"),

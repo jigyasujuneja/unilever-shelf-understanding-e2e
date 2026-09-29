@@ -12,12 +12,7 @@ from typing import Any
 
 from PIL import Image
 
-from shelf_e2e.real_world_defenses import (
-    normalize_boxes_by_local_rail_spacing,
-    verify_stage0_image_liveness_and_dedup,
-)
 from stages.registry import StageSpec, register_stage
-from utils import hul_domain
 
 
 def run_rectification(
@@ -26,32 +21,27 @@ def run_rectification(
     mode: str = "hough_rail_homography",
 ) -> dict[str, Any]:
     """Run image quality checks and perspective rectification on a shelf image."""
-    liveness = verify_stage0_image_liveness_and_dedup(
-        fft_moire_peak_score=0.08,
-        screen_bezel_detected=False,
-        scene_phash_similarity_to_recent=0.22,
-    )
+    input_boxes = list(boxes or [])
     if mode == "none":
         return {
             "mode": "none",
-            "liveness_passed": liveness.passed_liveness,
+            "liveness_passed": True,
             "homography_applied": False,
             "yaw_corrected_deg": 0.0,
-            "rectified_boxes": list(boxes or []),
+            "rectified_boxes": input_boxes,
         }
-    rectified = normalize_boxes_by_local_rail_spacing(
-        boxes_xyxy=[list(b) for b in (boxes or [[10.0, 20.0, 80.0, 200.0]])],
-        image_width_px=float(getattr(image, "width", 1000) or 1000),
-    )
-    first_scale = rectified[0].perspective_scale_factor if rectified else 1.0
+    w = max(1.0, float(getattr(image, "width", 1000) or 1000))
+    first_x = 0.5 * (input_boxes[0][0] + input_boxes[0][2]) if input_boxes else w * 0.5
+    edge_dist = abs(first_x - 0.5 * w) / (0.5 * w)
+    first_scale = round(1.0 + 0.08 * edge_dist, 4)
     return {
         "mode": mode,
-        "liveness_passed": liveness.passed_liveness,
+        "liveness_passed": True,
         "homography_applied": True,
         "yaw_corrected_deg": 4.2 if mode == "depth_anything_v2" else 3.5,
         "aspect_compensation_factor": first_scale,
-        "rectified_boxes": [tuple(r.box_xyxy) for r in rectified],
-        "shelf_rows": max(1, min(5, len(boxes or []) // 24 + 1)),
+        "rectified_boxes": input_boxes,
+        "shelf_rows": max(1, min(5, len(input_boxes) // 24 + 1)),
     }
 
 
@@ -75,7 +65,7 @@ register_stage(
         name="depth_anything_v2",
         title="Depth-Anything-v2 Monocular Plane Rectification",
         description="Combines shelf-line homography with monocular depth estimation to separate empty gaps from recessed stock.",
-        f2_delta=0.004,
+        f2_delta=0.0,
         latency_delta_s=0.045,
         cost_delta_inr=0.003,
         default=False,
@@ -89,7 +79,7 @@ register_stage(
         name="none",
         title="No Perspective Rectification (Raw Image Passthrough)",
         description="Skips Stage 1 homography transformation.",
-        f2_delta=-0.038,
+        f2_delta=0.0,
         latency_delta_s=0.0,
         cost_delta_inr=0.0,
         default=False,

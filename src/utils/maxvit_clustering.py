@@ -10,11 +10,11 @@ with Complete-Linkage High-Purity Clustering (`ADR-008`) across `val` (`3,649` G
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from functools import lru_cache
 import hashlib
 import json
 import math
+from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -424,7 +424,7 @@ def load_dynamic_hul_catalog_index() -> list[dict[str, Any]]:
         pack_type = str(bp.get("packaging_type") or "Bottle")
         is_hul = bool(bp.get("is_hul", True))
 
-        attr_text = f"{brand}|{category}|{variant}|{size}|{pack_type}".encode("utf-8")
+        attr_text = f"{brand}|{category}|{variant}|{size}|{pack_type}".encode()
         digest = hashlib.sha256(attr_text).digest()
         vec = np.array([(digest[i % 32] / 255.0) for i in range(64)], dtype=np.float32)
         vec /= max(1e-6, float(np.linalg.norm(vec)))

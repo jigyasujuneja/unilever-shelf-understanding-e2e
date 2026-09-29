@@ -63,10 +63,10 @@ class Sam2MaskScannTrackF(Approach):
     name = "track_f_sam2_scann"
     task = "combined"
     epic = "MT Market Share - Combined Classification"
-    architecture = "Track F: SAM-3 Instance Mask + Background-Zeroed gemini-embedding-001 + ScaNN (ADR-004/006)"
+    architecture = "Track F: SAM-3 Instance Mask + Background-Zeroed gemini-embedding-2-preview + ScaNN (ADR-004/006)"
     steps = [
         "Stage 3: RT-DETR-v2 + SAM-3 pixel-accurate instance segmentation",
-        "Stage 4: Background-zeroed gemini-embedding-001 + ScaNN vector lookup",
+        "Stage 4: Background-zeroed gemini-embedding-2-preview + ScaNN vector lookup",
     ]
     skus = embeddings.SKUS
 

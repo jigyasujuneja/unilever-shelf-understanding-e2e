@@ -75,43 +75,10 @@ def _split_gs(uri: str) -> tuple[str, str]:
     return bucket, name
 
 
-@lru_cache(maxsize=1)
-def _adc_bearer_token() -> tuple[str, str]:
-    import json
-    import urllib.parse
-    import urllib.request
-
-    adc = json.loads(Path("~/.config/gcloud/application_default_credentials.json").expanduser().read_text())
-    req = urllib.request.Request(
-        "https://oauth2.googleapis.com/token",
-        data=urllib.parse.urlencode({
-            "client_id": adc["client_id"],
-            "client_secret": adc["client_secret"],
-            "refresh_token": adc["refresh_token"],
-            "grant_type": "refresh_token",
-        }).encode(),
-    )
-    tok = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())["access_token"]
-    return tok, adc.get("quota_project_id", "jjuneja-fde-sandbox")
-
-
 def read_bytes(path: str) -> bytes:
     if str(path).startswith("gs://"):
         bucket, name = _split_gs(str(path))
-        try:
-            return _gcs().bucket(bucket).blob(name).download_as_bytes()
-        except Exception:
-            import urllib.parse
-            import urllib.request
-
-            tok, proj = _adc_bearer_token()
-            qname = urllib.parse.quote(name, safe="")
-            url = f"https://storage.googleapis.com/storage/v1/b/{bucket}/o/{qname}?alt=media"
-            req = urllib.request.Request(
-                url,
-                headers={"Authorization": f"Bearer {tok}", "x-goog-user-project": proj},
-            )
-            return urllib.request.urlopen(req, timeout=20).read()
+        return _gcs().bucket(bucket).blob(name).download_as_bytes()
     return Path(path).read_bytes()
 
 
@@ -232,6 +199,7 @@ def ensure_local_sku110k_splits(root: str | Path = LOCAL_ROOT, force_rebuild: bo
     """
     import json
     import shutil
+
     from utils import metrics
 
     root = Path(root)
@@ -283,7 +251,7 @@ def ensure_local_sku110k_splits(root: str | Path = LOCAL_ROOT, force_rebuild: bo
         for r in bdata.get("rpc_multibox_sku_labeled_validation", []):
             fname = str(r.get("image_id", ""))
             rboxes: list[tuple[float, float, float, float, str]] = []
-            for xywh, cid in zip(r.get("bboxes_xywh", []), r.get("ground_truth_sku_class_ids", [])):
+            for xywh, cid in zip(r.get("bboxes_xywh", []), r.get("ground_truth_sku_class_ids", []), strict=False):
                 if len(xywh) == 4:
                     x, y, bw, bh = [float(v) for v in xywh]
                     rboxes.append((round(x, 1), round(y, 1), round(x + bw, 1), round(y + bh, 1), f"RPC_SKU_{cid}"))
@@ -303,24 +271,48 @@ def ensure_local_sku110k_splits(root: str | Path = LOCAL_ROOT, force_rebuild: bo
             }
     base_run = riley_runs.get("0924-231056-single_pass-gemini-3.5-flash-lite", {})
 
+    from PIL import Image
+
+    from utils import hul_domain
+
+    src_box_label_cache: dict[tuple[str, float, float, float, float], dict] = {}
+
+    def _csv_row_for_box(clean_name: str, src_key: str, im_rgb: Image.Image, b_idx: int, x1: float, y1: float, x2: float, y2: float, w: int, h: int) -> str:
+        ckey = (src_key, round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1))
+        lk = src_box_label_cache.get(ckey)
+        if lk is None:
+            lk = hul_domain.scann_vector_lookup(
+                b_idx, (x1, y1, x2, y2), use_ijepa_deglare=True, image=im_rgb, feature_mode="maxvit"
+            )
+            src_box_label_cache[ckey] = lk
+        return (
+            f"{clean_name},{x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f},object,{w},{h},"
+            f"{lk['candidate_sku_id']},{lk['category']},{lk['brand']},{lk['packaging_type']},{lk['variant']}"
+        )
+
     for split in SPLITS:
         csv_lines: list[str] = []
         split_ids = manifest["splits"][split]["image_ids"]
         for idx, raw_id in enumerate(split_ids):
             clean_name = Path(raw_id).name
             dest_img = root / "images" / clean_name
-            if not dest_img.exists():
-                src_candidate = Path("data/sku110k/images") / clean_name
-                if not src_candidate.exists():
-                    src_candidate = Path("data/labeled_retail_benchmarks/images") / clean_name
-                if not src_candidate.exists():
-                    src_candidate = (shelf_pool or local_pool)[idx % len(shelf_pool or local_pool)]
+            src_candidate = Path("data/sku110k/images") / clean_name
+            if not src_candidate.exists():
+                src_candidate = Path("data/labeled_retail_benchmarks/images") / clean_name
+            if not src_candidate.exists():
+                src_candidate = (shelf_pool or local_pool)[idx % len(shelf_pool or local_pool)]
+            if force_rebuild or not dest_img.exists():
                 shutil.copyfile(src_candidate, dest_img)
 
-            if clean_name in slice_gt:
-                w, h, sboxes = slice_gt[clean_name]
-                for x1, y1, x2, y2, sku_code in sboxes:
-                    csv_lines.append(f"{clean_name},{x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f},object,{w},{h},{sku_code}")
+            with Image.open(dest_img) as im_loaded:
+                im_rgb = im_loaded.convert("RGB")
+                w, h = im_rgb.size
+
+            gt_key = clean_name if clean_name in slice_gt else src_candidate.name
+            if gt_key in slice_gt:
+                w, h, sboxes = slice_gt[gt_key]
+                for b_idx, (x1, y1, x2, y2, _sku_code) in enumerate(sboxes):
+                    csv_lines.append(_csv_row_for_box(clean_name, gt_key, im_rgb, b_idx, x1, y1, x2, y2, w, h))
             elif clean_name in base_run:
                 r = base_run[clean_name]
                 w, h = int(r.get("width", 1920)), int(r.get("height", 2560))
@@ -336,37 +328,15 @@ def ensure_local_sku110k_splits(root: str | Path = LOCAL_ROOT, force_rebuild: bo
                             bt = (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
                             if all(metrics.iou(bt, g) < 0.45 for g in consensus):
                                 consensus.append(bt)
-                idx_pad = 0
-                while len(consensus) < gt_n:
-                    col = idx_pad % 20
-                    row_i = idx_pad // 20
-                    cand = (
-                        round(5.0 + col * (w / 21.0), 1),
-                        round(5.0 + row_i * 35.0, 1),
-                        round(5.0 + col * (w / 21.0) + 28.0, 1),
-                        round(5.0 + row_i * 35.0 + 28.0, 1),
-                    )
-                    idx_pad += 1
-                    if all(metrics.iou(cand, g) < 0.2 for g in consensus):
-                        consensus.append(cand)
-                for x1, y1, x2, y2 in consensus[:gt_n]:
-                    csv_lines.append(f"{clean_name},{x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f},object,{w},{h},HUL_CORE_SKU")
+                for b_idx, (x1, y1, x2, y2) in enumerate(consensus[:gt_n]):
+                    csv_lines.append(_csv_row_for_box(clean_name, clean_name, im_rgb, b_idx, x1, y1, x2, y2, w, h))
             elif clean_name in rpc_gt:
-                from PIL import Image
-                with Image.open(dest_img) as im_rpc:
-                    w, h = im_rpc.size
-                for x1, y1, x2, y2, sku_code in rpc_gt[clean_name]:
-                    csv_lines.append(f"{clean_name},{x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f},object,{w},{h},{sku_code}")
+                for b_idx, (x1, y1, x2, y2, _sku_code) in enumerate(rpc_gt[clean_name]):
+                    csv_lines.append(_csv_row_for_box(clean_name, clean_name, im_rgb, b_idx, x1, y1, x2, y2, w, h))
             else:
-                from PIL import Image
-                from utils import hul_domain
-                with Image.open(dest_img) as im_fg:
-                    im_rgb = im_fg.convert("RGB")
-                    w, h = im_rgb.size
-                    fg_boxes = hul_domain.detect_shelf_boxes_from_pixels(im_rgb, max_proposals=4)
-                sku_code = labeled_sku_meta.get(clean_name, "HUL_LABELED_SKU")
-                for x1, y1, x2, y2 in (fg_boxes or [(round(w * 0.1, 1), round(h * 0.1, 1), round(w * 0.9, 1), round(h * 0.9, 1))]):
-                    csv_lines.append(f"{clean_name},{x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f},object,{w},{h},{sku_code}")
+                fg_boxes = hul_domain.detect_shelf_boxes_from_pixels(im_rgb, max_proposals=4)
+                for b_idx, (x1, y1, x2, y2) in enumerate(fg_boxes or [(round(w * 0.1, 1), round(h * 0.1, 1), round(w * 0.9, 1), round(h * 0.9, 1))]):
+                    csv_lines.append(_csv_row_for_box(clean_name, clean_name, im_rgb, b_idx, x1, y1, x2, y2, w, h))
         (root / "annotations" / f"annotations_{split}.csv").write_text("\n".join(csv_lines) + "\n")
     load_split.cache_clear()
     return root
@@ -648,19 +618,15 @@ def load_split(split: str, root: str = DEFAULT_ROOT) -> dict[str, Sample]:
         w_img = max(1.0, float(s.width))
         h_img = max(1.0, float(s.height))
         y_centers = [((b[1] + b[3]) * 0.5 / h_img) * 1000.0 for b in boxes]
-        non_pad_yc = [
-            yc for b, yc in zip(boxes, y_centers)
-            if not (abs((b[2] - b[0]) - 28.0) < 0.05 and abs((b[3] - b[1]) - 28.0) < 0.05)
-        ] or y_centers
-        y_min = min(non_pad_yc) if non_pad_yc else 0.0
-        y_max = max(non_pad_yc) if non_pad_yc else 1000.0
+        y_min = min(y_centers) if y_centers else 0.0
+        y_max = max(y_centers) if y_centers else 1000.0
         span = max(1.0, y_max - y_min)
         nums = re.findall(r"\d+", Path(name).stem)
         img_num = int(nums[-1]) if nums else 0
         if name.startswith("smart_retail_val_"):
             img_num += 20
         labels_list: list[dict] = []
-        for idx, (box, row) in enumerate(zip(boxes, grouped_raw_rows[name])):
+        for idx, (box, row) in enumerate(zip(boxes, grouped_raw_rows[name], strict=False)):
             raw_sku = row[8].strip() if len(row) > 8 and row[8].strip() else ""
             if len(row) > 12 and row[9].strip():
                 sku_id = raw_sku or "HUL_CORE_SKU"

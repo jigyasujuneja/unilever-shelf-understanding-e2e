@@ -29,18 +29,33 @@ This repository unifies the **`shelf-bench` Cloud Run benchmark harness** (`clou
 * **All Approaches in `src/approaches/`**: Every model pipeline (`single_pass`, `detect_classify`, `tiered_hybrid_scann`, `djev_systemone_sister_shade`, `hul_8stage_gemini38_hybrid`, `track_a_cascading_vit`, `track_e_open_vocab`, `track_f_sam2_scann`) is registered via `@register` inside `src/approaches/` with a uniform `(image, model, ctx) -> Detections` contract.
 * **All Shared Domain, Cloud, and MLOps Logic in `src/utils/` and `src/runner.py`**: Dynamic Argolis provisioning (`src/utils/cloud.py`), 3-way stratified `Train/Val/Test` splits (`src/utils/dataset.py`), the HUL 8-stage domain adapter (`src/utils/hul_domain.py`), MLOps drift and 7-gate promotion (`src/utils/mlops_pipeline.py`), and dual-persona storyboard APIs (`src/utils/storyboard_api.py`) reside in `src/utils/`.
 
-## 2. Unified Cloud Benchmark Leaderboard (`50-Image SKU-110K Test Split` + `HUL 7-Dim Audit`)
+## 2. Unified Cloud Benchmark Leaderboard (`SKU-110K` + `HUL 7-Dim Audit` Across All 6 EPICs)
 
-Evaluated across the 50-image `SKU-110K` test cohort (`7,264` ground-truth shelf boxes) and HUL's 7-Dimension SKU taxonomy (`Category`, `Subcategory`, `Brand`, `Variant`, `Packaging Type`, `Pack Type`, `Size + ERP Base Pack Code`).
+Evaluated in GCP (`jjuneja-fde-sandbox`) across the `SKU-110K` test split and HUL's 7-Dimension SKU taxonomy (`Category`, `Subcategory`, `Brand`, `Variant`, `Packaging Type`, `Pack Type`, `Size + ERP Base Pack Code`) using live Vertex AI (`gemini-3.8-flash`, `gemini-3.5-flash-lite`), **Gemini Embedding 2 (`gemini-embedding-2-preview`)**, Cloud Billing Catalog SKU pricing, and Cloud Trace telemetry.
 
-| Rank | Registered Approach (`src/approaches/`) | Model / Routing Cascade | 2D Box `F2` (`IoU>=0.5`) | HUL 7-Dim SKU `F2` | 14-SKU Sister-Shade `F2` | `P95` Latency / Img | Total Cost (`50` Imgs, `INR`) | Cost / Img (`INR`) | 7-Gate CI/CD Status |
+| Rank | Task | EPIC | Registered Approach (`src/approaches/`) | Model | `Acc` | `Recall` | `F2` | `P95` Latency | Cost / Img (`INR`) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **#1** | **`hul_8stage_gemini38_hybrid`** | `RT-DETR-v2` + `I-JEPA/ScaNN` (`89%`) + `/v1/systemone` (`9%`) + `Gemini 3.8 Flash` (`2%`) | **`0.990`** (`P:0.990 R:0.990`) | **`0.979`** | **`0.969`** | **`1.5 s`** (`218ms` GPU) | **`INR 1.81`** | **`INR 0.036`** | **PROMOTED (`7/7`)** |
-| **#2** | **`djev_systemone_sister_shade`** | `RT-DETR-v2` + `I-JEPA/ScaNN` (`89%`) + `Stage 4.5` (`3x Zoom + CIELAB`) + `/v1/systemone` (`11%`) | **`0.990`** (`P:0.989 R:0.990`) | **`0.974`** | **`0.964`** | **`1.3 s`** (`218ms` GPU) | **`INR 2.25`** | **`INR 0.045`** | **PROMOTED (`7/7`)** |
-| **#3** | **`tiered_hybrid_scann`** | `RT-DETR-v2` + `AlloyDB ScaNN` (`sim>=0.82`, `89%`) + `Gemini 3.8 Flash` (`11%`) | **`0.988`** (`P:0.988 R:0.988`) | **`0.958`** | **`0.884`** | **`1.9 s`** | **`INR 2.81`** | **`INR 0.056`** | **HOLD (`6/7`, Shade `F2<0.92`)** |
-| **#4** | **`single_pass`** (`cloud-gtm` baseline) | 1-Pass Full-Shelf `gemini-3.5-flash-lite` | `0.816` (`P:0.892 R:0.799`) | `0.420` | `0.120` | `46.6 s` | `INR 12.69` | `INR 0.254` | **FAIL (`2/7` Gates)** |
-| **#5** | **`single_pass`** (`cloud-gtm` baseline) | 1-Pass Full-Shelf `gemini-3.8-flash` | `0.785` (`P:0.822 R:0.777`) | `0.501` | `0.151` | `40.4 s` | `INR 23.06` | `INR 0.461` | **FAIL (`2/7` Gates)** |
-| **#6** | **`detect_classify`** (`cloud-gtm` baseline) | 2-Pass Detect + Crop Classify `gemini-3.8-flash` (`20` imgs) | `0.768` (`P:0.863 R:0.748`) | `0.884` | `0.785` | `311.5 s` | `INR 351.23` | `INR 17.562` | **FAIL (`1/7` Gates)** |
+| **1** | `classification` | `MT Market Share - Other (Category, Brand and Packaging)` | [`hul_hierarchy_classifier`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/hul_hierarchy_classifier.py) | `gemini-3.8-flash` | `0.816` | `0.899` | **`0.899`** | `12.8s` | `INR 0.704` |
+| **2** | `classification` | `MT Market Share - Variant Classification` | [`sister_shade_systemone`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/sister_shade_systemone.py) | `gemini-3.8-flash` | `0.799` | `0.888` | **`0.888`** | `10.3s` | `INR 1.462` |
+| **3** | `classification` | `MT Market Share - Variant Classification` | [`scann_vector_retriever`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/scann_vector_retriever.py) (`gemini-embedding-2-preview`) | `gemini-3.8-flash` | `0.795` | `0.886` | **`0.886`** | `26.4s` | `INR 1.244` |
+| **4** | `combined` | `MT Market Share - Combined Classification` | [`djev_systemone_sister_shade`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/djev_systemone_sister_shade.py) | `gemini-3.8-flash` | `0.793` | `0.878` | **`0.881`** | `22.9s` | `INR 1.110` |
+| **5** | `classification` | `MT Market Share - Other (Category, Brand and Packaging)` | [`djev_diffusiongemma_compound`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/djev_diffusiongemma_compound.py) | `gemini-3.8-flash` | `0.786` | `0.880` | **`0.880`** | `11.1s` | `INR 0.643` |
+| **6** | `detection` | `MT Market Share - SKU Detection` | [`yolo_n26_sku110k`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/yolo_n26_sku110k.py) | `gemini-3.5-flash-lite` | `0.735` | `0.880` | **`0.867`** | `15.7s` | `INR 0.876` |
+| **7** | `classification` | `MT Market Share - Variant Classification` | [`ft_gemini31_variant_compound`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/ft_gemini31_variant_compound.py) | `gemini-3.5-flash-lite` | `0.742` | `0.852` | **`0.852`** | `6.8s` | `INR 0.425` |
+| **8** | `classification` | `MT Market Share - Other (Category, Brand and Packaging)` | [`ft_gemini31_cat_brand_pkg`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/ft_gemini31_cat_brand_pkg.py) | `gemini-3.5-flash-lite` | `0.742` | `0.852` | **`0.852`** | `8.2s` | `INR 0.426` |
+| **9** | `combined` | `MT Market Share - Combined Classification` | [`tiered_hybrid_scann`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/tiered_hybrid_scann.py) (`gemini-embedding-2-preview`) | `gemini-3.8-flash` | `0.751` | `0.836` | **`0.845`** | `19.3s` | `INR 1.090` |
+| **10** | `detection` | `MT Market Share - SKU Detection` | [`gemini_2_robotics_detector`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/gemini_2_robotics_detector.py) | `gemini-3.8-flash` | `0.743` | `0.839` | **`0.844`** | `21.2s` | `INR 1.059` |
+| **11** | `detection` | `MT Market Share - SKU Detection` | [`rtdetr_shelf_rail_detector`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/rtdetr_shelf_rail_detector.py) | `gemini-3.8-flash` | `0.763` | `0.829` | **`0.843`** | `22.5s` | `INR 1.004` |
+| **12** | `combined` | `MT Market Share - Combined Classification` | [`maxvit_clustered_djev`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/maxvit_clustered_djev.py) | `gemini-3.8-flash` | `0.738` | `0.829` | **`0.837`** | `29.1s` | `INR 1.080` |
+| **13** | `combined` | `MT Market Share - Combined Classification` | [`hul_8stage_gemini38_hybrid`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/hul_8stage_gemini38_hybrid.py) | `gemini-3.8-flash` | `0.739` | `0.810` | **`0.826`** | `23.1s` | `INR 1.020` |
+| **14** | `detection` | `MT Merchandising - Promotion Asset Detection` | [`promo_asset_detector`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/promo_asset_detector.py) | `gemini-3.8-flash` | `0.712` | `0.795` | **`0.809`** | `19.7s` | `INR 0.999` |
+| **15** | `detection` | `MT Market Share - SKU Detection` | [`single_pass`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/single_pass.py) (`cloud-gtm` baseline) | `gemini-3.8-flash` | `0.720` | `0.766` | **`0.793`** | `35.8s` | `INR 1.464` |
+| **16** | `combined` | `MT Market Share - Combined Classification` | [`modular_e2e_pipeline`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/modular_e2e_pipeline.py) | `gemini-3.8-flash` | `0.605` | `0.748` | **`0.750`** | `43.5s` | `INR 3.161` |
+| **17** | `combined` | `MT Merchandising - Promotion Product Detection` | [`promo_product_detector`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/promo_product_detector.py) | `gemini-3.8-flash` | `0.622` | `0.735` | **`0.748`** | `27.0s` | `INR 1.457` |
+| **18** | `detection` | `MT Market Share - SKU Detection` | [`single_pass`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/single_pass.py) (`cloud-gtm` baseline) | `gemini-3.5-flash-lite` | `0.591` | `0.715` | **`0.726`** | `25.9s` | `INR 1.229` |
+| **19** | `detection` | `MT Market Share - SKU Detection` | [`detect_classify`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/detect_classify.py) (`cloud-gtm` baseline) | `gemini-3.8-flash` | `0.624` | `0.696` | **`0.723`** | `107.1s` | `INR 2.032` |
+| **20** | `detection` | `MT Market Share - SKU Detection` | [`detect_classify`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/detect_classify.py) (`cloud-gtm` baseline) | `gemini-3.5-flash-lite` | `0.553` | `0.688` | **`0.697`** | `21.8s` | `INR 1.478` |
+| **21** | `combined` | `MT Market Share - Combined Classification` | [`compound_pipeline_1_plus_2`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/compound_pipeline_1_plus_2.py) | `gemini-3.5-flash-lite` | `0.464` | `0.626` | **`0.629`** | `21.0s` | `INR 1.454` |
 
 ## 3. Performance Breakdown 1: By Model Architecture (`All 8 Neural Tracks`)
 
@@ -109,35 +124,43 @@ Shows how each of HUL's 7 taxonomy attributes is resolved across architectures a
 
 ## 8. End-to-End Quickstart (`Local`, `Argolis Cloud Run`, and `Storyboard APIs`)
 
-See [`HOW_TO_GUIDE.md`](HOW_TO_GUIDE.md) for the complete operational manual.
+See [`HOW_TO_GUIDE.md`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/HOW_TO_GUIDE.md) for the complete operational manual.
 
 ### 1. List All Registered Approaches and Leaderboard
 ```bash
-PYTHONPATH=src:. python3 src/cli.py list
-PYTHONPATH=src:. python3 src/cli.py leaderboard
+.venv/bin/shelf-bench list
+.venv/bin/shelf-bench leaderboard
 ```
 
-### 2. Bootstrap Any Argolis GCP Project and Submit to Cloud Run
+### 2. Bootstrap Any Argolis GCP Project and Run End-to-End (`Vertex AI` + `Cloud Run Jobs`)
 ```bash
-# Provision APIs, UBLA buckets, dataset uploads, Cloud Build image, and Cloud Run Job
-PYTHONPATH=src:. python3 src/cli.py bootstrap --project <YOUR_ARGOLIS_PROJECT_ID> --region us-central1
+# Provision APIs, UBLA buckets, resource-level IAM, and upload datasets to gs://<PROJECT>-shelf-images
+.venv/bin/shelf-bench --project <YOUR_ARGOLIS_PROJECT_ID> bootstrap --region us-central1
 
-# Execute the #1 Production Hybrid pipeline on Cloud Run across the 50-image test split
-PYTHONPATH=src:. python3 src/cli.py submit hul_8stage_gemini38_hybrid \
-  --project <YOUR_ARGOLIS_PROJECT_ID> \
+# Execute any EPIC approach directly against Vertex AI and Cloud Billing Catalog
+.venv/bin/shelf-bench --project <YOUR_ARGOLIS_PROJECT_ID> run \
+  -a hul_hierarchy_classifier sister_shade_systemone scann_vector_retriever hul_8stage_gemini38_hybrid \
+  -m gemini-3.8-flash \
   --split test \
-  --limit 50
+  --limit 10 \
+  --workers 5
+
+# Build container via Cloud Build and execute on Cloud Run Jobs, pulling results back to results/
+.venv/bin/shelf-bench --project <YOUR_ARGOLIS_PROJECT_ID> cloud-run \
+  -a hul_8stage_gemini38_hybrid \
+  -m gemini-3.8-flash \
+  --split test \
+  --limit 10 \
+  --workers 5
 ```
 
-### 3. Serve the Dual-Persona Storyboard APIs (`/api/v1/cx-storyboard` and `/api/v1/eng-workbench`)
+### 3. Serve the Interactive Arena UI and Dual-Persona Storyboard APIs
 ```bash
-PYTHONPATH=src:. python3 src/cli.py serve --port 8080
+.venv/bin/shelf-bench serve --port 8080
 ```
 
-### 4. Run the Automated Unit and Integration Test Suite (`14/14` Tests Passing)
+### 4. Run the Automated Unit Test Suite and Linter (`31/31` Tests Passing)
 ```bash
-PYTHONPATH=src:. python3 -m unittest -v \
-  tests/test_unified_cloud_mlops_and_approaches.py \
-  tests/test_shelfbench_arena_platform.py \
-  tests/test_spec006_djev_ijepa_and_mt_kpis.py
+.venv/bin/pytest -q
+.venv/bin/ruff check src tests
 ```

@@ -20,8 +20,8 @@ from typing import Any
 
 from PIL import Image
 
-from approaches.base import Approach, Box, Context, get, label_counts, register
 import stages
+from approaches.base import Approach, Box, Context, get, label_counts, register
 from utils import embeddings
 
 
