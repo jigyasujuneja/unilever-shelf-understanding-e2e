@@ -29,7 +29,7 @@ from utils import dataset
 from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "configs", "data/splits", "results", "src"]
+SOURCE_FILES = ["Dockerfile", "pyproject.toml", "requirements.txt", "README.md", "config.yaml", "configs", "data/splits", "results", "src", "web"]
 AuthorizedSession = Any
 
 
@@ -405,7 +405,11 @@ def deploy_cloud_service(port: int = 8080, log=print) -> str:
         "template": {
             "containers": [{
                 "image": image,
-                "args": ["serve", "--host", "0.0.0.0", "--port", str(port)],
+                "args": ["serve", "--host", "0.0.0.0", "--port", str(port), "--root", gcp["data"]],
+                "env": [
+                    {"name": "SHELF_BENCH_PROJECT", "value": project},
+                    {"name": "SHELF_BENCH_REGION", "value": region},
+                ],
                 "ports": [{"containerPort": port}],
                 "resources": {"limits": {"cpu": str(cr.get("cpu", 2)),
                                          "memory": f"{cr.get('memory_gib', 4)}Gi"}},
