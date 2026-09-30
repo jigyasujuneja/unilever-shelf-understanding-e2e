@@ -1,0 +1,36 @@
+flowchart TD
+  classDef trigger fill:#e8f0fe,stroke:#1a73e8,color:#174ea6
+  classDef step fill:#f1f3f4,stroke:#5f6368,color:#202124
+  classDef cond fill:#fef7e0,stroke:#f9ab00,color:#b06000
+  classDef ml fill:#fce8e6,stroke:#d93025,color:#a50e0e
+  classDef ok fill:#e6f4ea,stroke:#188038,color:#0d652d
+
+  TRIG["HTTP Request Trigger (manual)<br/>Schema Validation Enabled<br/>Required: Image_Names, Outlet_Code, RSCode,<br/>Request_ID, Salesman_Code (Optional: psa_category)"]:::trigger
+
+  ENV["Environement_Variables (ParseJson)<br/>API_KEY, AZUREML_API, DYNAMIC_TASK_API,<br/>DYNAMIC_TASK_API_TEST, DYNAMIC_TASK_API_TOKEN"]:::step
+
+  HAS_IMG{"Has_Images<br/>length(Image_Names) > 0?"}:::cond
+
+  RESP_404["Response (HTTP 404)<br/>{message: 'No Images', messagecode: 404}"]:::ml
+  ACK_200["Acknowledgement (HTTP 200)<br/>{message: 'Success', messagecode: 200}"]:::ok
+  TIME_COND{"Condition: Business Hours?<br/>IST between 07:30 and 18:00"}:::cond
+  OUTSIDE_HRS["Else: No Action<br/>(AKS cluster stopped outside 07:30-18:00 IST)"]:::step
+
+  AML["Azure_ML_Call_-_endpoint (HTTP POST)<br/>URI: AZUREML_API (Bearer API_KEY)<br/>Timeout: PT180S, RetryPolicy: none<br/>Body: @triggerBody()"]:::ml
+
+  subgraph SUCCESS_SCOPE["Success Scope (runAfter: SUCCEEDED)"]
+    TASK_S["Create_Dynamic_Task_-_Success (HTTP POST)<br/>URI: DYNAMIC_TASK_API<br/>Headers: REQUEST_ID, TOKEN (Static)<br/>Body: @body('Azure_ML_Call_-_endpoint')"]:::ok
+  end
+
+  subgraph FAIL_SCOPE["Failure Scope (runAfter: TIMEDOUT, SKIPPED, FAILED)"]
+    TASK_F["Create_Dynamic_Task_-_Failure (HTTP POST)<br/>URI: DYNAMIC_TASK_API<br/>Headers: REQUEST_ID, TOKEN (Static)<br/>Body: {StatusCode: 500, Recognised_Packs: '',<br/>Remarks: 'Internal Server Error', ...}"]:::ml
+  end
+
+  TRIG --> ENV --> HAS_IMG
+  HAS_IMG -- "False (else)" --> RESP_404
+  HAS_IMG -- "True" --> ACK_200
+  HAS_IMG -- "True" --> TIME_COND
+  TIME_COND -- "True (07:30-18:00 IST)" --> AML
+  TIME_COND -- "False" --> OUTSIDE_HRS
+  AML -- "SUCCEEDED" --> TASK_S
+  AML -- "TIMEDOUT / SKIPPED / FAILED" --> TASK_F

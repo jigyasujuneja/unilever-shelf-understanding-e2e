@@ -1,0 +1,32 @@
+flowchart TD
+  classDef config fill:#f1f3f4,stroke:#5f6368,color:#202124
+  classDef db fill:#e6f4ea,stroke:#188038,color:#0d652d
+  classDef compute fill:#fef7e0,stroke:#f9ab00,color:#b06000
+  classDef blob fill:#e8f0fe,stroke:#1a73e8,color:#174ea6
+
+  INIT["1. Initialize Category & Model Accuracy Weights<br/>Categories = ['PW'] (Personal Wash)<br/>Weights: W2(SubCat)=86.12, W3(Brand)=91.72, W4(Variant)=83.38,<br/>W5(Size)=45.61, W6(PkgType)=81, W1(Pack)=(W4*W5)/100=38.03<br/>Create/clean local folder: ./p2p_PW/"]:::config
+
+  MYSQL[("Azure MySQL Database<br/>Tables: PW, cluster_mapping,<br/>sub_category_PW, Brand_PW,<br/>variant_PW, size_PW, Packaging_type_PW")]:::db
+
+  SEG_FETCH["2. Fetch & Slice Segments<br/>SELECT DISTINCT Segment_id FROM PW<br/>Remove 'Combined', sort(), slice segments[300:600]<br/>Chunk into batches of segment_size = 80"]:::db
+
+  subgraph PARALLEL["3. Parallel Execution: Pool(pool_size+1).starmap(Calculate_segment_AS)"]
+    direction TB
+    CLUST_Q["Lookup Clusters for Segment:<br/>SELECT cluster, cluster_desc FROM cluster_mapping<br/>WHERE ol_segment = segment"]:::db
+    PACK_Q["Fetch Candidate Pack Pairs:<br/>SELECT Pack1, Pack2, Confidence FROM PW<br/>WHERE Segment_id = segment<br/>(Filter out 'Model_Output' / 'MODEL_OUTPUT')"]:::db
+    SPLIT["split_pack(Pack1) & split_pack(Pack2) on '__'<br/>Extract: sub_category, brand, variant, size, Packaging_type"]:::compute
+    COMP_Q["Query 5 Component Score Tables in MySQL for Segment:<br/>1. sub_category_PW (Cat1, Cat2) -> sub_category_score<br/>2. Brand_PW (brand1, brand2) -> brand_score<br/>3. variant_PW (variant1, variant2) -> variant_score<br/>4. size_PW (size1, size2) -> size_score<br/>5. Packaging_type_PW (Pkg1, Pkg2) -> Packaging_type_score"]:::db
+    SCORE_CALC["Compute Weighted Association Score:<br/>(W1*pack_score + W2*sub_cat + W3*brand + W4*variant<br/>+ W5*size + W6*pkg_type) / (W1+W2+W3+W4+W5+W6)<br/>Replicate row for each cluster in clusters"]:::compute
+    WRITE_CSV["Write Segment CSV:<br/>./p2p_PW/{segment}__PW.csv<br/>Columns: Cluster_id, Segment_id, Product1, Product2, Association_Score, rn"]:::config
+
+    CLUST_Q --> PACK_Q --> SPLIT --> COMP_Q --> SCORE_CALC --> WRITE_CSV
+  end
+
+  UPLOAD["4. Upload Segment CSVs to Azure Blob Storage<br/>Container Path: new-p2p/Association/PW/{segment}__PW.csv<br/>(overwrite=True)"]:::blob
+
+  INIT --> SEG_FETCH --> CLUST_Q
+  WRITE_CSV --> UPLOAD
+  MYSQL <--> SEG_FETCH
+  MYSQL <--> CLUST_Q
+  MYSQL <--> PACK_Q
+  MYSQL <--> COMP_Q

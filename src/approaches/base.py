@@ -1,0 +1,502 @@
+"""Approach interface, step composition (``compose``), and auto-discovery registry.
+
+Approaches live under ``src/approaches/<use_case>/<task>/``, mirroring the UI sections and tabs:
+  - ``market_share/detection/``:      implement ``detect(image, ctx) -> list[Box]``
+  - ``market_share/classification/``: implement ``identify(image, ctx, allowed_ids=None) -> int | None``
+  - ``market_share/retrieval/``:      implement ``identify(image, ctx, allowed_ids=None) -> int | None``
+  - ``market_share/end_to_end/``:     either compose steps via ``compose(name, detector, *identifiers)``
+                                      OR override ``detect_and_identify(image, ctx) -> (boxes, sku_ids)``
+                                      when one model call performs both detection and classification.
+  - ``merchandising/{planogram_compliance,promo_detection}/``: ``use_case = "merchandising"``
+
+Every ``@register`` class or ``compose(...)`` call in a module (not starting with ``_``) is
+discovered automatically and appears in ``shelf-bench list``.
+
+Workflow to add and benchmark a new approach:
+  1. Drop a file in ``src/approaches/<use_case>/<task>/<name>.py`` (see templates in ``end_to_end/``).
+  2. Iterate locally on ``val``:  ``shelf-bench run -a <name> -m gemini-3.5-flash-lite --split val --limit 5``
+  3. Add an offline unit test in ``tests/test_<task>.py`` and run ``make lint && make test``.
+  4. Benchmark on Cloud Run:      ``make cloud A=<name> M="gemini-3.8-flash gemini-3.5-flash-lite"``
+"""
+
+from __future__ import annotations
+
+import copy
+import importlib
+import logging
+import pkgutil
+import sys
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from PIL import Image
+
+from utils import telemetry
+from utils.llm import LLMResult, Usage
+
+Box = tuple[float, float, float, float]  # x1, y1, x2, y2 in original-image pixels
+
+# JSON schema for "a list of [ymin, xmin, ymax, xmax] boxes normalised to 0..1000",
+# which is Gemini's native box format.
+BOX_LIST_SCHEMA = {
+    "type": "array",
+    "items": {"type": "array", "items": {"type": "integer"}},
+}
+
+
+MAX_STEP_CALLS = 100   # model calls kept per step in images.jsonl (the rest are only counted)
+MAX_STEP_TEXT = 4_000  # chars of prompt / response kept per call (full text is in Cloud Logging)
+
+
+def _clip(text: str | None) -> str | None:
+    if text is None or len(text) <= MAX_STEP_TEXT:
+        return text
+    return text[:MAX_STEP_TEXT] + f"... [{len(text) - MAX_STEP_TEXT} more chars]"
+
+
+@dataclass
+class Trace:
+    """What the UI shows as 'step by step'. Keep steps few and meaningful.
+
+    Each step also carries what happened since the previous one - the model calls
+    (``calls``: tokens, latency, cost, prompt, response), non-Gemini billed units (``billed``)
+    and whatever structured ``info`` the approach passes - shown behind the step's (i) icon.
+    Pending calls are kept per thread: a step recorded in a worker thread (e.g. per crop in
+    ``identify_boxes``) claims that thread's calls; a step in the thread that owns the trace
+    also sweeps up whatever the workers left unclaimed (e.g. into "Identify each box").
+    """
+
+    steps: list[dict] = field(default_factory=list)
+    usage: Usage = field(default_factory=Usage)
+    billed: dict[str, float] = field(default_factory=dict)  # non-Gemini usage, see Context.bill
+    span: Any = None  # the image's OpenTelemetry span; each step is also an event on it
+    _t0: float = field(default_factory=time.perf_counter)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _owner: int = field(default_factory=threading.get_ident)
+    _calls: dict[int, list[dict]] = field(default_factory=dict)          # thread -> since last step
+    _billed: dict[int, dict[str, float]] = field(default_factory=dict)   # thread -> since last step
+
+    def step(self, name: str, detail: str = "", boxes: list[Box] | None = None,
+             regions: list[Box] | None = None, info: dict | None = None) -> None:
+        """Record a step. ``boxes`` are detections to overlay; ``regions`` e.g. tiles;
+        ``info`` any JSON-able details worth inspecting (candidates, scores, removed boxes)."""
+        now = time.perf_counter()
+        s: dict[str, Any] = {"name": name, "detail": detail, "ms": round((now - self._t0) * 1000)}
+        if boxes is not None:
+            s["boxes"] = [[round(v, 1) for v in b] for b in boxes]
+        if regions is not None:
+            s["regions"] = [[round(v, 1) for v in r] for r in regions]
+        if info:
+            s["info"] = info
+        me = threading.get_ident()
+        with self._lock:
+            threads = list(self._calls.keys() | self._billed.keys()) if me == self._owner else [me]
+            calls = [c for t in threads for c in self._calls.pop(t, [])]
+            billed: dict[str, float] = {}
+            for t in threads:
+                for unit, n in self._billed.pop(t, {}).items():
+                    billed[unit] = billed.get(unit, 0) + n
+        if calls:
+            s["calls"] = calls[:MAX_STEP_CALLS]
+            if len(calls) > MAX_STEP_CALLS:
+                s["calls_omitted"] = len(calls) - MAX_STEP_CALLS
+        if billed:
+            s["billed"] = billed
+        self.steps.append(s)
+        self._t0 = now
+        if self.span is not None:
+            self.span.add_event(f"step: {name}", telemetry.clean({
+                "detail": detail, "ms": s["ms"],
+                "boxes": len(boxes) if boxes is not None else None,
+                "regions": len(regions) if regions is not None else None}))
+
+    def record_call(self, call: dict) -> None:
+        with self._lock:
+            self._calls.setdefault(threading.get_ident(), []).append(call)
+
+    def record_billed(self, unit: str, amount: float) -> None:
+        with self._lock:
+            self.billed[unit] = self.billed.get(unit, 0) + amount
+            pending = self._billed.setdefault(threading.get_ident(), {})
+            pending[unit] = pending.get(unit, 0) + amount
+
+
+@dataclass
+class Context:
+    """Everything an approach may use.
+
+    ``llm`` is a Gemini (or a fake in tests). Anything else an approach uses (embeddings,
+    AlloyDB, ...) it creates itself in ``Approach.setup`` from the helpers in ``utils/``.
+    """
+
+    model: str
+    llm: Callable[..., LLMResult]
+    trace: Trace = field(default_factory=Trace)
+    # Set by the runner: OTel parent for model-call spans (works from any thread), and
+    # usage -> Gemini cost dict (list_usd / credit_usd / net_usd) for the span.
+    otel_parent: Any = None
+    price: Callable[[Usage], dict] | None = None
+
+    def ask(self, image: Image.Image, prompt: str, **kw) -> LLMResult:
+        """Call the run's Gemini model. kw: schema=<JSON schema>, max_side=<px downscale>.
+
+        Every call is a span (tokens, traffic type, retries, cost) plus a log entry with the
+        prompt and response, so it can be inspected in Cloud Trace / Cloud Logging.
+        """
+        req = {"gen_ai.operation.name": "generate_content", "gen_ai.provider.name": "gcp.vertex_ai",
+               "gen_ai.request.model": self.model, "shelf_bench.image.width": image.width,
+               "shelf_bench.image.height": image.height, "shelf_bench.max_side": kw.get("max_side"),
+               "shelf_bench.schema": bool(kw.get("schema")), "shelf_bench.prompt_chars": len(prompt)}
+        with telemetry.span(f"gemini {self.model}", parent=self.otel_parent, **req) as span:
+            t0 = time.perf_counter()
+            try:
+                res = self.llm(image, prompt, **kw)
+            except Exception as e:
+                telemetry.fail(span, e)
+                err = f"{type(e).__name__}: {e}"[:2000]
+                telemetry.log(span, "gemini_call_failed",
+                              {**req, "error": err,
+                               "seconds": round(time.perf_counter() - t0, 3),
+                               "prompt": telemetry.truncate(prompt)}, level=logging.ERROR)
+                self.trace.record_call({"span_id": telemetry.ids(span)[1], "model": self.model, "error": err,
+                                        "seconds": round(time.perf_counter() - t0, 3),
+                                        "image": [image.width, image.height],
+                                        "prompt": _clip(prompt)})
+                raise
+            with self.trace._lock:
+                self.trace.usage = self.trace.usage + res.usage
+            cost = self.price(res.usage) if self.price else {}
+            m = res.meta
+            fields = {
+                **req, **telemetry.usage_attrs(res.usage),
+                "gen_ai.response.model": m.get("model_version"),
+                "gen_ai.response.id": m.get("response_id"),
+                "gen_ai.response.finish_reasons": [m["finish_reason"]] if m.get("finish_reason") else None,
+                "shelf_bench.traffic_type": ",".join(res.usage.traffic) or None,
+                "shelf_bench.tier_requested": m.get("tier_requested"),
+                "shelf_bench.attempts": m.get("attempts", 1),
+                "shelf_bench.truncated": m.get("truncated"),
+                "shelf_bench.thinking_level": m.get("thinking_level"),
+                "gen_ai.request.temperature": m.get("temperature"),
+                "gen_ai.request.max_tokens": m.get("max_output_tokens"),
+                "shelf_bench.image_bytes": m.get("image_bytes"),
+                "shelf_bench.response_chars": len(res.text or ""),
+                "shelf_bench.model_seconds": round(res.seconds, 3),
+                **{f"shelf_bench.cost.{k}": v for k, v in cost.items() if isinstance(v, (int, float))},
+            }
+            telemetry.set_attrs(span, fields)
+            telemetry.log(span, "gemini_call", {
+                **{k: v for k, v in fields.items() if v is not None},
+                "token_buckets": res.usage.buckets, "retry_errors": m.get("retry_errors") or None,
+                "prompt": telemetry.truncate(prompt), "response": telemetry.truncate(res.text)})
+            call = {
+                "span_id": telemetry.ids(span)[1],  # joins this call to its span + log entry in GCP
+                "model": m.get("model_version") or self.model,
+                "seconds": round(res.seconds, 3),
+                "input_tokens": res.usage.input_tokens,
+                "output_tokens": res.usage.output_tokens,
+                "thinking_tokens": res.usage.thinking_tokens,
+                "buckets": res.usage.buckets,
+                "traffic": ",".join(res.usage.traffic) or None,
+                "tier_requested": m.get("tier_requested"),
+                "attempts": m.get("attempts", 1),
+                "retry_errors": m.get("retry_errors") or None,
+                "finish_reason": m.get("finish_reason"),
+                "truncated": m.get("truncated"),
+                "thinking_level": m.get("thinking_level"),
+                "image": [image.width, image.height],
+                "max_side": kw.get("max_side"),
+                "image_bytes": m.get("image_bytes"),
+                "schema": bool(kw.get("schema")),
+                "cost_usd": cost.get("net_usd"),
+                "list_usd": cost.get("list_usd"),
+                "prompt": _clip(prompt),
+                "response": _clip(res.text),
+            }
+            self.trace.record_call({k: v for k, v in call.items() if v not in (None, {}, "")})
+        return res
+
+    def bill(self, unit: str, amount: float = 1) -> None:
+        """Record billable non-Gemini usage for this image (e.g. ``bill("embedding_image")``).
+
+        ``unit`` must be a key of the approach's ``skus``; it's priced from the Billing Catalog.
+        The ``utils`` clients call this for you when you pass them ``ctx``.
+        """
+        self.trace.record_billed(unit, amount)
+
+
+class Approach:
+    name: str = ""          # CLI id
+    architecture: str = ""  # one line for the leaderboard
+    steps: list[str] = []   # static description of the pipeline for the UI
+    # Leaderboard tab, and the images it's scored on:
+    #   detection      -> "sku110k":  detect() returns boxes, scored by IoU vs GT boxes
+    #   classification -> "products": identify() names the product in each photo
+    #   retrieval      -> "rpc":      identify() names the product in each GT box crop
+    #   end_to_end     -> "rpc"/"shelves": either compose(detector, *identifiers) or override
+    #                                 detect_and_identify() for single-invocation pipelines
+    task: str = "detection"
+    dataset: str = "sku110k"
+    # Leaderboard section (USE_CASES): "market_share" = which products are on the shelf and how
+    # many (detect, identify, count); "merchandising" = how they are displayed (planogram,
+    # shelf position, promo material, price tags). Ranked separately.
+    use_case: str = "market_share"
+    # The -m models this approach really calls. None = any Vertex Gemini model (via ctx.ask).
+    # Anything else is refused, so a run is always labelled with the model that produced it.
+    models: list[str] | None = None
+    # Fixed models it always calls besides -m (e.g. an embedding model next to Gemini); shown
+    # in `shelf-bench list` and in every run's architecture label.
+    also_calls: list[str] = []
+    # Non-Gemini billable units -> (Billing Catalog service id, SKU description), e.g.
+    # utils.embeddings.SKUS. Priced at run start; charge them with ctx.bill(unit, amount).
+    skus: dict[str, tuple[str, str]] = {}
+
+    def accepts(self, model: str) -> bool:
+        if self.models is not None:
+            return model in self.models
+        return model.startswith("gemini-") and not model.startswith("gemini-embedding")
+
+    @property
+    def uses_gemini(self) -> bool:
+        return self.models is None or all(
+            m.startswith("gemini-") and not m.startswith("gemini-embedding") for m in self.models
+        )
+
+    def setup(self, config: dict, ctx: Context) -> None:
+        """Called once per run before any image: create clients (embeddings, AlloyDB, ...) and
+        build indexes. Calls billed to ``ctx`` here are reported as the run's one-off setup
+        cost, not as cost per image."""
+
+    def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        raise NotImplementedError
+
+    def identify(self, image: Image.Image, ctx: Context,
+                 allowed_ids: set[int] | None = None) -> int | None:
+        """The ``sku_id`` of the one product in ``image`` (a product photo or a box crop), from
+        ``dataset.catalog(name=self.dataset)``, or None if it isn't in the catalog.
+        If ``allowed_ids`` is given (from an earlier coarse classification step), only those
+        catalog products are considered."""
+        raise NotImplementedError
+
+    def narrow(self, image: Image.Image, catalog: dict[int, dict], ctx: Context) -> set[int] | None:
+        """Coarse filter for multi-step ``detect -> classify -> retrieve`` pipelines: return the
+        subset of ``catalog`` ``sku_id``s compatible with ``image`` (by default: all products in
+        ``catalog`` that share the ``brand`` or ``category`` of ``self.identify(image, ctx)``)."""
+        pid = self.identify(image, ctx)
+        pred = catalog.get(pid) if pid is not None else None
+        if not pred:
+            return None
+        for f in ("brand", "category"):
+            if pred.get(f):
+                match = {k for k, p in catalog.items() if p.get(f) == pred[f]}
+                if match:
+                    return match
+        return {pid}
+
+    def identify_boxes(self, image: Image.Image, boxes: list[Box], ctx: Context) -> list[int | None]:
+        """``identify`` on each box crop, a few at a time. Override to use the boxes together."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            return list(pool.map(lambda b: self.identify(crop(image, b), ctx), boxes))
+
+    def detect_and_identify(
+        self, image: Image.Image, ctx: Context
+    ) -> tuple[list[Box], list[int | None]]:
+        """End-to-end hook: return ``(boxes, sku_ids)`` for a shelf/checkout photo.
+
+        Override this directly when a single model invocation performs both detection and
+        classification (e.g. a fine-tuned Gemini model or Agent Platform endpoint). By default,
+        it runs ``self.detect(image, ctx)`` followed by ``self.identify_boxes(image, boxes, ctx)``."""
+        boxes = self.detect(image, ctx)
+        ids = self.identify_boxes(image, boxes, ctx)
+        ctx.trace.step("Identify each box", f"{sum(i is not None for i in ids)} of {len(boxes)} "
+                       "boxes matched to a catalog product", boxes=boxes)
+        return boxes, ids
+
+
+def crop(image: Image.Image, box: Box, pad: float = 0.05) -> Image.Image:
+    """``box`` cut out of ``image`` with ``pad`` (share of the box size) on every side."""
+    x1, y1, x2, y2 = box
+    px, py = (x2 - x1) * pad, (y2 - y1) * pad
+    return image.crop((max(0, x1 - px), max(0, y1 - py),
+                       min(image.width, x2 + px), min(image.height, y2 + py)))
+
+
+REGISTRY: dict[str, Approach] = {}
+USE_CASES = ("market_share", "merchandising")  # leaderboard sections, in UI order
+
+
+def register(cls: type[Approach]) -> type[Approach]:
+    inst = cls()
+    if inst.use_case not in USE_CASES:
+        raise ValueError(f"{inst.name}: use_case must be one of {USE_CASES}, got {inst.use_case!r}")
+    REGISTRY[inst.name] = inst
+    return cls
+
+
+def compose(
+    name: str,
+    detector: type[Approach] | Approach,
+    *identifiers: type[Approach] | Approach,
+    dataset: str = "rpc",
+    use_case: str = "market_share",
+    models: list[str] | None = None,
+    also_calls: list[str] | None = None,
+    architecture: str | None = None,
+    steps: list[str] | None = None,
+    register_approach: bool = True,
+) -> type[Approach]:
+    """Compose a detection step and one or more classification/retrieval steps into an
+    ``end_to_end`` approach (e.g. ``detect -> retrieve``, ``detect -> classify``, or
+    ``detect -> classify -> retrieve``)."""
+    if not identifiers:
+        raise ValueError(f"compose({name!r}): pass at least one identifier/classifier after detector")
+
+    def _inst(s: type[Approach] | Approach) -> Approach:
+        obj = s() if isinstance(s, type) else copy.copy(s)
+        obj.dataset = dataset
+        return obj
+
+    proto = [_inst(detector), *(_inst(s) for s in identifiers)]
+    merged_skus: dict[str, tuple[str, str]] = {}
+    for s in proto:
+        merged_skus.update(s.skus)
+
+    if models is None and all(s.models is not None for s in proto):
+        models = list(proto[0].models or [])
+    if also_calls is None:
+        also: list[str] = []
+        for s in proto:
+            for m in s.also_calls:
+                if m not in also:
+                    also.append(m)
+            if models is None and s.models and s.models[0] not in also:
+                also.append(s.models[0])
+        also_calls = also
+
+    if architecture is None:
+        architecture = " -> ".join(s.architecture for s in proto if s.architecture)
+    if steps is None:
+        setup_steps = list(dict.fromkeys(
+            st for s in proto for st in s.steps if st.lower().startswith("setup")
+        ))
+        run_steps = [st for s in proto for st in s.steps if not st.lower().startswith("setup")]
+        steps = [*setup_steps, *run_steps]
+
+    class ComposedApproach(Approach):
+        def __init__(self) -> None:
+            self.det_stage = _inst(detector)
+            self.id_stages = [_inst(s) for s in identifiers]
+            self.catalog: dict[int, dict] = {}
+
+        def setup(self, config: dict, ctx: Context) -> None:
+            if len(self.id_stages) > 1:
+                from utils import dataset as ds_mod
+
+                self.catalog = ds_mod.catalog(name=self.dataset)
+            for s in (self.det_stage, *self.id_stages):
+                s.setup(config, ctx)
+
+        def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+            return self.det_stage.detect(image, ctx)
+
+        def identify(self, image: Image.Image, ctx: Context,
+                     allowed_ids: set[int] | None = None) -> int | None:
+            for mid in self.id_stages[:-1]:
+                narrowed = mid.narrow(image, self.catalog, ctx)
+                if narrowed:
+                    allowed_ids = narrowed if allowed_ids is None else (allowed_ids & narrowed) or narrowed
+            last = self.id_stages[-1]
+            try:
+                return last.identify(image, ctx, allowed_ids=allowed_ids)
+            except TypeError:
+                return last.identify(image, ctx)
+
+        def identify_boxes(self, image: Image.Image, boxes: list[Box], ctx: Context) -> list[int | None]:
+            if len(self.id_stages) == 1 and type(self.id_stages[0]).identify_boxes is not Approach.identify_boxes:
+                return self.id_stages[0].identify_boxes(image, boxes, ctx)
+            return super().identify_boxes(image, boxes, ctx)
+
+    ComposedApproach.__name__ = "".join(w.capitalize() for w in name.split("_"))
+    ComposedApproach.name = name
+    ComposedApproach.task = "end_to_end"
+    ComposedApproach.dataset = dataset
+    ComposedApproach.use_case = use_case
+    ComposedApproach.models = models
+    ComposedApproach.also_calls = also_calls
+    ComposedApproach.skus = merged_skus
+    ComposedApproach.architecture = architecture
+    ComposedApproach.steps = steps
+    return register(ComposedApproach) if register_approach else ComposedApproach
+
+
+def get(name: str) -> Approach:
+    _discover()
+    if name not in REGISTRY:
+        raise KeyError(f"Unknown approach {name!r}. Available: {', '.join(sorted(REGISTRY))}")
+    return REGISTRY[name]
+
+
+def all_approaches() -> dict[str, Approach]:
+    _discover()
+    return dict(sorted(REGISTRY.items()))
+
+
+def _discover() -> None:
+    import approaches as pkg
+
+    for info in pkgutil.walk_packages(pkg.__path__, prefix=f"{pkg.__name__}."):
+        parts = info.name.split(".")
+        if any(p.startswith("_") for p in parts[1:]):
+            continue
+        mod = importlib.import_module(info.name)
+        if not info.ispkg:
+            leaf = parts[-1]
+            sys.modules.setdefault(f"{pkg.__name__}.{leaf}", mod)
+            setattr(pkg, leaf, mod)
+
+
+# ---- helpers shared by the Gemini approaches -------------------------------------------------
+
+def to_pixels(raw: Any, x0: float, y0: float, w: float, h: float) -> list[Box]:
+    """Gemini [ymin,xmin,ymax,xmax] in 0..1000 of a (x0,y0,w,h) region -> absolute pixel boxes."""
+    if isinstance(raw, dict):  # tolerate {"boxes": [...]}
+        raw = next((v for v in raw.values() if isinstance(v, list)), [])
+    out: list[Box] = []
+    for b in raw or []:
+        if isinstance(b, dict):
+            b = b.get("box_2d") or b.get("bbox_2d") or b.get("box")
+        if not isinstance(b, (list, tuple)) or len(b) != 4:
+            continue
+        try:
+            ymin, xmin, ymax, xmax = (min(1000.0, max(0.0, float(v))) for v in b)
+        except (TypeError, ValueError):
+            continue
+        if xmax <= xmin or ymax <= ymin:
+            continue
+        out.append((x0 + xmin / 1000 * w, y0 + ymin / 1000 * h,
+                    x0 + xmax / 1000 * w, y0 + ymax / 1000 * h))
+    return out
+
+
+DETECT_PROMPT = (
+    "Detect every individual retail product visible on the shelves in this image - every "
+    "box, bottle, can, bag and package, including small, partially visible and edge-of-frame "
+    "items. Each physical item gets its own tight box. Do not merge adjacent identical products. "
+    "Return ONLY a JSON array of boxes, each [ymin, xmin, ymax, xmax] normalized to 0-1000."
+)
+
+# Product classes both approaches assign. SKU-110K only labels "object", so classes are shown
+# in the UI but not scored; boxes labelled not_a_product are dropped (that part is scored).
+CATEGORIES = ["food", "beverage", "personal_care", "home_care", "other_product", "not_a_product"]
+NOT_PRODUCT = "not_a_product"
+
+
+def label_counts(labels: list[str]) -> str:
+    from collections import Counter
+
+    return ", ".join(f"{n} {c}" for n, c in Counter(labels).most_common())

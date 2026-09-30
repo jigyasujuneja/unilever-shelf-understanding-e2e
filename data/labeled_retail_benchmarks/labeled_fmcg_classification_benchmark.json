@@ -1,0 +1,2244 @@
+{
+  "summary": {
+    "total_labeled_fmcg_skus_indexed": 184,
+    "unilever_ground_truth_skus": 105,
+    "competitor_ground_truth_skus": 79,
+    "local_downloaded_labeled_sku_images": 25,
+    "local_downloaded_rpc_multibox_images": 5,
+    "datasets_combined": [
+      "kierth/retail-products-philippines (Brand + Product Name + Size + Category Labels)",
+      "benjamintli/retail-product-checkout (Multi-Object BBox + 200 SKU Class IDs)",
+      "nyris/products10k-traintest-v1 (10,000 Fine-Grained SKU Class IDs)"
+    ]
+  },
+  "downloaded_unilever_and_competitor_samples": [
+    {
+      "id": 72,
+      "brand": "Knorr",
+      "product_name": "Knorr Liquid Seasoning 130ml",
+      "category": "condiments",
+      "extracted_size": "130ml",
+      "tags": "seasoning, condiment, cooking",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0072_knorr.jpg"
+    },
+    {
+      "id": 77,
+      "brand": "Knorr",
+      "product_name": "Knorr Sinigang Sa Sampalok Mix 44g",
+      "category": "cooking_essentials",
+      "extracted_size": "44g",
+      "tags": "mix, sinigang, cooking",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0077_knorr.jpg"
+    },
+    {
+      "id": 80,
+      "brand": "Knorr",
+      "product_name": "Knorr Chicken Cubes 10g",
+      "category": "cooking_essentials",
+      "extracted_size": "10g",
+      "tags": "bouillon, seasoning, cooking",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0080_knorr.jpg"
+    },
+    {
+      "id": 87,
+      "brand": "Knorr",
+      "product_name": "Knorr SavorRich Pork Seasoning 480g",
+      "category": "cooking_essentials",
+      "extracted_size": "480g",
+      "tags": "seasoning, pork, cooking",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0087_knorr.jpg"
+    },
+    {
+      "id": 98,
+      "brand": "Dove",
+      "product_name": "Dove Beauty Bar 135g",
+      "category": "personal_care",
+      "extracted_size": "135g",
+      "tags": "soap, bath, moisturizing",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0098_dove.jpg"
+    },
+    {
+      "id": 102,
+      "brand": "Sunsilk",
+      "product_name": "Sunsilk Shampoo Sachet 6ml",
+      "category": "personal_care",
+      "extracted_size": "6ml",
+      "tags": "shampoo, sachet, hair_care",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0102_sunsilk.jpg"
+    },
+    {
+      "id": 107,
+      "brand": "Vaseline",
+      "product_name": "Vaseline Petroleum Jelly 100g",
+      "category": "personal_care",
+      "extracted_size": "100g",
+      "tags": "petroleum_jelly, skin_care",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0107_vaseline.jpg"
+    },
+    {
+      "id": 108,
+      "brand": "Rexona",
+      "product_name": "Rexona Deodorant Stick 40g",
+      "category": "personal_care",
+      "extracted_size": "40g",
+      "tags": "deodorant, hygiene",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0108_rexona.jpg"
+    },
+    {
+      "id": 115,
+      "brand": "Surf",
+      "product_name": "Surf Powder Detergent Sachet 65g",
+      "category": "laundry",
+      "extracted_size": "65g",
+      "tags": "detergent, laundry, sachet",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0115_surf.jpg"
+    },
+    {
+      "id": 117,
+      "brand": "Breeze",
+      "product_name": "Breeze Powder Detergent Sachet 65g",
+      "category": "laundry",
+      "extracted_size": "65g",
+      "tags": "detergent, laundry, sachet",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0117_breeze.jpg"
+    },
+    {
+      "id": 119,
+      "brand": "Domex",
+      "product_name": "Domex Bleach Multi-Purpose 500ml",
+      "category": "household",
+      "extracted_size": "500ml",
+      "tags": "bleach, cleaning, disinfectant",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0119_domex.jpg"
+    },
+    {
+      "id": 138,
+      "brand": "Hope",
+      "product_name": "Hope Luxury Cigarette Pack",
+      "category": "tobacco",
+      "extracted_size": "standard",
+      "tags": "cigarette, tobacco",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0138_hope.jpg"
+    },
+    {
+      "id": 143,
+      "brand": "Scotch",
+      "product_name": "Adhesive Clear Tape 1 inch x 50mm",
+      "category": "school_supplies",
+      "extracted_size": "standard",
+      "tags": "tape, school, office",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0143_scotch.jpg"
+    },
+    {
+      "id": 157,
+      "brand": "Selecta",
+      "product_name": "Selecta Super Thick Vanilla Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0157_selecta.jpg"
+    },
+    {
+      "id": 183,
+      "brand": "Starfile",
+      "product_name": "Short Clear Folder",
+      "category": "school_supplies",
+      "extracted_size": "standard",
+      "tags": "folder, school, office",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0183_starfile.jpg"
+    },
+    {
+      "id": 184,
+      "brand": "Starfile",
+      "product_name": "Long Clear Folder",
+      "category": "school_supplies",
+      "extracted_size": "standard",
+      "tags": "folder, school, office",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0184_starfile.jpg"
+    },
+    {
+      "id": 198,
+      "brand": "Ponds",
+      "product_name": "Ponds Bright Miracle Facial Foam 10g",
+      "category": "personal_care",
+      "extracted_size": "10g",
+      "tags": "facial_wash, hygiene, cleaning",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0198_ponds.jpg"
+    },
+    {
+      "id": 199,
+      "brand": "Ponds",
+      "product_name": "Ponds Bright Miracle Facial Foam 100g",
+      "category": "personal_care",
+      "extracted_size": "100g",
+      "tags": "facial_wash, hygiene, cleaning",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0199_ponds.jpg"
+    },
+    {
+      "id": 369,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 15ml",
+      "category": "condiments",
+      "extracted_size": "15ml",
+      "tags": "mayo",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0369_lady_s_choic.jpg"
+    },
+    {
+      "id": 370,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 27ml",
+      "category": "condiments",
+      "extracted_size": "27ml",
+      "tags": "mayo",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0370_lady_s_choic.jpg"
+    },
+    {
+      "id": 371,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 80ml",
+      "category": "condiments",
+      "extracted_size": "80ml",
+      "tags": "mayo",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0371_lady_s_choic.jpg"
+    },
+    {
+      "id": 372,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 220ml Pouch",
+      "category": "condiments",
+      "extracted_size": "220ml",
+      "tags": "mayo",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0372_lady_s_choic.jpg"
+    },
+    {
+      "id": 373,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 470ml Pouch",
+      "category": "condiments",
+      "extracted_size": "470ml",
+      "tags": "mayo",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0373_lady_s_choic.jpg"
+    },
+    {
+      "id": 374,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 700ml",
+      "category": "condiments",
+      "extracted_size": "700ml",
+      "tags": "mayo",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0374_lady_s_choic.jpg"
+    },
+    {
+      "id": 375,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 1kg",
+      "category": "condiments",
+      "extracted_size": "1kg",
+      "tags": "mayo",
+      "is_unilever": true,
+      "local_image_path": "data/labeled_retail_benchmarks/images/labeled_sku_0375_lady_s_choic.jpg"
+    }
+  ],
+  "rpc_multibox_sku_labeled_validation": [
+    {
+      "image_id": "rpc_val_multibox_000.jpg",
+      "local_image_path": "data/labeled_retail_benchmarks/images/rpc_val_multibox_000.jpg",
+      "num_labeled_objects": 9,
+      "ground_truth_sku_class_ids": [
+        44,
+        69,
+        69,
+        74,
+        74,
+        99,
+        55,
+        44,
+        55
+      ],
+      "bboxes_xywh": [
+        [
+          903.77001953125,
+          717.9500122070312,
+          320.7799987792969,
+          339.0400085449219
+        ],
+        [
+          296.1099853515625,
+          819.6599731445312,
+          272.5299987792969,
+          340.3399963378906
+        ],
+        [
+          307.8399963378906,
+          1140.43994140625,
+          256.8900146484375,
+          335.1300048828125
+        ],
+        [
+          513.1300048828125,
+          886.5399780273438,
+          222.97999572753906,
+          620.3300170898438
+        ],
+        [
+          690.489990234375,
+          697.3300170898438,
+          310.3999938964844,
+          593.5
+        ],
+        [
+          1171.030029296875,
+          887.6799926757812,
+          206.0800018310547,
+          220.91000366210938
+        ],
+        [
+          1096.72998046875,
+          1112.5,
+          277.3699951171875,
+          429.9800109863281
+        ],
+        [
+          739.6199951171875,
+          1478.760009765625,
+          306.6300048828125,
+          264.94000244140625
+        ],
+        [
+          140.66000366210938,
+          1282.3599853515625,
+          200.82000732421875,
+          481.7099914550781
+        ]
+      ]
+    },
+    {
+      "image_id": "rpc_val_multibox_001.jpg",
+      "local_image_path": "data/labeled_retail_benchmarks/images/rpc_val_multibox_001.jpg",
+      "num_labeled_objects": 9,
+      "ground_truth_sku_class_ids": [
+        55,
+        44,
+        44,
+        74,
+        74,
+        69,
+        69,
+        55,
+        99
+      ],
+      "bboxes_xywh": [
+        [
+          1201.6400146484375,
+          898.6300048828125,
+          256.2099914550781,
+          411.3299865722656
+        ],
+        [
+          854.3599853515625,
+          852.5900268554688,
+          289.239990234375,
+          336.2699890136719
+        ],
+        [
+          986.6099853515625,
+          1169.4200439453125,
+          254.77999877929688,
+          317.8299865722656
+        ],
+        [
+          675.2100219726562,
+          955.8200073242188,
+          184.00999450683594,
+          626.6500244140625
+        ],
+        [
+          502.7900085449219,
+          928.7899780273438,
+          196.8699951171875,
+          629.22998046875
+        ],
+        [
+          273.5400085449219,
+          838.2100219726562,
+          262.5400085449219,
+          326.8399963378906
+        ],
+        [
+          140.92999267578125,
+          1273.56005859375,
+          346.92999267578125,
+          363.010009765625
+        ],
+        [
+          765.1400146484375,
+          1470.4599609375,
+          442.0400085449219,
+          296.0299987792969
+        ],
+        [
+          702.3900146484375,
+          803.9500122070312,
+          238.22000122070312,
+          179.50999450683594
+        ]
+      ]
+    },
+    {
+      "image_id": "rpc_val_multibox_002.jpg",
+      "local_image_path": "data/labeled_retail_benchmarks/images/rpc_val_multibox_002.jpg",
+      "num_labeled_objects": 7,
+      "ground_truth_sku_class_ids": [
+        6,
+        6,
+        6,
+        146,
+        87,
+        87,
+        87
+      ],
+      "bboxes_xywh": [
+        [
+          1254.469970703125,
+          228.3000030517578,
+          519.7899780273438,
+          587.5900268554688
+        ],
+        [
+          1134.9599609375,
+          743.3900146484375,
+          622.239990234375,
+          640.02001953125
+        ],
+        [
+          1000.6099853515625,
+          1238.52001953125,
+          632.5499877929688,
+          511.5899963378906
+        ],
+        [
+          1033.25,
+          797.6400146484375,
+          123.8499984741211,
+          258.32000732421875
+        ],
+        [
+          780.239990234375,
+          640.1699829101562,
+          194.6199951171875,
+          527.25
+        ],
+        [
+          918.25,
+          948.030029296875,
+          153.92999267578125,
+          532.5599975585938
+        ],
+        [
+          606.8499755859375,
+          917.9500122070312,
+          268.92999267578125,
+          516.6400146484375
+        ]
+      ]
+    },
+    {
+      "image_id": "rpc_val_multibox_003.jpg",
+      "local_image_path": "data/labeled_retail_benchmarks/images/rpc_val_multibox_003.jpg",
+      "num_labeled_objects": 7,
+      "ground_truth_sku_class_ids": [
+        6,
+        6,
+        146,
+        87,
+        87,
+        87,
+        6
+      ],
+      "bboxes_xywh": [
+        [
+          967.1500244140625,
+          161.02000427246094,
+          537.3099975585938,
+          604.1699829101562
+        ],
+        [
+          251.55999755859375,
+          360.5899963378906,
+          653.6900024414062,
+          510.07000732421875
+        ],
+        [
+          880.780029296875,
+          752.0800170898438,
+          133.64999389648438,
+          265.9700012207031
+        ],
+        [
+          346.92999267578125,
+          686.8599853515625,
+          295.55999755859375,
+          498.3399963378906
+        ],
+        [
+          678.5800170898438,
+          630.1500244140625,
+          307.5899963378906,
+          506.92999267578125
+        ],
+        [
+          1347.0400390625,
+          755.5999755859375,
+          170.1199951171875,
+          537.8599853515625
+        ],
+        [
+          776.530029296875,
+          903.3800048828125,
+          596.280029296875,
+          642.6799926757812
+        ]
+      ]
+    },
+    {
+      "image_id": "rpc_val_multibox_004.jpg",
+      "local_image_path": "data/labeled_retail_benchmarks/images/rpc_val_multibox_004.jpg",
+      "num_labeled_objects": 7,
+      "ground_truth_sku_class_ids": [
+        6,
+        87,
+        87,
+        6,
+        87,
+        146,
+        6
+      ],
+      "bboxes_xywh": [
+        [
+          1013.9000244140625,
+          230.0,
+          633.1099853515625,
+          629.1199951171875
+        ],
+        [
+          837.22998046875,
+          449.760009765625,
+          355.8399963378906,
+          484.6000061035156
+        ],
+        [
+          770.77001953125,
+          506.5299987792969,
+          240.9199981689453,
+          519.219970703125
+        ],
+        [
+          422.7200012207031,
+          541.1799926757812,
+          477.0799865722656,
+          576.5399780273438
+        ],
+        [
+          909.6500244140625,
+          995.6699829101562,
+          292.3299865722656,
+          525.1500244140625
+        ],
+        [
+          1331.9200439453125,
+          1005.0,
+          253.36000061035156,
+          209.6300048828125
+        ],
+        [
+          364.4200134277344,
+          1200.52001953125,
+          524.1699829101562,
+          431.57000732421875
+        ]
+      ]
+    }
+  ],
+  "full_labeled_fmcg_catalog": [
+    {
+      "id": 67,
+      "brand": "Datu Puti",
+      "product_name": "Datu Puti Vinegar 385ml",
+      "category": "condiments",
+      "extracted_size": "385ml",
+      "tags": "vinegar, condiment, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 68,
+      "brand": "Datu Puti",
+      "product_name": "Datu Puti Soy Sauce 385ml",
+      "category": "condiments",
+      "extracted_size": "385ml",
+      "tags": "soy_sauce, condiment, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 69,
+      "brand": "Silver Swan",
+      "product_name": "Silver Swan Soy Sauce 385ml",
+      "category": "condiments",
+      "extracted_size": "385ml",
+      "tags": "soy_sauce, condiment, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 70,
+      "brand": "UFC",
+      "product_name": "UFC Banana Ketchup 320g",
+      "category": "condiments",
+      "extracted_size": "320g",
+      "tags": "ketchup, banana_ketchup, condiment",
+      "is_unilever": false
+    },
+    {
+      "id": 71,
+      "brand": "Del Monte",
+      "product_name": "Del Monte Tomato Ketchup 320g",
+      "category": "condiments",
+      "extracted_size": "320g",
+      "tags": "ketchup, condiment, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 72,
+      "brand": "Knorr",
+      "product_name": "Knorr Liquid Seasoning 130ml",
+      "category": "condiments",
+      "extracted_size": "130ml",
+      "tags": "seasoning, condiment, cooking",
+      "is_unilever": true
+    },
+    {
+      "id": 73,
+      "brand": "Mang Tomas",
+      "product_name": "Mang Tomas All-Purpose Sauce 320g",
+      "category": "condiments",
+      "extracted_size": "320g",
+      "tags": "sauce, condiment, lechon",
+      "is_unilever": false
+    },
+    {
+      "id": 74,
+      "brand": "Jufran",
+      "product_name": "Jufran Banana Sauce 320g",
+      "category": "condiments",
+      "extracted_size": "320g",
+      "tags": "ketchup, banana_ketchup, condiment",
+      "is_unilever": false
+    },
+    {
+      "id": 75,
+      "brand": "Purefoods",
+      "product_name": "Purefoods Fiesta Ham Spread 165g",
+      "category": "condiments",
+      "extracted_size": "165g",
+      "tags": "spread, ham, condiment",
+      "is_unilever": false
+    },
+    {
+      "id": 76,
+      "brand": "Eden",
+      "product_name": "Eden Cheese Food Spread 165g",
+      "category": "condiments",
+      "extracted_size": "165g",
+      "tags": "spread, cheese, condiment",
+      "is_unilever": false
+    },
+    {
+      "id": 77,
+      "brand": "Knorr",
+      "product_name": "Knorr Sinigang Sa Sampalok Mix 44g",
+      "category": "cooking_essentials",
+      "extracted_size": "44g",
+      "tags": "mix, sinigang, cooking",
+      "is_unilever": true
+    },
+    {
+      "id": 78,
+      "brand": "Mama Sita's",
+      "product_name": "Mama Sita's Kare-Kare Mix 50g",
+      "category": "cooking_essentials",
+      "extracted_size": "50g",
+      "tags": "mix, kare-kare, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 79,
+      "brand": "Mama Sita's",
+      "product_name": "Mama Sita's Adobo Mix 50g",
+      "category": "cooking_essentials",
+      "extracted_size": "50g",
+      "tags": "mix, adobo, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 80,
+      "brand": "Knorr",
+      "product_name": "Knorr Chicken Cubes 10g",
+      "category": "cooking_essentials",
+      "extracted_size": "10g",
+      "tags": "bouillon, seasoning, cooking",
+      "is_unilever": true
+    },
+    {
+      "id": 81,
+      "brand": "Ajinomoto",
+      "product_name": "Ajinomoto Umami Seasoning 50g",
+      "category": "cooking_essentials",
+      "extracted_size": "50g",
+      "tags": "seasoning, msg, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 82,
+      "brand": "Masarap",
+      "product_name": "Fidel Iodized Salt Refined Sea Salt250g",
+      "category": "cooking_essentials",
+      "extracted_size": "standard",
+      "tags": "salt, seasoning, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 83,
+      "brand": "White King",
+      "product_name": "Sugar King Value Refined Sugar 1kg",
+      "category": "cooking_essentials",
+      "extracted_size": "1kg",
+      "tags": "sugar, baking, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 84,
+      "brand": "Minola",
+      "product_name": "Minola Premium Coconut Oil 500ml",
+      "category": "cooking_essentials",
+      "extracted_size": "500ml",
+      "tags": "oil, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 85,
+      "brand": "Baguio Oil",
+      "product_name": "Baguio Pure Coconut Oil 1L",
+      "category": "cooking_essentials",
+      "extracted_size": "1l",
+      "tags": "oil, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 86,
+      "brand": "Marca Pi\u00f1a",
+      "product_name": "Marca Pi\u00f1a Parmesan Cheese 227g",
+      "category": "cooking_essentials",
+      "extracted_size": "227g",
+      "tags": "cheese, dairy, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 87,
+      "brand": "Knorr",
+      "product_name": "Knorr SavorRich Pork Seasoning 480g",
+      "category": "cooking_essentials",
+      "extracted_size": "480g",
+      "tags": "seasoning, pork, cooking",
+      "is_unilever": true
+    },
+    {
+      "id": 96,
+      "brand": "Safeguard",
+      "product_name": "Safeguard Classic White Bar Soap 135g",
+      "category": "personal_care",
+      "extracted_size": "135g",
+      "tags": "soap, bath, hygiene",
+      "is_unilever": false
+    },
+    {
+      "id": 97,
+      "brand": "Palmolive",
+      "product_name": "Palmolive Naturals Bar Soap 115g",
+      "category": "personal_care",
+      "extracted_size": "115g",
+      "tags": "soap, bath, hygiene",
+      "is_unilever": false
+    },
+    {
+      "id": 98,
+      "brand": "Dove",
+      "product_name": "Dove Beauty Bar 135g",
+      "category": "personal_care",
+      "extracted_size": "135g",
+      "tags": "soap, bath, moisturizing",
+      "is_unilever": true
+    },
+    {
+      "id": 99,
+      "brand": "Rejoice",
+      "product_name": "Rejoice Shampoo Sachet 6ml",
+      "category": "personal_care",
+      "extracted_size": "6ml",
+      "tags": "shampoo, sachet, hair_care",
+      "is_unilever": false
+    },
+    {
+      "id": 100,
+      "brand": "Head & Shoulders",
+      "product_name": "Head & Shoulders Shampoo Sachet 6ml",
+      "category": "personal_care",
+      "extracted_size": "6ml",
+      "tags": "shampoo, sachet, anti-dandruff",
+      "is_unilever": false
+    },
+    {
+      "id": 101,
+      "brand": "Pantene",
+      "product_name": "Pantene Shampoo Sachet 6ml",
+      "category": "personal_care",
+      "extracted_size": "6ml",
+      "tags": "shampoo, sachet, hair_care",
+      "is_unilever": false
+    },
+    {
+      "id": 102,
+      "brand": "Sunsilk",
+      "product_name": "Sunsilk Shampoo Sachet 6ml",
+      "category": "personal_care",
+      "extracted_size": "6ml",
+      "tags": "shampoo, sachet, hair_care",
+      "is_unilever": true
+    },
+    {
+      "id": 103,
+      "brand": "Colgate",
+      "product_name": "Colgate Total Toothpaste 50g",
+      "category": "personal_care",
+      "extracted_size": "50g",
+      "tags": "toothpaste, oral_care, hygiene",
+      "is_unilever": false
+    },
+    {
+      "id": 104,
+      "brand": "Close-Up",
+      "product_name": "Close-Up Deep Action Toothpaste 75g",
+      "category": "personal_care",
+      "extracted_size": "75g",
+      "tags": "toothpaste, oral_care, hygiene",
+      "is_unilever": false
+    },
+    {
+      "id": 105,
+      "brand": "Hapee",
+      "product_name": "Hapee Toothpaste Bubblegum 75g",
+      "category": "personal_care",
+      "extracted_size": "75g",
+      "tags": "toothpaste, oral_care, kids",
+      "is_unilever": false
+    },
+    {
+      "id": 106,
+      "brand": "Soft & Beautiful",
+      "product_name": "Soft & Beautiful Petroleum Jelly 50g",
+      "category": "personal_care",
+      "extracted_size": "50g",
+      "tags": "petroleum_jelly, skin_care",
+      "is_unilever": false
+    },
+    {
+      "id": 107,
+      "brand": "Vaseline",
+      "product_name": "Vaseline Petroleum Jelly 100g",
+      "category": "personal_care",
+      "extracted_size": "100g",
+      "tags": "petroleum_jelly, skin_care",
+      "is_unilever": true
+    },
+    {
+      "id": 108,
+      "brand": "Rexona",
+      "product_name": "Rexona Deodorant Stick 40g",
+      "category": "personal_care",
+      "extracted_size": "40g",
+      "tags": "deodorant, hygiene",
+      "is_unilever": true
+    },
+    {
+      "id": 109,
+      "brand": "Nivea",
+      "product_name": "Nivea Roll-On Deodorant Pearl & Beauty 25ml",
+      "category": "personal_care",
+      "extracted_size": "25ml",
+      "tags": "deodorant, roll-on, hygiene",
+      "is_unilever": false
+    },
+    {
+      "id": 110,
+      "brand": "Whisper",
+      "product_name": "Whisper All-Around Cottony Sanitary Napkin 8s",
+      "category": "personal_care",
+      "extracted_size": "standard",
+      "tags": "feminine_care, sanitary_napkin",
+      "is_unilever": false
+    },
+    {
+      "id": 111,
+      "brand": "Modess",
+      "product_name": "Modess Regular Sanitary Napkin 10s",
+      "category": "personal_care",
+      "extracted_size": "standard",
+      "tags": "feminine_care, sanitary_napkin",
+      "is_unilever": false
+    },
+    {
+      "id": 112,
+      "brand": "Gillette",
+      "product_name": "Gilette Blue II Disposable Razor",
+      "category": "personal_care",
+      "extracted_size": "standard",
+      "tags": "razor, shaving, hygiene",
+      "is_unilever": false
+    },
+    {
+      "id": 113,
+      "brand": "Gard",
+      "product_name": "Gard Anti-Dandruff Shampoo Sachet 6ml",
+      "category": "personal_care",
+      "extracted_size": "6ml",
+      "tags": "shampoo, sachet, anti-dandruff",
+      "is_unilever": false
+    },
+    {
+      "id": 114,
+      "brand": "Ariel",
+      "product_name": "Ariel Powder Detergent Sachet 65g",
+      "category": "laundry",
+      "extracted_size": "65g",
+      "tags": "detergent, laundry, sachet",
+      "is_unilever": false
+    },
+    {
+      "id": 115,
+      "brand": "Surf",
+      "product_name": "Surf Powder Detergent Sachet 65g",
+      "category": "laundry",
+      "extracted_size": "65g",
+      "tags": "detergent, laundry, sachet",
+      "is_unilever": true
+    },
+    {
+      "id": 116,
+      "brand": "Tide",
+      "product_name": "Tide Powder Detergent Sachet 65g",
+      "category": "laundry",
+      "extracted_size": "65g",
+      "tags": "detergent, laundry, sachet",
+      "is_unilever": false
+    },
+    {
+      "id": 117,
+      "brand": "Breeze",
+      "product_name": "Breeze Powder Detergent Sachet 65g",
+      "category": "laundry",
+      "extracted_size": "65g",
+      "tags": "detergent, laundry, sachet",
+      "is_unilever": true
+    },
+    {
+      "id": 118,
+      "brand": "Champion",
+      "product_name": "Champion Detergent Bar 140g",
+      "category": "laundry",
+      "extracted_size": "140g",
+      "tags": "detergent, laundry, bar_soap",
+      "is_unilever": false
+    },
+    {
+      "id": 119,
+      "brand": "Domex",
+      "product_name": "Domex Bleach Multi-Purpose 500ml",
+      "category": "household",
+      "extracted_size": "500ml",
+      "tags": "bleach, cleaning, disinfectant",
+      "is_unilever": true
+    },
+    {
+      "id": 138,
+      "brand": "Hope",
+      "product_name": "Hope Luxury Cigarette Pack",
+      "category": "tobacco",
+      "extracted_size": "standard",
+      "tags": "cigarette, tobacco",
+      "is_unilever": true
+    },
+    {
+      "id": 143,
+      "brand": "Scotch",
+      "product_name": "Adhesive Clear Tape 1 inch x 50mm",
+      "category": "school_supplies",
+      "extracted_size": "standard",
+      "tags": "tape, school, office",
+      "is_unilever": true
+    },
+    {
+      "id": 157,
+      "brand": "Selecta",
+      "product_name": "Selecta Super Thick Vanilla Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert",
+      "is_unilever": true
+    },
+    {
+      "id": 158,
+      "brand": "Champion",
+      "product_name": "Champion Antibacterial Fabric Conditioner Fresh Day 50ml",
+      "category": "laundry",
+      "extracted_size": "50ml",
+      "tags": "fabric_conditioner, laundry, sachet",
+      "is_unilever": false
+    },
+    {
+      "id": 159,
+      "brand": "Downy",
+      "product_name": "Downy Fabric Conditioner",
+      "category": "laundry",
+      "extracted_size": "standard",
+      "tags": "fabric_conditioner, laundry, sachet",
+      "is_unilever": false
+    },
+    {
+      "id": 161,
+      "brand": "Dial",
+      "product_name": "Dial Bar Soap Antibacterial 90g",
+      "category": "personal_care",
+      "extracted_size": "90g",
+      "tags": "soap, antibacterial, hygiene",
+      "is_unilever": false
+    },
+    {
+      "id": 166,
+      "brand": "Datu Puti",
+      "product_name": "Datu Puti Patis",
+      "category": "condiments",
+      "extracted_size": "standard",
+      "tags": "vinegar, soy_sauce, sachet, condiment",
+      "is_unilever": false
+    },
+    {
+      "id": 183,
+      "brand": "Starfile",
+      "product_name": "Short Clear Folder",
+      "category": "school_supplies",
+      "extracted_size": "standard",
+      "tags": "folder, school, office",
+      "is_unilever": true
+    },
+    {
+      "id": 184,
+      "brand": "Starfile",
+      "product_name": "Long Clear Folder",
+      "category": "school_supplies",
+      "extracted_size": "standard",
+      "tags": "folder, school, office",
+      "is_unilever": true
+    },
+    {
+      "id": 190,
+      "brand": "Babyflo",
+      "product_name": "Babyflo Gentle Buds 72 Tips",
+      "category": "personal_care",
+      "extracted_size": "standard",
+      "tags": "bath, cotton_buds, hygiene",
+      "is_unilever": false
+    },
+    {
+      "id": 191,
+      "brand": "Cleene",
+      "product_name": "Cleene Cotton 15g",
+      "category": "personal_care",
+      "extracted_size": "15g",
+      "tags": "bath, cotton, hygiene",
+      "is_unilever": false
+    },
+    {
+      "id": 193,
+      "brand": "Green Cross",
+      "product_name": "Green Cross Isopropyl Alcohol 60ml",
+      "category": "personal_care",
+      "extracted_size": "60ml",
+      "tags": "cleaning, hygiene, wound",
+      "is_unilever": false
+    },
+    {
+      "id": 194,
+      "brand": "Green Cross",
+      "product_name": "Green Cross Isopropyl Alcohol 500ml",
+      "category": "personal_care",
+      "extracted_size": "500ml",
+      "tags": "cleaning, hygiene, wound",
+      "is_unilever": false
+    },
+    {
+      "id": 195,
+      "brand": "Femme",
+      "product_name": "Femme Bathroom Tissue 300 sheets 2 ply 1s",
+      "category": "personal_care",
+      "extracted_size": "standard",
+      "tags": "tissue, hygiene, cleaning",
+      "is_unilever": false
+    },
+    {
+      "id": 196,
+      "brand": "Kleenex",
+      "product_name": "Kleenex Facial Tissue",
+      "category": "personal_care",
+      "extracted_size": "standard",
+      "tags": "tissue, hygiene, cleaning",
+      "is_unilever": false
+    },
+    {
+      "id": 197,
+      "brand": "Nivea",
+      "product_name": "Nivea MicellAIR Extra White 200ml",
+      "category": "personal_care",
+      "extracted_size": "200ml",
+      "tags": "makeup_remover, hygiene, cleaning",
+      "is_unilever": false
+    },
+    {
+      "id": 198,
+      "brand": "Ponds",
+      "product_name": "Ponds Bright Miracle Facial Foam 10g",
+      "category": "personal_care",
+      "extracted_size": "10g",
+      "tags": "facial_wash, hygiene, cleaning",
+      "is_unilever": true
+    },
+    {
+      "id": 199,
+      "brand": "Ponds",
+      "product_name": "Ponds Bright Miracle Facial Foam 100g",
+      "category": "personal_care",
+      "extracted_size": "100g",
+      "tags": "facial_wash, hygiene, cleaning",
+      "is_unilever": true
+    },
+    {
+      "id": 200,
+      "brand": "Johnsons",
+      "product_name": "Johnsons Baby Powder Regular 25g",
+      "category": "personal_care",
+      "extracted_size": "25g",
+      "tags": "powder, hygiene, face",
+      "is_unilever": false
+    },
+    {
+      "id": 201,
+      "brand": "Johnsons",
+      "product_name": "Johnsons Baby Powder Regular 200g",
+      "category": "personal_care",
+      "extracted_size": "200g",
+      "tags": "powder, hygiene, face",
+      "is_unilever": false
+    },
+    {
+      "id": 354,
+      "brand": "Danes",
+      "product_name": "Danes Mayo Dressing 220g",
+      "category": "condiments",
+      "extracted_size": "220g",
+      "tags": "mayo",
+      "is_unilever": false
+    },
+    {
+      "id": 355,
+      "brand": "Danes",
+      "product_name": "Danes Herb and Garlic Mayo 220g",
+      "category": "condiments",
+      "extracted_size": "220g",
+      "tags": "mayo",
+      "is_unilever": false
+    },
+    {
+      "id": 356,
+      "brand": "Danes",
+      "product_name": "Danes Sriracha Mayo 220g",
+      "category": "condiments",
+      "extracted_size": "220g",
+      "tags": "mayo, spicy",
+      "is_unilever": false
+    },
+    {
+      "id": 357,
+      "brand": "Danes",
+      "product_name": "Danes Japanese Mayo 190g",
+      "category": "condiments",
+      "extracted_size": "190g",
+      "tags": "mayo",
+      "is_unilever": false
+    },
+    {
+      "id": 358,
+      "brand": "Danes",
+      "product_name": "Danes Roasted Sesame Dressing 200g",
+      "category": "condiments",
+      "extracted_size": "200g",
+      "tags": "dressing",
+      "is_unilever": false
+    },
+    {
+      "id": 359,
+      "brand": "Bigtime",
+      "product_name": "Bigtime Negosyo Mayo Dressing 250g",
+      "category": "condiments",
+      "extracted_size": "250g",
+      "tags": "mayo",
+      "is_unilever": false
+    },
+    {
+      "id": 360,
+      "brand": "Bigtime",
+      "product_name": "Bigtime Negosyo Burger Dressing 250g",
+      "category": "condiments",
+      "extracted_size": "250g",
+      "tags": "dressing",
+      "is_unilever": false
+    },
+    {
+      "id": 369,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 15ml",
+      "category": "condiments",
+      "extracted_size": "15ml",
+      "tags": "mayo",
+      "is_unilever": true
+    },
+    {
+      "id": 370,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 27ml",
+      "category": "condiments",
+      "extracted_size": "27ml",
+      "tags": "mayo",
+      "is_unilever": true
+    },
+    {
+      "id": 371,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 80ml",
+      "category": "condiments",
+      "extracted_size": "80ml",
+      "tags": "mayo",
+      "is_unilever": true
+    },
+    {
+      "id": 372,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 220ml Pouch",
+      "category": "condiments",
+      "extracted_size": "220ml",
+      "tags": "mayo",
+      "is_unilever": true
+    },
+    {
+      "id": 373,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 470ml Pouch",
+      "category": "condiments",
+      "extracted_size": "470ml",
+      "tags": "mayo",
+      "is_unilever": true
+    },
+    {
+      "id": 374,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 700ml",
+      "category": "condiments",
+      "extracted_size": "700ml",
+      "tags": "mayo",
+      "is_unilever": true
+    },
+    {
+      "id": 375,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 1kg",
+      "category": "condiments",
+      "extracted_size": "1kg",
+      "tags": "mayo",
+      "is_unilever": true
+    },
+    {
+      "id": 376,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Real Mayonnaise 3.5L",
+      "category": "condiments",
+      "extracted_size": "3.5l",
+      "tags": "mayo",
+      "is_unilever": true
+    },
+    {
+      "id": 377,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Sandwich Spread 15ml",
+      "category": "condiments",
+      "extracted_size": "15ml",
+      "tags": "spread",
+      "is_unilever": true
+    },
+    {
+      "id": 378,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Sandwich Spread 80ml",
+      "category": "condiments",
+      "extracted_size": "80ml",
+      "tags": "spread",
+      "is_unilever": true
+    },
+    {
+      "id": 379,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Sandwich Spread 220ml",
+      "category": "condiments",
+      "extracted_size": "220ml",
+      "tags": "spread",
+      "is_unilever": true
+    },
+    {
+      "id": 380,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Sandwich Spread 470ml",
+      "category": "condiments",
+      "extracted_size": "470ml",
+      "tags": "spread",
+      "is_unilever": true
+    },
+    {
+      "id": 381,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Sandwich Spread 700ml",
+      "category": "condiments",
+      "extracted_size": "700ml",
+      "tags": "spread",
+      "is_unilever": true
+    },
+    {
+      "id": 382,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Sandwich Spread 3.5L",
+      "category": "condiments",
+      "extracted_size": "3.5l",
+      "tags": "spread",
+      "is_unilever": true
+    },
+    {
+      "id": 383,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Chicken Spread 15ml",
+      "category": "condiments",
+      "extracted_size": "15ml",
+      "tags": "spread, chicken",
+      "is_unilever": true
+    },
+    {
+      "id": 384,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Chicken Spread 80ml",
+      "category": "condiments",
+      "extracted_size": "80ml",
+      "tags": "spread, chicken",
+      "is_unilever": true
+    },
+    {
+      "id": 385,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Chicken Spread 220ml",
+      "category": "condiments",
+      "extracted_size": "220ml",
+      "tags": "spread, chicken",
+      "is_unilever": true
+    },
+    {
+      "id": 386,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Chicken Spread 470ml",
+      "category": "condiments",
+      "extracted_size": "470ml",
+      "tags": "spread, chicken",
+      "is_unilever": true
+    },
+    {
+      "id": 387,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Ham Spread 15ml",
+      "category": "condiments",
+      "extracted_size": "15ml",
+      "tags": "spread, ham",
+      "is_unilever": true
+    },
+    {
+      "id": 388,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Ham Spread 80ml",
+      "category": "condiments",
+      "extracted_size": "80ml",
+      "tags": "spread, ham",
+      "is_unilever": true
+    },
+    {
+      "id": 389,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Ham Spread 220ml",
+      "category": "condiments",
+      "extracted_size": "220ml",
+      "tags": "spread, ham",
+      "is_unilever": true
+    },
+    {
+      "id": 390,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Ham Spread 470ml Pouch",
+      "category": "condiments",
+      "extracted_size": "470ml",
+      "tags": "spread, ham",
+      "is_unilever": true
+    },
+    {
+      "id": 391,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Tuna Spread 15ml",
+      "category": "condiments",
+      "extracted_size": "15ml",
+      "tags": "spread, tuna",
+      "is_unilever": true
+    },
+    {
+      "id": 392,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Tuna Spread 80ml",
+      "category": "condiments",
+      "extracted_size": "80ml",
+      "tags": "spread, tuna",
+      "is_unilever": true
+    },
+    {
+      "id": 393,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Tuna Spread 220ml",
+      "category": "condiments",
+      "extracted_size": "220ml",
+      "tags": "spread, tuna",
+      "is_unilever": true
+    },
+    {
+      "id": 394,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Tuna Spread 470ml",
+      "category": "condiments",
+      "extracted_size": "470ml",
+      "tags": "spread, tuna",
+      "is_unilever": true
+    },
+    {
+      "id": 395,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Bacon Spread 15ml",
+      "category": "condiments",
+      "extracted_size": "15ml",
+      "tags": "spread, bacon",
+      "is_unilever": true
+    },
+    {
+      "id": 396,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Bacon Spread 27ml",
+      "category": "condiments",
+      "extracted_size": "27ml",
+      "tags": "spread, bacon",
+      "is_unilever": true
+    },
+    {
+      "id": 397,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Bacon Spread 80ml",
+      "category": "condiments",
+      "extracted_size": "80ml",
+      "tags": "spread, bacon",
+      "is_unilever": true
+    },
+    {
+      "id": 398,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Bacon Spread 220ml",
+      "category": "condiments",
+      "extracted_size": "220ml",
+      "tags": "spread, bacon",
+      "is_unilever": true
+    },
+    {
+      "id": 399,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Bacon Spread 470ml",
+      "category": "condiments",
+      "extracted_size": "470ml",
+      "tags": "spread, bacon",
+      "is_unilever": true
+    },
+    {
+      "id": 400,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Spicy Mayo 290ml",
+      "category": "condiments",
+      "extracted_size": "290ml",
+      "tags": "spread, mayonnaise, spicy",
+      "is_unilever": true
+    },
+    {
+      "id": 401,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Roasted Garlic Mayo 290ml",
+      "category": "condiments",
+      "extracted_size": "290ml",
+      "tags": "spread, mayonnaise, garlic",
+      "is_unilever": true
+    },
+    {
+      "id": 402,
+      "brand": "Lady's Choice",
+      "product_name": "Lady's Choice Cheddar Cheese Mayo 290ml",
+      "category": "condiments",
+      "extracted_size": "290ml",
+      "tags": "spread, mayonnaise, cheddar",
+      "is_unilever": true
+    },
+    {
+      "id": 403,
+      "brand": "Knorr",
+      "product_name": "Knorr Liquid Seasoning 12ml",
+      "category": "condiments",
+      "extracted_size": "12ml",
+      "tags": "seasoning, condiment, cooking, sachet",
+      "is_unilever": true
+    },
+    {
+      "id": 404,
+      "brand": "Knorr",
+      "product_name": "Knorr Liquid Seasoning 250ml",
+      "category": "condiments",
+      "extracted_size": "250ml",
+      "tags": "seasoning, condiment, cooking",
+      "is_unilever": true
+    },
+    {
+      "id": 405,
+      "brand": "Knorr",
+      "product_name": "Knorr Liquid Seasoning 500ml",
+      "category": "condiments",
+      "extracted_size": "500ml",
+      "tags": "seasoning, condiment, cooking",
+      "is_unilever": true
+    },
+    {
+      "id": 406,
+      "brand": "Knorr",
+      "product_name": "Knorr Liquid Seasoning 1L",
+      "category": "condiments",
+      "extracted_size": "1l",
+      "tags": "seasoning, condiment, cooking",
+      "is_unilever": true
+    },
+    {
+      "id": 407,
+      "brand": "Knorr",
+      "product_name": "Knorr Liquid Seasoning 2L",
+      "category": "condiments",
+      "extracted_size": "2l",
+      "tags": "seasoning, condiment, cooking, negosyo, bulk",
+      "is_unilever": true
+    },
+    {
+      "id": 408,
+      "brand": "Knorr",
+      "product_name": "Knorr Liquid Seasoning 3.8L",
+      "category": "condiments",
+      "extracted_size": "3.8l",
+      "tags": "seasoning, condiment, cooking, negosyo, bulk",
+      "is_unilever": true
+    },
+    {
+      "id": 410,
+      "brand": "Selecta",
+      "product_name": "Selecta Mochi Ice Cream Vanilla 30ml",
+      "category": "frozen_goods",
+      "extracted_size": "30ml",
+      "tags": "ice_cream, frozen, dessert, mochi, stick, vanilla",
+      "is_unilever": true
+    },
+    {
+      "id": 418,
+      "brand": "Selecta",
+      "product_name": "Selecta Cornetto Ube Caramel 110ml",
+      "category": "frozen_goods",
+      "extracted_size": "110ml",
+      "tags": "ice_cream, frozen, dessert, cornetto, cone, ube, caramel",
+      "is_unilever": true
+    },
+    {
+      "id": 419,
+      "brand": "Selecta",
+      "product_name": "Selecta Cornetto Matcha 110ml",
+      "category": "frozen_goods",
+      "extracted_size": "110ml",
+      "tags": "ice_cream, frozen, dessert, cornetto, cone, matcha",
+      "is_unilever": true
+    },
+    {
+      "id": 420,
+      "brand": "Selecta",
+      "product_name": "Selecta Super Thick Mango Ice Cream 450ml",
+      "category": "frozen_goods",
+      "extracted_size": "450ml",
+      "tags": "ice_cream, frozen, dessert, super_thick, pint, mango",
+      "is_unilever": true
+    },
+    {
+      "id": 424,
+      "brand": "Selecta",
+      "product_name": "Selecta Double Dutch Ice Cream 450ml",
+      "category": "frozen_goods",
+      "extracted_size": "450ml",
+      "tags": "ice_cream, frozen, dessert, supreme, pint, double_dutch, chocolate",
+      "is_unilever": true
+    },
+    {
+      "id": 425,
+      "brand": "Selecta",
+      "product_name": "Selecta Cookies & Cream Ice Cream 450ml",
+      "category": "frozen_goods",
+      "extracted_size": "450ml",
+      "tags": "ice_cream, frozen, dessert, supreme, pint, cookies_and_cream",
+      "is_unilever": true
+    },
+    {
+      "id": 426,
+      "brand": "Selecta",
+      "product_name": "Selecta Coffee Crumble Ice Cream 450ml",
+      "category": "frozen_goods",
+      "extracted_size": "450ml",
+      "tags": "ice_cream, frozen, dessert, supreme, pint, coffee",
+      "is_unilever": true
+    },
+    {
+      "id": 427,
+      "brand": "Selecta",
+      "product_name": "Selecta Rocky Road Ice Cream 450ml",
+      "category": "frozen_goods",
+      "extracted_size": "450ml",
+      "tags": "ice_cream, frozen, dessert, supreme, pint, rocky_road, chocolate",
+      "is_unilever": true
+    },
+    {
+      "id": 429,
+      "brand": "Selecta",
+      "product_name": "Selecta Buco Salad Ice Cream 450ml",
+      "category": "frozen_goods",
+      "extracted_size": "450ml",
+      "tags": "ice_cream, frozen, dessert, specialty, pint, buco",
+      "is_unilever": true
+    },
+    {
+      "id": 431,
+      "brand": "Selecta",
+      "product_name": "Selecta Hershey's Milk Almonds Ice Cream 450ml",
+      "category": "frozen_goods",
+      "extracted_size": "450ml",
+      "tags": "ice_cream, frozen, dessert, collab, pint, hersheys, chocolate, almond",
+      "is_unilever": true
+    },
+    {
+      "id": 441,
+      "brand": "Selecta",
+      "product_name": "Selecta 3-in-1 Ube-Mango-Avocado Ice Cream 750ml",
+      "category": "frozen_goods",
+      "extracted_size": "750ml",
+      "tags": "ice_cream, frozen, dessert, 3-in-1, ube, mango, avocado",
+      "is_unilever": true
+    },
+    {
+      "id": 442,
+      "brand": "Selecta",
+      "product_name": "Selecta 3-in-1+1 Choco-Keso-Ube-Mango Ice Cream 1.25L",
+      "category": "frozen_goods",
+      "extracted_size": "1.25l",
+      "tags": "ice_cream, frozen, dessert, 3-in-1, chocolate, cheese, ube, mango",
+      "is_unilever": true
+    },
+    {
+      "id": 444,
+      "brand": "Selecta",
+      "product_name": "Selecta Super Thick Strawberry Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert, super_thick, strawberry",
+      "is_unilever": true
+    },
+    {
+      "id": 445,
+      "brand": "Selecta",
+      "product_name": "Selecta Super Thick Ube Royale Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert, super_thick, ube",
+      "is_unilever": true
+    },
+    {
+      "id": 446,
+      "brand": "Selecta",
+      "product_name": "Selecta Double Dutch Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert, supreme, double_dutch, chocolate",
+      "is_unilever": true
+    },
+    {
+      "id": 447,
+      "brand": "Selecta",
+      "product_name": "Selecta Cookies & Cream Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert, supreme, cookies_and_cream",
+      "is_unilever": true
+    },
+    {
+      "id": 448,
+      "brand": "Selecta",
+      "product_name": "Selecta Coffee Crumble Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert, supreme, coffee",
+      "is_unilever": true
+    },
+    {
+      "id": 449,
+      "brand": "Selecta",
+      "product_name": "Selecta Rocky Road Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert, supreme, rocky_road, chocolate",
+      "is_unilever": true
+    },
+    {
+      "id": 450,
+      "brand": "Selecta",
+      "product_name": "Selecta Super Thick Mango Ice Cream 1.5L",
+      "category": "frozen_goods",
+      "extracted_size": "1.5l",
+      "tags": "ice_cream, frozen, dessert, super_thick, mango",
+      "is_unilever": true
+    },
+    {
+      "id": 451,
+      "brand": "Selecta",
+      "product_name": "Selecta Super Thick Vanilla Ice Cream 1.5L",
+      "category": "frozen_goods",
+      "extracted_size": "1.5l",
+      "tags": "ice_cream, frozen, dessert, super_thick, vanilla",
+      "is_unilever": true
+    },
+    {
+      "id": 452,
+      "brand": "Selecta",
+      "product_name": "Selecta Super Thick Strawberry Ice Cream 1.5L",
+      "category": "frozen_goods",
+      "extracted_size": "1.5l",
+      "tags": "ice_cream, frozen, dessert, super_thick, strawberry",
+      "is_unilever": true
+    },
+    {
+      "id": 453,
+      "brand": "Selecta",
+      "product_name": "Selecta Super Thick Ube Royale Ice Cream 1.5L",
+      "category": "frozen_goods",
+      "extracted_size": "1.5l",
+      "tags": "ice_cream, frozen, dessert, super_thick, ube",
+      "is_unilever": true
+    },
+    {
+      "id": 469,
+      "brand": "Selecta",
+      "product_name": "Selecta Ice Cream Hokkaido Lengua 1.25L",
+      "category": "frozen_goods",
+      "extracted_size": "1.25l",
+      "tags": "ice_cream, frozen, dessert, specialty",
+      "is_unilever": true
+    },
+    {
+      "id": 471,
+      "brand": "Selecta",
+      "product_name": "Selecta Avocado Dream Ice Cream 1.25L",
+      "category": "frozen_goods",
+      "extracted_size": "1.25l",
+      "tags": "ice_cream, frozen, dessert, avocado",
+      "is_unilever": true
+    },
+    {
+      "id": 472,
+      "brand": "Selecta",
+      "product_name": "Selecta Shoyu Caramel Ice Cream 1.25L",
+      "category": "frozen_goods",
+      "extracted_size": "1.25l",
+      "tags": "ice_cream, frozen, dessert, caramel, specialty",
+      "is_unilever": true
+    },
+    {
+      "id": 473,
+      "brand": "Selecta",
+      "product_name": "Selecta Nama Chocolate Ice Cream 1.25L",
+      "category": "frozen_goods",
+      "extracted_size": "1.25l",
+      "tags": "ice_cream, frozen, dessert, chocolate, specialty",
+      "is_unilever": true
+    },
+    {
+      "id": 476,
+      "brand": "Selecta",
+      "product_name": "Selecta Choco Almond Fudge Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert, chocolate, almond",
+      "is_unilever": true
+    },
+    {
+      "id": 477,
+      "brand": "Selecta",
+      "product_name": "Selecta Choco Almond Fudge & Cookies and Cream Ice Cream 2L",
+      "category": "frozen_goods",
+      "extracted_size": "2l",
+      "tags": "ice_cream, frozen, dessert, chocolate, almond, cookies_and_cream, combo",
+      "is_unilever": true
+    },
+    {
+      "id": 478,
+      "brand": "Selecta",
+      "product_name": "Selecta Strawberries n Creme Ice Cream 1.3L",
+      "category": "frozen_goods",
+      "extracted_size": "1.3l",
+      "tags": "ice_cream, frozen, dessert, strawberry",
+      "is_unilever": true
+    },
+    {
+      "id": 479,
+      "brand": "Selecta",
+      "product_name": "Selecta Creamdae Choco Keso Ube Ice Cream 750ml",
+      "category": "frozen_goods",
+      "extracted_size": "750ml",
+      "tags": "ice_cream, frozen, dessert, 3-in-1, chocolate, cheese, ube",
+      "is_unilever": true
+    },
+    {
+      "id": 482,
+      "brand": "Selecta",
+      "product_name": "Selecta Special Pistachio & Cashew Ice Cream 1.25L",
+      "category": "frozen_goods",
+      "extracted_size": "1.25l",
+      "tags": "ice_cream, frozen, dessert, pistachio, cashew, specialty",
+      "is_unilever": true
+    },
+    {
+      "id": 487,
+      "brand": "Selecta",
+      "product_name": "Selecta Double Dutch & Rocky Road Ice Cream 1.25L",
+      "category": "frozen_goods",
+      "extracted_size": "1.25l",
+      "tags": "ice_cream, frozen, dessert, double_dutch, rocky_road, chocolate, combo",
+      "is_unilever": true
+    },
+    {
+      "id": 488,
+      "brand": "Selecta",
+      "product_name": "Selecta Magnum Strawberry Panna Cotta 80ml",
+      "category": "frozen_goods",
+      "extracted_size": "80ml",
+      "tags": "ice_cream, frozen, dessert, magnum, stick, strawberry",
+      "is_unilever": true
+    },
+    {
+      "id": 565,
+      "brand": "JCD",
+      "product_name": "JCD Lumpia Wrapper 200pcs",
+      "category": "cooking_essentials",
+      "extracted_size": "standard",
+      "tags": "lumpia, wrapper, cooking, fresh",
+      "is_unilever": false
+    },
+    {
+      "id": 618,
+      "brand": "Marby",
+      "product_name": "Marby Lumpia Wrapper Big 230g 20pcs",
+      "category": "cooking_essentials",
+      "extracted_size": "230g",
+      "tags": "lumpia, wrapper, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 619,
+      "brand": "Manila Bambi",
+      "product_name": "Manila Bambi Springroll Wrappers 200g",
+      "category": "cooking_essentials",
+      "extracted_size": "200g",
+      "tags": "lumpia, wrapper, cooking",
+      "is_unilever": false
+    },
+    {
+      "id": 626,
+      "brand": "Seoul",
+      "product_name": "Seoul Kimchi 410g",
+      "category": "condiments",
+      "extracted_size": "410g",
+      "tags": "kimchi, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 660,
+      "brand": "Seoul",
+      "product_name": "Seoul Kimchi Radish 190g",
+      "category": "condiments",
+      "extracted_size": "190g",
+      "tags": "kimchi, radish, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 661,
+      "brand": "Seoul",
+      "product_name": "Seoul Kimchi Green Cabbage 190g",
+      "category": "condiments",
+      "extracted_size": "190g",
+      "tags": "kimchi, cabbage, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 662,
+      "brand": "Seoul",
+      "product_name": "Seoul Kimchi Chinese Cabbage 190g",
+      "category": "condiments",
+      "extracted_size": "190g",
+      "tags": "kimchi, cabbage, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 682,
+      "brand": "Ade",
+      "product_name": "Ade Kimchi Mix Kimchi 210g",
+      "category": "condiments",
+      "extracted_size": "210g",
+      "tags": "kimchi, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 683,
+      "brand": "Ade",
+      "product_name": "Ade Atsara 210g",
+      "category": "condiments",
+      "extracted_size": "210g",
+      "tags": "atsara, fermented, condiment",
+      "is_unilever": false
+    },
+    {
+      "id": 744,
+      "brand": "Wangsil",
+      "product_name": "Wangsil Kimchi Radish Cube Pouch 500g",
+      "category": "condiments",
+      "extracted_size": "500g",
+      "tags": "kimchi, radish, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 766,
+      "brand": "Surasang",
+      "product_name": "Surasang Seasoned Radish 200g",
+      "category": "condiments",
+      "extracted_size": "200g",
+      "tags": "radish, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 767,
+      "brand": "Surasang",
+      "product_name": "Surasang Seasoned Lotus Root 200g",
+      "category": "condiments",
+      "extracted_size": "200g",
+      "tags": "lotus_root, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 806,
+      "brand": "Seoul",
+      "product_name": "Seoul Nongbu Kimchi 900g",
+      "category": "condiments",
+      "extracted_size": "900g",
+      "tags": "kimchi, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 957,
+      "brand": "Casa De",
+      "product_name": "Casa De Tortilla Wraps 8inch 280g 6pcs",
+      "category": "cooking_essentials",
+      "extracted_size": "280g",
+      "tags": "tortilla, wrap",
+      "is_unilever": false
+    },
+    {
+      "id": 958,
+      "brand": "Casa De",
+      "product_name": "Casa De Tortilla Wraps 10inch 430g 6pcs",
+      "category": "cooking_essentials",
+      "extracted_size": "430g",
+      "tags": "tortilla, wrap",
+      "is_unilever": false
+    },
+    {
+      "id": 979,
+      "brand": "A Rose",
+      "product_name": "A Rose Kimchi 450g",
+      "category": "condiments",
+      "extracted_size": "450g",
+      "tags": "kimchi, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 980,
+      "brand": "A Rose",
+      "product_name": "A Rose Kimchi 250g",
+      "category": "condiments",
+      "extracted_size": "250g",
+      "tags": "kimchi, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 982,
+      "brand": "Jimcu",
+      "product_name": "Jimcu Wantan Wrapper 270g",
+      "category": "cooking_essentials",
+      "extracted_size": "270g",
+      "tags": "wrapper, wonton",
+      "is_unilever": false
+    },
+    {
+      "id": 983,
+      "brand": "Jimcu",
+      "product_name": "Jimcu Shao Mai Wrapper 200g",
+      "category": "cooking_essentials",
+      "extracted_size": "200g",
+      "tags": "wrapper, siomai",
+      "is_unilever": false
+    },
+    {
+      "id": 984,
+      "brand": "Jimcu",
+      "product_name": "Jimcu Shao Mai Wrapper 120g",
+      "category": "cooking_essentials",
+      "extracted_size": "120g",
+      "tags": "wrapper, siomai",
+      "is_unilever": false
+    },
+    {
+      "id": 985,
+      "brand": "Jimcu",
+      "product_name": "Jimcu Lumpia Wrapper 400g",
+      "category": "cooking_essentials",
+      "extracted_size": "400g",
+      "tags": "wrapper, lumpia",
+      "is_unilever": false
+    },
+    {
+      "id": 986,
+      "brand": "Jimcu",
+      "product_name": "Jimcu Dumpling Wrapper 250g",
+      "category": "cooking_essentials",
+      "extracted_size": "250g",
+      "tags": "wrapper, dumpling",
+      "is_unilever": false
+    },
+    {
+      "id": 1002,
+      "brand": "Ade",
+      "product_name": "Ade Chinese Cabbage Kimchi 820g",
+      "category": "condiments",
+      "extracted_size": "820g",
+      "tags": "kimchi, cabbage, korean, fermented",
+      "is_unilever": false
+    },
+    {
+      "id": 1325,
+      "brand": "Rebisco",
+      "product_name": "Frydays Deep Frying Fat",
+      "category": "cooking_essentials",
+      "extracted_size": "standard",
+      "tags": "frying_fat",
+      "is_unilever": false
+    },
+    {
+      "id": 1330,
+      "brand": "Rebisco",
+      "product_name": "Ultra Bake Vegetable Shortening",
+      "category": "cooking_essentials",
+      "extracted_size": "standard",
+      "tags": "shortening",
+      "is_unilever": false
+    },
+    {
+      "id": 1434,
+      "brand": "Pilot",
+      "product_name": "Pilot G-Tec-C Maica 0.4mm Clear Blue",
+      "category": "stationery",
+      "extracted_size": "standard",
+      "tags": "pen, gel_pen, clear_blue, 0.4mm, maica",
+      "is_unilever": true
+    },
+    {
+      "id": 1542,
+      "brand": "Dove",
+      "product_name": "Dove White Beauty Bar 90g",
+      "category": "soap",
+      "extracted_size": "90g",
+      "tags": "soap, moisturizing, beauty bar",
+      "is_unilever": true
+    },
+    {
+      "id": 1543,
+      "brand": "Dove",
+      "product_name": "Dove White Beauty Bar 3s 90g",
+      "category": "soap",
+      "extracted_size": "90g",
+      "tags": "soap, moisturizing, beauty bar, value pack",
+      "is_unilever": true
+    },
+    {
+      "id": 1544,
+      "brand": "Dove",
+      "product_name": "Dove White Beauty Bar 135g",
+      "category": "soap",
+      "extracted_size": "135g",
+      "tags": "soap, moisturizing, beauty bar",
+      "is_unilever": true
+    },
+    {
+      "id": 1545,
+      "brand": "Dove",
+      "product_name": "Dove White Beauty Bar 3s 135g",
+      "category": "soap",
+      "extracted_size": "135g",
+      "tags": "soap, moisturizing, beauty bar, value pack",
+      "is_unilever": true
+    },
+    {
+      "id": 1546,
+      "brand": "Dove",
+      "product_name": "Dove Sensitive Beauty Bar 90g",
+      "category": "soap",
+      "extracted_size": "90g",
+      "tags": "soap, sensitive skin, beauty bar",
+      "is_unilever": true
+    },
+    {
+      "id": 1547,
+      "brand": "Dove",
+      "product_name": "Dove Sensitive Beauty Bar 3s 90g",
+      "category": "soap",
+      "extracted_size": "90g",
+      "tags": "soap, sensitive skin, beauty bar, value pack",
+      "is_unilever": true
+    },
+    {
+      "id": 1548,
+      "brand": "Dove",
+      "product_name": "Dove Sensitive Beauty Bar 135g",
+      "category": "soap",
+      "extracted_size": "135g",
+      "tags": "soap, sensitive skin, beauty bar",
+      "is_unilever": true
+    },
+    {
+      "id": 1549,
+      "brand": "Dove",
+      "product_name": "Dove Sensitive Beauty Bar 3s 135g",
+      "category": "soap",
+      "extracted_size": "135g",
+      "tags": "soap, sensitive skin, beauty bar, value pack",
+      "is_unilever": true
+    },
+    {
+      "id": 1550,
+      "brand": "Dove",
+      "product_name": "Dove Soap Exfoliating 90g",
+      "category": "soap",
+      "extracted_size": "90g",
+      "tags": "soap, exfoliating, beauty bar",
+      "is_unilever": true
+    },
+    {
+      "id": 1642,
+      "brand": "ClearWave",
+      "product_name": "Calcium Hardness Increaser",
+      "category": "pool chemical",
+      "extracted_size": "standard",
+      "tags": "pool chemical, calcium hardness, calcium chloride, water balance, hardness increaser, pool maintenance, scaling prevention",
+      "is_unilever": true
+    },
+    {
+      "id": 1643,
+      "brand": "Rx Clear",
+      "product_name": "Cyanuric Acid (Stabilizer)",
+      "category": "pool chemical",
+      "extracted_size": "standard",
+      "tags": "pool chemical, cyanuric acid, stabilizer, conditioner, UV protection, chlorine lock, pool maintenance",
+      "is_unilever": true
+    },
+    {
+      "id": 1662,
+      "brand": "ClearWave",
+      "product_name": "Pool Flocculant (Floc)",
+      "category": "pool chemical",
+      "extracted_size": "standard",
+      "tags": "pool chemical, flocculant, floc, cloudy water, bottom floccing, pool maintenance, water clarity, sediment",
+      "is_unilever": true
+    },
+    {
+      "id": 1665,
+      "brand": "Rx Clear",
+      "product_name": "Saltwater Pool Conditioner",
+      "category": "pool chemical",
+      "extracted_size": "standard",
+      "tags": "pool chemical, saltwater conditioner, salt pool, scale inhibitor, cell protector, pool maintenance, water balance",
+      "is_unilever": true
+    }
+  ]
+}

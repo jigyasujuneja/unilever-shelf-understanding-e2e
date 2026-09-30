@@ -1,0 +1,27 @@
+flowchart TD
+  classDef trigger fill:#e8f0fe,stroke:#1a73e8,color:#174ea6
+  classDef step fill:#f1f3f4,stroke:#5f6368,color:#202124
+  classDef cond fill:#fef7e0,stroke:#f9ab00,color:#b06000
+  classDef aks fill:#e6f4ea,stroke:#188038,color:#0d652d
+  classDef disabled fill:#fff,stroke:#9aa0a6,color:#5f6368,stroke-dasharray: 5 5
+
+  TRIG["Recurrence Trigger:<br/>Run_at_the_start_of_the_business_day<br/>Frequency: Daily (Interval: 1)<br/>Schedule: 07:30 India Standard Time"]:::trigger
+
+  COND{"Condition_check_if_it_is_Sunday<br/>dayOfWeek(addToTime(utcNow(), 330m)) == 10?<br/>(Note: dayOfWeek is 0..6, so always False)"}:::cond
+
+  subgraph TRUE_BRANCH["True Branch (Unreachable / Bypassed Sunday Single-Cluster Start)"]
+    START_SINGLE["Invoke_resource_operation_to_start_MT_002_AKS<br/>ApiConnection POST via arm-1<br/>Path: /subscriptions?{masked}<br/>API Version: 2021-03-01"]:::disabled
+  end
+
+  subgraph FALSE_BRANCH["Else Branch (Executed Daily at 07:30 IST)"]
+    direction TB
+    CLUSTERS["Clusters_to_Start (ParseJson)<br/>['masked-cluster-001', 'masked-cluster-002']"]:::step
+    subgraph FE_AKS["For_each_AKS_cluster"]
+      START_ALL["Start_AKS_cluster (ApiConnection POST via arm-1)<br/>.../Microsoft.ContainerService/managedClusters/{cluster}/start<br/>API Version: 2021-03-01"]:::aks
+    end
+    CLUSTERS --> START_ALL
+  end
+
+  TRIG --> COND
+  COND -. "True (Never reached: 0..6 != 10)" .-> START_SINGLE
+  COND -- "False (else - Always taken)" --> CLUSTERS
