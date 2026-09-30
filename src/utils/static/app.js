@@ -277,9 +277,16 @@ function labelTable(d) {
 
 async function showImage(runId, imageId) {
   const v = document.getElementById("viewer");
-  const d = await getJSON(`/api/runs/${encodeURIComponent(runId)}/images/${encodeURIComponent(imageId)}`);
+  const base = `/api/runs/${encodeURIComponent(runId)}/images/${encodeURIComponent(imageId)}`;
+  const d = await getJSON(base);
+  let t0 = 0;
+  d.steps.forEach((st) => { st.at = (t0 += st.ms); });  // ms since the image started (for audit matching)
+  // Filter steps that removed nothing are noise (older runs still record them).
+  d.steps = d.steps.filter((st) => !/^0 removed\b/.test(st.detail ?? ""));
   const last = d.steps.length - 1;
+  if (last >= 0) d.steps[last].totals = true;  // the scoring step: whole-image totals
   const dur = (ms) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
+  const auditable = !!d.telemetry?.trace_id;
   v.innerHTML = `
     <div class="viewer-grid">
       <div>
@@ -288,24 +295,211 @@ async function showImage(runId, imageId) {
       </div>
       <div>
         ${labelTable(d)}
-        <div class="muted hint">Steps for ${esc(imageId)}. Click one to see what it produced.</div>
+        <div class="muted hint">Steps for ${esc(imageId)}. Click one to see what it produced; ⓘ for its details.</div>
         ${telemetryLinks(d.telemetry)}
+        ${auditable ? `<p class="audit-bar"><button class="audit-load">Load Cloud Trace + Logging into the steps</button>
+          <span class="muted audit-status">every Gemini span and log entry (gemini_call, image_scored) of this image, for auditing</span></p>` : ""}
         ${d.error ? `<p class="warn">${esc(d.error)}</p>` : ""}
-        <ol class="steps">${d.steps.map((st, i) => `
-          <li data-i="${i}"><b>${esc(st.name)}</b> <span class="muted">${dur(st.ms)}</span><br><span class="detail">${esc(st.detail)}</span></li>`).join("")}
-        </ol>
+        <ol class="steps"></ol>
       </div>
     </div>`;
+  const steps = v.querySelector(".steps");
+  let selected = last;
+  const render = () => {
+    const open = new Set([...steps.querySelectorAll("li.open")].map((li) => +li.dataset.i));
+    steps.innerHTML = d.steps.map((st, i) => `
+      <li data-i="${i}" class="${i === selected ? "sel" : ""} ${open.has(i) ? "open" : ""}">${hasMore(st) ? `<button class="more" title="Details" aria-label="Details">ⓘ${st.gcp?.length ? `<span class="gcp-n">${st.gcp.length}</span>` : ""}</button>` : ""}<b>${esc(st.name)}</b> <span class="muted">${dur(st.ms)}</span><br><span class="detail">${esc(st.detail)}</span>${hasMore(st) ? `<div class="more-body">${stepMore(st, d)}</div>` : ""}</li>`).join("");
+  };
+  render();
   const img = new Image();
   img.src = `/img/${d.split}/${encodeURIComponent(imageId)}`;
   await img.decode();
-  const steps = v.querySelector(".steps");
   const select = (i) => {
+    selected = i;
     steps.querySelectorAll("li").forEach((li) => li.classList.toggle("sel", +li.dataset.i === i));
     draw(v.querySelector("canvas"), img, d, i === last ? null : d.steps[i]);
   };
-  steps.addEventListener("click", (e) => { const li = e.target.closest("li"); if (li) select(+li.dataset.i); });
+  steps.addEventListener("click", (e) => {
+    if (e.target.closest(".more-body")) return;  // reading details: keep the current overlay
+    const li = e.target.closest("li");
+    if (!li) return;
+    if (e.target.closest(".more")) li.classList.toggle("open");
+    select(+li.dataset.i);
+  });
+  v.querySelector(".audit-load")?.addEventListener("click", async (e) => {
+    const btn = e.target, status = v.querySelector(".audit-status");
+    btn.disabled = true;
+    status.textContent = "Fetching from Cloud Trace and Cloud Logging…";
+    try {
+      const a = await fetch(`${base}/audit`).then(async (r) => (r.ok ? r.json() : Promise.reject((await r.json()).error || r.statusText)));
+      const n = attachAudit(d, a);
+      render();
+      status.innerHTML = `${a.calls.length} Gemini span${a.calls.length === 1 ? "" : "s"} and ${a.calls.reduce((s, c) => s + c.entries.length, 0) + a.entries.length} log entries attached to ${n} steps (ⓘ shows a count). <a href="${esc(a.image.trace_url)}" target="_blank" rel="noopener">Image span</a> · <a href="${esc(a.image.logs_url)}" target="_blank" rel="noopener">its log entries</a>`;
+      btn.textContent = "Loaded";
+    } catch (err) {
+      status.innerHTML = `<span class="bad">${esc(err)}</span>`;
+      btn.disabled = false;
+    }
+  });
   select(last);
+}
+
+// Put each GCP span (+ its log entries) on the step it belongs to. Runs that record span ids per
+// call are joined exactly. Older runs are matched by time (ms since the image started): a step is
+// recorded right after its call ends, except the old "Gemini tier" step, recorded right before its
+// call, so those are paired in time order (approximate: crops ran in parallel).
+function attachAudit(d, a) {
+  d.steps.forEach((st) => { st.gcp = []; });
+  const at = d.steps.map((st) => st.at);
+  const left = new Map(a.calls.map((c) => [c.span_id, c]));
+  const put = (i, c, how) => { d.steps[i].gcp.push({ ...c, how }); left.delete(c.span_id); };
+  d.steps.forEach((st, i) => (st.calls || []).forEach((c) => {
+    if (c.span_id && left.has(c.span_id)) put(i, left.get(c.span_id), "exact (span id recorded with the step)");
+  }));
+  d.steps.forEach((st, i) => {
+    if (st.name !== "Gemini tier" || st.calls || /->/.test(st.detail)) return;
+    const c = [...left.values()].filter((x) => x.name.startsWith("gemini") && x.start_ms >= at[i] - 50).sort((x, y) => x.start_ms - y.start_ms)[0];
+    if (c) put(i, c, "by time order: the first call to start after this step (approximate, crops ran in parallel)");
+  });
+  [...left.values()].forEach((c) => {
+    const i = at.findIndex((ti) => ti >= c.end_ms - 50);
+    put(i >= 0 ? i : d.steps.length - 1, c, "by timestamp: the first step recorded after the call ended");
+  });
+  if (d.steps.length && a.entries.length) d.steps[d.steps.length - 1].gcpImage = a;
+  return d.steps.filter((st) => st.gcp.length || st.gcpImage).length;
+}
+
+// Step details (ⓘ): what the approach recorded for the step (info), the model calls made since
+// the previous step (tokens, latency, cost, prompt, response) and other billed units.
+const hasMore = (st) => !!(st.info || st.calls || st.billed || st.totals || st.gcp?.length || st.gcpImage);
+const num = (v) => Number(v ?? 0).toLocaleString();
+
+function stepMore(st, d) {
+  const rate = d.usd_to_inr || 0;
+  const money = (usd) => (rate ? inr(usd * rate) : `$${Number(usd).toPrecision(3)}`);
+  const kv = (rows) => `<table class="kv">${rows.filter(([, val]) => val !== undefined && val !== null && val !== "")
+    .map(([k, val]) => `<tr><th>${esc(k)}</th><td>${val}</td></tr>`).join("")}</table>`;
+  const out = [];
+  if (st.totals) {
+    const u = d.usage || {};
+    out.push(`<div class="more-h">Image totals</div>` + kv([
+      ["Correct / false / missed", `${d.tp} / ${d.fp} / ${d.fn}`],
+      ["Precision · recall · F2", d.precision != null ? `${pct(d.precision)} · ${pct(d.recall)} · ${pct(d.f2)}` : undefined],
+      ["Latency", d.latency_s != null ? sec(d.latency_s) : undefined],
+      ["Cost", d.cost_usd != null ? `${money(d.cost_usd)}${d.services_cost_usd ? ` (non-Gemini ${money(d.services_cost_usd)})` : ""}` : undefined],
+      ["Gemini calls", u.calls ? num(u.calls) : undefined],
+      ["Tokens in / out / thinking", u.calls ? `${num(u.input_tokens)} / ${num(u.output_tokens)} / ${num(u.thinking_tokens)}` : undefined],
+      ["Token buckets", u.buckets && Object.keys(u.buckets).length ? esc(Object.entries(u.buckets).map(([k, n]) => `${k} ${num(n)}`).join(" · ")) : undefined],
+      ["Traffic", u.traffic && Object.keys(u.traffic).length ? esc(Object.entries(u.traffic).map(([k, n]) => `${k} ×${n}`).join(" · ")) : undefined],
+      ["Other billed", d.billed && Object.keys(d.billed).length ? esc(Object.entries(d.billed).map(([k, n]) => `${k} ×${num(n)}`).join(" · ")) : undefined],
+    ]));
+  }
+  if (st.info) out.push(`<div class="more-h">Details</div>` + infoHtml(st.info, d));
+  if (st.billed) {
+    out.push(`<div class="more-h">Billed (non-Gemini)</div>` +
+      kv(Object.entries(st.billed).map(([k, n]) => [k, `×${num(n)}`])));
+  }
+  (st.calls || []).forEach((c, i) => {
+    const label = `${i + 1}${st.calls.length > 1 ? ` of ${st.calls.length}` : ""}`;
+    if (c.kind === "embedding") {
+      out.push(`<div class="more-h">Call ${label}: embedding</div>` + kv([
+        ["Model", esc(c.model)],
+        ["Input", esc(`${c.input}, ${c.dimension}-d vector`)],
+        ["Latency", c.seconds != null ? sec(c.seconds) : undefined],
+        ["Attempts", c.attempts > 1 ? c.attempts : undefined],
+        ["Billed", c.billed ? esc(Object.entries(c.billed).map(([k, n]) => `${k} ×${num(n)}`).join(" · ")) : undefined],
+      ]));
+      return;
+    }
+    const size = c.image ? `${c.image[0]}×${c.image[1]} px${c.max_side ? ` (sent at ≤ ${c.max_side} px)` : ""}` +
+      (c.image_bytes ? `, ${(c.image_bytes / 1024).toFixed(0)} KB` : "") : undefined;
+    out.push(`<div class="more-h">Call ${label}: Gemini</div>` + kv([
+      ["Error", c.error ? `<span class="bad">${esc(c.error)}</span>` : undefined],
+      ["Model", esc(c.model)],
+      ["Latency", c.seconds != null ? sec(c.seconds) : undefined],
+      ["Tokens in / out / thinking", c.input_tokens != null ? `${num(c.input_tokens)} / ${num(c.output_tokens)} / ${num(c.thinking_tokens)}` : undefined],
+      ["Token buckets", c.buckets ? esc(Object.entries(c.buckets).map(([k, n]) => `${k} ${num(n)}`).join(" · ")) : undefined],
+      ["Cost", c.cost_usd != null ? money(c.cost_usd) + (c.list_usd != null && c.list_usd !== c.cost_usd ? ` (list ${money(c.list_usd)})` : "") : undefined],
+      ["Traffic served / requested", c.traffic || c.tier_requested ? esc(`${c.traffic ?? "?"} / ${c.tier_requested ?? "standard"}`) : undefined],
+      ["Finish reason", c.finish_reason ? esc(c.finish_reason) + (c.truncated ? ' <span class="bad">(output truncated)</span>' : "") : undefined],
+      ["Attempts", c.attempts > 1 ? `${c.attempts}${c.retry_errors ? ` <span class="muted">${esc(JSON.stringify(c.retry_errors))}</span>` : ""}` : undefined],
+      ["Thinking level", c.thinking_level ? esc(c.thinking_level) : undefined],
+      ["Image", size],
+      ["JSON schema", c.schema ? "yes" : undefined],
+    ]) + textBlock("Prompt", c.prompt) + textBlock("Response", c.response));
+  });
+  if (st.calls_omitted) out.push(`<p class="muted">+${st.calls_omitted} more calls not stored here (see Logs).</p>`);
+  (st.gcp || []).forEach((c, i) => out.push(gcpCallHtml(c, i, st.gcp.length, money)));
+  if (st.gcpImage) {
+    const a = st.gcpImage;
+    out.push(`<div class="more-h gcp">Cloud Trace: ${esc(a.image.name)} <span class="muted">${sec(a.image.duration_ms / 1000)}</span></div>
+      <p>${link(a.image.trace_url, "Span in Cloud Trace")} · ${link(a.image.logs_url, "Its log entries")}</p>` +
+      attrsHtml(a.image.attributes) + a.entries.map(entryHtml).join(""));
+  }
+  return out.join("");
+}
+
+const link = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener">${text}</a>`;
+const attrsHtml = (attrs) => `<details><summary>All span attributes <span class="muted">(${Object.keys(attrs).length})</span></summary>
+  <table class="kv">${Object.entries(attrs).map(([k, val]) => `<tr><th class="mono">${esc(k)}</th><td class="mono">${esc(val)}</td></tr>`).join("")}</table></details>`;
+
+function entryHtml(e) {
+  const p = e.payload || {};
+  const text = typeof p === "string" ? p : null;
+  const rest = text ? null : Object.fromEntries(Object.entries(p).filter(([k]) => k !== "prompt" && k !== "response"));
+  return `<div class="gcp-entry"><b>${esc(text ? "text entry" : p.event || "entry")}</b>
+    <span class="sev sev-${esc(e.severity)}">${esc(e.severity)}</span>
+    <span class="muted">${esc(e.timestamp)} · ${esc(e.log_name)} · ${esc(e.resource)}</span>
+    ${text ? `<pre>${esc(text)}</pre>` : textBlock("Prompt", p.prompt) + textBlock("Response", p.response) +
+      `<details><summary>jsonPayload <span class="muted">(${Object.keys(rest).length} fields)</span></summary><pre>${esc(JSON.stringify(rest, null, 1))}</pre></details>`}</div>`;
+}
+
+function gcpCallHtml(c, i, n, money) {
+  const a = c.attributes || {};
+  const tok = (k) => (a[k] != null ? num(a[k]) : "?");
+  const cost = a["shelf_bench.cost.net_usd"];
+  return `<div class="more-h gcp">Cloud Trace span ${n > 1 ? `${i + 1} of ${n}` : ""}: ${esc(c.name)}
+      <span class="muted">${sec(c.start_ms / 1000)} → ${sec(c.end_ms / 1000)}</span></div>
+    <p class="muted">Matched ${esc(c.how)}</p>
+    <p>${link(c.trace_url, "Span in Cloud Trace")} · ${link(c.logs_url, "Its log entries")}</p>
+    <table class="kv">
+      ${a["gen_ai.usage.input_tokens"] != null ? `<tr><th>Tokens in / out / thinking</th><td>${tok("gen_ai.usage.input_tokens")} / ${tok("gen_ai.usage.output_tokens")} / ${tok("shelf_bench.usage.thinking_tokens")}</td></tr>` : ""}
+      ${a["shelf_bench.embedding.seconds"] != null ? `<tr><th>Embedding</th><td>${esc(a["shelf_bench.embedding.kind"])}, ${esc(a["shelf_bench.embedding.dimension"])}-d, ${esc(a["shelf_bench.embedding.seconds"])} s</td></tr>` : ""}
+      ${Object.keys(a).some((k) => k.startsWith("shelf_bench.billed.")) ? `<tr><th>Billed</th><td>${esc(Object.entries(a).filter(([k]) => k.startsWith("shelf_bench.billed.")).map(([k, n]) => `${k.slice(19)} ×${n}`).join(" · "))}</td></tr>` : ""}
+      ${cost != null ? `<tr><th>Cost</th><td>${money(+cost)}</td></tr>` : ""}
+      ${a["gen_ai.response.finish_reasons"] ? `<tr><th>Finish reason</th><td>${esc(a["gen_ai.response.finish_reasons"])}</td></tr>` : ""}
+      ${a["shelf_bench.traffic_type"] ? `<tr><th>Traffic served</th><td>${esc(a["shelf_bench.traffic_type"])}</td></tr>` : ""}
+      ${a["shelf_bench.attempts"] && a["shelf_bench.attempts"] !== "1" ? `<tr><th>Attempts</th><td>${esc(a["shelf_bench.attempts"])}</td></tr>` : ""}
+    </table>` + attrsHtml(a) + (c.entries.length ? c.entries.map(entryHtml).join("") : '<p class="muted">No log entry found for this span.</p>');
+}
+
+function textBlock(label, text) {
+  if (!text) return "";
+  let body = text;
+  try { body = JSON.stringify(JSON.parse(text), null, 1); } catch { /* not JSON: show as is */ }
+  return `<details><summary>${label} <span class="muted">(${num(text.length)} chars)</span></summary><pre>${esc(body)}</pre></details>`;
+}
+
+function infoHtml(info, d) {
+  const refs = d.split === "rpc" || d.split === "shelves";
+  return Object.entries(info).map(([k, val]) => {
+    const label = esc(k.replace(/_/g, " "));
+    if (k === "removed" && Array.isArray(val)) {
+      return `<p><b>${label}</b>: ${val.length} box${val.length === 1 ? "" : "es"} <span class="muted">(dashed red on the image)</span></p>`;
+    }
+    if (Array.isArray(val) && val.length && typeof val[0] === "object") {
+      const cols = Object.keys(val[0]).filter((c) => c !== "sku_id");
+      return `<p><b>${label}</b></p><table class="kv list"><tbody>${val.map((r) => `
+        <tr class="${r.sku_id != null && r.sku_id === info.answer ? "pick" : ""}">
+          <td>${r.sku_id != null ? `${refs ? `<img class="ref" loading="lazy" src="/img/${d.split}-ref/${encodeURIComponent(r.sku_id)}" alt="">` : ""}#${esc(r.sku_id)}` : ""}</td>
+          ${cols.map((c) => `<td>${esc(typeof r[c] === "number" ? +r[c].toFixed(4) : r[c])}</td>`).join("")}</tr>`).join("")}
+        </tbody></table>`;
+    }
+    if (val && typeof val === "object") {
+      return `<p><b>${label}</b>: ${esc(Object.entries(val).map(([a, b]) => `${a.replace(/_/g, " ")} ${b}`).join(" · "))}</p>`;
+    }
+    return `<p><b>${label}</b>: ${esc(val ?? "none")}</p>`;
+  }).join("");
 }
 
 // Final step: ground truth vs. predictions (TP / FP); for identification, a green / red box per
@@ -354,9 +548,14 @@ function draw(canvas, img, d, step) {
   } else {
     (step.regions || []).forEach((b) => rect(b, "rgba(250,204,21,.95)", 3));
     (step.boxes || []).forEach((b) => rect(b, "rgba(59,130,246,.95)"));
+    const removed = step.info?.removed || [];
+    g.setLineDash([5, 3]);
+    removed.forEach((b) => rect(b, RED, 2.5));
+    g.setLineDash([]);
     const parts = [];
     if (step.regions) parts.push(`<span class="sw tile"></span>tiles (${step.regions.length})`);
     if (step.boxes) parts.push(`<span class="sw tp"></span>boxes (${step.boxes.length})`);
+    if (removed.length) parts.push(`<span class="sw fp"></span>removed, dashed (${removed.length})`);
     legend.innerHTML = parts.join(" ") || '<span class="muted">nothing to overlay for this step</span>';
   }
 }

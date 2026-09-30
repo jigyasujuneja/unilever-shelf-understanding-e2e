@@ -20,9 +20,13 @@ from __future__ import annotations
 
 from PIL import Image
 
-from approaches.base import NOT_PRODUCT, Box, Context, label_counts, register
-from approaches.market_share.detection.single_pass import PROMPT, SCHEMA, SinglePass, labelled_boxes
-from approaches.market_share.detection.single_pass_dedup import NMS_IOU, dedup
+from approaches.base import NOT_PRODUCT, Approach, Box, Context, label_counts, register
+from approaches.market_share.detection.single_pass_dedup import (
+    PROMPT,
+    SCHEMA,
+    dedup_traced,
+    labelled_boxes,
+)
 
 SEAM_BAND = 0.015   # a box edge within this share of the image height of the seam touches it
 SEAM_X_OVERLAP = 0.8  # share of the narrower piece's width that must overlap to merge
@@ -58,7 +62,7 @@ def merge_seam(top: list[Box], bottom: list[Box], seam: float, h: float) -> tupl
 
 
 @register
-class TiledDedup(SinglePass):
+class TiledDedup(Approach):
     name = "tiled_dedup"
     architecture = "Gemini, one call per half-height tile -> seam stitching -> duplicate removal"
     steps = [
@@ -84,9 +88,4 @@ class TiledDedup(SinglePass):
         joined, n = merge_seam(halves[0], halves[1], seam, h)
         ctx.trace.step("Seam stitching", f"{n} products cut by the seam merged -> {len(joined)}",
                        boxes=joined)
-        a, b, kept = dedup(joined)
-        ctx.trace.step("Container boxes removed", f"{len(joined) - len(a)} removed", boxes=a)
-        ctx.trace.step(f"NMS at IoU {NMS_IOU}", f"{len(a) - len(b)} removed", boxes=b)
-        ctx.trace.step("Depth ghosts removed", f"{len(b) - len(kept)} removed -> {len(kept)}",
-                       boxes=kept)
-        return kept
+        return dedup_traced(joined, ctx)

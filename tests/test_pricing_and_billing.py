@@ -59,8 +59,9 @@ def test_gemini_cost_uses_the_sku_for_each_bucket_and_promo_credit():
     assert c["credit_usd"] == pytest.approx(c["list_usd"] / 2)
     after = pricing.gemini_cost("m", buckets, sheet, date(2027, 1, 1))
     assert after["credit_usd"] == 0 and after["net_usd"] == after["list_usd"]
+    assert pricing.gemini_cost("m", {"flex/output": 1_000_000}, sheet)["list_usd"] == pytest.approx(1.25)
     with pytest.raises(RuntimeError):
-        pricing.gemini_cost("m", {"flex/output": 5}, sheet)
+        pricing.gemini_cost("m", {"batch/output": 5}, sheet)
 
 
 def test_price_sheet_parses_billing_catalog(monkeypatch):

@@ -122,13 +122,15 @@ def parse_json(text: str) -> Any:
         return [[float(v) for v in q] for q in quads]
 
 
-TIERS = ("standard", "priority")
+TIERS = ("standard", "priority", "flex")
 
 # Priority PayGo: https://cloud.google.com/vertex-ai/generative-ai/docs/priority-paygo
+# Flex PayGo: https://cloud.google.com/vertex-ai/generative-ai/docs/flex-paygo (50% of Standard
+# per token, for latency-tolerant work such as batch shelf processing).
 # "shared" skips Provisioned Throughput (none in this project) so every call is PayGo.
-PRIORITY_HEADERS = {
-    "X-Vertex-AI-LLM-Request-Type": "shared",
-    "X-Vertex-AI-LLM-Shared-Request-Type": "priority",
+TIER_HEADERS = {
+    tier: {"X-Vertex-AI-LLM-Request-Type": "shared", "X-Vertex-AI-LLM-Shared-Request-Type": tier}
+    for tier in ("priority", "flex")
 }
 
 
@@ -152,7 +154,7 @@ class Gemini:
         self.tier = tier
         self.client = genai.Client(
             vertexai=True, project=cfg.get("project"), location=cfg.get("location", "global"),
-            http_options=types.HttpOptions(headers=PRIORITY_HEADERS) if tier == "priority" else None,
+            http_options=types.HttpOptions(headers=TIER_HEADERS[tier]) if tier in TIER_HEADERS else None,
         )
 
     def __call__(

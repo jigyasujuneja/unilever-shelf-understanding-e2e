@@ -9,7 +9,7 @@ One-time setup (psql / AlloyDB Studio)::
 
     CREATE EXTENSION IF NOT EXISTS vector;
     CREATE EXTENSION IF NOT EXISTS alloydb_scann;      -- optional, fast ANN index
-    CREATE TABLE products (id TEXT PRIMARY KEY, name TEXT, embedding vector(512), metadata JSONB);
+    CREATE TABLE products (id TEXT PRIMARY KEY, name TEXT, embedding vector(768), metadata JSONB);  -- 768 = gemini-embedding-2-preview; 512 for multimodalembedding@001
     CREATE INDEX ON products USING scann (embedding cosine) WITH (num_leaves = 100);
 
 IAM: the caller needs ``roles/alloydb.client`` + ``roles/serviceusage.serviceUsageConsumer`` and

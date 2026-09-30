@@ -39,13 +39,13 @@ class DetectRetrieveAlloyDB(EmbeddingRetrieval):
     also_calls = [MODEL]
     architecture = "Gemini detects boxes, Vertex embeddings + AlloyDB identify each product"
     steps = ["Gemini detects every product box",
-             "Embed each crop (Vertex multimodal) and look it up in AlloyDB"]
+             "Embed each crop (gemini-embedding-2-preview) and look it up in AlloyDB"]
     skus = embeddings.SKUS  # priced from the Billing Catalog at run start
 
     def setup(self, config: dict, ctx: Context) -> None:
-        # The products table must hold the reference-photo embeddings (same model, 512-d),
+        # The products table must hold the reference-photo embeddings (same model, 768-d),
         # with id = the RPC product id; see the setup SQL in utils/alloydb.py.
-        self.emb = embeddings.VertexEmbeddings(config)
+        self.emb = embeddings.VertexEmbeddings(config, model=MODEL)
         self.db = AlloyDB(**config["alloydb"])
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:

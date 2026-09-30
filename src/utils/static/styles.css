@@ -88,3 +88,33 @@ canvas { display: block; max-width: 100%; }
   text-decoration: none; font-weight: 700; font-size: 15px; }
 .section.on { color: var(--accent); border-color: var(--accent); background: var(--sel); }
 .section.on .count { background: #fff; color: var(--accent); }
+
+/* Step details (the (i) button on a step) */
+.steps .more { position: absolute; right: 8px; top: 6px; border: 1px solid var(--line); background: var(--card);
+  color: var(--muted); border-radius: 50%; width: 22px; height: 22px; padding: 0; font-size: 13px; line-height: 20px; cursor: pointer; }
+.steps .more:hover, .steps li.open .more { color: var(--accent); border-color: var(--accent); }
+.steps li:has(.more) { padding-right: 38px; }
+.steps .more-body { display: none; margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); cursor: auto; font-size: 12.5px; }
+.steps li.open .more-body { display: block; }
+.more-h { font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin: 8px 0 4px; }
+.more-body p { margin: 4px 0; }
+.more-body table.kv { background: transparent; width: auto; }
+.more-body table.kv th, .more-body table.kv td { padding: 2px 10px 2px 0; border: 0; background: transparent; font-size: 12.5px; white-space: normal; vertical-align: middle; }
+.more-body table.kv th { color: var(--muted); font-weight: 500; }
+.more-body table.list tr.pick td { font-weight: 700; color: var(--accent); }
+.more-body img.ref { width: 32px; height: 32px; object-fit: contain; vertical-align: middle; margin-right: 6px; background: #fff; border: 1px solid var(--line); border-radius: 4px; }
+.more-body details { margin: 4px 0; }
+.more-body summary { cursor: pointer; }
+.more-body pre { max-height: 260px; overflow: auto; background: #f3f4f6; border-radius: 4px; padding: 8px; margin: 4px 0;
+  font-size: 11.5px; white-space: pre-wrap; word-break: break-word; }
+.audit-bar { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 12.5px; }
+.audit-bar button { font: inherit; padding: 3px 10px; border: 1px solid var(--accent); color: var(--accent); background: var(--card); border-radius: 5px; cursor: pointer; }
+.audit-bar button:disabled { opacity: .6; cursor: default; }
+.steps .more .gcp-n { position: absolute; top: -6px; right: -8px; background: var(--accent); color: #fff; border-radius: 8px;
+  font-size: 9.5px; line-height: 14px; min-width: 14px; padding: 0 3px; }
+.more-h.gcp { color: #0f766e; border-top: 1px solid var(--line); padding-top: 6px; }
+.gcp-entry { margin: 6px 0; padding: 6px 8px; background: #f9fafb; border: 1px solid var(--line); border-radius: 4px; }
+.sev { font-size: 10.5px; font-weight: 700; padding: 0 5px; border-radius: 3px; background: var(--line); }
+.sev-ERROR, .sev-CRITICAL { background: #fee2e2; color: #b91c1c; } .sev-WARNING { background: #fef3c7; color: #92400e; }
+.sev-INFO { background: #dbeafe; color: #1e40af; }
+.more-body td.mono, .more-body th.mono { font-size: 11.5px; word-break: break-all; }

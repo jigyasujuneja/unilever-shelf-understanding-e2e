@@ -117,7 +117,7 @@ def run(
         raise RuntimeError(f"No images found for split={split!r} under {data_root}")
 
     started = datetime.now(timezone.utc)
-    run_id = (f"{started:%m%d-%H%M%S}-{approach}-{model}" + ("-priority" if tier == "priority" else ""))
+    run_id = f"{started:%m%d-%H%M%S}-{approach}-{model}" + ("" if tier == "standard" else f"-{tier}")
     log(f"[{run_id}] {len(samples)} images from {appr.dataset} {split} (seed {seed}) on {env['platform']}")
 
     def price(u: Usage) -> dict:
@@ -161,7 +161,7 @@ def run(
             telemetry.log(span, "image_scored", {
                 "run_id": run_id, **{k: v for k, v in row.items()
                                      if k not in ("preds", "matched", "steps")},
-                "steps": [{k: v for k, v in s.items() if k not in ("boxes", "regions")}
+                "steps": [{k: v for k, v in s.items() if k not in ("boxes", "regions", "calls", "info")}
                           for s in row["steps"]]},
                 level=logging.ERROR if row["error"] else logging.INFO)
             row["telemetry"] = telemetry.links(span, per_span=True)
@@ -304,11 +304,13 @@ def run(
             "model": model,
             "tier": tier,
             "traffic": usage.traffic,  # calls per traffic type Vertex actually served
-            # Share of calls Vertex actually served at priority (the rest were downgraded).
+            # Share of calls Vertex actually served at priority / flex (the rest were downgraded).
             "priority_served": round(usage.traffic.get("priority", 0) / calls, 3)
             if calls and tier == "priority" else None,
+            "flex_served": round(usage.traffic.get("flex", 0) / calls, 3)
+            if calls and tier == "flex" else None,
             "architecture": f"{appr.architecture} [{' + '.join([model, *appr.also_calls])}"
-                            + (", priority" if tier == "priority" else "") + "]",
+                            + ("" if tier == "standard" else f", {tier}") + "]",
             "steps": appr.steps,
             "owner": owner or getpass.getuser(),
             "split": split, "limit": limit, "seed": seed, "workers": workers,

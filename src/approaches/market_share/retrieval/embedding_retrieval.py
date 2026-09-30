@@ -6,6 +6,10 @@ or ``gemini-embedding-2-preview``; reported as the run's setup cost, like buildi
 once). Per product crop we embed the crop and return the product whose closest reference photo is
 most similar (cosine). That's what a vector database (``utils/alloydb.py``) would do; with 800
 vectors a Python loop is enough.
+
+When this step runs under a Gemini model (the ``detect_*`` pipelines), the embedder is fixed:
+``shortlist_model``. It is ``gemini-embedding-2-preview`` because on RPC it identified 89.9% of
+crops vs 74.2% for ``multimodalembedding@001`` at about the same price per crop.
 """
 
 from __future__ import annotations
@@ -18,9 +22,9 @@ from PIL import Image
 from approaches.base import Approach, Context, register
 from approaches.market_share.classification.embedding_text_match import unit
 from utils import dataset
-from utils.embeddings import MODELS, MULTIMODAL, SKUS, VertexEmbeddings
+from utils.embeddings import GEMINI_EMBEDDING, MODELS, SKUS, VertexEmbeddings
 
-MODEL = MULTIMODAL  # the fixed shortlist model of the Gemini approaches built on this one
+MODEL = GEMINI_EMBEDDING  # the fixed embedder of the Gemini pipelines built on this one
 
 
 @register
@@ -30,6 +34,7 @@ class EmbeddingRetrieval(Approach):
     dataset = "rpc"
     models = MODELS
     skus = SKUS
+    shortlist_model = MODEL  # embedder used when the run's -m is a Gemini model
     architecture = "Crop embedding -> nearest reference photo"
     steps = [
         "Setup (once per run, reported apart from cost/img): embed every reference photo",
@@ -39,8 +44,8 @@ class EmbeddingRetrieval(Approach):
 
     def setup(self, config: dict, ctx: Context) -> None:
         # Run as an embedding approach: the run's model. Under a Gemini model (the rerank and
-        # detect approaches): the fixed shortlist model they list in ``also_calls``.
-        self.emb = VertexEmbeddings(config, model=ctx.model if ctx.model in MODELS else MODEL)
+        # detect approaches): the fixed ``shortlist_model`` they list in ``also_calls``.
+        self.emb = VertexEmbeddings(config, model=ctx.model if ctx.model in MODELS else self.shortlist_model)
         gallery = dataset.rpc_gallery(dataset.data_root(self.dataset))
         refs = [(pid, path) for pid, paths in gallery.items() for path in paths]
         self.jpeg: dict[str, bytes] = {}  # reference photos, for the rerank contact sheet

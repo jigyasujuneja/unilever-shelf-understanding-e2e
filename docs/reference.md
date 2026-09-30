@@ -1,7 +1,7 @@
 # Shelf Benchmark: reference
 
 Details behind the [README](../README.md): onboarding cookbook for new approaches, how cost is
-computed, the Priority tier, how to back retrieval with a vector database, and what telemetry
+computed, the Priority and Flex tiers, how to back retrieval with a vector database, and what telemetry
 records.
 
 ## Onboarding cookbook: 4 patterns for adding & benchmarking an approach
@@ -11,16 +11,16 @@ Every approach lives under `src/approaches/<use_case>/<task>/` and is auto-disco
 
 | Pattern | Where to put it | What to implement | Copy from |
 |---------|-----------------|-------------------|-----------|
-| **1. Standalone detector / classifier / retriever** | `market_share/{detection,classification,retrieval}/` | `@register` subclass with `detect(image, ctx)` or `identify(image, ctx, allowed_ids=None)` | [`single_pass.py`](../src/approaches/market_share/detection/single_pass.py), [`gemini_classify.py`](../src/approaches/market_share/classification/gemini_classify.py), [`embedding_retrieval.py`](../src/approaches/market_share/retrieval/embedding_retrieval.py) |
+| **1. Standalone detector / classifier / retriever** | `market_share/{detection,classification,retrieval}/` | `@register` subclass with `detect(image, ctx)` or `identify(image, ctx, allowed_ids=None)` | [`single_pass_dedup.py`](../src/approaches/market_share/detection/single_pass_dedup.py), [`hierarchy_classify.py`](../src/approaches/market_share/classification/hierarchy_classify.py), [`embedding_retrieval.py`](../src/approaches/market_share/retrieval/embedding_retrieval.py) |
 | **2. Multi-step composition** (`detect -> retrieve`, `detect -> classify`, or `detect -> classify -> retrieve`) | `market_share/end_to_end/` | `compose("my_e2e", DetectorCls, *IdentifierClasses, dataset="shelves")` — intermediate classifiers filter the catalog via `narrow(image, catalog, ctx) -> set[int]` | [`detect_identify.py`](../src/approaches/market_share/end_to_end/detect_identify.py) |
 | **3. Single-invocation detect + classify** (e.g. fine-tuned Gemini or Agent Platform endpoint returning boxes + `sku_id`s in 1 call) | `market_share/end_to_end/` | `@register` subclass with `task = "end_to_end"` and `detect_and_identify(image, ctx) -> (boxes, sku_ids)` | [`_single_call_end_to_end_template.py`](../src/approaches/market_share/end_to_end/_single_call_end_to_end_template.py) |
-| **4. Custom / non-Gemini model** (e.g. YOLO, DiffusionGemma, Vertex endpoint) | Any task folder | Set `models = ["my-model-id"]` (and `also_calls = [...]` if hybrid), initialize your client/weights in `setup(config, ctx)`, and optionally bill non-Gemini SKUs with `ctx.bill(unit, amount)` | [`rail_profile_cv.py`](../src/approaches/market_share/detection/rail_profile_cv.py), [`embedding_retrieval.py`](../src/approaches/market_share/retrieval/embedding_retrieval.py) |
+| **4. Custom / non-Gemini model** (e.g. YOLO, DiffusionGemma, Vertex endpoint) | Any task folder | Set `models = ["my-model-id"]` (and `also_calls = [...]` if hybrid), initialize your client/weights in `setup(config, ctx)`, and optionally bill non-Gemini SKUs with `ctx.bill(unit, amount)` | [`embedding_retrieval.py`](../src/approaches/market_share/retrieval/embedding_retrieval.py) |
 
 **4-step verification & benchmark checklist:**
 1. **Check registration:** `.venv/bin/shelf-bench list` (confirms use case, task, dataset, and accepted models).
 2. **Smoke test on `val`:** `make run A=my_approach M=gemini-3.5-flash-lite ARGS="--split val --limit 5"` and inspect in `make ui`.
 3. **Add an offline unit test:** Add a test in the matching file under [`tests/`](../tests/) (`test_detection.py`, `test_classification.py`, `test_retrieval.py`, or `test_end_to_end.py`) and run `make lint && make test`.
-4. **Run official Cloud Run benchmark:** `make cloud A=my_approach M="gemini-3.8-flash gemini-3.5-flash-lite"` (builds the container, runs on Cloud Run, prices every SKU from the Cloud Billing Catalog API, pulls `results/<run_id>/`, and ranks it on the leaderboard).
+4. **Run official Cloud Run benchmark:** `make cloud A=my_approach M=gemini-3.5-flash-lite` (builds the container, runs on Cloud Run, prices every SKU from the Cloud Billing Catalog API, pulls `results/<run_id>/`, and ranks it on the leaderboard).
 
 ## How cost per image is calculated
 
@@ -49,20 +49,23 @@ tiers, taxes, negotiated discounts, and instance-hour services such as AlloyDB (
 cost, not per image). The exact invoiced amount is only in the Cloud Billing BigQuery export.
 Local runs (`shelf-bench run`) price Gemini and other APIs only and are for development.
 
-## Priority PayGo
+## Priority and Flex PayGo
 
-Every run can call Gemini on the Standard or the [Priority PayGo](https://cloud.google.com/vertex-ai/generative-ai/docs/priority-paygo)
-tier. Priority costs 1.8x per token and aims for steadier latency. No setup is needed beyond the
-request headers, which `llm.py` sends for `-t priority`. It works on the global endpoint only.
+Every run can call Gemini on the Standard, the [Priority PayGo](https://cloud.google.com/vertex-ai/generative-ai/docs/priority-paygo)
+or the [Flex PayGo](https://cloud.google.com/vertex-ai/generative-ai/docs/flex-paygo) tier.
+Priority costs 1.8x per token and aims for steadier latency; Flex costs 0.5x per token in exchange
+for longer, less predictable latency and more throttling, which suits batch shelf processing
+(nobody waits on a market-share report per photo). No setup is needed beyond the request headers,
+which `llm.py` sends for `-t priority` / `-t flex`. Both work on the global endpoint only.
 
 ```bash
-shelf-bench cloud-run -a single_pass detect_classify -m gemini-3.8-flash gemini-3.5-flash-lite \
-                      -t standard priority          # 8 runs; priority runs end in -priority
+shelf-bench cloud-run -a shelf_detect_retrieve shelf_detect_tiered -m gemini-3.5-flash-lite \
+                      -t standard flex              # 4 runs; flex runs end in -flex
 ```
 
-Vertex can downgrade a priority request to standard when capacity is short. Each call's
+Vertex can downgrade a priority or flex request to standard when capacity is short. Each call's
 `trafficType` is recorded, and downgraded calls are billed at standard rates. The run summary's
-`priority_served` field is the share of calls actually served at priority.
+`priority_served` / `flex_served` field is the share of calls actually served at that tier.
 
 ## Retrieval with a vector database (AlloyDB)
 
@@ -78,7 +81,7 @@ class DetectRetrieveAlloyDB(EmbeddingRetrieval):
     skus = embeddings.SKUS                        # extra Billing Catalog SKUs priced at run start
 
     def setup(self, config, ctx):                 # once per run, before any image
-        self.emb = embeddings.VertexEmbeddings(config)
+        self.emb = embeddings.VertexEmbeddings(config, model=MODEL)
         self.db = AlloyDB(**config["alloydb"])
 
     def detect(self, image, ctx):
@@ -119,6 +122,7 @@ Every run, local or Cloud Run, is **one OpenTelemetry trace** in Cloud Trace
 | `run <run_id>` | approach, model, tier, split / limit / seed, owner, Cloud Run execution + task; at the end F2, recall, precision, p50/p95/p99, cost/img, total tokens, traffic served |
 | `image <image_id>` | gt / pred / tp / fp / fn, F2, latency, cost (net + list + other APIs), tokens, error (span status = ERROR); each `ctx.trace.step` is a span event |
 | `gemini <model>` | `gen_ai.usage.input_tokens` / `output_tokens`, thinking tokens, image vs text vs cached input tokens, traffic type Vertex actually served, tier requested, attempts + one `retry` event per 429/5xx, finish reason, response id / model version, temperature / max tokens / thinking level, image size and JPEG bytes, model latency, cost. Its log entry also has the **prompt and response text** |
+| `embedding <model>` | one per crop / text embedded while scoring an image: model, image or text, dimension, latency, attempts, billed units (`shelf_bench.billed.*`). Reference-photo embeddings in setup are billed but not traced |
 
 Links are stored with the results and shown on the run page:
 
@@ -126,6 +130,9 @@ Links are stored with the results and shown on the run page:
   entry of the run) and, on Cloud Run, `task_logs_url` (the task's full stdout/stderr).
 * each row of `images.jsonl` has `telemetry` with that image's span (`span_id`, `trace_url`,
   `logs_url`).
+* each call recorded on a step in `images.jsonl` carries its `span_id`, so the run page's
+  **Load Cloud Trace + Logging into the steps** ([audit.py](../src/utils/audit.py)) puts every
+  span and log entry on the exact step it belongs to (older runs: matched by timestamp).
 
 Handy Logs Explorer queries: `logName="projects/unilever-shelf-understanding/logs/shelf-bench"
 jsonPayload.event="gemini_call" jsonPayload."shelf_bench.attempts">1` (retried calls),

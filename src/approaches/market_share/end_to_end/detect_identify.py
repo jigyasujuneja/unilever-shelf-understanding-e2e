@@ -4,12 +4,15 @@ Any detection approach (in ``market_share/detection/``) and one or more classifi
 retrieval approaches (in ``market_share/classification/`` or ``market_share/retrieval/``) can be
 composed into a registered ``end_to_end`` approach with :func:`approaches.base.compose`:
 
-* ``detect -> retrieve`` (e.g. ``detect_retrieve``, ``shelf_detect_retrieve``)
-* ``detect -> rerank`` / ``detect -> tiered`` (e.g. ``detect_rerank``, ``detect_tiered``,
-  ``shelf_detect_rerank``, ``shelf_detect_tiered``)
-* ``detect -> classify`` (e.g. ``compose("detect_classify_e2e", SinglePassDedup, GeminiClassify)``)
+* ``detect -> retrieve`` (``detect_retrieve``, ``shelf_detect_retrieve``)
+* ``detect -> tiered`` (``detect_tiered``, ``shelf_detect_tiered``): embedding answer, Gemini only
+  for the crops the embedding is unsure about
+* ``detect -> classify`` (e.g. ``compose("detect_classify_e2e", SinglePassDedup, HierarchyClassify)``)
 * ``detect -> classify -> retrieve`` (coarse classifier narrows the catalog via ``narrow()``,
   then retrieval ranks only the matching reference photos)
+
+Always sending every crop to Gemini (``detect_rerank`` / ``shelf_detect_rerank``) cost more than
+the tiered pipelines for no better F2 and was removed.
 
 For a single-invocation model that performs both detection and SKU classification in one call,
 override ``Approach.detect_and_identify(image, ctx)`` instead — see
@@ -23,10 +26,10 @@ from PIL import Image
 from approaches.base import BOX_LIST_SCHEMA, Approach, Box, Context, compose, to_pixels
 from approaches.market_share.detection.single_pass_dedup import SinglePassDedup
 from approaches.market_share.retrieval.embedding_retrieval import MODEL, EmbeddingRetrieval
-from approaches.market_share.retrieval.gemini_rerank import GeminiRerank, K
 from approaches.market_share.retrieval.tiered_hybrid import (
     MIN_COSINE,
     MIN_MARGIN,
+    K,
     TieredHybrid,
 )
 
@@ -72,19 +75,6 @@ DetectRetrieve = compose(
     ],
 )
 
-DetectRerank = compose(
-    "detect_rerank",
-    GeminiBoxDetector,
-    GeminiRerank,
-    dataset="rpc",
-    architecture=f"Gemini detects boxes -> embedding shortlist (top {K}) -> Gemini picks",
-    steps=[
-        "Setup (once per run, reported apart from cost/img): embed every reference photo",
-        "One Gemini call on the photo returns every product box",
-        f"Per box: embedding shortlist of {K} products, then one Gemini call picks one (or none)",
-    ],
-)
-
 DetectTiered = compose(
     "detect_tiered",
     GeminiBoxDetector,
@@ -113,19 +103,6 @@ ShelfDetectRetrieve = compose(
         "Setup (once per run, reported apart from cost/img): embed every reference crop",
         "single_pass_dedup: one Gemini call + container, NMS and depth-ghost filters",
         "Embed each box crop; the product of the most similar reference crop wins",
-    ],
-)
-
-ShelfDetectRerank = compose(
-    "shelf_detect_rerank",
-    SinglePassDedup,
-    GeminiRerank,
-    dataset="shelves",
-    architecture=f"single_pass_dedup boxes -> embedding shortlist (top {K}) -> Gemini picks",
-    steps=[
-        "Setup (once per run, reported apart from cost/img): embed every reference crop",
-        "single_pass_dedup: one Gemini call + container, NMS and depth-ghost filters",
-        f"Per box: embedding shortlist of {K} products, then one Gemini call picks one (or none)",
     ],
 )
 

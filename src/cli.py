@@ -3,10 +3,10 @@
     shelf-bench bootstrap                        # new GCP project: APIs, bucket, registry, data
     shelf-bench download                         # fetch + extract SKU-110K (~12 GB)
     shelf-bench list                             # approaches and models
-    shelf-bench run -a detect_classify -m gemini-3.8-flash
-    shelf-bench run -a single_pass detect_classify -m gemini-3.8-flash gemini-3.5-flash-lite
-    shelf-bench run -a gemini_classify embedding_retrieval -m gemini-3.8-flash multimodalembedding@001
-    shelf-bench cloud-run -a single_pass -m gemini-3.8-flash -t standard priority
+    shelf-bench run -a single_pass_dedup -m gemini-3.5-flash-lite
+    shelf-bench run -a single_pass_dedup tiled_dedup -m gemini-3.5-flash-lite gemini-3.8-flash
+    shelf-bench run -a hierarchy_classify embedding_retrieval -m gemini-3.5-flash-lite gemini-embedding-2-preview
+    shelf-bench cloud-run -a shelf_detect_retrieve -m gemini-3.5-flash-lite -t standard flex
     shelf-bench leaderboard
     shelf-bench serve                            # leaderboard UI on http://localhost:8080
     shelf-bench serve-cloud                      # the same UI as a private Cloud Run service
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("-a", "--approach", nargs="+", required=True)
     s.add_argument("-m", "--model", nargs="+", required=True)
     s.add_argument("-t", "--tier", nargs="+", choices=TIERS, default=d.get("tier", ["standard"]),
-                   help="Gemini PayGo tier(s): standard and/or priority")
+                   help="Gemini PayGo tier(s): standard, priority (1.8x) and/or flex (0.5x)")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("-a", "--approach", nargs="+", required=True)
     s.add_argument("-m", "--model", nargs="+", required=True)
     s.add_argument("-t", "--tier", nargs="+", choices=TIERS, default=d.get("tier", ["standard"]),
-                   help="Gemini PayGo tier(s): standard and/or priority")
+                   help="Gemini PayGo tier(s): standard, priority (1.8x) and/or flex (0.5x)")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
@@ -163,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def print_leaderboard(rows: list[dict]) -> None:
     if not rows:
-        print("No runs yet. Try: shelf-bench run -a single_pass -m gemini-3.8-flash")
+        print("No runs yet. Try: shelf-bench run -a single_pass_dedup -m gemini-3.5-flash-lite")
         return
     hdr = f"{'#':>3}  {'run id':<56} {'owner':<10} {'acc':>5} {'rec':>5} {'F2':>5} {'p95':>6} {'p99':>6} {'₹/img':>8}"
     use_case = task = None

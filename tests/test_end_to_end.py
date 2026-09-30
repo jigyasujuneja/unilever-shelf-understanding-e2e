@@ -27,7 +27,13 @@ def test_registry_has_builtin_approaches():
     cfg = tomllib.loads(Path("pyproject.toml").read_text())
     assert cfg["tool"]["setuptools"]["packages"]["find"] == {"where": ["src"]}
     names = set(approaches.all_approaches())
-    assert {"single_pass", "detect_classify", "detect_retrieve", "shelf_detect_tiered"} <= names
+    assert names == {
+        "single_pass_dedup", "tiled_dedup",                               # detection
+        "hierarchy_classify", "embedding_text_match",                     # classification
+        "embedding_retrieval", "tiered_hybrid",                           # retrieval
+        "detect_retrieve", "detect_tiered",                               # end-to-end (RPC)
+        "shelf_detect_retrieve", "shelf_detect_tiered",                   # end-to-end (shelves)
+    }
     for ap in approaches.all_approaches().values():
         assert ap.architecture and ap.steps
 
@@ -41,7 +47,7 @@ def test_market_share_and_merchandising_are_ranked_separately(fake_root, tmp_pat
     from approaches.base import Approach, register
 
     s = runner.run(
-        "single_pass",
+        "single_pass_dedup",
         "gemini-t",
         "test",
         1,
@@ -101,6 +107,8 @@ def test_end_to_end_needs_the_right_box_and_the_right_product(rpc_root, colour_e
     )
     # Boxes 1-2 right; box 3 is on a real product but names the wrong one (FP + FN); box 4 FP.
     assert (s["tp"], s["fp"], s["fn"]) == (2, 2, 1) and s["found_recall"] == 1.0
+    assert colour_embeddings == ["gemini-embedding-2-preview"]
+    assert s["architecture"].endswith("[gemini-t + gemini-embedding-2-preview]")
     _, rows = runner.load_run(s["run_id"], tmp_path)
     labels = rows[0]["labels"]
     assert labels[2]["gt"]["sku_id"] == 3 and labels[2]["correct"]["product"] is False

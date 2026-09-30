@@ -46,7 +46,7 @@ RPC_GT = [
 
 def fake_sheet(models, promotions=()):
     table = {}
-    for tier, mult in (("standard", 1.0), ("priority", 1.8)):
+    for tier, mult in (("standard", 1.0), ("priority", 1.8), ("flex", 0.5)):
         for kind, usd in (
             ("text_input", 0.3),
             ("image_input", 0.3),
@@ -204,20 +204,26 @@ def rpc_root(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture
 def colour_embeddings(monkeypatch):
-    """Fake multimodal embedding: the image's mean colour. Each call bills one image."""
+    """Fake image embedding: the image's mean colour. Each call bills one image. Returns the list
+    of embedding models the approach created a client for."""
     from PIL import ImageStat
 
     from approaches.market_share.retrieval import embedding_retrieval
+    from utils.embeddings import MODELS
+
+    created: list[str] = []
 
     class FakeEmbeddings:
         def __init__(self, config, model):
-            assert model == "multimodalembedding@001"
+            assert model in MODELS
+            created.append(model)
 
         def image(self, image, ctx=None):
             ctx.bill("embedding_image", 1)
             return ImageStat.Stat(image).mean
 
     monkeypatch.setattr(embedding_retrieval, "VertexEmbeddings", FakeEmbeddings)
+    return created
 
 
 __all__ = [

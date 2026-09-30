@@ -21,7 +21,7 @@ sequenceDiagram
     T->>BILL: fetch live prices (Gemini, embeddings, Cloud Run, GCS, USD to INR)
     T->>GCS: read annotations + seeded sample of test images
     loop each image (4 workers)
-      T->>GEM: generateContent (single_pass: 1 call / detect_classify: detect then classify)
+      T->>GEM: generateContent (single_pass_dedup: 1 call / tiled_dedup: 1 per half)
       GEM-->>T: boxes + labels, usage_metadata (tokens, traffic type)
       opt retrieval approach (its own embedder, DB and SQL)
         T->>RET: embed crop (utils/embeddings), then its SQL query (utils/alloydb)

@@ -1,6 +1,6 @@
 """Tests for ``src/approaches/market_share/classification/`` (the Classification tab).
 
-Copy ``test_gemini_classify_scores_product_brand_and_category`` when adding a new classification
+Copy ``test_classification_scores_product_brand_and_category`` when adding a new classification
 approach.
 """
 
@@ -13,15 +13,17 @@ import runner
 from utils.llm import LLMResult
 
 
-def test_gemini_classify_scores_product_brand_and_category(products_root, tmp_path):
+def test_classification_scores_product_brand_and_category(products_root, tmp_path):
     answers = {61: 1, 62: 1, 63: -1}  # p1 right; p2 -> sister size (same brand); p3 not listed
 
     def llm(image, prompt, **kw):
+        if "Which of these brands" in prompt:  # brand unread: call 2 sees the whole catalog
+            return LLMResult({"brand": "not listed", "size": ""}, usage(), 0.01)
         assert "2: Knorr | Knorr Cubes 60g | cooking" in prompt and kw["schema"]
         return LLMResult({"sku_id": answers[image.width]}, usage(), 0.01)
 
     s = runner.run(
-        "gemini_classify",
+        "hierarchy_classify",
         "gemini-t",
         "test",
         0,

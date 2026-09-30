@@ -1,6 +1,6 @@
 """Tests for ``src/approaches/market_share/detection/`` (the Detection tab).
 
-Copy ``test_run_single_pass_end_to_end`` when adding a new detection approach.
+Copy ``test_run_single_pass_dedup_end_to_end`` when adding a new detection approach.
 """
 
 from __future__ import annotations
@@ -8,16 +8,15 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import GT, PER_M, H, OracleLLM, W, board_inr, usage
+from conftest import PER_M, H, OracleLLM, W, board_inr, usage
 from PIL import Image
 
 import runner
-from utils import metrics
 from utils.llm import LLMResult
 
 
-def test_single_pass_parses_labelled_boxes():
-    from approaches.market_share.detection.single_pass import labelled_boxes
+def test_single_pass_dedup_parses_labelled_boxes():
+    from approaches.market_share.detection.single_pass_dedup import labelled_boxes
 
     raw = [
         {"box_2d": [0, 0, 500, 500], "label": "food"},
@@ -29,10 +28,10 @@ def test_single_pass_parses_labelled_boxes():
     assert labels == ["food", "not_a_product", "other_product"]
 
 
-def test_run_single_pass_end_to_end(fake_root, tmp_path):
+def test_run_single_pass_dedup_end_to_end(fake_root, tmp_path):
     out = tmp_path / "results"
     s = runner.run(
-        "single_pass",
+        "single_pass_dedup",
         "gemini-fake",
         "test",
         0,
@@ -78,64 +77,38 @@ def test_run_single_pass_end_to_end(fake_root, tmp_path):
     assert [st["name"] for st in images[0]["steps"]][-1] == "Score vs ground truth"
 
 
-def test_detect_classify_drops_non_products(fake_root, tmp_path):
-    junk = [int(260 / H * 1000), int(0 / W * 1000), int(299 / H * 1000), int(40 / W * 1000)]
+def test_flex_tier_runs_are_labelled_and_billed_at_flex(fake_root, tmp_path):
+    from utils.llm import TIER_HEADERS
 
-    class TwoPass(OracleLLM):
+    assert TIER_HEADERS["flex"] == {
+        "X-Vertex-AI-LLM-Request-Type": "shared",
+        "X-Vertex-AI-LLM-Shared-Request-Type": "flex",
+    }
+
+    class FlexLLM(OracleLLM):  # Vertex reports ON_DEMAND_FLEX traffic -> flex token buckets
         def __call__(self, image, prompt, **kw):
-            with self.lock:
-                self.calls += 1
-            if "contact sheet" in prompt:  # pass 2: box 4 (the junk box) is not a product
-                return LLMResult(
-                    [{"id": i, "label": "not_a_product" if i == 4 else "food"} for i in range(5)],
-                    usage(500, 50),
-                    0.01,
-                )
-            boxes = [
-                [int(y1 / H * 1000), int(x1 / W * 1000), int(y2 / H * 1000), int(x2 / W * 1000)]
-                for x1, y1, x2, y2 in GT
-            ]
-            return LLMResult(boxes + [junk], usage(), 0.01)
+            res = super().__call__(image, prompt, **kw)
+            res.usage.traffic = {"flex": 1}
+            res.usage.buckets = {"flex/image_input": 1000, "flex/output": 250}
+            return res
 
-    llm = TwoPass()
     s = runner.run(
-        "detect_classify",
+        "single_pass_dedup",
         "gemini-fake",
-        "val",
-        1,
+        "test",
+        0,
         0,
         1,
         "t",
         results_dir=tmp_path,
         data_root=fake_root,
-        llm=llm,
+        llm=FlexLLM(),
         log=lambda *_: None,
+        tier="flex",
     )
-    assert llm.calls == 2 and s["fp"] == 0 and s["recall"] == 1.0
-    _, images = runner.load_run(s["run_id"], tmp_path)
-    names = [st["name"] for st in images[0]["steps"]]
-    assert names == [
-        "Load image",
-        "Pass 1: detection",
-        "Pass 2: classification",
-        "Score vs ground truth",
-    ]
-    assert len(images[0]["steps"][1]["boxes"]) == 5 and len(images[0]["steps"][2]["boxes"]) == 4
-
-
-def test_rail_profile_cv_finds_facings_between_shelf_rails():
-    from approaches.market_share.detection.rail_profile_cv import rail_profile_boxes
-
-    im = Image.new("RGB", (600, 400), (235, 235, 235))
-    colours = ["red", "blue", "yellow", "green", "purple", "orange"]
-    for y0 in (20, 210):  # two shelves: a dark rail above each row of 6 coloured packs
-        im.paste((30, 30, 30), (0, y0, 600, y0 + 12))
-        for k, c in enumerate(colours):
-            im.paste(c, (10 + k * 98, y0 + 25, 95 + k * 98, y0 + 180))
-    boxes, bands = rail_profile_boxes(im)
-    assert len(bands) >= 2 and 6 <= len(boxes) <= 24
-    packs = [(10 + k * 98, y0 + 25, 95 + k * 98, y0 + 180) for y0 in (20, 210) for k in range(6)]
-    assert sum(any(metrics.iou(b, p) > 0.3 for b in boxes) for p in packs) >= 8
+    assert s["run_id"].endswith("-flex") and s["architecture"].endswith(", flex]")
+    assert s["flex_served"] == 1.0 and s["priority_served"] is None
+    assert s["cost_per_image_usd"] == pytest.approx(0.5 * (1000 * 0.3 + 250 * 2.5) * PER_M)
 
 
 def test_single_pass_dedup_drops_containers_duplicates_and_depth_ghosts():
@@ -151,6 +124,19 @@ def test_single_pass_dedup_drops_containers_duplicates_and_depth_ghosts():
     assert group not in a and bottle in a
     assert double not in b and ghost in b
     assert set(kept) == {item, other, bottle}
+
+
+def test_dedup_traces_only_filters_that_removed_something():
+    from approaches.base import Context, Trace
+    from approaches.market_share.detection.single_pass_dedup import dedup_traced
+
+    ctx = Context(model="m", llm=None, trace=Trace())
+    item, ghost = (100, 100, 200, 300), (130, 110, 190, 280)
+    assert dedup_traced([item, ghost], ctx) == [item]
+    assert [s["name"] for s in ctx.trace.steps] == ["Depth ghosts removed"]
+    ctx = Context(model="m", llm=None, trace=Trace())
+    dedup_traced([item], ctx)
+    assert ctx.trace.steps == []
 
 
 def test_tiled_dedup_merges_products_cut_by_the_seam():
@@ -181,7 +167,7 @@ def test_failed_image_counts_as_zero_detections(fake_root, tmp_path):
         raise RuntimeError("boom")
 
     s = runner.run(
-        "single_pass",
+        "single_pass_dedup",
         "gemini-t",
         "test",
         0,

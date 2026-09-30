@@ -13,7 +13,6 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 from conftest import OracleLLM, usage
-from PIL import Image
 
 import runner
 from utils.llm import LLMResult
@@ -56,16 +55,20 @@ def test_embedding_retrieval_identifies_each_ground_truth_crop(rpc_root, colour_
         httpd.shutdown()
 
 
-def test_gemini_rerank_takes_gemini_choice_and_none_means_none(rpc_root, colour_embeddings, tmp_path):
-    from approaches.market_share.retrieval.gemini_rerank import CELL
+def test_tiered_hybrid_escalation_takes_gemini_choice_and_none_means_none(
+    rpc_root, colour_embeddings, tmp_path, monkeypatch
+):
+    from approaches.market_share.retrieval import tiered_hybrid
+    from approaches.market_share.retrieval.tiered_hybrid import CELL
 
     def llm(sheet, prompt, **kw):  # picks candidate 1 for the red crop, "none of these" otherwise
         assert "Panel Q" in prompt and kw["schema"]
         r, g, b = sheet.getpixel((CELL // 2, 30 + CELL // 2))
         return LLMResult({"choice": 1 if r > 200 and g < 100 else 0}, usage(), 0.01)
 
+    monkeypatch.setattr(tiered_hybrid, "MIN_MARGIN", 2.0)  # never sure: every crop escalates
     s = runner.run(
-        "gemini_rerank",
+        "tiered_hybrid",
         "gemini-t",
         "test",
         0,
@@ -77,9 +80,23 @@ def test_gemini_rerank_takes_gemini_choice_and_none_means_none(rpc_root, colour_
         log=lambda *_: None,
     )
     assert s["accuracy"] == pytest.approx(1 / 3, abs=1e-4) and s["precision"] == 1.0
+    # Thresholds were tuned for multimodalembedding@001, so tiered keeps it as its shortlist.
     assert s["architecture"].endswith("[gemini-t + multimodalembedding@001]")
+    assert colour_embeddings == ["multimodalembedding@001"]
     _, rows = runner.load_run(s["run_id"], tmp_path)
     assert [lab["pred"] and lab["pred"]["sku_id"] for lab in rows[0]["labels"]] == [1, None, None]
+    assert rows[0]["billed"] == {"embedding_image": 3}  # each escalated crop embedded once
+    # Step details (UI (i) icon): each crop's step carries its own call, bill and shortlist,
+    # even though crops run in worker threads.
+    tiers = [st for st in rows[0]["steps"] if st["name"] == "Gemini tier"]
+    assert len(tiers) == 3
+    for st in tiers:
+        assert len(st["calls"]) == 1 and st["billed"] == {"embedding_image": 1}
+        assert "Panel Q" in st["calls"][0]["prompt"] and st["calls"][0]["input_tokens"] > 0
+        assert st["info"]["shortlist"][0]["cosine"] >= st["info"]["shortlist"][-1]["cosine"]
+    assert sorted(str(st["info"]["answer"]) for st in tiers) == ["1", "None", "None"]
+    identify = next(st for st in rows[0]["steps"] if st["name"] == "Identify each box")
+    assert "calls" not in identify and "billed" not in identify  # nothing left unclaimed
 
 
 def test_tiered_hybrid_asks_gemini_only_when_the_embedding_is_unsure(
@@ -115,32 +132,5 @@ def test_tiered_hybrid_asks_gemini_only_when_the_embedding_is_unsure(
         log=lambda *_: None,
     )
     assert llm.calls == 3 and s["accuracy"] == 0.0
-
-
-def test_sister_shade_colour_term_breaks_near_ties():
-    from approaches.market_share.retrieval.sister_shade_rerank import (
-        colour_score,
-        delta_e,
-        mean_lab,
-    )
-
-    red = mean_lab(Image.new("RGB", (10, 10), "red"))
-    dark_red = mean_lab(Image.new("RGB", (10, 10), (120, 0, 0)))
-    assert delta_e(red, red) == 0 and delta_e(red, dark_red) > 20
-    # Slightly lower cosine but the same colour beats slightly higher cosine and another shade.
-    assert colour_score(0.80, delta_e(red, red)) > colour_score(0.81, delta_e(red, dark_red))
-
-
-def test_sister_shade_rerank_runs_on_rpc(rpc_root, colour_embeddings, tmp_path):
-    s = runner.run(
-        "sister_shade_rerank",
-        "multimodalembedding@001",
-        "test",
-        0,
-        0,
-        1,
-        "t",
-        results_dir=tmp_path,
-        log=lambda *_: None,
-    )
-    assert s["task"] == "retrieval" and s["accuracy"] == pytest.approx(2 / 3, abs=1e-4)
+    _, rows = runner.load_run(s["run_id"], tmp_path)
+    assert rows[0]["billed"] == {"embedding_image": 3}

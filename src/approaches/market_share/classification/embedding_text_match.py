@@ -55,5 +55,7 @@ class EmbeddingTextMatch(Approach):
         ranked = sorted(((sum(a * b for a, b in zip(q, v, strict=True)), i) for i, v in pool),
                         reverse=True)
         top = ", ".join(f"{self.catalog[i]['product']} {s:.3f}" for s, i in ranked[:3])
-        ctx.trace.step("Nearest catalog products", f"top 3 by cosine: {top}")
+        ctx.trace.step("Nearest catalog products", f"top 3 by cosine: {top}", info={"shortlist": [
+            {"sku_id": i, "product": self.catalog[i]["product"], "cosine": round(s, 4)}
+            for s, i in ranked[:10]]})
         return ranked[0][1]

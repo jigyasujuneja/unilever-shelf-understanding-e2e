@@ -4,6 +4,7 @@
     GET /api/leaderboard                   ranked runs
     GET /api/runs/<run_id>                 run summary + per-image metrics
     GET /api/runs/<run_id>/images/<image>  one image: predictions, ground truth, step trace
+    GET /api/runs/<run_id>/images/<image>/audit  its Cloud Trace spans + Cloud Logging entries
     GET /img/<split>/<image>               downscaled JPEG from SKU-110K
     GET /img/products/<image>              downscaled JPEG from the labelled products set
     GET /img/rpc/<image>                   downscaled RPC checkout photo
@@ -17,7 +18,7 @@ import json
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from PIL import Image
 
@@ -111,12 +112,35 @@ class Handler(BaseHTTPRequestHandler):
                 gt = _samples(name, summary["split"], str(self.data_root)).get(parts[4])
                 return self._json({**row, "task": summary.get("task", "detection"),
                                    "split": summary["split"] if name == "sku110k" else name,
+                                   "usd_to_inr": summary.get("usd_to_inr")
+                                   or summary.get("pricing", {}).get("usd_to_inr"),
                                    "gt": [list(b) for b in gt.boxes] if gt else []})
             if parts[0] == "img" and len(parts) == 3:
                 return self._send(_jpeg(parts[1], parts[2], str(self.data_root)), "image/jpeg")
+            if parts[:2] == ["api", "runs"] and len(parts) == 6 and parts[3] == "images" and parts[5] == "audit":
+                return self._audit(parts[2], parts[4])
             self._json({"error": "not found"}, 404)
         except FileNotFoundError as e:
             self._json({"error": f"not found: {e}"}, 404)
+
+    def _audit(self, run_id: str, image_id: str) -> None:
+        """Cloud Trace + Cloud Logging for one image (utils/audit.py), fetched on demand."""
+        from utils import audit
+
+        _, images = runner.load_run(run_id, self.results_dir)
+        row = next((r for r in images if r["image_id"] == image_id), None)
+        if row is None:
+            raise FileNotFoundError(image_id)
+        t = row.get("telemetry") or {}
+        project = parse_qs(urlparse(t.get("trace_url", "")).query).get("project", [None])[0]
+        if not (t.get("trace_id") and t.get("span_id") and project):
+            return self._json({"error": "this run was made with telemetry off: nothing in GCP"}, 404)
+        try:
+            return self._json(audit.image_audit(project, t["trace_id"], t["span_id"]))
+        except FileNotFoundError:
+            raise
+        except Exception as e:  # auth / permission / API errors: show them in the UI
+            return self._json({"error": f"{type(e).__name__}: {e}"[:500]}, 502)
 
 
 def serve(host: str = "127.0.0.1", port: int = 8080, results_dir: Path = runner.RESULTS_DIR,

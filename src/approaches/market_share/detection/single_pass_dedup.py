@@ -1,8 +1,9 @@
-"""``single_pass`` plus geometric clean-up of the boxes Gemini returns (Detection tab).
+"""One Gemini call detects and classifies every product, then geometric clean-up (Detection tab).
 
-Ported from the post-filters in Jigyasu's detection stages (``hul_domain`` container
-suppression, ``shelf_e2e.geometry`` depth-ghost suppression). Same single Gemini call as
-``single_pass``, then three rules that remove duplicate boxes without another call:
+One call on the whole (downscaled) shelf returns every box with a coarse class; boxes labelled
+``not_a_product`` are dropped. Then the post-filters ported from Jigyasu's detection stages
+(``hul_domain`` container suppression, ``shelf_e2e.geometry`` depth-ghost suppression) remove
+duplicate boxes without another call:
 
 1. Container boxes: a box that has a much smaller box (< 65% of its area) inside it is usually a
    whole group or shelf section, so it is dropped, unless it is tall and narrow (w/h <= 0.72,
@@ -10,15 +11,62 @@ suppression, ``shelf_e2e.geometry`` depth-ghost suppression). Same single Gemini
 2. Greedy NMS at IoU 0.58.
 3. Depth ghosts: a smaller box at about the same height and mostly the same columns as a
    bigger box nearer the front (the product behind it, or a double detection) is dropped.
+
+The plain call without these filters (the former ``single_pass`` approach) scored lower F2 at the
+same cost, so only this version is kept.
 """
 
 from __future__ import annotations
 
 from PIL import Image
 
-from approaches.base import NOT_PRODUCT, Box, Context, label_counts, register
-from approaches.market_share.detection.single_pass import PROMPT, SCHEMA, SinglePass, labelled_boxes
+from approaches.base import (
+    CATEGORIES,
+    NOT_PRODUCT,
+    Approach,
+    Box,
+    Context,
+    label_counts,
+    register,
+    to_pixels,
+)
 from utils import metrics
+
+SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "box_2d": {"type": "array", "items": {"type": "integer"}},
+            "label": {"type": "string", "enum": CATEGORIES},
+        },
+        "required": ["box_2d", "label"],
+    },
+}
+
+PROMPT = (
+    "Detect every individual retail product visible on the shelves in this image - every "
+    "box, bottle, can, bag and package, including small, partially visible and edge-of-frame "
+    "items. Each physical item gets its own tight box. Do not merge adjacent identical products. "
+    f"Classify each one as one of: {', '.join(CATEGORIES)} (not_a_product = price tag, "
+    "shelf edge or other non-product). "
+    'Return ONLY a JSON array like [{"box_2d": [ymin, xmin, ymax, xmax], "label": "food"}] '
+    "with boxes normalized to 0-1000."
+)
+
+
+def labelled_boxes(raw, w: float, h: float) -> tuple[list[Box], list[str]]:
+    """Gemini's [{box_2d, label}] -> pixel boxes + labels (missing labels -> other_product)."""
+    if isinstance(raw, dict):
+        raw = next((v for v in raw.values() if isinstance(v, list)), [])
+    boxes, labels = [], []
+    for item in raw or []:
+        b = to_pixels([item], 0, 0, w, h)
+        if b:
+            boxes += b
+            lab = item.get("label") if isinstance(item, dict) else None
+            labels.append(lab if lab in CATEGORIES else "other_product")
+    return boxes, labels
 
 CONTAINED_AREA = 0.65  # a box inside another is "much smaller" below this area ratio
 CONTAINED_SLACK = 8.0  # px a contained box may stick out of its container
@@ -69,8 +117,22 @@ def dedup(boxes: list[Box]) -> tuple[list[Box], list[Box], list[Box]]:
     return a, b, drop_depth_ghosts(b)
 
 
+def dedup_traced(boxes: list[Box], ctx: Context) -> list[Box]:
+    """``dedup`` + one trace step per filter that removed something (no-op filters stay hidden)."""
+    a, b, kept = dedup(boxes)
+    for name, before, after in (("Container boxes removed", boxes, a),
+                                (f"Duplicates removed (NMS at IoU {NMS_IOU})", a, b),
+                                ("Depth ghosts removed", b, kept)):
+        if len(after) < len(before):
+            left = {tuple(x) for x in after}
+            gone = [x for x in before if tuple(x) not in left]
+            ctx.trace.step(name, f"{len(before) - len(after)} removed -> {len(after)}", boxes=after,
+                           info={"removed": [[round(v, 1) for v in x] for x in gone]})
+    return kept
+
+
 @register
-class SinglePassDedup(SinglePass):
+class SinglePassDedup(Approach):
     name = "single_pass_dedup"
     architecture = "Gemini, one call detects every product -> geometric duplicate removal"
     steps = [
@@ -88,9 +150,4 @@ class SinglePassDedup(SinglePass):
         ctx.trace.step("Gemini detection + classification",
                        f"1 call, {res.seconds:.1f}s -> {len(raw)} products "
                        f"({label_counts(labels) or 'none'})", boxes=raw)
-        a, b, kept = dedup(raw)
-        ctx.trace.step("Container boxes removed", f"{len(raw) - len(a)} removed", boxes=a)
-        ctx.trace.step(f"NMS at IoU {NMS_IOU}", f"{len(a) - len(b)} removed", boxes=b)
-        ctx.trace.step("Depth ghosts removed", f"{len(b) - len(kept)} removed -> {len(kept)}",
-                       boxes=kept)
-        return kept
+        return dedup_traced(raw, ctx)

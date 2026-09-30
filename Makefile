@@ -2,11 +2,10 @@
 PY := .venv/bin/python
 SB := .venv/bin/shelf-bench
 # Every approach runs only the models it calls; other combinations are skipped.
-A ?= single_pass detect_classify gemini_classify embedding_text_match embedding_retrieval \
-     gemini_rerank detect_retrieve detect_rerank \
-     rail_profile_cv single_pass_dedup tiled_dedup hierarchy_classify tiered_hybrid detect_tiered sister_shade_rerank \
-     shelf_detect_retrieve shelf_detect_rerank shelf_detect_tiered
-M ?= gemini-3.8-flash gemini-3.5-flash-lite multimodalembedding@001 gemini-embedding-2-preview classical-cv
+A ?= single_pass_dedup tiled_dedup hierarchy_classify embedding_text_match embedding_retrieval \
+     tiered_hybrid detect_retrieve detect_tiered shelf_detect_retrieve shelf_detect_tiered
+# gemini-3.8-flash and multimodalembedding@001 lost to these on every tab (F2 per ₹); add them with M=.
+M ?= gemini-3.5-flash-lite gemini-embedding-2-preview
 
 .PHONY: help setup auth bootstrap test lint run cloud pull ui ui-cloud ui-proxy data rpc docs clean
 

@@ -47,9 +47,27 @@ BOX_LIST_SCHEMA = {
 }
 
 
+MAX_STEP_CALLS = 100   # model calls kept per step in images.jsonl (the rest are only counted)
+MAX_STEP_TEXT = 4_000  # chars of prompt / response kept per call (full text is in Cloud Logging)
+
+
+def _clip(text: str | None) -> str | None:
+    if text is None or len(text) <= MAX_STEP_TEXT:
+        return text
+    return text[:MAX_STEP_TEXT] + f"... [{len(text) - MAX_STEP_TEXT} more chars]"
+
+
 @dataclass
 class Trace:
-    """What the UI shows as 'step by step'. Keep steps few and meaningful."""
+    """What the UI shows as 'step by step'. Keep steps few and meaningful.
+
+    Each step also carries what happened since the previous one - the model calls
+    (``calls``: tokens, latency, cost, prompt, response), non-Gemini billed units (``billed``)
+    and whatever structured ``info`` the approach passes - shown behind the step's (i) icon.
+    Pending calls are kept per thread: a step recorded in a worker thread (e.g. per crop in
+    ``identify_boxes``) claims that thread's calls; a step in the thread that owns the trace
+    also sweeps up whatever the workers left unclaimed (e.g. into "Identify each box").
+    """
 
     steps: list[dict] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
@@ -57,16 +75,36 @@ class Trace:
     span: Any = None  # the image's OpenTelemetry span; each step is also an event on it
     _t0: float = field(default_factory=time.perf_counter)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _owner: int = field(default_factory=threading.get_ident)
+    _calls: dict[int, list[dict]] = field(default_factory=dict)          # thread -> since last step
+    _billed: dict[int, dict[str, float]] = field(default_factory=dict)   # thread -> since last step
 
     def step(self, name: str, detail: str = "", boxes: list[Box] | None = None,
-             regions: list[Box] | None = None) -> None:
-        """Record a step. ``boxes`` are detections to overlay; ``regions`` e.g. tiles."""
+             regions: list[Box] | None = None, info: dict | None = None) -> None:
+        """Record a step. ``boxes`` are detections to overlay; ``regions`` e.g. tiles;
+        ``info`` any JSON-able details worth inspecting (candidates, scores, removed boxes)."""
         now = time.perf_counter()
         s: dict[str, Any] = {"name": name, "detail": detail, "ms": round((now - self._t0) * 1000)}
         if boxes is not None:
             s["boxes"] = [[round(v, 1) for v in b] for b in boxes]
         if regions is not None:
             s["regions"] = [[round(v, 1) for v in r] for r in regions]
+        if info:
+            s["info"] = info
+        me = threading.get_ident()
+        with self._lock:
+            threads = list(self._calls.keys() | self._billed.keys()) if me == self._owner else [me]
+            calls = [c for t in threads for c in self._calls.pop(t, [])]
+            billed: dict[str, float] = {}
+            for t in threads:
+                for unit, n in self._billed.pop(t, {}).items():
+                    billed[unit] = billed.get(unit, 0) + n
+        if calls:
+            s["calls"] = calls[:MAX_STEP_CALLS]
+            if len(calls) > MAX_STEP_CALLS:
+                s["calls_omitted"] = len(calls) - MAX_STEP_CALLS
+        if billed:
+            s["billed"] = billed
         self.steps.append(s)
         self._t0 = now
         if self.span is not None:
@@ -74,6 +112,16 @@ class Trace:
                 "detail": detail, "ms": s["ms"],
                 "boxes": len(boxes) if boxes is not None else None,
                 "regions": len(regions) if regions is not None else None}))
+
+    def record_call(self, call: dict) -> None:
+        with self._lock:
+            self._calls.setdefault(threading.get_ident(), []).append(call)
+
+    def record_billed(self, unit: str, amount: float) -> None:
+        with self._lock:
+            self.billed[unit] = self.billed.get(unit, 0) + amount
+            pending = self._billed.setdefault(threading.get_ident(), {})
+            pending[unit] = pending.get(unit, 0) + amount
 
 
 @dataclass
@@ -108,10 +156,15 @@ class Context:
                 res = self.llm(image, prompt, **kw)
             except Exception as e:
                 telemetry.fail(span, e)
+                err = f"{type(e).__name__}: {e}"[:2000]
                 telemetry.log(span, "gemini_call_failed",
-                              {**req, "error": f"{type(e).__name__}: {e}"[:2000],
+                              {**req, "error": err,
                                "seconds": round(time.perf_counter() - t0, 3),
                                "prompt": telemetry.truncate(prompt)}, level=logging.ERROR)
+                self.trace.record_call({"span_id": telemetry.ids(span)[1], "model": self.model, "error": err,
+                                        "seconds": round(time.perf_counter() - t0, 3),
+                                        "image": [image.width, image.height],
+                                        "prompt": _clip(prompt)})
                 raise
             with self.trace._lock:
                 self.trace.usage = self.trace.usage + res.usage
@@ -139,6 +192,31 @@ class Context:
                 **{k: v for k, v in fields.items() if v is not None},
                 "token_buckets": res.usage.buckets, "retry_errors": m.get("retry_errors") or None,
                 "prompt": telemetry.truncate(prompt), "response": telemetry.truncate(res.text)})
+            call = {
+                "span_id": telemetry.ids(span)[1],  # joins this call to its span + log entry in GCP
+                "model": m.get("model_version") or self.model,
+                "seconds": round(res.seconds, 3),
+                "input_tokens": res.usage.input_tokens,
+                "output_tokens": res.usage.output_tokens,
+                "thinking_tokens": res.usage.thinking_tokens,
+                "buckets": res.usage.buckets,
+                "traffic": ",".join(res.usage.traffic) or None,
+                "tier_requested": m.get("tier_requested"),
+                "attempts": m.get("attempts", 1),
+                "retry_errors": m.get("retry_errors") or None,
+                "finish_reason": m.get("finish_reason"),
+                "truncated": m.get("truncated"),
+                "thinking_level": m.get("thinking_level"),
+                "image": [image.width, image.height],
+                "max_side": kw.get("max_side"),
+                "image_bytes": m.get("image_bytes"),
+                "schema": bool(kw.get("schema")),
+                "cost_usd": cost.get("net_usd"),
+                "list_usd": cost.get("list_usd"),
+                "prompt": _clip(prompt),
+                "response": _clip(res.text),
+            }
+            self.trace.record_call({k: v for k, v in call.items() if v not in (None, {}, "")})
         return res
 
     def bill(self, unit: str, amount: float = 1) -> None:
@@ -147,8 +225,7 @@ class Context:
         ``unit`` must be a key of the approach's ``skus``; it's priced from the Billing Catalog.
         The ``utils`` clients call this for you when you pass them ``ctx``.
         """
-        with self.trace._lock:
-            self.trace.billed[unit] = self.trace.billed.get(unit, 0) + amount
+        self.trace.record_billed(unit, amount)
 
 
 class Approach:
