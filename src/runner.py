@@ -191,8 +191,7 @@ def run(
                 preds = list(sample.boxes)
                 ids = identify_all(image, preds, ctx)
             elif task == "end_to_end":
-                preds = appr.detect(image, ctx)
-                ids = identify_all(image, preds, ctx)
+                preds, ids = appr.detect_and_identify(image, ctx)
             else:
                 preds = appr.detect(image, ctx)
         except Exception as e:  # a failed image scores as "found nothing"

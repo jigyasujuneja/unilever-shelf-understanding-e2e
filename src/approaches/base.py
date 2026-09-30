@@ -8,9 +8,11 @@ with ``shelf-bench run -a <name> -m <model>``. See ``single_pass.py`` for a ~30-
 
 from __future__ import annotations
 
+import copy
 import importlib
 import logging
 import pkgutil
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -144,8 +146,8 @@ class Approach:
     #   detection      -> "sku110k":  detect() returns boxes, scored by IoU vs GT boxes
     #   classification -> "products": identify() names the product in each photo
     #   retrieval      -> "rpc":      identify() names the product in each GT box crop
-    #   end_to_end     -> "rpc":      detect() finds the boxes, identify() names each crop;
-    #                                 a hit needs IoU >= 0.5 and the right product
+    #   end_to_end     -> "rpc"/"shelves": either compose(detector, *identifiers) or override
+    #                                 detect_and_identify() for single-invocation pipelines
     task: str = "detection"
     dataset: str = "sku110k"
     # Leaderboard section (USE_CASES): "market_share" = which products are on the shelf and how
@@ -177,10 +179,28 @@ class Approach:
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
         raise NotImplementedError
 
-    def identify(self, image: Image.Image, ctx: Context) -> int | None:
+    def identify(self, image: Image.Image, ctx: Context,
+                 allowed_ids: set[int] | None = None) -> int | None:
         """The ``sku_id`` of the one product in ``image`` (a product photo or a box crop), from
-        ``dataset.catalog(name=self.dataset)``, or None if it isn't in the catalog."""
+        ``dataset.catalog(name=self.dataset)``, or None if it isn't in the catalog.
+        If ``allowed_ids`` is given (from an earlier coarse classification step), only those
+        catalog products are considered."""
         raise NotImplementedError
+
+    def narrow(self, image: Image.Image, catalog: dict[int, dict], ctx: Context) -> set[int] | None:
+        """Coarse filter for multi-step ``detect -> classify -> retrieve`` pipelines: return the
+        subset of ``catalog`` ``sku_id``s compatible with ``image`` (by default: all products in
+        ``catalog`` that share the ``brand`` or ``category`` of ``self.identify(image, ctx)``)."""
+        pid = self.identify(image, ctx)
+        pred = catalog.get(pid) if pid is not None else None
+        if not pred:
+            return None
+        for f in ("brand", "category"):
+            if pred.get(f):
+                match = {k for k, p in catalog.items() if p.get(f) == pred[f]}
+                if match:
+                    return match
+        return {pid}
 
     def identify_boxes(self, image: Image.Image, boxes: list[Box], ctx: Context) -> list[int | None]:
         """``identify`` on each box crop, a few at a time. Override to use the boxes together."""
@@ -188,6 +208,20 @@ class Approach:
 
         with ThreadPoolExecutor(max_workers=8) as pool:
             return list(pool.map(lambda b: self.identify(crop(image, b), ctx), boxes))
+
+    def detect_and_identify(
+        self, image: Image.Image, ctx: Context
+    ) -> tuple[list[Box], list[int | None]]:
+        """End-to-end hook: return ``(boxes, sku_ids)`` for a shelf/checkout photo.
+
+        Override this directly when a single model invocation performs both detection and
+        classification (e.g. a fine-tuned Gemini model or Agent Platform endpoint). By default,
+        it runs ``self.detect(image, ctx)`` followed by ``self.identify_boxes(image, boxes, ctx)``."""
+        boxes = self.detect(image, ctx)
+        ids = self.identify_boxes(image, boxes, ctx)
+        ctx.trace.step("Identify each box", f"{sum(i is not None for i in ids)} of {len(boxes)} "
+                       "boxes matched to a catalog product", boxes=boxes)
+        return boxes, ids
 
 
 def crop(image: Image.Image, box: Box, pad: float = 0.05) -> Image.Image:
@@ -210,6 +244,102 @@ def register(cls: type[Approach]) -> type[Approach]:
     return cls
 
 
+def compose(
+    name: str,
+    detector: type[Approach] | Approach,
+    *identifiers: type[Approach] | Approach,
+    dataset: str = "rpc",
+    use_case: str = "market_share",
+    models: list[str] | None = None,
+    also_calls: list[str] | None = None,
+    architecture: str | None = None,
+    steps: list[str] | None = None,
+    register_approach: bool = True,
+) -> type[Approach]:
+    """Compose a detection step and one or more classification/retrieval steps into an
+    ``end_to_end`` approach (e.g. ``detect -> retrieve``, ``detect -> classify``, or
+    ``detect -> classify -> retrieve``)."""
+    if not identifiers:
+        raise ValueError(f"compose({name!r}): pass at least one identifier/classifier after detector")
+
+    def _inst(s: type[Approach] | Approach) -> Approach:
+        obj = s() if isinstance(s, type) else copy.copy(s)
+        obj.dataset = dataset
+        return obj
+
+    proto = [_inst(detector), *(_inst(s) for s in identifiers)]
+    merged_skus: dict[str, tuple[str, str]] = {}
+    for s in proto:
+        merged_skus.update(s.skus)
+
+    if models is None and all(s.models is not None for s in proto):
+        models = list(proto[0].models or [])
+    if also_calls is None:
+        also: list[str] = []
+        for s in proto:
+            for m in s.also_calls:
+                if m not in also:
+                    also.append(m)
+            if models is None and s.models and s.models[0] not in also:
+                also.append(s.models[0])
+        also_calls = also
+
+    if architecture is None:
+        architecture = " -> ".join(s.architecture for s in proto if s.architecture)
+    if steps is None:
+        setup_steps = list(dict.fromkeys(
+            st for s in proto for st in s.steps if st.lower().startswith("setup")
+        ))
+        run_steps = [st for s in proto for st in s.steps if not st.lower().startswith("setup")]
+        steps = [*setup_steps, *run_steps]
+
+    class ComposedApproach(Approach):
+        def __init__(self) -> None:
+            self.det_stage = _inst(detector)
+            self.id_stages = [_inst(s) for s in identifiers]
+            self.catalog: dict[int, dict] = {}
+
+        def setup(self, config: dict, ctx: Context) -> None:
+            if len(self.id_stages) > 1:
+                from utils import dataset as ds_mod
+
+                self.catalog = ds_mod.catalog(name=self.dataset)
+            for s in (self.det_stage, *self.id_stages):
+                s.setup(config, ctx)
+
+        def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+            return self.det_stage.detect(image, ctx)
+
+        def identify(self, image: Image.Image, ctx: Context,
+                     allowed_ids: set[int] | None = None) -> int | None:
+            for mid in self.id_stages[:-1]:
+                narrowed = mid.narrow(image, self.catalog, ctx)
+                if narrowed:
+                    allowed_ids = narrowed if allowed_ids is None else (allowed_ids & narrowed) or narrowed
+            last = self.id_stages[-1]
+            try:
+                return last.identify(image, ctx, allowed_ids=allowed_ids)
+            except TypeError:
+                return last.identify(image, ctx)
+
+        def identify_boxes(self, image: Image.Image, boxes: list[Box], ctx: Context) -> list[int | None]:
+            if len(self.id_stages) == 1 and type(self.id_stages[0]).identify_boxes is not Approach.identify_boxes:
+                return self.id_stages[0].identify_boxes(image, boxes, ctx)
+            return super().identify_boxes(image, boxes, ctx)
+
+    ComposedApproach.__name__ = "".join(w.capitalize() for w in name.split("_"))
+    ComposedApproach.name = name
+    ComposedApproach.task = "end_to_end"
+    ComposedApproach.dataset = dataset
+    ComposedApproach.use_case = use_case
+    ComposedApproach.models = models
+    ComposedApproach.also_calls = also_calls
+    ComposedApproach.skus = merged_skus
+    ComposedApproach.architecture = architecture
+    ComposedApproach.steps = steps
+    return register(ComposedApproach) if register_approach else ComposedApproach
+
+
 def get(name: str) -> Approach:
     _discover()
     if name not in REGISTRY:
@@ -225,9 +355,15 @@ def all_approaches() -> dict[str, Approach]:
 def _discover() -> None:
     import approaches as pkg
 
-    for m in pkgutil.iter_modules(pkg.__path__):
-        if not m.name.startswith("_"):
-            importlib.import_module(f"{pkg.__name__}.{m.name}")
+    for info in pkgutil.walk_packages(pkg.__path__, prefix=f"{pkg.__name__}."):
+        parts = info.name.split(".")
+        if any(p.startswith("_") for p in parts[1:]):
+            continue
+        mod = importlib.import_module(info.name)
+        if not info.ispkg:
+            leaf = parts[-1]
+            sys.modules.setdefault(f"{pkg.__name__}.{leaf}", mod)
+            setattr(pkg, leaf, mod)
 
 
 # ---- helpers shared by the Gemini approaches -------------------------------------------------

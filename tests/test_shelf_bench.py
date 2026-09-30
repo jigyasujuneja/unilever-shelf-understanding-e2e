@@ -183,7 +183,7 @@ def test_price_sheet_parses_billing_catalog(monkeypatch):
 
 
 def test_single_pass_parses_labelled_boxes():
-    from approaches.single_pass import labelled_boxes
+    from approaches.market_share.detection.single_pass import labelled_boxes
 
     raw = [{"box_2d": [0, 0, 500, 500], "label": "food"},
            {"box_2d": [500, 500, 1000, 1000], "label": "not_a_product"},
@@ -343,7 +343,7 @@ def test_gemini_classify_scores_product_brand_and_category(products_root, tmp_pa
 
 
 def test_embedding_text_match_picks_nearest_catalog_text(products_root, tmp_path, monkeypatch):
-    from approaches import embedding_text_match
+    from approaches.market_share.classification import embedding_text_match
 
     names = [n for _, _, n, _ in CATALOG]
 
@@ -644,7 +644,7 @@ def colour_embeddings(monkeypatch):
     """Fake multimodal embedding: the image's mean colour. Each call bills one image."""
     from PIL import ImageStat
 
-    from approaches import embedding_retrieval
+    from approaches.market_share.retrieval import embedding_retrieval
 
     class FakeEmbeddings:
         def __init__(self, config, model):
@@ -692,7 +692,7 @@ def test_embedding_retrieval_identifies_each_ground_truth_crop(rpc_root, colour_
 
 
 def test_gemini_rerank_takes_gemini_choice_and_none_means_none(rpc_root, colour_embeddings, tmp_path):
-    from approaches.gemini_rerank import CELL
+    from approaches.market_share.retrieval.gemini_rerank import CELL
 
     def llm(sheet, prompt, **kw):  # picks candidate 1 for the red crop, "none of these" otherwise
         assert "Panel Q" in prompt and kw["schema"]
@@ -727,7 +727,7 @@ def test_end_to_end_needs_the_right_box_and_the_right_product(rpc_root, colour_e
 # ---- approaches ported from Jigyasu's pipeline ---------------------------------------------
 
 def test_rail_profile_cv_finds_facings_between_shelf_rails():
-    from approaches.rail_profile_cv import rail_profile_boxes
+    from approaches.market_share.detection.rail_profile_cv import rail_profile_boxes
 
     im = Image.new("RGB", (600, 400), (235, 235, 235))
     colours = ["red", "blue", "yellow", "green", "purple", "orange"]
@@ -742,7 +742,7 @@ def test_rail_profile_cv_finds_facings_between_shelf_rails():
 
 
 def test_single_pass_dedup_drops_containers_duplicates_and_depth_ghosts():
-    from approaches.single_pass_dedup import dedup
+    from approaches.market_share.detection.single_pass_dedup import dedup
 
     item, other = (100, 100, 200, 300), (300, 100, 400, 300)
     group = (90, 90, 410, 310)            # wide box around both items: container
@@ -758,7 +758,7 @@ def test_single_pass_dedup_drops_containers_duplicates_and_depth_ghosts():
 
 def test_tiled_dedup_merges_products_cut_by_the_seam():
     from approaches.base import Context, Trace
-    from approaches.tiled_dedup import TiledDedup, merge_seam
+    from approaches.market_share.detection.tiled_dedup import TiledDedup, merge_seam
 
     top = [(100, 400, 150, 500), (300, 420, 360, 499), (500, 100, 560, 200)]
     bottom = [(101, 502, 149, 610), (330, 500, 420, 600), (700, 700, 760, 800)]
@@ -805,7 +805,7 @@ def test_hierarchy_classify_filters_by_brand_and_size_before_asking(products_roo
 
 def test_tiered_hybrid_asks_gemini_only_when_the_embedding_is_unsure(rpc_root, colour_embeddings,
                                                                      tmp_path, monkeypatch):
-    from approaches import tiered_hybrid
+    from approaches.market_share.retrieval import tiered_hybrid
 
     llm = OracleLLM()  # never right here: any answer that isn't {"choice": k} means "none"
     s = runner.run("tiered_hybrid", "gemini-t", "test", 0, 0, 1, "t", results_dir=tmp_path,
@@ -818,7 +818,11 @@ def test_tiered_hybrid_asks_gemini_only_when_the_embedding_is_unsure(rpc_root, c
 
 
 def test_sister_shade_colour_term_breaks_near_ties():
-    from approaches.sister_shade_rerank import colour_score, delta_e, mean_lab
+    from approaches.market_share.retrieval.sister_shade_rerank import (
+        colour_score,
+        delta_e,
+        mean_lab,
+    )
 
     red, dark_red = mean_lab(Image.new("RGB", (10, 10), "red")), mean_lab(Image.new("RGB", (10, 10), (120, 0, 0)))
     assert delta_e(red, red) == 0 and delta_e(red, dark_red) > 20
@@ -960,3 +964,70 @@ def test_prepare_shelves_keeps_sessions_apart_and_builds_gallery(tmp_path):
         assert files and all((out / f).exists() for f in files)
     assert data["splits"]["test"][0]["boxes"] == [[10.0, 10.0, 50.0, 90.0]]
     assert set(dataset.rpc_catalog(str(out))) == {1, 2}
+
+
+def test_compose_chains_detect_classify_and_retrieve(rpc_root, colour_embeddings, tmp_path, monkeypatch):
+    from approaches.base import Approach, compose, to_pixels
+    from approaches.market_share.retrieval.embedding_retrieval import EmbeddingRetrieval
+
+    class BoxDet(Approach):
+        name, architecture, steps = "box_det", "Detect boxes", ["Detect boxes"]
+
+        def detect(self, image, ctx):
+            return to_pixels(ctx.ask(image, "detect").data, 0, 0, *image.size)
+
+    class OnlyId3Filter(Approach):
+        name, architecture, steps = "id3_filter", "Narrow to SKU 3", ["Filter catalog to SKU 3"]
+
+        def narrow(self, image, catalog, ctx):
+            # For the green crop at x >= 150, restrict retrieval to SKU 3 so it beats SKU 2
+            return {3} if image.getpixel((10, 10))[1] > 100 else {1, 2}
+
+    cls = compose("det_cls_ret", BoxDet, OnlyId3Filter, EmbeddingRetrieval,
+                  dataset="rpc", register_approach=False)
+    monkeypatch.setitem(approaches.base.REGISTRY, "det_cls_ret", cls())
+
+    boxes = [g[:4] for g in RPC_GT]
+
+    def llm(image, prompt, **kw):
+        return LLMResult([[int(y1 / H * 1000), int(x1 / W * 1000), int(y2 / H * 1000),
+                           int(x2 / W * 1000)] for x1, y1, x2, y2 in boxes], usage(), 0.01)
+
+    s = runner.run("det_cls_ret", "gemini-t", "test", 0, 0, 1, "t", results_dir=tmp_path,
+                   llm=llm, log=lambda *_: None)
+    # Without OnlyId3Filter, product 3 (painted green) matched product 2; with narrow->{3} it matches 3.
+    assert (s["tp"], s["fp"], s["fn"]) == (2, 1, 1)
+    _, rows = runner.load_run(s["run_id"], tmp_path)
+    assert [lab["pred"]["sku_id"] for lab in rows[0]["labels"]] == [1, 3, 3]
+
+
+def test_single_call_detect_and_identify_runs_end_to_end(rpc_root, tmp_path, monkeypatch):
+    from approaches.base import Approach, to_pixels
+
+    class SingleShotE2E(Approach):
+        name = "single_shot_e2e"
+        task = "end_to_end"
+        dataset = "rpc"
+        architecture = "Single call: detect + identify"
+        steps = ["One call returns boxes and sku_ids"]
+
+        def detect_and_identify(self, image, ctx):
+            res = ctx.ask(image, "detect_and_identify")
+            boxes = to_pixels([r["box_2d"] for r in res.data], 0, 0, *image.size)
+            ids = [r["sku_id"] for r in res.data]
+            ctx.trace.step("Single-shot detect + classify", f"{len(boxes)} items", boxes=boxes)
+            return boxes, ids
+
+    monkeypatch.setitem(approaches.base.REGISTRY, "single_shot_e2e", SingleShotE2E())
+
+    def llm(image, prompt, **kw):
+        return LLMResult([
+            {"box_2d": [int(y1 / H * 1000), int(x1 / W * 1000), int(y2 / H * 1000), int(x2 / W * 1000)],
+             "sku_id": sku}
+            for x1, y1, x2, y2, sku, _ in RPC_GT
+        ], usage(), 0.01)
+
+    s = runner.run("single_shot_e2e", "gemini-t", "test", 0, 0, 1, "t", results_dir=tmp_path,
+                   llm=llm, log=lambda *_: None)
+    assert (s["tp"], s["fp"], s["fn"]) == (3, 0, 0) and s["f2"] == pytest.approx(1.0)
+

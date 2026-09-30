@@ -40,16 +40,19 @@ class EmbeddingTextMatch(Approach):
 
     def setup(self, config: dict, ctx: Context) -> None:
         self.emb = VertexEmbeddings(config, model=ctx.model)
-        self.catalog = dataset.catalog()
+        self.catalog = dataset.catalog(name=self.dataset)
         ids = list(self.catalog)
-        texts = [f"{p['brand']} {p['product']} ({p['category']})" for p in self.catalog.values()]
+        texts = [f"{p.get('brand', '')} {p['product']} ({p.get('category', '')})".strip()
+                 for p in self.catalog.values()]
         with ThreadPoolExecutor(max_workers=8) as pool:
             vecs = list(pool.map(lambda t: self.emb.text(t, ctx), texts))
         self.index = list(zip(ids, (unit(v) for v in vecs), strict=True))
 
-    def identify(self, image: Image.Image, ctx: Context) -> int | None:
+    def identify(self, image: Image.Image, ctx: Context,
+                 allowed_ids: set[int] | None = None) -> int | None:
         q = unit(self.emb.image(image, ctx))
-        ranked = sorted(((sum(a * b for a, b in zip(q, v, strict=True)), i) for i, v in self.index),
+        pool = [(i, v) for i, v in self.index if not allowed_ids or i in allowed_ids] or self.index
+        ranked = sorted(((sum(a * b for a, b in zip(q, v, strict=True)), i) for i, v in pool),
                         reverse=True)
         top = ", ".join(f"{self.catalog[i]['product']} {s:.3f}" for s, i in ranked[:3])
         ctx.trace.step("Nearest catalog products", f"top 3 by cosine: {top}")

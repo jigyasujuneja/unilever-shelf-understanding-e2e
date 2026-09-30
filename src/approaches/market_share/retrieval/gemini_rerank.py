@@ -13,7 +13,7 @@ import io
 from PIL import Image, ImageDraw, ImageFont
 
 from approaches.base import Context, register
-from approaches.embedding_retrieval import MODEL, EmbeddingRetrieval
+from approaches.market_share.retrieval.embedding_retrieval import MODEL, EmbeddingRetrieval
 
 K = 5       # candidates shown to Gemini
 CELL = 320  # px per image on the sheet
@@ -58,9 +58,10 @@ class GeminiRerank(EmbeddingRetrieval):
         f"One Gemini call per crop: the crop next to the {K} candidates; Gemini picks one (or none)",
     ]
 
-    def identify(self, image: Image.Image, ctx: Context) -> int | None:
-        top = self.ranked(image, ctx)[:K]
+    def identify(self, image: Image.Image, ctx: Context,
+                 allowed_ids: set[int] | None = None) -> int | None:
+        top = self.ranked(image, ctx, allowed_ids)[:K]
         refs = [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
         data = ctx.ask(sheet(image, refs), PROMPT, schema=SCHEMA).data
         choice = data.get("choice") if isinstance(data, dict) else None
-        return top[choice - 1][1] if isinstance(choice, int) and 1 <= choice <= K else None
+        return top[choice - 1][1] if isinstance(choice, int) and 1 <= choice <= len(top) else None

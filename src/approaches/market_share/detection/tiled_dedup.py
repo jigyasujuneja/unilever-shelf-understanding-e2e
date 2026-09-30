@@ -21,8 +21,8 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import NOT_PRODUCT, Box, Context, label_counts, register
-from approaches.single_pass import PROMPT, SCHEMA, SinglePass, labelled_boxes
-from approaches.single_pass_dedup import NMS_IOU, dedup
+from approaches.market_share.detection.single_pass import PROMPT, SCHEMA, SinglePass, labelled_boxes
+from approaches.market_share.detection.single_pass_dedup import NMS_IOU, dedup
 
 SEAM_BAND = 0.015   # a box edge within this share of the image height of the seam touches it
 SEAM_X_OVERLAP = 0.8  # share of the narrower piece's width that must overlap to merge

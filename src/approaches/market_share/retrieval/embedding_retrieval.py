@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
 from approaches.base import Approach, Context, register
-from approaches.embedding_text_match import unit
+from approaches.market_share.classification.embedding_text_match import unit
 from utils import dataset
 from utils.embeddings import MODELS, MULTIMODAL, SKUS, VertexEmbeddings
 
@@ -54,15 +54,22 @@ class EmbeddingRetrieval(Approach):
         with ThreadPoolExecutor(max_workers=8) as pool:
             self.index = list(pool.map(embed, refs))
 
-    def ranked(self, image: Image.Image, ctx: Context) -> list[tuple[float, int, str]]:
+    def ranked(self, image: Image.Image, ctx: Context,
+               allowed_ids: set[int] | None = None) -> list[tuple[float, int, str]]:
         """Products by similarity of their closest reference photo: (cosine, product, photo)."""
         q = unit(self.emb.image(image, ctx))
         best: dict[int, tuple[float, int, str]] = {}
         for pid, path, v in self.index:
+            if allowed_ids and pid not in allowed_ids:
+                continue
             s = sum(a * b for a, b in zip(q, v, strict=True))
             if pid not in best or s > best[pid][0]:
                 best[pid] = (s, pid, path)
-        return sorted(best.values(), reverse=True)
+        return sorted(best.values(), reverse=True) if best else (
+            self.ranked(image, ctx, None) if allowed_ids else []
+        )
 
-    def identify(self, image: Image.Image, ctx: Context) -> int | None:
-        return self.ranked(image, ctx)[0][1]
+    def identify(self, image: Image.Image, ctx: Context,
+                 allowed_ids: set[int] | None = None) -> int | None:
+        r = self.ranked(image, ctx, allowed_ids)
+        return r[0][1] if r else None

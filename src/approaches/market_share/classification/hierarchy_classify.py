@@ -20,8 +20,8 @@ import re
 from PIL import Image
 
 from approaches.base import Approach, Context, register
-from approaches.gemini_classify import PROMPT as PICK_PROMPT
-from approaches.gemini_classify import SCHEMA as PICK_SCHEMA
+from approaches.market_share.classification.gemini_classify import PROMPT as PICK_PROMPT
+from approaches.market_share.classification.gemini_classify import SCHEMA as PICK_SCHEMA
 from utils import dataset
 
 NOT_LISTED = "not listed"
@@ -51,8 +51,8 @@ class HierarchyClassify(Approach):
     ]
 
     def setup(self, config: dict, ctx: Context) -> None:
-        self.catalog = dataset.catalog()
-        self.brands = sorted({p["brand"] for p in self.catalog.values()})
+        self.catalog = dataset.catalog(name=self.dataset)
+        self.brands = sorted({p.get("brand") or p.get("category", "") for p in self.catalog.values() if p.get("brand") or p.get("category")})
         self.brand_schema = {
             "type": "object",
             "properties": {"brand": {"type": "string", "enum": [*self.brands, NOT_LISTED]},
@@ -61,29 +61,43 @@ class HierarchyClassify(Approach):
         }
         self.brand_prompt = BRAND_PROMPT.format(brands=", ".join(self.brands))
 
-    def candidates(self, brand: str, size: str) -> tuple[dict[int, dict], str]:
+    def candidates(self, brand: str, size: str,
+                   allowed_ids: set[int] | None = None) -> tuple[dict[int, dict], str]:
         """Catalog products left after the brand and size filters, and how they were chosen."""
-        by_brand = {i: p for i, p in self.catalog.items() if p["brand"] == brand}
+        pool = ({i: p for i, p in self.catalog.items() if i in allowed_ids}
+                if allowed_ids else self.catalog) or self.catalog
+        by_brand = {i: p for i, p in pool.items()
+                    if (p.get("brand") or p.get("category")) == brand}
         if not by_brand:
-            return self.catalog, f"brand {brand!r} not in the catalog: whole catalog"
+            return pool, f"brand {brand!r} not in the catalog: whole catalog"
         sized = {i: p for i, p in by_brand.items()
                  if size and norm_size(p.get("size") or p["product"]) == size}
         if sized:
             return sized, f"{len(by_brand)} {brand} products, {len(sized)} of size {size}"
         return by_brand, f"{len(by_brand)} {brand} products (size {size or '?'} matches none)"
 
-    def identify(self, image: Image.Image, ctx: Context) -> int | None:
+    def narrow(self, image: Image.Image, catalog: dict[int, dict], ctx: Context) -> set[int] | None:
         data = ctx.ask(image, self.brand_prompt, schema=self.brand_schema, max_side=1024).data
         data = data if isinstance(data, dict) else {}
         brand, size = str(data.get("brand", NOT_LISTED)), norm_size(str(data.get("size", "")))
         cands, how = self.candidates(brand, size)
+        ctx.trace.step("Gemini reads brand and size", f"brand {brand}, size {size or '?'} -> {how}")
+        return set(cands)
+
+    def identify(self, image: Image.Image, ctx: Context,
+                 allowed_ids: set[int] | None = None) -> int | None:
+        data = ctx.ask(image, self.brand_prompt, schema=self.brand_schema, max_side=1024).data
+        data = data if isinstance(data, dict) else {}
+        brand, size = str(data.get("brand", NOT_LISTED)), norm_size(str(data.get("size", "")))
+        cands, how = self.candidates(brand, size, allowed_ids=allowed_ids)
         ctx.trace.step("Gemini reads brand and size", f"brand {brand}, size {size or '?'} -> {how}")
         if len(cands) == 1:
             sku = next(iter(cands))
             ctx.trace.step("One candidate left", f"id {sku}: {cands[sku]['product']}")
             return sku
         prompt = PICK_PROMPT.format(catalog="\n".join(
-            f"{i}: {p['brand']} | {p['product']} | {p['category']}" for i, p in cands.items()))
+            f"{i}: {p.get('brand', '')} | {p['product']} | {p.get('category', '')}"
+            for i, p in cands.items()))
         data = ctx.ask(image, prompt, schema=PICK_SCHEMA, max_side=1024).data
         sku = data.get("sku_id") if isinstance(data, dict) else None
         p = cands.get(sku)

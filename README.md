@@ -201,10 +201,13 @@ included.
 
 ### Adding an approach
 
-An approach is one Python file in `src/approaches/`. Any `@register` class in that folder shows up
-in `shelf-bench list`, the CLI, Cloud Run and the leaderboard.
+Approaches live under `src/approaches/<use_case>/<task>/`, matching the UI sections and tabs:
+`market_share/{detection,classification,retrieval,end_to_end}/` and
+`merchandising/{planogram_compliance,promo_detection}/`. Any `@register` class or `compose(...)`
+call in that tree is discovered automatically and shows up in `shelf-bench list`, the CLI, Cloud
+Run and the leaderboard.
 
-**1. Create `src/approaches/my_approach.py`**
+**1a. Create a standalone approach** (e.g. `src/approaches/market_share/detection/my_approach.py`):
 
 ```python
 from approaches.base import (BOX_LIST_SCHEMA, DETECT_PROMPT, Approach, Context,
@@ -223,6 +226,26 @@ class MyApproach(Approach):
         ctx.trace.step("Gemini", f"{len(boxes)} boxes", boxes=boxes)   # a clickable step in the UI
         return boxes
 ```
+
+**1b. Or compose existing steps into an `end_to_end` pipeline** (`detect -> retrieve`, `detect -> classify`, or `detect -> classify -> retrieve`):
+
+```python
+from approaches.base import compose
+from approaches.market_share.classification.hierarchy_classify import HierarchyClassify
+from approaches.market_share.detection.single_pass_dedup import SinglePassDedup
+from approaches.market_share.retrieval.embedding_retrieval import EmbeddingRetrieval
+
+# 2-step: detect -> retrieve, or 3-step: detect -> coarse classify (narrow) -> retrieve
+ShelfDetectClassifyRetrieve = compose(
+    "shelf_detect_classify_retrieve",
+    SinglePassDedup,
+    HierarchyClassify,
+    EmbeddingRetrieval,
+    dataset="shelves",
+)
+```
+
+**1c. Or run detection + classification in a single model invocation** by overriding `detect_and_identify(image, ctx) -> (boxes, sku_ids)` (see [`_single_call_end_to_end_template.py`](src/approaches/market_share/end_to_end/_single_call_end_to_end_template.py)).
 
 **2. Iterate on `val`** (fast, local, doesn't touch the leaderboard split):
 
@@ -250,6 +273,8 @@ New pip dependencies go in `pyproject.toml`.
 |-----|--------------|
 | `ctx.ask(image, prompt, schema=None, max_side=None)` | Calls the run's Gemini model on an image (a full shelf, a crop, a contact sheet...). `schema` = JSON response schema, `max_side` = downscale first. Returns `LLMResult(data, usage, seconds, text)`. Tokens, traffic type and cost are recorded automatically. Call it as often as you like, including from threads |
 | `setup(self, config, ctx)` | Optional hook run once per run before any image: create clients (embeddings, databases...) from `config.yaml`, build an index. What it bills to `ctx` is the run's **setup cost**, shown on the run page and not in cost/img |
+| `compose(name, detector, *identifiers, dataset=...)` | Chains any detector approach with 1+ classification/retrieval steps into a registered `end_to_end` approach. Intermediate classifiers narrow the catalog via `narrow(image, catalog, ctx) -> set[int]` before the final step's `identify(image, ctx, allowed_ids=...)` |
+| `detect_and_identify(self, image, ctx)` | Override on an `end_to_end` approach when a single model call returns both `boxes` and `sku_id`s in one pass |
 | `VertexEmbeddings(config, model)` | [utils/embeddings.py](src/utils/embeddings.py): `.image(img, ctx)` / `.text(s, ctx)` with `multimodalembedding@001` or `gemini-embedding-2-preview`, billed to `ctx`. For a vector database see [docs/reference.md](docs/reference.md#retrieval-with-a-vector-database-alloydb) |
 | `skus = {unit: catalog query}` + `ctx.bill(unit, amount)` | For non-Gemini paid APIs: list their Billing Catalog SKUs and record usage per image, and it's priced into cost/img. The embeddings client already does this |
 | `ctx.trace.step(name, detail, boxes=None, regions=None)` | Adds a step to the run page. `boxes` are drawn as detections, `regions` as outlines (tiles, crops). Keep it to 2-4 meaningful steps |
@@ -265,8 +290,8 @@ nothing"); keep per-image state local, because images run concurrently.
 
 | Attribute | Values | Default |
 |-----------|--------|---------|
-| `task` | `detection` (implement `detect`); `classification` or `retrieval` (implement `identify(image, ctx) -> catalog id or None`; for retrieval the runner calls it on each ground-truth box crop); `end_to_end` (implement both: the runner crops each detected box and identifies it) | `detection` |
-| `dataset` | `sku110k`, `products` (the labelled product photos, `test` split only) or `rpc` | `sku110k` |
+| `task` | `detection` (implement `detect`); `classification` or `retrieval` (implement `identify(image, ctx, allowed_ids=None) -> catalog id or None`; for retrieval the runner calls it on each ground-truth box crop); `end_to_end` (compose via `compose(detector, *identifiers)` or override `detect_and_identify(image, ctx)`) | `detection` |
+| `dataset` | `sku110k`, `products` (the labelled product photos, `test` split only), `rpc` or `shelves` | `sku110k` |
 | `models` | The model ids the approach actually calls, e.g. `["multimodalembedding@001"]`. `None` = any `gemini-*` model via `ctx.ask` | `None` |
 | `also_calls` | Models called on every run whatever `-m` is (e.g. a fixed embedder), shown in the architecture | `[]` |
 | `use_case` | Leaderboard section: `market_share` (find, identify, count products) or `merchandising` (planogram, shelf position, promo material, price tags). Ranked separately | `market_share` |
@@ -324,7 +349,15 @@ Dockerfile                     container for the Cloud Run job
 src/
   cli.py                       shelf-bench command
   runner.py                    run approach x model -> results/<run_id>/ (local or GCS)
-  approaches/                  base.py (interface) + one file per approach (_*.py = templates)
+  approaches/                  base.py (Approach, compose, register) + modular hierarchy (_*.py = templates):
+    market_share/
+      detection/                 SKU-110K shelf product detectors (single_pass, single_pass_dedup, tiled_dedup, detect_classify, rail_profile_cv)
+      classification/            closed-catalog classifiers (gemini_classify, hierarchy_classify, embedding_text_match)
+      retrieval/                 reference-photo retrievers & rerankers (embedding_retrieval, sister_shade_rerank, gemini_rerank, tiered_hybrid)
+      end_to_end/                composed pipelines (detect_identify.py) + single-call / AlloyDB templates
+    merchandising/
+      planogram_compliance/      shelf-row layout, facings & share-of-shelf approaches (awaiting labelled data)
+      promo_detection/           POSM / promotional asset & price-tag detection (awaiting labelled data)
   utils/                       plumbing you rarely need to touch:
     dataset.py                   download, upload, load SKU-110K, the labelled products and RPC (local or gs://)
     metrics.py                   IoU matching, accuracy/recall/F2, product matching, percentiles

@@ -13,8 +13,8 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import Box, Context, register
-from approaches.detect_identify import gemini_detect
-from approaches.embedding_retrieval import MODEL, EmbeddingRetrieval
+from approaches.market_share.end_to_end.detect_identify import gemini_detect
+from approaches.market_share.retrieval.embedding_retrieval import MODEL, EmbeddingRetrieval
 from utils import embeddings
 from utils.alloydb import AlloyDB, pgvector
 

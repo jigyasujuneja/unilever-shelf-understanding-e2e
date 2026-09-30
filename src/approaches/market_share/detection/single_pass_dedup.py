@@ -17,7 +17,7 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import NOT_PRODUCT, Box, Context, label_counts, register
-from approaches.single_pass import PROMPT, SCHEMA, SinglePass, labelled_boxes
+from approaches.market_share.detection.single_pass import PROMPT, SCHEMA, SinglePass, labelled_boxes
 from utils import metrics
 
 CONTAINED_AREA = 0.65  # a box inside another is "much smaller" below this area ratio

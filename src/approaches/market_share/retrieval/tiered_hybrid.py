@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from PIL import Image
 
-from approaches.base import Box, Context, register
-from approaches.detect_identify import gemini_detect
-from approaches.gemini_rerank import GeminiRerank, K
+from approaches.base import Context, register
+from approaches.market_share.retrieval.gemini_rerank import GeminiRerank, K
 
 MIN_COSINE = 0.70
 MIN_MARGIN = 0.045
@@ -35,26 +34,12 @@ class TieredHybrid(GeminiRerank):
         f"Otherwise one Gemini call: the crop next to the top {K}; Gemini picks one (or none)",
     ]
 
-    def identify(self, image: Image.Image, ctx: Context) -> int | None:
-        ranked = self.ranked(image, ctx)
+    def identify(self, image: Image.Image, ctx: Context,
+                 allowed_ids: set[int] | None = None) -> int | None:
+        ranked = self.ranked(image, ctx, allowed_ids)
         (s1, pid, _), s2 = ranked[0], ranked[1][0] if len(ranked) > 1 else -1.0
         if s1 >= MIN_COSINE and s1 - s2 >= MIN_MARGIN:
             ctx.trace.step("Embedding tier", f"#{pid} accepted (cos {s1:.3f}, margin {s1 - s2:.3f})")
             return pid
         ctx.trace.step("Gemini tier", f"escalated (cos {s1:.3f}, margin {s1 - s2:.3f})")
-        return super().identify(image, ctx)
-
-
-@register
-class DetectTiered(TieredHybrid):
-    name = "detect_tiered"
-    task = "end_to_end"
-    architecture = "Gemini detects boxes -> " + TieredHybrid.architecture
-    steps = [
-        "Setup (once per run, reported apart from cost/img): embed every reference photo",
-        "One Gemini call on the photo returns every product box",
-        *TieredHybrid.steps[1:],
-    ]
-
-    def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
-        return gemini_detect(image, ctx)
+        return super().identify(image, ctx, allowed_ids)

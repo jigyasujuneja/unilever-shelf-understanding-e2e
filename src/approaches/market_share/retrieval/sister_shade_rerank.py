@@ -21,7 +21,7 @@ import numpy as np
 from PIL import Image
 
 from approaches.base import Context, register
-from approaches.embedding_retrieval import EmbeddingRetrieval
+from approaches.market_share.retrieval.embedding_retrieval import EmbeddingRetrieval
 
 K = 5
 TEMPERATURE = 0.07
@@ -67,7 +67,10 @@ class SisterShadeRerank(EmbeddingRetrieval):
         super().setup(config, ctx)
         self.lab = {path: mean_lab(Image.open(io.BytesIO(data))) for path, data in self.jpeg.items()}
 
-    def identify(self, image: Image.Image, ctx: Context) -> int | None:
-        top = self.ranked(image, ctx)[:K]
+    def identify(self, image: Image.Image, ctx: Context,
+                 allowed_ids: set[int] | None = None) -> int | None:
+        top = self.ranked(image, ctx, allowed_ids)[:K]
+        if not top:
+            return None
         q = mean_lab(image)
         return max((colour_score(s, delta_e(q, self.lab[path])), pid) for s, pid, path in top)[1]
