@@ -7,13 +7,13 @@ flowchart TD
   B["2. Authenticate<br/>gcloud auth application-default login"]:::step
   C["3. Offline tests<br/>make test (no GCP needed)"]:::check
   D["4. Explore the leaderboard<br/>make ui, open http://localhost:8080"]:::step
-  E["5. Add an approach<br/>src/approaches/my_approach.py<br/>@register class with detect(image, ctx)"]:::step
+  E["5. Add an approach in src/approaches/&lt;use_case&gt;/&lt;task&gt;/<br/>@register class (detect / identify / detect_and_identify)<br/>or compose(name, detector, *identifiers)"]:::step
   F["6. Iterate on val<br/>shelf-bench run -a my_approach<br/>-m gemini-3.5-flash-lite --split val --limit 5"]:::step
   G{"Steps look right<br/>in the UI?"}:::check
-  H["7. Add an offline test<br/>copy test_run_single_pass_end_to_end, make test"]:::check
+  H["7. Add an offline test in tests/test_&lt;task&gt;.py<br/>make lint &amp;&amp; make test"]:::check
   I["8. Benchmark on Cloud Run<br/>make cloud A=my_approach"]:::step
   J["9. On the leaderboard<br/>results pulled into results/, commit them"]:::check
-  R["Optional: match specific products<br/>copy _detect_retrieve_template.py,<br/>pick embedder + DB + SQL in the approach"]:::opt
+  R["Templates in market_share/end_to_end/:<br/>_single_call_end_to_end_template.py<br/>_detect_retrieve_template.py (AlloyDB)"]:::opt
 
   A --> B --> C --> D --> E --> F --> G
   G -- "no: tweak prompt / pipeline" --> F

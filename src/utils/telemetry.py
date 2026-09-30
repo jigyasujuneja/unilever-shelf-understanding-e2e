@@ -6,6 +6,7 @@ Every run is one trace::
       image <image_id>             gt/pred/tp/fp/fn, F2, latency, cost, error; one event per step
         gemini <model>             tokens by kind (input / image / text / cached / output /
                                    thinking), traffic type served, retries, finish reason, cost
+        embedding <model>          one per crop / text embedded: latency, retries, billed units
 
 Each span also writes one Cloud Logging entry with the same fields (Gemini calls add the prompt
 and response text), attached to that span. So "Logs" on a span in Cloud Trace shows its entry,

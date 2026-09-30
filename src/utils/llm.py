@@ -27,36 +27,8 @@ CONFIG_PATH = Path(os.environ.get("SHELF_BENCH_CONFIG")
                    or Path(__file__).resolve().parents[2] / "config.yaml")
 
 
-def load_config(path: Path = CONFIG_PATH, project_override: str | None = None) -> dict:
-    cfg = yaml.safe_load(Path(path).read_text()) if Path(path).exists() else {}
-    gcp = cfg.setdefault("gcp", {})
-    proj_env = project_override or os.environ.get("SHELF_BENCH_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
-    if not proj_env and (os.environ.get("CLOUD_RUN_JOB") or os.environ.get("K_SERVICE")):
-        try:
-            import google.auth
-
-            _, proj_env = google.auth.default()
-        except Exception:
-            proj_env = None
-    proj = proj_env or gcp.get("project") or "unilever-shelf-understanding"
-    region = os.environ.get("SHELF_BENCH_REGION") or gcp.get("region") or "us-central1"
-    gcp["project"] = proj
-    gcp["region"] = region
-    if proj_env or "data" not in gcp:
-        bucket = os.environ.get("SHELF_BENCH_BUCKET") or f"{proj}-shelf-images"
-        gcp["bucket"] = bucket
-        gcp["data"] = f"gs://{bucket}/SKU110K_fixed"
-        gcp["hul_labeled_data"] = f"gs://{bucket}/HUL_labeled_benchmarks"
-        gcp["hul_catalog_data"] = f"gs://{bucket}/HUL_catalog"
-        gcp["results"] = f"gs://{bucket}/results"
-    if proj_env:
-        for db_key in ("vector_store", "cloudsql", "alloydb"):
-            if isinstance(cfg.get(db_key), dict):
-                inst = str(cfg[db_key].get("instance", ""))
-                if ":" in inst:
-                    _, _, inst_name = inst.rpartition(":")
-                    cfg[db_key]["instance"] = f"{proj}:{region}:{inst_name}"
-    return cfg
+def load_config(path: Path = CONFIG_PATH) -> dict:
+    return yaml.safe_load(Path(path).read_text()) if Path(path).exists() else {}
 
 
 @dataclass
@@ -150,13 +122,15 @@ def parse_json(text: str) -> Any:
         return [[float(v) for v in q] for q in quads]
 
 
-TIERS = ("standard", "priority")
+TIERS = ("standard", "priority", "flex")
 
 # Priority PayGo: https://cloud.google.com/vertex-ai/generative-ai/docs/priority-paygo
+# Flex PayGo: https://cloud.google.com/vertex-ai/generative-ai/docs/flex-paygo (50% of Standard
+# per token, for latency-tolerant work such as batch shelf processing).
 # "shared" skips Provisioned Throughput (none in this project) so every call is PayGo.
-PRIORITY_HEADERS = {
-    "X-Vertex-AI-LLM-Request-Type": "shared",
-    "X-Vertex-AI-LLM-Shared-Request-Type": "priority",
+TIER_HEADERS = {
+    tier: {"X-Vertex-AI-LLM-Request-Type": "shared", "X-Vertex-AI-LLM-Shared-Request-Type": tier}
+    for tier in ("priority", "flex")
 }
 
 
@@ -180,7 +154,7 @@ class Gemini:
         self.tier = tier
         self.client = genai.Client(
             vertexai=True, project=cfg.get("project"), location=cfg.get("location", "global"),
-            http_options=types.HttpOptions(headers=PRIORITY_HEADERS) if tier == "priority" else None,
+            http_options=types.HttpOptions(headers=TIER_HEADERS[tier]) if tier in TIER_HEADERS else None,
         )
 
     def __call__(

@@ -1,13 +1,18 @@
-"""Detection approaches. Each module registers itself with ``@register``."""
+"""Approaches organized by business use case (``market_share/``, ``merchandising/``) and task
+(``detection/``, ``classification/``, ``retrieval/``, ``end_to_end/``). Each module registers
+itself with ``@register`` or ``compose(...)``."""
 
-import utils  # noqa: F401
 from approaches.base import (
     Approach,
     Context,
     Trace,
+    _discover,
     all_approaches,
+    compose,
     get,
     register,
 )
 
-__all__ = ["Approach", "Context", "Trace", "all_approaches", "get", "register"]
+_discover()
+
+__all__ = ["Approach", "Context", "Trace", "all_approaches", "compose", "get", "register"]
