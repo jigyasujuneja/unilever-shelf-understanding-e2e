@@ -1,9 +1,22 @@
-"""Approach interface + registry.
+"""Approach interface, step composition (``compose``), and auto-discovery registry.
 
-An approach turns one shelf image into product boxes and records the steps it took.
-To add one: drop a module in ``src/approaches/`` that defines a subclass and
-decorates it with ``@register``. It then shows up in ``shelf-bench list`` and can be run
-with ``shelf-bench run -a <name> -m <model>``. See ``single_pass.py`` for a ~30-line example.
+Approaches live under ``src/approaches/<use_case>/<task>/``, mirroring the UI sections and tabs:
+  - ``market_share/detection/``:      implement ``detect(image, ctx) -> list[Box]``
+  - ``market_share/classification/``: implement ``identify(image, ctx, allowed_ids=None) -> int | None``
+  - ``market_share/retrieval/``:      implement ``identify(image, ctx, allowed_ids=None) -> int | None``
+  - ``market_share/end_to_end/``:     either compose steps via ``compose(name, detector, *identifiers)``
+                                      OR override ``detect_and_identify(image, ctx) -> (boxes, sku_ids)``
+                                      when one model call performs both detection and classification.
+  - ``merchandising/{planogram_compliance,promo_detection}/``: ``use_case = "merchandising"``
+
+Every ``@register`` class or ``compose(...)`` call in a module (not starting with ``_``) is
+discovered automatically and appears in ``shelf-bench list``.
+
+Workflow to add and benchmark a new approach:
+  1. Drop a file in ``src/approaches/<use_case>/<task>/<name>.py`` (see templates in ``end_to_end/``).
+  2. Iterate locally on ``val``:  ``shelf-bench run -a <name> -m gemini-3.5-flash-lite --split val --limit 5``
+  3. Add an offline unit test in ``tests/test_<task>.py`` and run ``make lint && make test``.
+  4. Benchmark on Cloud Run:      ``make cloud A=<name> M="gemini-3.8-flash gemini-3.5-flash-lite"``
 """
 
 from __future__ import annotations

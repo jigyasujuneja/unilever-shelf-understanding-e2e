@@ -1,7 +1,26 @@
 # Shelf Benchmark: reference
 
-Details behind the [README](../README.md): how cost is computed, the Priority tier, how to back
-retrieval with a vector database, and what telemetry records.
+Details behind the [README](../README.md): onboarding cookbook for new approaches, how cost is
+computed, the Priority tier, how to back retrieval with a vector database, and what telemetry
+records.
+
+## Onboarding cookbook: 4 patterns for adding & benchmarking an approach
+
+Every approach lives under `src/approaches/<use_case>/<task>/` and is auto-discovered by
+[`approaches/base.py`](../src/approaches/base.py). Pick the pattern that matches your model:
+
+| Pattern | Where to put it | What to implement | Copy from |
+|---------|-----------------|-------------------|-----------|
+| **1. Standalone detector / classifier / retriever** | `market_share/{detection,classification,retrieval}/` | `@register` subclass with `detect(image, ctx)` or `identify(image, ctx, allowed_ids=None)` | [`single_pass.py`](../src/approaches/market_share/detection/single_pass.py), [`gemini_classify.py`](../src/approaches/market_share/classification/gemini_classify.py), [`embedding_retrieval.py`](../src/approaches/market_share/retrieval/embedding_retrieval.py) |
+| **2. Multi-step composition** (`detect -> retrieve`, `detect -> classify`, or `detect -> classify -> retrieve`) | `market_share/end_to_end/` | `compose("my_e2e", DetectorCls, *IdentifierClasses, dataset="shelves")` — intermediate classifiers filter the catalog via `narrow(image, catalog, ctx) -> set[int]` | [`detect_identify.py`](../src/approaches/market_share/end_to_end/detect_identify.py) |
+| **3. Single-invocation detect + classify** (e.g. fine-tuned Gemini or Agent Platform endpoint returning boxes + `sku_id`s in 1 call) | `market_share/end_to_end/` | `@register` subclass with `task = "end_to_end"` and `detect_and_identify(image, ctx) -> (boxes, sku_ids)` | [`_single_call_end_to_end_template.py`](../src/approaches/market_share/end_to_end/_single_call_end_to_end_template.py) |
+| **4. Custom / non-Gemini model** (e.g. YOLO, DiffusionGemma, Vertex endpoint) | Any task folder | Set `models = ["my-model-id"]` (and `also_calls = [...]` if hybrid), initialize your client/weights in `setup(config, ctx)`, and optionally bill non-Gemini SKUs with `ctx.bill(unit, amount)` | [`rail_profile_cv.py`](../src/approaches/market_share/detection/rail_profile_cv.py), [`embedding_retrieval.py`](../src/approaches/market_share/retrieval/embedding_retrieval.py) |
+
+**4-step verification & benchmark checklist:**
+1. **Check registration:** `.venv/bin/shelf-bench list` (confirms use case, task, dataset, and accepted models).
+2. **Smoke test on `val`:** `make run A=my_approach M=gemini-3.5-flash-lite ARGS="--split val --limit 5"` and inspect in `make ui`.
+3. **Add an offline unit test:** Add a test in the matching file under [`tests/`](../tests/) (`test_detection.py`, `test_classification.py`, `test_retrieval.py`, or `test_end_to_end.py`) and run `make lint && make test`.
+4. **Run official Cloud Run benchmark:** `make cloud A=my_approach M="gemini-3.8-flash gemini-3.5-flash-lite"` (builds the container, runs on Cloud Run, prices every SKU from the Cloud Billing Catalog API, pulls `results/<run_id>/`, and ranks it on the leaderboard).
 
 ## How cost per image is calculated
 
@@ -47,9 +66,9 @@ Vertex can downgrade a priority request to standard when capacity is short. Each
 
 ## Retrieval with a vector database (AlloyDB)
 
-[embedding_retrieval.py](../src/approaches/embedding_retrieval.py) keeps RPC's 800 reference
+[embedding_retrieval.py](../src/approaches/market_share/retrieval/embedding_retrieval.py) keeps RPC's 800 reference
 vectors in memory (built in `setup`; a Python loop is enough at that size).
-[_detect_retrieve_template.py](../src/approaches/_detect_retrieve_template.py) is the same pipeline
+[_detect_retrieve_template.py](../src/approaches/market_share/end_to_end/_detect_retrieve_template.py) is the same pipeline
 with the vectors in AlloyDB, which a real catalog of thousands of products needs (the leading `_`
 keeps it off the CLI until a database exists):
 
@@ -87,7 +106,7 @@ auth, encrypted, no passwords); `pgvector(vec)` formats a vector parameter.
    (512-d), with `id` = the RPC product id.
 4. Fill the `alloydb:` section of `config.yaml`. For a private-IP instance also set
    `cloud_run.network` / `cloud_run.subnet` (Direct VPC egress).
-5. Copy the template to `detect_retrieve_alloydb.py` (no `_`) and run it like any other approach.
+5. Copy the template to `src/approaches/market_share/end_to_end/detect_retrieve_alloydb.py` (no `_`) and run it like any other approach.
 
 ## Telemetry (Cloud Trace + Cloud Logging)
 

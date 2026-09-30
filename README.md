@@ -254,9 +254,12 @@ shelf-bench run -a my_approach -m gemini-3.5-flash-lite --split val --limit 5
 make ui    # open the run and click through the steps
 ```
 
-**3. Add an offline test** in `tests/test_shelf_bench.py`: copy
-`test_run_single_pass_end_to_end`, which runs an approach on a fake dataset with a fake model
-(`OracleLLM`), so `make test` needs no GCP.
+**3. Add an offline test** in the matching module under `tests/` (`test_detection.py`,
+`test_classification.py`, `test_retrieval.py`, or `test_end_to_end.py`): shared fixtures in
+`tests/conftest.py` provide fake datasets and a fake model (`OracleLLM`), so `make test` needs no
+GCP. See the [Onboarding cookbook](docs/reference.md#onboarding-cookbook-4-patterns-for-adding--benchmarking-an-approach)
+for all 4 implementation patterns (standalone, `compose`, single-call `detect_and_identify`, and
+custom non-Gemini models).
 
 **4. Get leaderboard numbers on Cloud Run:**
 
@@ -369,7 +372,15 @@ src/
     cloud.py                     Cloud Build + Cloud Run job, UI service deploy, project bootstrap
     server.py, static/           leaderboard UI (stdlib, no framework)
 data/labeled_retail_benchmarks/ the 25 labelled product photos + catalog (committed)
-docs/                          reference.md (cost, Priority, vector DB, telemetry) + diagrams
-tests/                         offline tests (fake dataset + fake model)
+docs/                          reference.md (onboarding cookbook, cost, Priority, vector DB, telemetry) + diagrams
+tests/                         offline tests (no network / GCP), split by task & subsystem:
+  conftest.py                    shared fake datasets (SKU-110K, products, RPC), OracleLLM & price sheet
+  test_detection.py              tests for market_share/detection/ approaches
+  test_classification.py         tests for market_share/classification/ approaches
+  test_retrieval.py              tests for market_share/retrieval/ approaches
+  test_end_to_end.py             tests for market_share/end_to_end/, compose(), detect_and_identify() & registry
+  test_datasets_and_metrics.py   tests for dataset loading/splitting, IoU/F2 metrics & JSON recovery
+  test_pricing_and_billing.py    tests for Billing Catalog pricing, promo credits, embeddings & AlloyDB
+  test_cloud_ui_and_telemetry.py tests for Cloud Run task sharding/compute, UI server/proxy & OpenTelemetry
 results/                       one folder per run (committed)
 ```
