@@ -1,4 +1,4 @@
-"""Detect, then identify, on real store shelves (the Shelf end-to-end tab).
+"""Detect, then identify, on real store shelves (the Shelves section of the End-to-end tab).
 
 The ``detect_*`` pipelines run on HoloSelecta shelf photos instead of RPC checkout photos; the
 gallery is product crops from other sessions' photos (see ``dataset.prepare_shelves``).

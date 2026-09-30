@@ -38,7 +38,7 @@ const TASKS = {
   },
   end_to_end: {
     label: "End-to-end",
-    blurb: RPC + " Find every product and name it: a box counts only if it overlaps a real product (IoU ≥ 0.5) and names that product.",
+    blurb: "Find every product and name it: a box counts only if it overlaps a real product (IoU ≥ 0.5) and names that product.",
     cols: [
       ["Found", "Share of real products boxed at all (IoU ≥ 0.5), whatever the name", (r) => pct(r.found_recall ?? 0)],
       ["Recall", "Share of real products boxed and named correctly", (r) => pct(r.recall)],
@@ -47,15 +47,21 @@ const TASKS = {
     score: F2_SCORE,
   },
 };
-TASKS.shelves_end_to_end = {
-  ...TASKS.end_to_end,
-  label: "Shelf end-to-end",
-  blurb: "HoloSelecta vending-machine shelves (115 products with GTINs; reference crops from other sessions' photos). Find every product and name it: a box counts only if it overlaps a real product (IoU ≥ 0.5) and names that product.",
+const DATASETS = {
+  shelves: {
+    label: "Shelves (HoloSelecta)",
+    blurb: "HoloSelecta retail & vending-machine shelves (115 products with GTINs; reference crops from other sessions' photos).",
+  },
+  rpc: {
+    label: "Checkout counter (RPC)",
+    blurb: RPC,
+  },
 };
 const ORDER = Object.keys(TASKS);
+const DS_ORDER = ["shelves", "rpc", "sku110k", "products"];
 const byOrder = (a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99);
-// One tab per task and dataset (runner.leaderboard ranks within each).
-const taskOf = (r) => (r.dataset === "shelves" ? "shelves_" : "") + (r.task || "detection");
+const byDsOrder = (a, b) => (DS_ORDER.indexOf(a) + 1 || 99) - (DS_ORDER.indexOf(b) + 1 || 99);
+const taskOf = (r) => r.task || "detection";
 // Leaderboard sections (Approach.use_case); runs from before sections existed are market share.
 const USE_CASES = {
   market_share: { label: "Market share", blurb: "Which products are on the shelf and how many: find, identify and count them." },
@@ -76,7 +82,8 @@ function route() {
   const b = location.hash.match(/^#\/board\/([^/]+)(?:\/([^/]+))?/);
   const parts = b ? [b[1], b[2]].filter(Boolean).map(decodeURIComponent) : [];
   if (parts.length && !USE_CASES[parts[0]]) parts.unshift("market_share");
-  showLeaderboard(parts[0] || "market_share", parts[1]);
+  const task = parts[1] === "shelves_end_to_end" ? "end_to_end" : parts[1];
+  showLeaderboard(parts[0] || "market_share", task);
 }
 
 // ---------------------------------------------------------------- leaderboard
@@ -97,20 +104,25 @@ async function showLeaderboard(useCase, task) {
   task = tasks.includes(task) ? task : tasks[0];
   const info = infoOf(task);
   const rows = all.filter((r) => taskOf(r) === task);
-  const ranked = rows.filter((r) => r.rank !== "dev");
-  const sets = new Set(ranked.map((r) => `${r.split} · ${r.images} images · seed ${r.seed}`));
-  const caption = !ranked.length
-    ? "No ranked runs yet (only Cloud Run runs on the leaderboard image set are ranked)"
-    : sets.size === 1
-      ? `Eval set: ${[...sets][0]}`
-      : `⚠ Runs use different eval sets (${[...sets].join(" / ")}) - compare with care.`;
+  const datasets = [...new Set(rows.map((r) => r.dataset || "sku110k"))].sort(byDsOrder);
   const tabs = tasks.map((t) => `
     <a class="tab${t === task ? " on" : ""}" href="#/board/${useCase}/${encodeURIComponent(t)}">
       ${esc(infoOf(t).label)} <span class="count">${all.filter((r) => taskOf(r) === t).length}</span></a>`).join("");
-  app.innerHTML = sections + `
-    <nav class="tabs">${tabs}</nav>
-    <p class="muted caption">${esc(info.blurb)}<br>${esc(caption)} · <i>dev</i> = local run or other image set, not ranked · click a row for per-image results</p>
-    <table class="board">
+  const renderDatasetBlock = (ds) => {
+    const dsRows = rows.filter((r) => (r.dataset || "sku110k") === ds);
+    const ranked = dsRows.filter((r) => r.rank !== "dev");
+    const sets = new Set(ranked.map((r) => `${r.split} · ${r.images} images · seed ${r.seed}`));
+    const caption = !ranked.length
+      ? "No ranked runs yet (only Cloud Run runs on the leaderboard image set are ranked)"
+      : sets.size === 1
+        ? `Eval set: ${[...sets][0]}`
+        : `⚠ Runs use different eval sets (${[...sets].join(" / ")}) - compare with care.`;
+    const dsMeta = DATASETS[ds];
+    const hdr = datasets.length > 1 && dsMeta
+      ? `<h2 class="ds-heading">${esc(dsMeta.label)} <span class="count">${dsRows.length}</span></h2>
+         <p class="muted caption">${esc(dsMeta.blurb)}<br>${esc(caption)} · <i>dev</i> = local run or other image set, not ranked · click a row for per-image results</p>`
+      : `<p class="muted caption">${esc(info.blurb)}<br>${esc(caption)} · <i>dev</i> = local run or other image set, not ranked · click a row for per-image results</p>`;
+    return hdr + `<table class="board">
       <thead><tr>
         <th>Rank</th><th>Run ID</th><th>Architecture</th><th>Owner</th>
         ${info.cols.map(([h, tip]) => `<th class="num" title="${esc(tip)}">${h}</th>`).join("")}
@@ -119,7 +131,7 @@ async function showLeaderboard(useCase, task) {
         <th class="num" title="99% of images finished within this time">p99</th>
         <th class="num" title="Model + other API + Cloud Run + storage cost per image">Cost / img</th>
       </tr></thead>
-      <tbody>${rows.map((r) => `
+      <tbody>${dsRows.map((r) => `
         <tr onclick="location.hash='#/run/${encodeURIComponent(r.run_id)}'">
           <td class="rank">${r.rank}</td>
           <td class="mono">${esc(r.run_id)}${r.errors ? ` <span class="warn" title="images that errored">${r.errors} err</span>` : ""}</td>
@@ -133,12 +145,16 @@ async function showLeaderboard(useCase, task) {
         </tr>`).join("")}
       </tbody>
     </table>`;
+  };
+  app.innerHTML = sections + `
+    <nav class="tabs">${tabs}</nav>
+    ${datasets.length > 1 ? `<p class="muted caption">${esc(info.blurb)}</p>` : ""}
+    ${datasets.map(renderDatasetBlock).join("")}`;
 }
 
 // ---------------------------------------------------------------- run detail
 async function showRun(runId) {
   const { summary: s, images } = await getJSON(`/api/runs/${encodeURIComponent(runId)}`);
-  const tab = taskOf(s);
   const task = s.task || "detection";
   const single = task === "classification"; // one product per photo
   const fa = s.field_accuracy || {};
@@ -166,7 +182,7 @@ async function showRun(runId) {
     (cells ? cells(r) : "") + num(sec(r.latency_s));
   const setupNote = s.cost?.setup_usd ? ` · one-off setup ${inr(s.cost.setup_usd * s.usd_to_inr)} (${s.cost.setup_seconds}s), not in cost/img` : "";
   app.innerHTML = `
-    <a href="#/board/${useCaseOf(s)}/${encodeURIComponent(tab)}" class="back">&larr; Leaderboard</a>
+    <a href="#/board/${useCaseOf(s)}/${encodeURIComponent(task)}" class="back">&larr; Leaderboard</a>
     <h1 class="mono">${esc(s.run_id)}</h1>
     <p class="muted">${esc(s.architecture)} · ${esc(s.owner)} · ${s.images} ${esc(s.dataset || "sku110k")} ${esc(s.split)} images · precision ${pct(s.precision)}</p>
     <p class="muted">${envLine(s)}${setupNote}</p>

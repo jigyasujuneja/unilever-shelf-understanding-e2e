@@ -11,8 +11,7 @@ no benchmarks yet). An approach picks its section with `use_case`.
 | Detection | Find every product box on a shelf photo | [SKU-110K](https://docs.ultralytics.com/datasets/detect/sku-110k/) (boxes only, no product labels) | F2 at IoU 0.5 |
 | Classification | Say which catalog product a photo shows | [Labelled product photos](#labelled-product-photos) (25 photos, 184-product catalog given as text) | Exact product accuracy |
 | Retrieval | Identify each product cut out of a multi-product photo by matching it to reference photos (image to image) | [RPC](#rpc-retail-product-checkout) checkout photos, ground-truth boxes given (200 products, 4 reference photos each) | Exact product accuracy |
-| End-to-end | Find every product **and** identify it | Same RPC photos, no boxes given; a box counts only at IoU >= 0.5 **and** the right product | F2 |
-| Shelf end-to-end | The same, on real shelves | [HoloSelecta](#holoselecta-shelves-shelf-end-to-end) vending-machine shelf photos (115 products; reference crops from other sessions' photos) | F2 |
+| End-to-end | Find every product **and** identify it | [HoloSelecta](#holoselecta-shelves-end-to-end) shelves (115 products) and [RPC](#rpc-retail-product-checkout) checkout photos (ranked separately); a box counts only at IoU >= 0.5 **and** the right product | F2 |
 
 RPC photos are products on a checkout counter and HoloSelecta shelves are Swiss vending machines;
 no labelled HUL shelf photos exist yet (see [Limitations](#limitations)).
@@ -107,7 +106,7 @@ photos of every product on its own.
 RPC only names products by id and category (e.g. `RPC #37 (drink)`), so the Category column is
 the coarse check. Photos are taken from above on a white counter.
 
-### HoloSelecta shelves (Shelf end-to-end)
+### HoloSelecta shelves (End-to-end)
 
 [HoloSelecta](https://github.com/tobiagru/ObjectDetectionGroceryProducts) (Selecta / ETH Zurich,
 CC BY 4.0): 295 photos of vending-machine shelves, every product boxed and labelled with its name,
@@ -183,10 +182,10 @@ Each run writes `results/<run_id>/summary.json` (the leaderboard row) and `image
 | `sister_shade_rerank` | Retrieval | `multimodalembedding@001` or `gemini-embedding-2-preview` | Embedding top 5 re-ranked by cosine/0.07 + max(-2, 2.5 - 0.15 x CIELAB colour distance of the pack centres). No Gemini call |
 | `gemini_rerank` | Retrieval | any `gemini-*` (+ `multimodalembedding@001`) | Embedding shortlist of 5 products, then one Gemini call per crop sees the crop next to one reference photo of each and picks one, or none |
 | `tiered_hybrid` | Retrieval | any `gemini-*` (+ `multimodalembedding@001`) | Accepts the embedding answer when it is clearly ahead (cosine >= 0.70 and >= 0.045 above the runner-up, tuned on val); otherwise `gemini_rerank` |
-| `detect_retrieve` | End-to-end | any `gemini-*` (+ `multimodalembedding@001`) | One Gemini call boxes every product, then `embedding_retrieval` on each box |
-| `detect_rerank` | End-to-end | any `gemini-*` (+ `multimodalembedding@001`) | One Gemini call boxes every product, then `gemini_rerank` on each box |
-| `detect_tiered` | End-to-end | any `gemini-*` (+ `multimodalembedding@001`) | One Gemini call boxes every product, then `tiered_hybrid` on each box |
-| `shelf_detect_retrieve`, `shelf_detect_rerank`, `shelf_detect_tiered` | Shelf end-to-end | as above | The three pipelines above on HoloSelecta shelves (`tiered_hybrid`'s thresholds are the ones tuned on RPC) |
+| `detect_retrieve` | End-to-end (RPC) | any `gemini-*` (+ `multimodalembedding@001`) | One Gemini call boxes every product, then `embedding_retrieval` on each box |
+| `detect_rerank` | End-to-end (RPC) | any `gemini-*` (+ `multimodalembedding@001`) | One Gemini call boxes every product, then `gemini_rerank` on each box |
+| `detect_tiered` | End-to-end (RPC) | any `gemini-*` (+ `multimodalembedding@001`) | One Gemini call boxes every product, then `tiered_hybrid` on each box |
+| `shelf_detect_retrieve`, `shelf_detect_rerank`, `shelf_detect_tiered` | End-to-end (Shelves) | as above | The three pipelines above on HoloSelecta shelves (`tiered_hybrid`'s thresholds are the ones tuned on RPC) |
 
 Models in brackets are fixed: they are called on every run whatever `-m` says (`also_calls`).
 Detection approaches also label boxes (food, beverage, ...) and drop `not_a_product` ones; the
