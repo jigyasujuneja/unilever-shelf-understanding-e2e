@@ -1,55 +1,57 @@
 """TEMPLATE (not registered: files starting with ``_`` are skipped). Copy to
-``detect_retrieve.py`` to benchmark detection + vector retrieval.
+``detect_retrieve_alloydb.py`` once an AlloyDB catalog exists.
 
-Detect boxes with Gemini, then identify each product by embedding its crop with
-``gemini-embedding-2-preview`` and looking it up in ``VectorCatalog`` (Cloud SQL for PostgreSQL
-``pgvector``, Vertex AI Vector Search, BigQuery ``VECTOR_SEARCH``, or GCS in-memory catalog).
+``detect_retrieve`` (detect_identify.py) with the reference vectors in AlloyDB instead of in
+memory: what a real catalog of thousands of products needs. Gemini detects boxes; the runner
+crops each box and calls ``identify``, which embeds the crop and looks it up in AlloyDB.
+Everything that varies between retrieval experiments lives here: which embedder, which
+database, and the SQL (pure vector below; a hybrid variant in comments).
 """
 
 from __future__ import annotations
 
 from PIL import Image
 
-from approaches.base import (
-    BOX_LIST_SCHEMA,
-    DETECT_PROMPT,
-    Approach,
-    Box,
-    Context,
-    register,
-    to_pixels,
-)
+from approaches.base import Box, Context, register
+from approaches.detect_identify import gemini_detect
+from approaches.embedding_retrieval import MODEL, EmbeddingRetrieval
 from utils import embeddings
-from utils.vector_store import CloudSQL, VectorCatalog, pgvector
+from utils.alloydb import AlloyDB, pgvector
 
 VECTOR_SQL = """
     SELECT id, 1 - (embedding <=> %s::vector) AS score
     FROM products ORDER BY embedding <=> %s::vector LIMIT 1
 """
+# Hybrid example (vector + keyword, reciprocal-rank fusion) - swap in and pass (vec, text):
+# WITH v AS (SELECT id, RANK() OVER (ORDER BY embedding <=> %s::vector) r
+#            FROM products ORDER BY r LIMIT 20),
+#      k AS (SELECT id, RANK() OVER (ORDER BY ts_rank(to_tsvector(name), plainto_tsquery(%s)) DESC) r
+#            FROM products WHERE to_tsvector(name) @@ plainto_tsquery(%s) ORDER BY r LIMIT 20)
+# SELECT id, SUM(1.0 / (60 + r)) score FROM (SELECT * FROM v UNION ALL SELECT * FROM k) u
+# GROUP BY id ORDER BY score DESC LIMIT 1
 
 
 @register
-class DetectRetrieve(Approach):
-    name = "detect_retrieve"
-    architecture = "Gemini detects boxes, Vertex embeddings + Cloud SQL pgvector / Vertex Vector Search identify each product"
+class DetectRetrieveAlloyDB(EmbeddingRetrieval):
+    name = "detect_retrieve_alloydb"
+    task = "end_to_end"
+    models: list[str] | None = None  # the Gemini detector
+    also_calls = [MODEL]
+    architecture = "Gemini detects boxes, Vertex embeddings + AlloyDB identify each product"
     steps = ["Gemini detects every product box",
-             "Embed each crop (Vertex multimodal) and look it up in Cloud SQL pgvector / VectorCatalog"]
+             "Embed each crop (Vertex multimodal) and look it up in AlloyDB"]
     skus = embeddings.SKUS  # priced from the Billing Catalog at run start
 
-    def setup(self, config: dict) -> None:
-        self.embed = embeddings.VertexEmbeddings(config)
-        self.catalog = VectorCatalog(config)
-        self.db = CloudSQL(**config.get("cloudsql", config.get("vector_store", {})))
+    def setup(self, config: dict, ctx: Context) -> None:
+        # The products table must hold the reference-photo embeddings (same model, 512-d),
+        # with id = the RPC product id; see the setup SQL in utils/alloydb.py.
+        self.emb = embeddings.VertexEmbeddings(config)
+        self.db = AlloyDB(**config["alloydb"])
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
-        res = ctx.ask(image, DETECT_PROMPT, schema=BOX_LIST_SCHEMA, max_side=2048)
-        boxes = to_pixels(res.data, 0, 0, *image.size)
-        ctx.trace.step("Gemini detection", f"{len(boxes)} boxes", boxes=boxes)
-        ids = []
-        for b in boxes:
-            vec = self.embed.image(image.crop(b), ctx)
-            v = pgvector(vec)
-            rows = self.db.query(VECTOR_SQL, (v, v))
-            ids.append(rows[0][0] if rows else "unknown")
-        ctx.trace.step("Identify products", f"{len(set(ids))} distinct products", boxes=boxes)
-        return boxes
+        return gemini_detect(image, ctx)
+
+    def identify(self, image: Image.Image, ctx: Context) -> int | None:
+        v = pgvector(self.emb.image(image, ctx))
+        rows = self.db.query(VECTOR_SQL, (v, v))
+        return int(rows[0][0]) if rows else None

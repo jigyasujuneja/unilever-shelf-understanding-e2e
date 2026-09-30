@@ -3,33 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Perfect Store Control Plane · EPIC Shelf Intelligence</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Shelf Benchmark Leaderboard</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased">
-  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-30 px-6 py-3 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <a href="#/" class="brand text-lg font-semibold tracking-tight text-white flex items-center gap-2">
-        <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-600 text-xs font-bold">U</span>
-        <span>Perfect Store Control Plane</span>
-      </a>
-      <span class="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30 font-mono">
-        EPIC · Endpoints · Pipelines · Identification · Compliance
-      </span>
-    </div>
-    <nav class="flex items-center gap-2 text-sm">
-      <a href="#/" id="nav-leaderboard" class="px-3 py-1.5 rounded-lg font-medium transition-colors">
-        Benchmark Leaderboard
-      </a>
-      <a href="#/audit" id="nav-audit" class="px-3 py-1.5 rounded-lg font-medium transition-colors">
-        Decision-First Reviewer
-      </a>
-    </nav>
+<body>
+  <header>
+    <a href="#/" class="brand">Shelf Benchmark Leaderboard</a>
+    <span class="muted">detection on SKU-110K &middot; product classification / retrieval on labelled product photos</span>
   </header>
-
-  <main id="app" class="flex-1 px-6 py-5 max-w-[1600px] w-full mx-auto"></main>
-
+  <main id="app"></main>
   <script src="/static/app.js"></script>
 </body>
 </html>

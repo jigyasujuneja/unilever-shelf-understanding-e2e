@@ -1,493 +1,187 @@
-// Perfect Store Control Plane — Unified EPIC Decision-First Validation UI & Benchmark Leaderboard Arena
+// Views: one leaderboard tab per task (#/board/<task>) and one run's results (#/run/<id>).
 const app = document.getElementById("app");
-const pct = (v) => ((v ?? 0) * 100).toFixed(1) + "%";
-const sec = (v) => (v ?? 0).toFixed(2) + "s";
+const pct = (v) => (v * 100).toFixed(1) + "%";
+const sec = (v) => v.toFixed(2) + "s";
 const inr = (v) => "₹" + (v > 0 && v < 0.001 ? v.toPrecision(2) : (v ?? 0).toFixed(3));
-const esc = (s) =>
-  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const getJSON = (url) => fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)));
+const mark = (ok) => (ok ? '<span class="ok">✓</span>' : '<span class="bad">✗</span>');
 
-// Sister-shade quicklist for AMBIGUOUS box disambiguation
-const SISTER_SHADE_QUICKLIST = [
-  "Lakme 9to5 CC Cream 01 Beige",
-  "Lakme 9to5 CC Cream 02 Honey",
-  "Lakme 9to5 CC Cream 03 Bronze",
-  "Lakme 9to5 CC Cream 04 Almond",
-  "Dove Hair Therapy Daily Shine Shampoo",
-  "Dove Intense Repair Conditioner Tube",
-  "Vaseline Intensive Care Deep Moisture",
-  "Ponds Super Light Gel Oil Free Moisturizer",
-  "Sunsilk Stunning Black Shine Shampoo",
-  "Clinic Plus Strong & Long Health Shampoo",
-  "Surf Excel Matic Top Load Liquid",
-  "Non-HUL Competitor SKU",
-];
-
-// Reactive State Store (populated from /api/v1/audits built from real results/ runs)
-const store = {
-  audits: [],
-  activeAuditIndex: 0,
-  selectedBoxId: null,
-  drawerOpen: false,
-  listeners: new Set(),
-  subscribe(fn) {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+// Leaderboard tabs. A tab appears once a run with that task exists (runner.leaderboard ranks
+// within each task). Runs in one tab are scored on the same dataset, so they compare.
+const fieldCol = (f, what) => [f[0].toUpperCase() + f.slice(1), `Share of ${what} whose ${f} is right`,
+  (r) => pct(r.field_accuracy?.[f] ?? 0)];
+const PRODUCT_SCORE = (what) => ["Product ▾", `Share of ${what} identified as the exact product. Ranking metric.`, "accuracy"];
+const F2_SCORE = ["F2 ▾", "Blend of precision and recall that weights recall 2x. Ranking metric.", "f2"];
+const RPC = "RPC checkout photos (Retail Product Checkout: 200 products in 17 categories, 4 reference photos each).";
+const TASKS = {
+  detection: {
+    label: "Detection",
+    blurb: "SKU-110K shelf photos: find every product box (IoU ≥ 0.5). SKU-110K has no product labels.",
+    cols: [
+      ["Accuracy", "Correct boxes / (correct + false + missed)", (r) => pct(r.accuracy)],
+      ["Recall", "Share of real products found", (r) => pct(r.recall)],
+    ],
+    score: F2_SCORE,
   },
-  notify() {
-    this.listeners.forEach((fn) => fn(this));
+  classification: {
+    label: "Classification",
+    blurb: "Labelled product photos (kierth/retail-products-philippines): each photo shows one product, to be picked from a 184-product catalog.",
+    cols: [fieldCol("brand", "photos"), fieldCol("category", "photos")],
+    score: PRODUCT_SCORE("photos"),
   },
-  get currentAudit() {
-    return this.audits[this.activeAuditIndex] || this.audits[0];
+  retrieval: {
+    label: "Retrieval",
+    blurb: RPC + " Every ground-truth product box is cut out of the photo and must be matched to the right product's reference photos (image to image).",
+    cols: [fieldCol("category", "product boxes")],
+    score: PRODUCT_SCORE("product boxes"),
+  },
+  end_to_end: {
+    label: "End-to-end",
+    blurb: RPC + " Find every product and name it: a box counts only if it overlaps a real product (IoU ≥ 0.5) and names that product.",
+    cols: [
+      ["Found", "Share of real products boxed at all (IoU ≥ 0.5), whatever the name", (r) => pct(r.found_recall ?? 0)],
+      ["Recall", "Share of real products boxed and named correctly", (r) => pct(r.recall)],
+      ["Precision", "Share of predicted boxes that are a real product, named correctly", (r) => pct(r.precision)],
+    ],
+    score: F2_SCORE,
   },
 };
-
-function updateNavHighlight() {
-  const isAudit = location.hash.startsWith("#/audit");
-  const navLb = document.getElementById("nav-leaderboard");
-  const navAud = document.getElementById("nav-audit");
-  if (navLb && navAud) {
-    navLb.className = isAudit
-      ? "px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white hover:bg-slate-800"
-      : "px-3 py-1.5 rounded-lg font-medium bg-blue-600 text-white";
-    navAud.className = isAudit
-      ? "px-3 py-1.5 rounded-lg font-medium bg-blue-600 text-white"
-      : "px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white hover:bg-slate-800";
-  }
-}
+TASKS.shelves_end_to_end = {
+  ...TASKS.end_to_end,
+  label: "Shelf end-to-end",
+  blurb: "HoloSelecta vending-machine shelves (115 products with GTINs; reference crops from other sessions' photos). Find every product and name it: a box counts only if it overlaps a real product (IoU ≥ 0.5) and names that product.",
+};
+const ORDER = Object.keys(TASKS);
+const byOrder = (a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99);
+// One tab per task and dataset (runner.leaderboard ranks within each).
+const taskOf = (r) => (r.dataset === "shelves" ? "shelves_" : "") + (r.task || "detection");
+// Leaderboard sections (Approach.use_case); runs from before sections existed are market share.
+const USE_CASES = {
+  market_share: { label: "Market share", blurb: "Which products are on the shelf and how many: find, identify and count them." },
+  merchandising: { label: "Merchandising", blurb: "How products are displayed: planogram compliance, shelf position, promo material, price tags." },
+};
+const useCaseOf = (r) => r.use_case || "market_share";
+const infoOf = (t) => TASKS[t] || { ...TASKS.detection, label: t, blurb: "" };
+// Per-box identifications: [{box, pred, gt, correct}] (older product runs stored one dict).
+const labelsOf = (r) => (!r.labels ? [] : Array.isArray(r.labels) ? r.labels : [r.labels]);
 
 window.addEventListener("hashchange", route);
 route();
 
 function route() {
-  updateNavHighlight();
-  const runMatch = location.hash.match(/^#\/run\/([^/]+)/);
-  if (runMatch) {
-    showRun(decodeURIComponent(runMatch[1]));
-  } else if (location.hash.startsWith("#/audit")) {
-    loadAndShowAuditWorkspace();
-  } else {
-    showLeaderboard();
-  }
+  const run = location.hash.match(/^#\/run\/([^/]+)/);
+  if (run) return showRun(decodeURIComponent(run[1]));
+  // #/board/<use case>/<task>; #/board/<task> (older links) means market share.
+  const b = location.hash.match(/^#\/board\/([^/]+)(?:\/([^/]+))?/);
+  const parts = b ? [b[1], b[2]].filter(Boolean).map(decodeURIComponent) : [];
+  if (parts.length && !USE_CASES[parts[0]]) parts.unshift("market_share");
+  showLeaderboard(parts[0] || "market_share", parts[1]);
 }
 
-// ============================================================================
-// VIEW 1: DECISION-FIRST EPIC AUDIT WORKSPACE (#/audit)
-// ============================================================================
-async function loadAndShowAuditWorkspace() {
-  try {
-    const remote = await getJSON("/api/v1/audits");
-    if (Array.isArray(remote) && remote.length > 0) {
-      store.audits = remote;
-      if (store.activeAuditIndex >= store.audits.length) store.activeAuditIndex = 0;
-    }
-  } catch (_) {
-    // Offline fallback remains active
-  }
-  renderAuditWorkspace();
-}
-
-function renderAuditWorkspace() {
-  const audit = store.currentAudit;
-  if (!audit) return;
-
-  const sc = audit.compliance_scorecard;
-  const sosFailed = sc.share_of_shelf_pct.status === "FAILED";
-  const tokerFailed = sc.toker_compliance.status === "FAILED";
-  const redLineFailed = sc.red_line_alignment.status === "FAILED";
-
-  const statusBadgeColors = {
-    PENDING: "bg-amber-500/20 text-amber-300 border-amber-500/40",
-    APPROVED: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40",
-    FLAGGED_FOR_AUDIT: "bg-orange-500/20 text-orange-300 border-orange-500/40",
-  };
-
-  const selectedBox = audit.identification_detections.find((b) => b.box_id === store.selectedBoxId);
-
-  app.innerHTML = `
-    <!-- Top Audit Selector & Store Metadata Bar -->
-    <div class="flex flex-wrap items-center justify-between gap-4 mb-5 bg-slate-900 border border-slate-800 rounded-xl p-4">
-      <div class="flex flex-wrap items-center gap-3">
-        <label class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Scenario</label>
-        <select id="audit-scenario-select" class="bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-1.5 font-mono">
-          ${store.audits
-            .map(
-              (a, idx) => `
-            <option value="${idx}" ${idx === store.activeAuditIndex ? "selected" : ""}>
-              [${esc(a.store_metadata.channel_type)}] ${esc(a.audit_id)} · ${esc(a.store_metadata.endpoint_source)}
-            </option>`
-            )
-            .join("")}
-        </select>
-        <span class="text-xs px-2.5 py-1 rounded-md bg-slate-800 text-slate-200 font-mono">
-          Store: ${esc(audit.store_metadata.store_id)}
-        </span>
-        <span class="text-xs px-2.5 py-1 rounded-md bg-blue-500/15 text-blue-300 border border-blue-500/30 font-semibold">
-          Channel: ${esc(audit.store_metadata.channel_type)} (${audit.store_metadata.channel_type === "MT" ? "Modern Trade" : "General Trade"})
-        </span>
-        <span class="text-xs px-2.5 py-1 rounded-md bg-purple-500/15 text-purple-300 border border-purple-500/30 font-semibold">
-          Endpoint [E]: ${esc(audit.store_metadata.endpoint_source)}
-        </span>
-      </div>
-      <div class="flex items-center gap-3">
-        <span class="text-xs uppercase tracking-wider px-3 py-1 rounded-full border font-semibold ${
-          statusBadgeColors[audit.review_status] || statusBadgeColors.PENDING
-        }">
-          Status: ${esc(audit.review_status)}
-        </span>
-        <button id="toggle-drawer-btn" class="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono transition">
-          [P] Pipeline Telemetry (${audit.pipeline_trace.latency_ms}ms · ₹${Number(audit.pipeline_trace.cost_saved_inr).toFixed(2)} saved)
-        </button>
-      </div>
-    </div>
-
-    <!-- B. Compliance Scorecard (Center Workspace) -->
-    <div class="mb-5">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="!m-0 text-xs uppercase tracking-wider text-slate-400 font-semibold">
-          [C] Business Compliance Scorecard · Decision-First Audit Rules
-        </h2>
-        <span class="text-xs text-slate-400">Orange border indicates failed SLA threshold requiring reviewer attention</span>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <!-- Card 1: Share of Shelf -->
-        <div class="kpi-card ${sosFailed ? "failed" : ""}">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Share of Shelf (SOS %)</span>
-            <span class="text-xs font-bold px-2 py-0.5 rounded ${
-              sosFailed ? "bg-orange-500/20 text-orange-400" : "bg-emerald-500/20 text-emerald-400"
-            }">${esc(sc.share_of_shelf_pct.status)}</span>
-          </div>
-          <div class="flex items-baseline gap-3 mt-1">
-            <span class="text-2xl font-bold tabular-nums text-white">${Number(sc.share_of_shelf_pct.detected).toFixed(1)}%</span>
-            <span class="text-xs text-slate-400">Detected vs Target <strong class="text-slate-200">${Number(sc.share_of_shelf_pct.target).toFixed(1)}%</strong></span>
-          </div>
-        </div>
-
-        <!-- Card 2: Promo Asset (Toker) Presence -->
-        <div class="kpi-card ${tokerFailed ? "failed" : ""}">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Promo Asset (Toker) Presence</span>
-            <span class="text-xs font-bold px-2 py-0.5 rounded ${
-              tokerFailed ? "bg-orange-500/20 text-orange-400" : "bg-emerald-500/20 text-emerald-400"
-            }">${esc(sc.toker_compliance.status)}</span>
-          </div>
-          <div class="flex items-baseline gap-3 mt-1">
-            <span class="text-2xl font-bold tabular-nums text-white">${sc.toker_compliance.detected_promos} / ${sc.toker_compliance.expected_promos}</span>
-            <span class="text-xs text-slate-400">Detected vs Expected Promo Headers</span>
-          </div>
-        </div>
-
-        <!-- Card 3: Eye-Level (Red Line) Alignment -->
-        <div class="kpi-card ${redLineFailed ? "failed" : ""}">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Eye-Level (Red Line) Alignment</span>
-            <span class="text-xs font-bold px-2 py-0.5 rounded ${
-              redLineFailed ? "bg-orange-500/20 text-orange-400" : "bg-emerald-500/20 text-emerald-400"
-            }">${esc(sc.red_line_alignment.status)}</span>
-          </div>
-          <div class="flex items-baseline gap-3 mt-1">
-            <span class="text-2xl font-bold text-white">${redLineFailed ? "Misaligned" : "Aligned"}</span>
-            <span class="text-xs text-slate-400">Golden Zone (1.2m–1.5m) Brand-Block Contiguity</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- A. Dual-Viewport Split Screen -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-      <!-- Left Panel: Endpoint Viewport [E] -->
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
-        <div class="flex items-center justify-between mb-3">
-          <div>
-            <span class="text-xs font-semibold uppercase tracking-wider text-blue-400">[E] Endpoint Viewport</span>
-            <h3 class="text-sm font-semibold text-white">Raw Mobile Capture (${esc(audit.store_metadata.endpoint_source)})</h3>
-          </div>
-          <span class="text-xs font-mono text-slate-400">${esc(audit.media.raw_input_url)}</span>
-        </div>
-        <div class="relative w-full overflow-hidden rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center min-h-[360px]">
-          <img id="raw-viewport-img" src="${esc(audit.media.raw_input_url)}" alt="Raw Shelf Capture" class="w-full h-auto block object-contain max-h-[540px]" />
-        </div>
-      </div>
-
-      <!-- Right Panel: Identification Canvas [I] -->
-      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <div>
-            <span class="text-xs font-semibold uppercase tracking-wider text-emerald-400">[I] Identification Canvas</span>
-            <h3 class="text-sm font-semibold text-white">Interactive SVG Overlay (Click Yellow AMBIGUOUS box to resolve shade)</h3>
-          </div>
-          <div class="flex items-center gap-3 text-xs">
-            <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block"></span> CONFIDENT</span>
-            <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-yellow-400 inline-block"></span> AMBIGUOUS</span>
-            <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-red-500 inline-block"></span> UNRECOGNIZED</span>
-          </div>
-        </div>
-
-        <div id="interactive-canvas-container" class="relative w-full overflow-hidden rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center min-h-[360px]">
-          <div class="relative inline-block w-full">
-            <img id="processed-viewport-img" src="${esc(audit.media.processed_canvas_url)}" alt="Processed Shelf Canvas" class="w-full h-auto block max-h-[540px] object-contain" />
-            <svg id="bbox-svg-overlay" viewBox="0 0 1000 750" preserveAspectRatio="none" class="absolute inset-0 w-full h-full pointer-events-auto">
-              ${audit.identification_detections
-                .map((det) => {
-                  const { x, y, w, h } = det.coordinates;
-                  const cls =
-                    det.status === "CONFIDENT"
-                      ? "bbox-confident"
-                      : det.status === "AMBIGUOUS"
-                      ? "bbox-ambiguous"
-                      : "bbox-unrecognized";
-                  const strokeColor =
-                    det.status === "CONFIDENT" ? "#22c55e" : det.status === "AMBIGUOUS" ? "#facc15" : "#ef4444";
-                  return `
-                    <g data-box-id="${esc(det.box_id)}" class="bbox-group">
-                      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" stroke-width="4" class="${cls}" />
-                      <rect x="${x}" y="${Math.max(0, y - 28)}" width="${Math.min(280, Math.max(120, w))}" height="24" rx="4" fill="${strokeColor}" />
-                      <text x="${x + 6}" y="${Math.max(16, y - 11)}" fill="#020617" font-size="13" font-weight="700" font-family="monospace">
-                        ${esc(det.box_id)} · ${Math.round(det.confidence * 100)}%
-                      </text>
-                    </g>`;
-                })
-                .join("")}
-            </svg>
-          </div>
-        </div>
-
-        <!-- Ambiguous Sister-Shade Disambiguation Dropdown Bar -->
-        ${
-          selectedBox
-            ? `
-          <div class="mt-3 p-3 rounded-lg bg-slate-950 border border-yellow-500/50 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <span class="text-xs font-mono text-yellow-400 font-semibold">${esc(selectedBox.box_id)} (${esc(selectedBox.status)} · ${(selectedBox.confidence * 100).toFixed(1)}%)</span>
-              <p class="text-xs text-slate-300 mt-0.5">Current SKU: <strong>${esc(selectedBox.sku_name)}</strong></p>
-            </div>
-            <div class="flex items-center gap-2">
-              <select id="shade-quicklist-select" class="bg-slate-900 border border-slate-700 text-slate-100 text-xs rounded-lg px-2.5 py-1.5">
-                ${SISTER_SHADE_QUICKLIST.map(
-                  (sku) => `<option value="${esc(sku)}" ${sku === selectedBox.sku_name ? "selected" : ""}>${esc(sku)}</option>`
-                ).join("")}
-              </select>
-              <button id="apply-shade-btn" class="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold">
-                Confirm Shade
-              </button>
-            </div>
-          </div>`
-            : `<div class="mt-2 text-xs text-slate-400">Tip: Click any bounding box above (especially yellow <span class="text-yellow-400 font-semibold">AMBIGUOUS</span> sister shades) to reassign or confirm its SKU.</div>`
-        }
-      </div>
-    </div>
-
-    <!-- C. Review Action Footer -->
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-      <div class="flex-1">
-        <label for="audit-feedback-input" class="block text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">
-          Reviewer Audit Feedback / Rejection Notes
-        </label>
-        <input
-          id="audit-feedback-input"
-          type="text"
-          value="${esc(audit.review_notes || "")}"
-          placeholder="Enter store coaching notes, Toker header discrepancy, or sister-shade override reason..."
-          class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-        />
-      </div>
-      <div class="flex items-center gap-3 self-end md:self-center">
-        <button
-          id="btn-flag-audit"
-          class="px-4 py-2.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs tracking-wider uppercase shadow transition"
-        >
-          [ FLAGGED FOR AUDIT ]
-        </button>
-        <button
-          id="btn-approve-audit"
-          class="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs tracking-wider uppercase shadow transition"
-        >
-          [ APPROVE AUDIT ]
-        </button>
-      </div>
-    </div>
-
-    <!-- D. Collapsible Pipeline Drawer (Bottom Right) -->
-    ${
-      store.drawerOpen
-        ? `
-      <div class="fixed bottom-4 right-4 z-40 w-full max-w-xl bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-4 max-h-[75vh] flex flex-col">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-          <div>
-            <span class="text-xs uppercase tracking-wider text-blue-400 font-semibold">[P] Pipeline Telemetry Drawer</span>
-            <h4 class="text-sm font-semibold text-white">Model Execution Cascade & FinOps Ledger</h4>
-          </div>
-          <button id="close-drawer-btn" class="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">Close ✕</button>
-        </div>
-        <div class="py-3 grid grid-cols-3 gap-3 border-b border-slate-800 text-xs">
-          <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-            <div class="text-slate-400">Active Cascade</div>
-            <div class="font-semibold text-slate-100 mt-0.5">${esc(audit.pipeline_trace.active_models.join(" → "))}</div>
-          </div>
-          <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-            <div class="text-slate-400">End-to-End Latency</div>
-            <div class="font-bold text-emerald-400 text-base mt-0.5">${audit.pipeline_trace.latency_ms} ms</div>
-          </div>
-          <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-            <div class="text-slate-400">Cost Saved vs 1-Pass VLM</div>
-            <div class="font-bold text-blue-400 text-base mt-0.5">₹${Number(audit.pipeline_trace.cost_saved_inr).toFixed(3)}</div>
-          </div>
-        </div>
-        <div class="mt-3 flex-1 overflow-auto">
-          <div class="text-xs text-slate-400 mb-1 font-mono">Raw EPIC State Payload Tree:</div>
-          <pre class="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-300 overflow-x-auto">${esc(
-            JSON.stringify(audit, null, 2)
-          )}</pre>
-        </div>
-      </div>`
-        : ""
-    }
-  `;
-
-  // Wire Event Listeners
-  document.getElementById("audit-scenario-select")?.addEventListener("change", (e) => {
-    store.activeAuditIndex = Number(e.target.value);
-    store.selectedBoxId = null;
-    renderAuditWorkspace();
-  });
-
-  document.getElementById("toggle-drawer-btn")?.addEventListener("click", () => {
-    store.drawerOpen = !store.drawerOpen;
-    renderAuditWorkspace();
-  });
-
-  document.getElementById("close-drawer-btn")?.addEventListener("click", () => {
-    store.drawerOpen = false;
-    renderAuditWorkspace();
-  });
-
-  document.querySelectorAll(".bbox-group").forEach((g) => {
-    g.addEventListener("click", () => {
-      store.selectedBoxId = g.getAttribute("data-box-id");
-      renderAuditWorkspace();
-    });
-  });
-
-  document.getElementById("apply-shade-btn")?.addEventListener("click", () => {
-    const sel = document.getElementById("shade-quicklist-select");
-    if (sel && selectedBox) {
-      selectedBox.sku_name = sel.value;
-      selectedBox.status = "CONFIDENT";
-      selectedBox.confidence = 0.99;
-      renderAuditWorkspace();
-    }
-  });
-
-  const submitReview = async (newStatus) => {
-    const notesInput = document.getElementById("audit-feedback-input");
-    if (notesInput) audit.review_notes = notesInput.value;
-    audit.review_status = newStatus;
-    try {
-      await fetch(`/api/v1/audits/${encodeURIComponent(audit.audit_id)}/review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          review_status: newStatus,
-          review_notes: audit.review_notes,
-          identification_detections: audit.identification_detections,
-        }),
-      });
-    } catch (_) {
-      // Offline state updated in memory
-    }
-    renderAuditWorkspace();
-  };
-
-  document.getElementById("btn-flag-audit")?.addEventListener("click", () => submitReview("FLAGGED_FOR_AUDIT"));
-  document.getElementById("btn-approve-audit")?.addEventListener("click", () => submitReview("APPROVED"));
-}
-
-// ============================================================================
-// VIEW 2: BENCHMARK LEADERBOARD ARENA (#/)
-// ============================================================================
-async function showLeaderboard() {
-  const rows = await getJSON("/api/leaderboard");
-  if (!rows.length) {
-    app.innerHTML = `<p class="empty">No runs yet.<br><code>shelf-bench run -a single_pass -m gemini-3.8-flash</code></p>`;
+// ---------------------------------------------------------------- leaderboard
+async function showLeaderboard(useCase, task) {
+  const every = await getJSON("/api/leaderboard");
+  const sections = `<nav class="sections">${Object.entries(USE_CASES).map(([k, u]) => `
+    <a class="section${k === useCase ? " on" : ""}" href="#/board/${k}">${esc(u.label)}
+      <span class="count">${every.filter((r) => useCaseOf(r) === k).length}</span></a>`).join("")}</nav>
+    <p class="muted caption">${esc(USE_CASES[useCase].blurb)}</p>`;
+  const all = every.filter((r) => useCaseOf(r) === useCase);
+  if (!all.length) {
+    app.innerHTML = sections + (useCase === "merchandising"
+      ? `<p class="empty">No merchandising benchmarks yet.<br>Approaches with <code>use_case = "merchandising"</code> will be ranked here.</p>`
+      : `<p class="empty">No runs yet.<br><code>shelf-bench run -a single_pass -m gemini-3.8-flash</code></p>`);
     return;
   }
-  const sets = new Set(rows.map((r) => `${r.split} · ${r.images} images · seed ${r.seed}`));
-  const caption =
-    sets.size === 1
+  const tasks = [...new Set(all.map(taskOf))].sort(byOrder);
+  task = tasks.includes(task) ? task : tasks[0];
+  const info = infoOf(task);
+  const rows = all.filter((r) => taskOf(r) === task);
+  const ranked = rows.filter((r) => r.rank !== "dev");
+  const sets = new Set(ranked.map((r) => `${r.split} · ${r.images} images · seed ${r.seed}`));
+  const caption = !ranked.length
+    ? "No ranked runs yet (only Cloud Run runs on the leaderboard image set are ranked)"
+    : sets.size === 1
       ? `Eval set: ${[...sets][0]}`
-      : `Runs across eval sets (${[...sets].join(" / ")}) · click any row for step-by-step trace or open the Decision-First Reviewer above`;
-  app.innerHTML = `
-    <div class="flex flex-wrap items-center justify-between gap-4 mb-3">
-      <p class="muted caption !m-0">${esc(caption)}</p>
-      <a href="#/audit" class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold">
-        Open Decision-First Reviewer &rarr;
-      </a>
-    </div>
+      : `⚠ Runs use different eval sets (${[...sets].join(" / ")}) - compare with care.`;
+  const tabs = tasks.map((t) => `
+    <a class="tab${t === task ? " on" : ""}" href="#/board/${useCase}/${encodeURIComponent(t)}">
+      ${esc(infoOf(t).label)} <span class="count">${all.filter((r) => taskOf(r) === t).length}</span></a>`).join("");
+  app.innerHTML = sections + `
+    <nav class="tabs">${tabs}</nav>
+    <p class="muted caption">${esc(info.blurb)}<br>${esc(caption)} · <i>dev</i> = local run or other image set, not ranked · click a row for per-image results</p>
     <table class="board">
       <thead><tr>
-        <th>Rank</th><th>Task</th><th>EPIC</th><th>Run ID</th><th>Architecture</th><th>Owner</th>
-        <th class="num" title="Correct boxes / (correct + false + missed)">Accuracy</th>
-        <th class="num" title="Share of real products found">Recall</th>
-        <th class="num" title="Blend of precision and recall that weights recall 2x. Ranking metric.">F2 ▾</th>
+        <th>Rank</th><th>Run ID</th><th>Architecture</th><th>Owner</th>
+        ${info.cols.map(([h, tip]) => `<th class="num" title="${esc(tip)}">${h}</th>`).join("")}
+        <th class="num" title="${esc(info.score[1])}">${info.score[0]}</th>
         <th class="num" title="95% of images finished within this time">p95</th>
-        <th class="num" title="Gemini + Cloud Run cost per image">Cost / img</th>
+        <th class="num" title="99% of images finished within this time">p99</th>
+        <th class="num" title="Model + other API + Cloud Run + storage cost per image">Cost / img</th>
       </tr></thead>
-      <tbody>${rows
-        .map(
-          (r) => `
+      <tbody>${rows.map((r) => `
         <tr onclick="location.hash='#/run/${encodeURIComponent(r.run_id)}'">
           <td class="rank">${r.rank}</td>
-          <td class="mono">${esc(r.task || "detection")}</td>
-          <td>${esc(r.epic || "")}</td>
-          <td class="mono">${esc(r.run_id)}${
-            r.errors ? ` <span class="warn" title="images that errored">${r.errors} err</span>` : ""
-          }</td>
+          <td class="mono">${esc(r.run_id)}${r.errors ? ` <span class="warn" title="images that errored">${r.errors} err</span>` : ""}</td>
           <td>${esc(r.architecture)}</td>
           <td>${esc(r.owner)}</td>
-          <td class="num">${pct(r.accuracy)}</td>
-          <td class="num">${pct(r.recall)}</td>
-          <td class="num strong">${pct(r.f2)}</td>
+          ${info.cols.map(([, , cell]) => `<td class="num">${cell(r)}</td>`).join("")}
+          <td class="num strong">${pct(r[info.score[2]])}</td>
           <td class="num">${sec(r.p95_latency_s)}</td>
+          <td class="num">${sec(r.p99_latency_s)}</td>
           <td class="num">${inr(r.cost_per_image_inr)}</td>
-        </tr>`
-        )
-        .join("")}
+        </tr>`).join("")}
       </tbody>
     </table>`;
 }
 
-// ============================================================================
-// VIEW 3: RUN STEP-BY-STEP TRACE (#/run/<id>)
-// ============================================================================
+// ---------------------------------------------------------------- run detail
 async function showRun(runId) {
   const { summary: s, images } = await getJSON(`/api/runs/${encodeURIComponent(runId)}`);
+  const task = taskOf(s);
+  const single = task === "classification"; // one product per photo
+  const fa = s.field_accuracy || {};
+  const stats = {
+    detection: () => stat("Accuracy", pct(s.accuracy)) + stat("Recall", pct(s.recall)) + stat("F2", pct(s.f2)),
+    end_to_end: () => stat("Found", pct(s.found_recall ?? 0)) + stat("Recall", pct(s.recall)) +
+      stat("Precision", pct(s.precision)) + stat("F2", pct(s.f2)),
+  }[task]?.() ?? Object.entries({ product: s.accuracy, ...fa })
+    .map(([f, v]) => stat(f[0].toUpperCase() + f.slice(1), pct(v))).join("");
+  const right = (r) => labelsOf(r).filter((l) => l.correct?.product).length;
+  const num = (v) => `<td class="num">${v}</td>`;
+  const [head, cells] = {
+    detection: ["<th class=num>GT</th><th class=num>Pred</th><th class=num>F2</th>",
+      (r) => num(r.gt_count) + num(r.pred_count) + num(pct(r.f2))],
+    classification: ["<th>Truth</th><th>Predicted</th>", (r) => {
+      const l = labelsOf(r)[0] || {};
+      return `<td>${esc(l.gt?.product)}</td><td>${mark(l.correct?.product)} ${esc(l.pred?.product ?? "nothing")}</td>`;
+    }],
+    retrieval: ["<th class=num>Products</th><th class=num>Identified</th>",
+      (r) => num(r.gt_count) + num(right(r))],
+    end_to_end: ["<th class=num>Products</th><th class=num>Boxes</th><th class=num>Right</th><th class=num>F2</th>",
+      (r) => num(r.gt_count) + num(r.pred_count) + num(right(r)) + num(pct(r.f2))],
+  }[task] || [];
+  const row = (r) => `<td class="mono">${esc(r.image_id)}${r.error ? ' <span class="warn">err</span>' : ""}</td>` +
+    (cells ? cells(r) : "") + num(sec(r.latency_s));
+  const setupNote = s.cost?.setup_usd ? ` · one-off setup ${inr(s.cost.setup_usd * s.usd_to_inr)} (${s.cost.setup_seconds}s), not in cost/img` : "";
   app.innerHTML = `
-    <a href="#/" class="back">&larr; Leaderboard</a>
+    <a href="#/board/${useCaseOf(s)}/${encodeURIComponent(task)}" class="back">&larr; Leaderboard</a>
     <h1 class="mono">${esc(s.run_id)}</h1>
-    <p class="muted">${esc(s.architecture)} · ${esc(s.owner)} · ${s.images} ${esc(s.split)} images · precision ${pct(s.precision)}</p>
-    <p class="muted">${envLine(s)}</p>
+    <p class="muted">${esc(s.architecture)} · ${esc(s.owner)} · ${s.images} ${esc(s.dataset || "sku110k")} ${esc(s.split)} images · precision ${pct(s.precision)}</p>
+    <p class="muted">${envLine(s)}${setupNote}</p>
     ${telemetryLinks(s.telemetry)}
     <div class="stats">
-      ${stat("Accuracy", pct(s.accuracy))}${stat("Recall", pct(s.recall))}${stat("F2", pct(s.f2))}
+      ${stats}
       ${stat("p95", sec(s.p95_latency_s))}${stat("p99", sec(s.p99_latency_s))}${stat("Cost / img", inr(s.cost_per_image_inr))}
     </div>
     <h2>Pipeline</h2>
-    <ol class="pipeline">${(s.steps || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ol>
+    <ol class="pipeline">${s.steps.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>
     <div class="split">
       <div class="images">
         <table class="small">
-          <thead><tr><th>Image</th><th class="num">GT</th><th class="num">Pred</th><th class="num">F2</th><th class="num">Latency</th></tr></thead>
-          <tbody>${images
-            .map(
-              (r) => `
-            <tr data-id="${esc(r.image_id)}">
-              <td class="mono">${esc(r.image_id)}${r.error ? ' <span class="warn">err</span>' : ""}</td>
-              <td class="num">${r.gt_count}</td><td class="num">${r.pred_count}</td>
-              <td class="num">${pct(r.f2)}</td><td class="num">${sec(r.latency_s)}</td>
-            </tr>`
-            )
-            .join("")}
+          <thead><tr><th>Image</th>${head || ""}<th class="num">Latency</th></tr></thead>
+          <tbody>${images.map((r) => `
+            <tr data-id="${esc(r.image_id)}"${single ? ` class="${labelsOf(r)[0]?.correct?.product ? "right" : "wrong"}"` : ""}>${row(r)}</tr>`).join("")}
           </tbody>
         </table>
       </div>
@@ -507,9 +201,10 @@ function stat(label, value) {
   return `<div class="stat"><div class="label">${label}</div><div class="value">${value}</div></div>`;
 }
 
+// Cloud Trace / Cloud Logging links stored by the runner (summary.json / images.jsonl "telemetry").
 function telemetryLinks(t) {
   if (!t) return "";
-  const a = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener" class="text-blue-400 underline">${text}</a>`;
+  const a = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener">${text}</a>`;
   const parts = [a(t.trace_url, "Trace"), a(t.logs_url, "Logs")];
   if (t.task_logs_url) parts.push(a(t.task_logs_url, "Cloud Run task logs"));
   return `<p class="muted">${parts.join(" · ")} <span class="mono">${esc(t.trace_id)}</span></p>`;
@@ -519,30 +214,48 @@ function envLine(s) {
   const e = s.environment || { platform: "local" };
   const c = s.cost || {};
   const r = (usd) => inr((usd || 0) * s.usd_to_inr);
-  const where =
-    e.platform === "cloud-run"
-      ? `Ran on Cloud Run (${esc(e.region)}, ${e.cpu} vCPU / ${e.memory_gib} GiB)`
-      : "Ran locally (compute not priced)";
+  const where = e.platform === "cloud-run"
+    ? `Ran on Cloud Run (${esc(e.region)}, ${e.cpu} vCPU / ${e.memory_gib} GiB)`
+    : "Ran locally (compute not priced)";
   const credit = c.gemini_credit_usd_per_image
-    ? ` (list ${r(c.gemini_list_usd_per_image)} - promo credit ${r(c.gemini_credit_usd_per_image)})`
-    : "";
-  const compute =
-    e.platform === "cloud-run"
-      ? ` + Cloud Run ${r(c.compute_usd_per_image)}${/provisional/.test(c.compute_source || "") ? " (provisional)" : ""}`
-      : "";
-  const storage = c.storage_usd_per_image ? ` + storage ${r(c.storage_usd_per_image)}` : "";
-  const services = c.services_usd_per_image ? ` + other APIs ${r(c.services_usd_per_image)}` : "";
-  const served = Object.entries(s.traffic || {})
-    .map(([k, v]) => `${v} ${esc(k)}`)
-    .join(", ");
+    ? ` (list ${r(c.gemini_list_usd_per_image)} − promo credit ${r(c.gemini_credit_usd_per_image)})` : "";
+  const served = Object.entries(s.traffic || {}).map(([k, v]) => `${v} ${esc(k)}`).join(", ");
+  const parts = [];
+  if (served || c.gemini_net_usd_per_image) parts.push(`Gemini ${r(c.gemini_net_usd_per_image)}${credit}`);
+  if (c.services_usd_per_image) parts.push(`other APIs ${r(c.services_usd_per_image)}`);
+  if (e.platform === "cloud-run") {
+    parts.push(`Cloud Run ${r(c.compute_usd_per_image)}${/provisional/.test(c.compute_source || "") ? " (provisional)" : ""}`);
+  }
+  if (c.storage_usd_per_image) parts.push(`storage ${r(c.storage_usd_per_image)}`);
   const src = s.pricing
     ? `Prices: Cloud Billing Catalog, ${esc((s.pricing.fetched_at || "").slice(0, 10))}, ₹${Number(s.usd_to_inr).toFixed(2)}/USD`
     : "";
-  return (
-    `${where} · cost/img = Gemini ${r(c.gemini_net_usd_per_image)}${credit}${compute}${storage}${services}` +
-    (served ? `<br>Gemini calls served: ${served}` : "") +
-    (src ? ` · ${src}` : "")
-  );
+  return `${where} · cost/img = ${parts.join(" + ") || r(0)}` +
+    (served ? `<br>Gemini calls served: ${served}` : "") + (src ? ` · ${src}` : "");
+}
+
+// Predicted vs ground-truth product: field by field for a one-product photo, else one row per
+// box (numbered like the boxes on the image), with the RPC reference photo of each product.
+function labelTable(d) {
+  const labels = labelsOf(d);
+  if (!labels.length) return "";
+  const fields = Object.keys(labels[0].correct || { product: 1 });
+  if (d.split === "products") {
+    const l = labels[0];
+    return `<table class="small labels">
+      <thead><tr><th></th><th>Truth</th><th>Predicted</th><th></th></tr></thead>
+      <tbody>${fields.map((k) => `
+        <tr><th>${esc(k[0].toUpperCase() + k.slice(1))}</th><td>${esc(l.gt?.[k])}</td><td>${esc(l.pred?.[k] ?? "—")}</td><td>${mark(l.correct?.[k])}</td></tr>`).join("")}
+      </tbody></table>`;
+  }
+  const ref = (p) => (p && (d.split === "rpc" || d.split === "shelves") ? `<img class="ref" loading="lazy" src="/img/${d.split}-ref/${encodeURIComponent(p.sku_id)}" alt="">` : "");
+  const name = (p, none) => (p ? `${ref(p)}${esc(p.product)}` : `<span class="muted">${none}</span>`);
+  return `<table class="small labels boxes">
+    <thead><tr><th>#</th><th>Truth</th><th>Predicted</th><th></th></tr></thead>
+    <tbody>${labels.map((l, i) => `
+      <tr><td class="num">${i + 1}</td><td>${name(l.gt, "no product here")}</td>
+        <td>${name(l.pred, "none")}</td><td>${mark(l.correct?.product)}</td></tr>`).join("")}
+    </tbody></table>`;
 }
 
 async function showImage(runId, imageId) {
@@ -557,17 +270,12 @@ async function showImage(runId, imageId) {
         <div class="legend" id="legend"></div>
       </div>
       <div>
+        ${labelTable(d)}
         <div class="muted hint">Steps for ${esc(imageId)}. Click one to see what it produced.</div>
         ${telemetryLinks(d.telemetry)}
         ${d.error ? `<p class="warn">${esc(d.error)}</p>` : ""}
-        <ol class="steps">${d.steps
-          .map(
-            (st, i) => `
-          <li data-i="${i}"><b>${esc(st.name)}</b> <span class="muted">${dur(st.ms)}</span><br><span class="detail">${esc(
-              st.detail
-            )}</span></li>`
-          )
-          .join("")}
+        <ol class="steps">${d.steps.map((st, i) => `
+          <li data-i="${i}"><b>${esc(st.name)}</b> <span class="muted">${dur(st.ms)}</span><br><span class="detail">${esc(st.detail)}</span></li>`).join("")}
         </ol>
       </div>
     </div>`;
@@ -579,13 +287,12 @@ async function showImage(runId, imageId) {
     steps.querySelectorAll("li").forEach((li) => li.classList.toggle("sel", +li.dataset.i === i));
     draw(v.querySelector("canvas"), img, d, i === last ? null : d.steps[i]);
   };
-  steps.addEventListener("click", (e) => {
-    const li = e.target.closest("li");
-    if (li) select(+li.dataset.i);
-  });
+  steps.addEventListener("click", (e) => { const li = e.target.closest("li"); if (li) select(+li.dataset.i); });
   select(last);
 }
 
+// Final step: ground truth vs. predictions (TP / FP); for identification, a green / red box per
+// right / wrong product (numbered like the table). Other steps: that step's boxes / tiles.
 function draw(canvas, img, d, step) {
   const maxW = Math.min(img.naturalWidth, (canvas.parentElement.clientWidth || 700) - 16);
   const k = Math.min(maxW / d.width, (window.innerHeight * 0.75) / d.height);
@@ -593,13 +300,36 @@ function draw(canvas, img, d, step) {
   canvas.height = d.height * k;
   const g = canvas.getContext("2d");
   g.drawImage(img, 0, 0, canvas.width, canvas.height);
-  const rect = (b, color, w = 1.5) => {
-    g.strokeStyle = color;
-    g.lineWidth = w;
-    g.strokeRect(b[0] * k, b[1] * k, (b[2] - b[0]) * k, (b[3] - b[1]) * k);
-  };
+  const rect = (b, color, w = 1.5) => { g.strokeStyle = color; g.lineWidth = w; g.strokeRect(b[0] * k, b[1] * k, (b[2] - b[0]) * k, (b[3] - b[1]) * k); };
+  const GREEN = "rgba(34,197,94,.95)", RED = "rgba(239,68,68,.95)";
   const legend = document.getElementById("legend");
-  if (!step) {
+  const labels = labelsOf(d);
+  if (!step && d.split === "products" && labels.length) {
+    const l = labels[0], ok = l.correct?.product;
+    d.gt.forEach((b) => rect(b, ok ? GREEN : RED, 8));
+    legend.innerHTML = ok
+      ? `<span class="sw right"></span>right product: ${esc(l.gt.product)}`
+      : `<span class="sw wrong"></span>wrong: predicted ${esc(l.pred?.product ?? "nothing")}, truth ${esc(l.gt.product)}`;
+  } else if (!step && labels.length) {
+    const e2e = d.task === "end_to_end";
+    if (e2e) {
+      g.setLineDash([6, 4]);
+      d.gt.forEach((b) => rect(b, "rgba(255,255,255,.9)", 2));
+      g.setLineDash([]);
+    }
+    g.font = "bold 13px sans-serif";
+    labels.forEach((l, i) => {
+      const c = l.correct?.product ? GREEN : RED;
+      rect(l.box, c, 3);
+      g.fillStyle = c;
+      g.fillRect(l.box[0] * k, l.box[1] * k, 22, 16);
+      g.fillStyle = "#fff";
+      g.fillText(String(i + 1), l.box[0] * k + 3, l.box[1] * k + 12);
+    });
+    const ok = labels.filter((l) => l.correct?.product).length;
+    legend.innerHTML = `<span class="sw right"></span>right product (${ok}) <span class="sw wrong"></span>wrong product or no product (${labels.length - ok})` +
+      (e2e ? ` <span class="sw gt"></span>ground truth, dashed (${d.gt_count}) · products missed or misnamed ${d.fn}` : "");
+  } else if (!step) {
     const tp = new Set(d.matched);
     d.gt.forEach((b) => rect(b, "rgba(34,197,94,.9)"));
     d.preds.forEach((b, i) => rect(b, tp.has(i) ? "rgba(59,130,246,.95)" : "rgba(239,68,68,.95)"));

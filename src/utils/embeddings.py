@@ -1,15 +1,17 @@
-"""Vertex AI Gemini Embedding 2 client (``gemini-embedding-2-preview``).
+"""Vertex AI multimodal embeddings client: ``multimodalembedding@001`` or ``gemini-embedding-2-preview``.
 
-Product crops and text share one multimodal vector space via ``:embedContent``, so a shelf crop
-can be matched against catalog product photos, SKU titles, or multimodal (image + text) entries.
-An approach creates one in ``setup()`` and calls ``image(crop, ctx)``, ``text(query, ctx)``, or
-``multimodal(crop, text_hint, ctx)``; passing ``ctx`` bills the call to the image being scored
-(priced from the ``SKUS`` below, which the approach lists in its own ``skus``).
+Crops and text share one vector space, so a shelf crop can be matched against catalog product
+photos or names. An approach creates one in ``setup()`` and calls ``image(crop, ctx)``; passing
+``ctx`` bills the call to the image being scored (priced from the ``SKUS`` below, which the
+approach lists in its own ``skus``). ``multimodalembedding@001`` is billed per image / text
+character; Gemini Embedding 2 (support from Jigyasu Juneja's branch) per input token, as reported
+in each response.
 """
 
 from __future__ import annotations
 
 import base64
+import random
 import time
 
 import google.auth
@@ -19,85 +21,66 @@ from PIL import Image
 from utils.llm import image_to_jpeg, load_config
 
 VERTEX_AI = "C7E2-9256-1C43"  # Billing Catalog service id
-DEFAULT_EMBEDDING_MODEL = "gemini-embedding-2-preview"
+MULTIMODAL = "multimodalembedding@001"
+GEMINI_EMBEDDING = "gemini-embedding-2-preview"
+MODELS = [MULTIMODAL, GEMINI_EMBEDDING]  # approaches that only embed can run either
 
 # Billable unit -> (Billing Catalog service, SKU description). Add to Approach.skus.
-SKUS = {
-    "embedding_image": (VERTEX_AI, "Embeddings for multimodal - Image (input)"),
-    "embedding_text_char": (VERTEX_AI, "Embeddings for multimodal - Text (input)"),
-}
+SKUS = {"embedding_image": (VERTEX_AI, "Embeddings for multimodal - Image (input)"),
+        "embedding_text_char": (VERTEX_AI, "Embeddings for multimodal - Text (input)"),
+        "gemini_embedding_image_token": (VERTEX_AI, "Gemini MM Embedding - Image Input"),
+        "gemini_embedding_text_token": (VERTEX_AI, "Gemini MM Embedding - Text Input")}
 
 
 class VertexEmbeddings:
-    """Multimodal image and text embeddings via Vertex AI ``gemini-embedding-2-preview``."""
-
-    def __init__(
-        self,
-        config: dict | None = None,
-        model: str = DEFAULT_EMBEDDING_MODEL,
-        dimension: int = 768,
-    ):
+    def __init__(self, config: dict | None = None, model: str = MULTIMODAL, dimension: int | None = None):
+        if model not in MODELS:
+            raise ValueError(f"embedding model must be one of {MODELS}, got {model!r}")
         gcp = (config or load_config())["gcp"]
         region = gcp.get("region", "us-central1")
-        self.model = model
-        self.dimension = dimension
-        method = "embedContent" if model.startswith("gemini-embedding") else "predict"
-        self.url = (
-            f"https://{region}-aiplatform.googleapis.com/v1/projects/{gcp['project']}"
-            f"/locations/{region}/publishers/google/models/{model}:{method}"
-        )
+        self.gemini = model == GEMINI_EMBEDDING
+        self.url = (f"https://{region}-aiplatform.googleapis.com/v1/projects/{gcp['project']}"
+                    f"/locations/{region}/publishers/google/models/{model}:"
+                    + ("embedContent" if self.gemini else "predict"))
+        self.dimension = dimension or (768 if self.gemini else 512)
         creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
         self.session = AuthorizedSession(creds)
 
-    def image(
-        self,
-        image: Image.Image,
-        ctx=None,
-        text_hint: str | None = None,
-    ) -> list[float]:
+    def image(self, image: Image.Image, ctx=None) -> list[float]:
         b64 = base64.b64encode(image_to_jpeg(image, 1024)).decode()
+        if self.gemini:
+            return self._embed({"inlineData": {"mimeType": "image/jpeg", "data": b64}}, ctx)
         if ctx:
             ctx.bill("embedding_image", 1)
-            if text_hint:
-                ctx.bill("embedding_text_char", len(text_hint[:1024]))
-        parts: list[dict] = [{"inlineData": {"mimeType": "image/jpeg", "data": b64}}]
-        if text_hint:
-            parts.append({"text": text_hint[:1024]})
-        return self._embed_parts(parts, fallback_instance={"image": {"bytesBase64Encoded": b64}}, fallback_key="imageEmbedding")
+        return self._predict({"image": {"bytesBase64Encoded": b64}}, "imageEmbedding")
 
     def text(self, text: str, ctx=None) -> list[float]:
         text = text[:1024]
+        if self.gemini:
+            return self._embed({"text": text}, ctx)
         if ctx:
             ctx.bill("embedding_text_char", len(text))
-        return self._embed_parts(
-            [{"text": text}],
-            fallback_instance={"text": text},
-            fallback_key="textEmbedding",
-        )
+        return self._predict({"text": text}, "textEmbedding")
 
-    def multimodal(self, image: Image.Image, text: str, ctx=None) -> list[float]:
-        return self.image(image, ctx=ctx, text_hint=text)
+    def _embed(self, part: dict, ctx) -> list[float]:
+        """Gemini Embedding 2 (``:embedContent``); bills the input tokens it reports."""
+        data = self._post({"content": {"parts": [part]}, "outputDimensionality": self.dimension})
+        if ctx:
+            for d in data.get("usageMetadata", {}).get("promptTokensDetails", []):
+                ctx.bill(f"gemini_embedding_{d['modality'].lower()}_token", d.get("tokenCount", 0))
+        return data["embedding"]["values"]
 
-    def _embed_parts(
-        self,
-        parts: list[dict],
-        fallback_instance: dict,
-        fallback_key: str,
-    ) -> list[float]:
-        if self.url.endswith(":embedContent"):
-            body: dict = {
-                "content": {"parts": parts},
-                "outputDimensionality": self.dimension,
-            }
-        else:
-            body = {"instances": [fallback_instance], "parameters": {"dimension": self.dimension}}
-        for attempt in range(5):  # 429 / 5xx back-off
+    def _predict(self, instance: dict, key: str) -> list[float]:
+        data = self._post({"instances": [instance], "parameters": {"dimension": self.dimension}})
+        return data["predictions"][0][key]
+
+    def _post(self, body: dict) -> dict:
+        # 429 / 5xx back-off. The quota is per minute, so wait long enough to reach the next
+        # minute, with jitter so parallel threads (and Cloud Run tasks) don't retry in step.
+        for attempt in range(12):
             r = self.session.post(self.url, json=body, timeout=60)
             if r.status_code not in (429, 500, 502, 503, 504):
                 break
-            time.sleep(2 ** attempt)
+            time.sleep(min(60, 2 ** attempt) * (0.5 + random.random()))
         r.raise_for_status()
-        payload = r.json()
-        if "embedding" in payload:
-            return [float(v) for v in payload["embedding"].get("values", [])]
-        return [float(v) for v in payload["predictions"][0][fallback_key]]
+        return r.json()

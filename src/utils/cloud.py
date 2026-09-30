@@ -12,102 +12,26 @@ Uses Application Default Credentials and REST APIs only, so it doesn't need the 
 from __future__ import annotations
 
 import io
-import json
 import math
-import os
 import tarfile
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+
+import google.auth
+from google.auth.transport.requests import AuthorizedSession
 
 import runner
 from utils import dataset
 from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ["Dockerfile", "pyproject.toml", "requirements.txt", "README.md", "config.yaml", "configs", "data/splits", "results", "src", "web"]
-AuthorizedSession = Any
+SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "src"]
 
 
-class _StdlibResponse:
-    def __init__(self, status_code: int, content: bytes, url: str, method: str):
-        self.status_code = status_code
-        self.content = content
-        self.text = content.decode("utf-8", errors="replace")
-        self.request = type("Req", (), {"method": method, "url": url})()
-
-    def json(self) -> Any:
-        return json.loads(self.text) if self.text.strip() else {}
-
-
-class _StdlibAuthorizedSession:
-    """Zero-dependency HTTP session using ADC bearer token when google-auth is not installed."""
-
-    def __init__(self) -> None:
-        self._tok, self._proj = dataset._adc_bearer_token()
-
-    def _req(
-        self,
-        method: str,
-        url: str,
-        params: dict | None = None,
-        json_body: Any = None,
-        data: bytes | None = None,
-        headers: dict | None = None,
-    ) -> _StdlibResponse:
-        if params:
-            sep = "&" if "?" in url else "?"
-            url = f"{url}{sep}{urllib.parse.urlencode(params)}"
-        hdrs = {
-            "Authorization": f"Bearer {self._tok}",
-            "x-goog-user-project": self._proj,
-            **(headers or {}),
-        }
-        body_bytes = data
-        if json_body is not None:
-            body_bytes = json.dumps(json_body).encode("utf-8")
-            hdrs.setdefault("Content-Type", "application/json")
-        req = urllib.request.Request(url, data=body_bytes, headers=hdrs, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                return _StdlibResponse(resp.status, resp.read(), url, method)
-        except urllib.error.HTTPError as e:
-            return _StdlibResponse(e.code, e.read(), url, method)
-
-    def get(self, url: str, params: dict | None = None, headers: dict | None = None, **_) -> _StdlibResponse:
-        return self._req("GET", url, params=params, headers=headers)
-
-    def post(
-        self,
-        url: str,
-        params: dict | None = None,
-        json: Any = None,
-        data: bytes | None = None,
-        headers: dict | None = None,
-        **_,
-    ) -> _StdlibResponse:
-        return self._req("POST", url, params=params, json_body=json, data=data, headers=headers)
-
-    def patch(self, url: str, params: dict | None = None, json: Any = None, headers: dict | None = None, **_) -> _StdlibResponse:
-        return self._req("PATCH", url, params=params, json_body=json, headers=headers)
-
-    def put(self, url: str, data: bytes | None = None, headers: dict | None = None, **_) -> _StdlibResponse:
-        return self._req("PUT", url, data=data, headers=headers)
-
-
-def _session():
-    try:
-        import google.auth
-        from google.auth.transport.requests import AuthorizedSession
-
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        return AuthorizedSession(creds)
-    except ImportError:
-        return _StdlibAuthorizedSession()
+def _session() -> AuthorizedSession:
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    return AuthorizedSession(creds)
 
 
 def _ok(r):
@@ -149,150 +73,14 @@ def task_seconds(env: dict, session: AuthorizedSession | None = None) -> float:
     return math.ceil(secs * 10) / 10
 
 
-REQUIRED_ARGOLIS_APIS = [
-    "aiplatform.googleapis.com",
-    "sqladmin.googleapis.com",
-    "run.googleapis.com",
-    "cloudbuild.googleapis.com",
-    "artifactregistry.googleapis.com",
-    "storage.googleapis.com",
-    "cloudbilling.googleapis.com",
-    "cloudtrace.googleapis.com",
-    "logging.googleapis.com",
-]
-
-
-def ensure_argolis_infra(s: AuthorizedSession, project: str, region: str, log=print) -> dict:
-    """Ensure any Argolis GCP project has required APIs, Uniform-Bucket-Level-Access GCS buckets,
-    and Artifact Registry repository (`cloud-run-source-deploy`) created before running Cloud Build/Run.
-    """
-    log(f"[Argolis Bootstrap] Verifying GCP APIs, GCS buckets, and Artifact Registry in project={project!r} ({region}) ...")
-    # 1. Enable required GCP services via Service Usage API
-    su_url = f"https://serviceusage.googleapis.com/v1/projects/{project}/services:batchEnable"
-    r_su = s.post(su_url, json={"serviceIds": REQUIRED_ARGOLIS_APIS})
-    if r_su.status_code < 300:
-        log(f"  [1/3] Enabled {len(REQUIRED_ARGOLIS_APIS)} GCP APIs ({', '.join(REQUIRED_ARGOLIS_APIS[:4])}, ...)")
-
-    # 2. Ensure GCS buckets exist with uniformBucketLevelAccess=True (mandatory in Argolis)
-    data_bucket = os.environ.get("SHELF_BENCH_BUCKET") or f"{project}-shelf-images"
-    source_bucket = f"run-sources-{project}-{region}"
-    for b_name in (data_bucket, source_bucket):
-        chk = s.get(f"https://storage.googleapis.com/storage/v1/b/{b_name}")
-        if chk.status_code == 404:
-            log(f"  [2/3] Creating Argolis-compliant GCS bucket gs://{b_name} (uniformBucketLevelAccess=True) ...")
-            _ok(s.post(
-                f"https://storage.googleapis.com/storage/v1/b?project={project}",
-                json={
-                    "name": b_name,
-                    "location": region,
-                    "iamConfiguration": {"uniformBucketLevelAccess": {"enabled": True}},
-                },
-            ))
-        else:
-            log(f"  [2/3] Verified GCS bucket gs://{b_name}")
-
-    # 3. Ensure Artifact Registry repository `cloud-run-source-deploy` exists in `region`
-    ar_base = f"https://artifactregistry.googleapis.com/v1/projects/{project}/locations/{region}/repositories"
-    ar_chk = s.get(f"{ar_base}/cloud-run-source-deploy")
-    if ar_chk.status_code == 404:
-        log(f"  [3/3] Creating Artifact Registry Docker repo {region}-docker.pkg.dev/{project}/cloud-run-source-deploy ...")
-        s.post(
-            f"{ar_base}?repositoryId=cloud-run-source-deploy",
-            json={"format": "DOCKER", "description": "Cloud Run source deploy repository for shelf-bench"},
-        )
-        time.sleep(3)
-    else:
-        log(f"  [3/3] Verified Artifact Registry repo {region}-docker.pkg.dev/{project}/cloud-run-source-deploy")
-
-    # 4. Grant resource-level IAM to the default Compute Engine service account so Cloud Build
-    #    and Cloud Run Jobs can read sources, push images, and write results even if the caller
-    #    lacks project-level IAM Admin (`resourcemanager.projects.setIamPolicy`).
-    proj_info = s.get(f"https://cloudresourcemanager.googleapis.com/v1/projects/{project}")
-    proj_num = proj_info.json().get("projectNumber") if proj_info.status_code == 200 else None
-    if proj_num:
-        compute_member = f"serviceAccount:{proj_num}-compute@developer.gserviceaccount.com"
-        for b_name in (data_bucket, source_bucket):
-            pol_r = s.get(f"https://storage.googleapis.com/storage/v1/b/{b_name}/iam")
-            if pol_r.status_code == 200:
-                pol = pol_r.json()
-                bindings = pol.get("bindings", [])
-                has_binding = any(
-                    b.get("role") == "roles/storage.admin" and compute_member in b.get("members", [])
-                    for b in bindings
-                )
-                if not has_binding:
-                    bindings.append({"role": "roles/storage.admin", "members": [compute_member]})
-                    pol["bindings"] = bindings
-                    s.put(f"https://storage.googleapis.com/storage/v1/b/{b_name}/iam", json=pol)
-        ar_iam_url = f"{ar_base}/cloud-run-source-deploy"
-        ar_pol_r = s.get(f"{ar_iam_url}:getIamPolicy")
-        if ar_pol_r.status_code == 200:
-            ar_pol = ar_pol_r.json()
-            ar_bindings = ar_pol.get("bindings", [])
-            has_ar = any(
-                b.get("role") == "roles/artifactregistry.writer" and compute_member in b.get("members", [])
-                for b in ar_bindings
-            )
-            if not has_ar:
-                ar_bindings.append({"role": "roles/artifactregistry.writer", "members": [compute_member]})
-                ar_pol["bindings"] = ar_bindings
-                s.post(f"{ar_iam_url}:setIamPolicy", json={"policy": ar_pol})
-
-    return {
-        "project": project,
-        "region": region,
-        "data_bucket": f"gs://{data_bucket}",
-        "source_bucket": f"gs://{source_bucket}",
-        "artifact_registry": f"{region}-docker.pkg.dev/{project}/cloud-run-source-deploy",
-    }
-
-
-def bootstrap_argolis_project(
-    project: str | None = None,
-    region: str | None = None,
-    upload_datasets: bool = True,
-    seed_results: bool | None = None,
-    log=print,
-) -> dict:
-    """One-command Argolis Setup (`shelf-bench bootstrap --project <ANY_ARGOLIS_PROJECT>`):
-    1. Dynamically sets `SHELF_BENCH_PROJECT` and `SHELF_BENCH_REGION`.
-    2. Enables all 9 GCP APIs (`Vertex AI`, `Cloud SQL Admin`, `Cloud Run`, `Cloud Build`, `Artifact Registry`, `GCS`, `Billing`, `Trace`, `Logging`).
-    3. Creates Argolis-compliant GCS buckets (`gs://<project>-shelf-images` and `gs://run-sources-<project>-<region>`).
-    4. Uploads `SKU110K_fixed` (`train/val/test`), `HUL_labeled_benchmarks` (`59` real images), `HUL_catalog` (`184/245` SKUs),
-       `dataset_splits_manifest.json`, and existing `results/` to `gs://<project>-shelf-images/`.
-    """
-    if project:
-        os.environ["SHELF_BENCH_PROJECT"] = project
-    if region:
-        os.environ["SHELF_BENCH_REGION"] = region
-    cfg = load_config(project_override=project)
-    proj, reg = cfg["gcp"]["project"], cfg["gcp"]["region"]
-    s = _session()
-    infra = ensure_argolis_infra(s, proj, reg, log=log)
-
-    if upload_datasets:
-        log(f"[Argolis Bootstrap] Uploading all datasets (SKU-110K train/val/test, HUL labeled benchmarks, HUL 245-SKU catalog, splits) to {infra['data_bucket']} ...")
-        dataset.upload(dataset.LOCAL_ROOT, cfg["gcp"]["data"], dataset_target="all")
-
-    should_seed_results = upload_datasets if seed_results is None else seed_results
-    if should_seed_results and Path("results").is_dir():
-        log(f"[Argolis Bootstrap] Syncing committed benchmark results to {cfg['gcp']['results']} ...")
-        dataset.upload("results", cfg["gcp"]["results"], dataset_target="sku110k")
-
-    log(f"[Argolis Bootstrap] Project {proj!r} is 100% ready for `shelf-bench vertex-job`, `shelf-bench cloud-run`, and `shelf-bench cloud-service`!")
-    return infra
-
-
 def build_image(s: AuthorizedSession, project: str, region: str, log=print) -> str:
-    ensure_argolis_infra(s, project, region, log=log)
     tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     image = f"{region}-docker.pkg.dev/{project}/cloud-run-source-deploy/shelf-bench:{tag}"
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for name in SOURCE_FILES:
-            if (ROOT / name).exists():
-                tar.add(ROOT / name, arcname=name,
-                        filter=lambda t: None if "__pycache__" in t.name or ".egg-info" in t.name else t)
+            tar.add(ROOT / name, arcname=name,
+                    filter=lambda t: None if "__pycache__" in t.name or ".egg-info" in t.name else t)
     bucket, obj = f"run-sources-{project}-{region}", f"shelf-bench/source-{tag}.tgz"
     dataset._gcs().bucket(bucket).blob(obj).upload_from_string(buf.getvalue())
     log(f"Building {image} with Cloud Build ...")
@@ -331,10 +119,6 @@ def deploy_job(s, project, region, image, args, tasks, cfg) -> str:
                 "containers": [{
                     "image": image,
                     "args": args,
-                    "env": [
-                        {"name": "SHELF_BENCH_PROJECT", "value": project},
-                        {"name": "SHELF_BENCH_REGION", "value": region},
-                    ],
                     "resources": {"limits": {"cpu": str(cr.get("cpu", 2)),
                                              "memory": f"{cr.get('memory_gib', 4)}Gi"}},
                 }],
@@ -371,9 +155,11 @@ def run_on_cloud(approaches: list[str], models: list[str], tiers: list[str], spl
     cfg = load_config()
     gcp = cfg["gcp"]
     project, region = gcp["project"], gcp["region"]
+    tasks = len(runner.combos(approaches, tiers, models, log))  # same list each task indexes
+    if not tasks:
+        raise SystemExit("Nothing to run: no approach runs any of the given models")
     s = _session()
     image = build_image(s, project, region, log)
-    tasks = len(approaches) * len(tiers) * len(models)
     args = ["run", "-a", *approaches, "-m", *models, "-t", *tiers, "--split", split, "--limit", str(limit),
             "--seed", str(seed), "--workers", str(workers), "--owner", owner,
             "--root", gcp["data"], "--results", gcp["results"]]
@@ -391,115 +177,127 @@ def run_on_cloud(approaches: list[str], models: list[str], tiers: list[str], spl
     return 0
 
 
-def deploy_cloud_service(port: int = 8080, log=print) -> str:
-    """Build and deploy the Always-On Cloud Run Web Service (`perfect-store-control-plane`) on Argolis."""
-    cfg = load_config()
-    gcp = cfg["gcp"]
-    cr = cfg.get("cloud_run", {})
+# ---- one-time project setup and the UI service ---------------------------------------------------
+
+APIS = ["aiplatform.googleapis.com", "run.googleapis.com", "cloudbuild.googleapis.com",
+        "artifactregistry.googleapis.com", "storage.googleapis.com", "cloudbilling.googleapis.com",
+        "cloudtrace.googleapis.com", "logging.googleapis.com"]
+
+
+def bootstrap(log=print) -> None:
+    """Prepare the config.yaml project: enable APIs, create the data bucket, the Cloud Build
+    source bucket and the Artifact Registry repo, and upload the labelled products set and the
+    RPC set (if ``make rpc`` prepared it).
+    Idempotent. SKU-110K (~12 GB) is uploaded separately: ``make data`` then ``shelf-bench upload``.
+    """
+    gcp = load_config()["gcp"]
     project, region = gcp["project"], gcp["region"]
-    service_name = cr.get("service", "perfect-store-control-plane")
+    s = _session()
+    _ok(s.post(f"https://serviceusage.googleapis.com/v1/projects/{project}/services:batchEnable",
+               json={"serviceIds": APIS}))
+    log(f"APIs enabled in {project}: {', '.join(a.split('.')[0] for a in APIS)}")
+    data_bucket = dataset._split_gs(gcp["data"])[0]
+    for bucket in (data_bucket, f"run-sources-{project}-{region}"):
+        if s.get(f"https://storage.googleapis.com/storage/v1/b/{bucket}").status_code == 404:
+            _ok(s.post(f"https://storage.googleapis.com/storage/v1/b?project={project}",
+                       json={"name": bucket, "location": region,
+                             "iamConfiguration": {"uniformBucketLevelAccess": {"enabled": True}}}))
+            log(f"created gs://{bucket}")
+        else:
+            log(f"gs://{bucket} exists")
+    repos = f"https://artifactregistry.googleapis.com/v1/projects/{project}/locations/{region}/repositories"
+    if s.get(f"{repos}/cloud-run-source-deploy").status_code == 404:
+        _ok(s.post(f"{repos}?repositoryId=cloud-run-source-deploy", json={"format": "DOCKER"}))
+        log(f"created Artifact Registry repo {region}/cloud-run-source-deploy")
+    else:
+        log("Artifact Registry repo cloud-run-source-deploy exists")
+    for local, key in ((dataset.PRODUCTS_LOCAL, "products"), (dataset.RPC_LOCAL, "rpc")):
+        if Path(local).is_dir() and gcp.get(key):
+            dataset.upload(local, gcp[key])
+    log("Next: make data && .venv/bin/shelf-bench upload   (SKU-110K, only needed for detection)")
+
+
+def deploy_ui(log=print) -> str:
+    """Deploy the leaderboard UI as a private Cloud Run service (``cloud_run.service``).
+    On start it pulls every finished run from ``gcp.results``; nobody can call it without the
+    Cloud Run Invoker role (open it with ``shelf-bench proxy``)."""
+    cfg = load_config()
+    gcp, cr = cfg["gcp"], cfg.get("cloud_run", {})
+    project, region = gcp["project"], gcp["region"]
+    name = cr.get("service", "shelf-bench-ui")
     s = _session()
     image = build_image(s, project, region, log)
     base = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services"
-    body = {
-        "template": {
-            "containers": [{
-                "image": image,
-                "args": ["serve", "--host", "0.0.0.0", "--port", str(port), "--root", gcp["data"]],
-                "env": [
-                    {"name": "SHELF_BENCH_PROJECT", "value": project},
-                    {"name": "SHELF_BENCH_REGION", "value": region},
-                ],
-                "ports": [{"containerPort": port}],
-                "resources": {"limits": {"cpu": str(cr.get("cpu", 2)),
-                                         "memory": f"{cr.get('memory_gib', 4)}Gi"}},
-            }],
-        },
-    }
-    exists = s.get(f"{base}/{service_name}").status_code == 200
-    op = _ok(s.patch(f"{base}/{service_name}", json=body) if exists
-             else s.post(f"{base}?serviceId={service_name}", json=body))
-    done_op = _wait_op(s, op["name"])
-    uri = done_op.get("response", {}).get("uri", f"https://{service_name}-{region}.a.run.app")
-    log(f"Deployed Cloud Run Service: {uri}")
+    body = {"template": {"containers": [{
+        "image": image,
+        "args": ["serve", "--pull", "--host", "0.0.0.0", "--port", "8080"],
+        "ports": [{"containerPort": 8080}],
+        "resources": {"limits": {"cpu": "1", "memory": "2Gi"}},
+    }]}}
+    exists = s.get(f"{base}/{name}").status_code == 200
+    op = _ok(s.patch(f"{base}/{name}", json=body) if exists
+             else s.post(f"{base}?serviceId={name}", json=body))
+    uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
+    log(f"Deployed {name}: {uri} (private)\nOpen it: make ui-proxy   (http://localhost:8083)")
     return uri
 
 
-def proxy_cloud_service(port: int = 8080, host: str = "127.0.0.1", target_url: str | None = None, log=print) -> None:
-    """Start an authenticated local HTTP proxy forwarding to the live Cloud Run Service.
-
-    Replaces `gcloud run services proxy` on workstations where the
-    `google-cloud-cli-cloud-run-proxy` apt component is not installed.
-    """
+def proxy_ui(port: int = 8083, host: str = "127.0.0.1", log=print) -> None:
+    """Serve the private UI service on ``http://host:port``, adding your identity token to every
+    request. Same as ``gcloud run services proxy``, without its extra gcloud component.
+    The token comes from ``gcloud auth print-identity-token`` (refreshed every 30 minutes)."""
     import subprocess
     import urllib.error
     import urllib.request
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     cfg = load_config()
-    gcp = cfg["gcp"]
-    cr = cfg.get("cloud_run", {})
-    project, region = gcp["project"], gcp["region"]
-    service_name = cr.get("service", "perfect-store-control-plane")
+    gcp, cr = cfg["gcp"], cfg.get("cloud_run", {})
+    name = cr.get("service", "shelf-bench-ui")
+    svc = f"https://run.googleapis.com/v2/projects/{gcp['project']}/locations/{gcp['region']}/services/{name}"
+    target = _ok(_session().get(svc)).get("uri", "").rstrip("/")
+    if not target:
+        raise RuntimeError(f"Cloud Run service {name} has no URL yet (deploy it with make ui-cloud)")
+    token = {"value": "", "expires": 0.0}
 
-    if not target_url:
-        s = _session()
-        svc = _ok(s.get(f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services/{service_name}"))
-        target_url = svc.get("uri", "").rstrip("/")
-        if not target_url:
-            raise RuntimeError(f"Cloud Run service {service_name!r} has no URI in {project}/{region}")
+    def id_token() -> str:
+        if time.time() >= token["expires"]:
+            token["value"] = subprocess.check_output(
+                ["gcloud", "auth", "print-identity-token"], text=True).strip()
+            token["expires"] = time.time() + 1800
+        return token["value"]
 
-    token_cache = {"token": "", "expires": 0.0}
-
-    def _get_id_token() -> str:
-        now = time.time()
-        if token_cache["token"] and now < token_cache["expires"]:
-            return token_cache["token"]
-        tok = subprocess.check_output(["gcloud", "auth", "print-identity-token"], text=True).strip()
-        token_cache["token"] = tok
-        token_cache["expires"] = now + 1800.0
-        return tok
-
-    class _CloudRunProxyHandler(BaseHTTPRequestHandler):
-        def _proxy(self, method: str) -> None:
-            upstream = f"{target_url}{self.path}"
-            length = int(self.headers.get("Content-Length", "0") or "0")
-            body = self.rfile.read(length) if length > 0 else None
-            headers = {
-                "Authorization": f"Bearer {_get_id_token()}",
-                "Accept": self.headers.get("Accept", "*/*"),
-            }
+    class Handler(BaseHTTPRequestHandler):
+        def _forward(self, method: str) -> None:
+            n = int(self.headers.get("Content-Length") or 0)
+            headers = {"Authorization": f"Bearer {id_token()}",
+                       "Accept": self.headers.get("Accept", "*/*")}
             if self.headers.get("Content-Type"):
                 headers["Content-Type"] = self.headers["Content-Type"]
-            req = urllib.request.Request(upstream, data=body, headers=headers, method=method)
+            req = urllib.request.Request(f"{target}{self.path}", data=self.rfile.read(n) if n else None,
+                                         headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=180) as resp:
-                    payload = resp.read()
-                    self.send_response(resp.status)
-                    for k, v in resp.headers.items():
-                        if k.lower() not in ("transfer-encoding", "content-encoding", "content-length", "connection"):
-                            self.send_header(k, v)
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.end_headers()
-                    self.wfile.write(payload)
-            except urllib.error.HTTPError as err:
-                payload = err.read()
-                self.send_response(err.code)
-                self.send_header("Content-Type", err.headers.get("Content-Type", "text/plain"))
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
+                with urllib.request.urlopen(req, timeout=180) as r:
+                    status, resp_headers, body = r.status, r.headers, r.read()
+            except urllib.error.HTTPError as e:
+                status, resp_headers, body = e.code, e.headers, e.read()
+            self.send_response(status)
+            for k, v in resp_headers.items():
+                if k.lower() not in ("transfer-encoding", "content-encoding", "content-length", "connection"):
+                    self.send_header(k, v)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def do_GET(self) -> None:
-            self._proxy("GET")
+            self._forward("GET")
 
         def do_POST(self) -> None:
-            self._proxy("POST")
+            self._forward("POST")
 
-        def log_message(self, format: str, *args) -> None:  # noqa: A002
-            return
+        def log_message(self, format, *args) -> None:  # noqa: A002
+            pass
 
-    log(f"Proxying {target_url} -> http://{host}:{port} (Decision-First Reviewer: http://{host}:{port}/#/audit)")
-    with ThreadingHTTPServer((host, port), _CloudRunProxyHandler) as httpd:
+    log(f"Proxying {target} -> http://{host}:{port}  (Ctrl-C to stop)")
+    with ThreadingHTTPServer((host, port), Handler) as httpd:
         httpd.serve_forever()
-

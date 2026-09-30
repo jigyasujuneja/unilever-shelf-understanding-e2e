@@ -1,12 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
-COPY pyproject.toml requirements.txt README.md config.yaml ./
-COPY configs ./configs
-COPY data/splits ./data/splits
-COPY results ./results
+COPY pyproject.toml README.md config.yaml ./
 COPY src ./src
-COPY web ./web
 RUN pip install --no-cache-dir .
-ENV PYTHONUNBUFFERED=1 SHELF_BENCH_CONFIG=/app/config.yaml PORT=8080
+ENV PYTHONUNBUFFERED=1 SHELF_BENCH_CONFIG=/app/config.yaml
 ENTRYPOINT ["shelf-bench"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]

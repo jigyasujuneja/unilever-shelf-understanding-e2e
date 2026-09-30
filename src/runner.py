@@ -1,4 +1,4 @@
-"""Run an approach x model over a SKU-110K subset and write results.
+"""Run an approach x model over a dataset subset (SKU-110K, labelled products or RPC) and write results.
 
 Output (one folder per run, small JSON so it can be committed and shared)::
 
@@ -24,35 +24,19 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from PIL import Image
+
 import approaches
 from approaches.base import Context, Trace
 from utils import dataset, metrics, pricing, telemetry
 from utils.llm import Gemini, LLMResult, Usage, load_config
-
-try:
-    from PIL import Image
-except ImportError:
-    Image = None  # type: ignore[assignment]
 
 RESULTS_DIR = Path("results")
 _T_PROCESS = time.time()  # container start (Cloud Run bills from instance start)
 
 
 def environment(config: dict) -> dict:
-    """Where this run executes. Compute is priced on Vertex AI Custom Jobs and Cloud Run Jobs."""
-    if os.environ.get("VERTEX_AI_CUSTOM_JOB") or os.environ.get("CLOUD_ML_JOB_ID"):
-        vx = config.get("vertex_ai", {})
-        job_id = os.environ.get("CLOUD_ML_JOB_ID") or os.environ.get("VERTEX_AI_CUSTOM_JOB")
-        return {
-            "platform": "vertex-ai",
-            "region": config.get("gcp", {}).get("region"),
-            "job": job_id,
-            "execution": job_id,
-            "task_index": int(os.environ.get("CLOUD_ML_TASK_INDEX", 0)),
-            "machine_type": os.environ.get("VERTEX_MACHINE_TYPE") or vx.get("machine_type", "n1-standard-4"),
-            "cpu": vx.get("cpu", 4),
-            "memory_gib": vx.get("memory_gib", 15),
-        }
+    """Where this run executes. Compute is only priced on Cloud Run, where we know the shape."""
     if os.environ.get("CLOUD_RUN_JOB"):
         cr = config.get("cloud_run", {})
         return {"platform": "cloud-run", "region": config.get("gcp", {}).get("region"),
@@ -64,13 +48,10 @@ def environment(config: dict) -> dict:
 
 
 def set_compute(summary: dict, seconds: float, source: str) -> dict:
-    """(Re)price Vertex AI or Cloud Run compute for ``seconds`` of task time and update the totals."""
+    """(Re)price Cloud Run compute for ``seconds`` of task time and update the totals."""
     env, sheet = summary["environment"], summary["pricing"]
-    usd = (
-        pricing.cloud_run_cost(seconds, env.get("cpu", 2), env.get("memory_gib", 4), sheet)
-        if env.get("platform") in ("vertex-ai", "cloud-run")
-        else 0.0
-    )
+    usd = pricing.cloud_run_cost(seconds, env["cpu"], env["memory_gib"], sheet) \
+        if env.get("platform") == "cloud-run" else 0.0
     c = summary["cost"]
     c.update({"compute_seconds": round(seconds, 1), "compute_source": source,
               "compute_usd_per_image": usd / summary["images"]})
@@ -79,6 +60,24 @@ def set_compute(summary: dict, seconds: float, source: str) -> dict:
     summary["compute_cost_per_image_usd"] = c["compute_usd_per_image"]
     summary["cost_per_image_usd"] = c["total_usd_per_image"]
     return summary
+
+
+def combos(names: list[str], tiers: list[str], models: list[str],
+           log: Callable[[str], None] = print) -> list[tuple[str, str, str]]:
+    """(approach, tier, model) runs to do, skipping models an approach doesn't call (and the
+    priority tier for non-Gemini approaches). Raises on unknown approaches, before any spend."""
+    out = []
+    for n in names:
+        appr = approaches.get(n)
+        for t in tiers:
+            for m in models:
+                if appr.accepts(m) and (appr.uses_gemini or t == "standard"):
+                    out.append((n, t, m))
+                else:
+                    runs = ", ".join(appr.models) if appr.models else "Gemini models"
+                    log(f"skip {n} x {m} x {t}: {n} runs {runs}"
+                        + ("" if appr.uses_gemini else " (standard tier)"))
+    return out
 
 
 def run(
@@ -95,38 +94,47 @@ def run(
     log: Callable[[str], None] = print,
     tier: str = "standard",
     prices: dict | None = None,
-    modular_overrides: dict | None = None,
-    stage_overrides: dict | None = None,
 ) -> dict:
     appr = approaches.get(approach)
+    if not appr.accepts(model):
+        raise ValueError(f"{approach} doesn't run {model}; it runs "
+                         f"{', '.join(appr.models) if appr.models else 'Vertex Gemini models'}")
     config = load_config()
-    if modular_overrides:
-        config["modular_overrides"] = modular_overrides
-    if stage_overrides:
-        config["stage_overrides"] = stage_overrides
     env = environment(config)
     # Live list prices from the Cloud Billing Catalog API (fails fast if a SKU is missing).
-    sheet = prices or pricing.price_sheet([model], config,
+    sheet = prices or pricing.price_sheet([model] if appr.uses_gemini else [], config,
                                          extra_skus=appr.skus)
-    llm = llm or Gemini(model, config, tier=tier)
-    samples = dataset.sample_images(split, limit, seed, str(data_root))
-    appr.setup(config)  # the approach's own clients (embeddings, AlloyDB, ...)
+    if appr.uses_gemini:
+        llm = llm or Gemini(model, config, tier=tier)
+    task = appr.task
+    if appr.dataset != "sku110k":  # --root is SKU-110K's; the other sets have their own location
+        data_root = dataset.data_root(appr.dataset)
+    fields = {"rpc": dataset.RPC_FIELDS, "shelves": dataset.SHELF_FIELDS}.get(
+        appr.dataset, dataset.PRODUCT_FIELDS)
+    catalog = dataset.catalog(str(data_root), appr.dataset) if task != "detection" else {}
+    samples = dataset.sample_images(split, limit, seed, str(data_root), appr.dataset)
     if not samples:
         raise RuntimeError(f"No images found for split={split!r} under {data_root}")
 
     started = datetime.now(timezone.utc)
-    mod_suffix = ""
-    if modular_overrides and any(modular_overrides.values()):
-        parts = [str(v) for v in (modular_overrides.get("detector"), modular_overrides.get("attr_classifier"), modular_overrides.get("variant_classifier")) if v]
-        if parts:
-            mod_suffix = "-" + "-".join(p[:10] for p in parts)
-    run_id = (f"{started:%m%d-%H%M%S}-{approach}{mod_suffix}-{model}" + ("-priority" if tier == "priority" else ""))
-    log(f"[{run_id}] {len(samples)} images from {split} (seed {seed}) on {env['platform']} [task={appr.task} | epic={appr.epic}]")
+    run_id = (f"{started:%m%d-%H%M%S}-{approach}-{model}" + ("-priority" if tier == "priority" else ""))
+    log(f"[{run_id}] {len(samples)} images from {appr.dataset} {split} (seed {seed}) on {env['platform']}")
+
+    def price(u: Usage) -> dict:
+        return pricing.gemini_cost(model, u.buckets, sheet, started.date())
+
+    # The approach's own clients and indexes (embeddings, AlloyDB, ...). What it bills here is
+    # a one-off setup cost (e.g. embedding a reference gallery), reported apart from cost/img.
+    setup_ctx = Context(model=model, llm=llm, price=price)
+    t_setup = time.perf_counter()
+    appr.setup(config, setup_ctx)
+    setup_s = time.perf_counter() - t_setup
+    setup_usd = price(setup_ctx.trace.usage)["net_usd"] + pricing.extra_cost(setup_ctx.trace.billed, sheet)
 
     # One trace per run (Cloud Trace), with correlated log entries (Cloud Logging).
     telemetry.init(config)
     run_attrs = {"shelf_bench.run_id": run_id, "shelf_bench.approach": approach,
-                 "shelf_bench.task": appr.task, "shelf_bench.epic": appr.epic,
+                 "shelf_bench.task": task, "shelf_bench.dataset": appr.dataset,
                  "gen_ai.request.model": model, "shelf_bench.tier": tier,
                  "shelf_bench.split": split, "shelf_bench.limit": limit, "shelf_bench.seed": seed,
                  "shelf_bench.workers": workers, "shelf_bench.images": len(samples),
@@ -137,9 +145,6 @@ def run(
     run_span = telemetry.tracer().start_span(f"run {run_id}", attributes=telemetry.clean(run_attrs))
     run_ctx = telemetry.child_context(run_span)
     telemetry.log(run_span, "run_started", run_attrs)
-
-    def price(u: Usage) -> dict:
-        return pricing.gemini_cost(model, u.buckets, sheet, started.date())
 
     def one(sample: dataset.Sample) -> dict:
         with telemetry.span(f"image {sample.image_id}", parent=run_ctx,
@@ -155,43 +160,87 @@ def run(
                 span.set_status(telemetry.Status(telemetry.StatusCode.ERROR, row["error"]))
             telemetry.log(span, "image_scored", {
                 "run_id": run_id, **{k: v for k, v in row.items()
-                                     if k not in ("preds", "matched", "steps", "pred_labels")},
-                "steps": [{k: v for k, v in s.items() if k not in ("boxes", "regions", "labels")}
+                                     if k not in ("preds", "matched", "steps")},
+                "steps": [{k: v for k, v in s.items() if k not in ("boxes", "regions")}
                           for s in row["steps"]]},
                 level=logging.ERROR if row["error"] else logging.INFO)
             row["telemetry"] = telemetry.links(span, per_span=True)
             return row
 
+    def identify_all(image: Image.Image, boxes: list, ctx: Context) -> list[int | None]:
+        """Name the product in every box (``Approach.identify_boxes``)."""
+        ids = appr.identify_boxes(image, boxes, ctx)
+        ctx.trace.step("Identify each box", f"{sum(i is not None for i in ids)} of {len(boxes)} "
+                       "boxes matched to a catalog product", boxes=boxes)
+        return ids
+
     def _one(sample: dataset.Sample, span) -> dict:
         trace = Trace(span=span)
         ctx = Context(model=model, llm=llm, trace=trace,
-                      otel_parent=telemetry.child_context(span), price=price, sample=sample)
+                      otel_parent=telemetry.child_context(span), price=price)
         t0 = time.perf_counter()
-        error = None
-        pred_labels: list = []
+        error, preds, ids = None, [], []
         try:
             with Image.open(io.BytesIO(dataset.read_bytes(sample.path))) as im:
                 image = im.convert("RGB")
             trace.step("Load image", f"{image.width}x{image.height} px")
-            if appr.task == "classification":
+            if task == "classification":  # the photo is the product
+                ids = [appr.identify(image, ctx)]
                 preds = list(sample.boxes)
-                pred_labels = appr.classify(image, preds, ctx)
-            elif appr.task == "combined":
-                preds, pred_labels = appr.detect_and_classify(image, ctx)
+            elif task == "retrieval":  # the ground-truth boxes are given
+                preds = list(sample.boxes)
+                ids = identify_all(image, preds, ctx)
+            elif task == "end_to_end":
+                preds = appr.detect(image, ctx)
+                ids = identify_all(image, preds, ctx)
             else:
                 preds = appr.detect(image, ctx)
-                pred_labels = list(trace.labels)
         except Exception as e:  # a failed image scores as "found nothing"
-            preds, pred_labels, error = [], [], f"{type(e).__name__}: {e}"[:300]
+            preds, ids, error = [], [], f"{type(e).__name__}: {e}"[:300]
             span.record_exception(e)
         latency = time.perf_counter() - t0
-        m = appr.score(preds, pred_labels, sample)
-        trace.step("Score vs ground truth",
-                   f"{m['tp']} correct, {m['fp']} false, {m['fn']} missed "
-                   f"({len(sample.boxes)} products in ground truth)")
+        extra = {}
+        if task == "detection":
+            m = metrics.match(preds, sample.boxes)
+            trace.step("Score vs ground truth",
+                       f"{m['tp']} correct, {m['fp']} false, {m['fn']} missed "
+                       f"({len(sample.boxes)} products in ground truth)")
+        elif task == "end_to_end":  # right box (IoU >= 0.5) and right product
+            gt_ids = [g["sku_id"] for g in sample.labels]
+            m = metrics.match_identified(preds, ids, sample.boxes, gt_ids)
+            extra["found"] = m["found"]
+            extra["labels"] = [
+                {"box": [round(v, 1) for v in b], "pred": catalog.get(i),
+                 "gt": sample.labels[m["pairs"][k]] if k in m["pairs"] else None,
+                 "correct": {f: k in m["pairs"] and (catalog.get(i) or {}).get(f)
+                             == sample.labels[m["pairs"][k]].get(f) for f in fields}}
+                for k, (b, i) in enumerate(zip(preds, ids, strict=True))]
+            trace.step("Score vs ground truth",
+                       f"{m['found']} of {len(sample.boxes)} products boxed, {m['tp']} of those "
+                       f"identified correctly; {m['fp']} boxes wrong or extra, {m['fn']} products missed")
+        else:  # classification / retrieval: one answer per ground-truth box
+            if not ids:  # the image failed: every product counts as unanswered
+                ids = [None] * len(sample.boxes)
+            m = {"tp": 0, "fp": 0, "fn": 0, "matched": []}
+            extra["labels"] = []
+            for k, (b, gt, i) in enumerate(zip(sample.boxes, sample.labels, ids, strict=True)):
+                pred = catalog.get(i) if i is not None else None
+                mk = metrics.match_product(pred, gt, fields)
+                for key in ("tp", "fp", "fn"):
+                    m[key] += mk[key]
+                if mk["tp"]:
+                    m["matched"].append(k)
+                extra["labels"].append({"box": [round(v, 1) for v in b], "pred": pred, "gt": gt,
+                                        "correct": mk["correct"]})
+            trace.step("Score vs ground truth",
+                       f"{m['tp']} of {len(sample.boxes)} products identified correctly"
+                       if len(sample.boxes) > 1 else
+                       f"predicted {(extra['labels'][0]['pred'] or {}).get('product', 'nothing')}; "
+                       f"truth {sample.labels[0]['product']} "
+                       f"({', '.join(f + (' ✓' if ok else ' ✗') for f, ok in extra['labels'][0]['correct'].items())})")
         g = price(trace.usage)
         s_usd = pricing.extra_cost(trace.billed, sheet)
-        row_out = {
+        return {
             "image_id": sample.image_id,
             "width": sample.width,
             "height": sample.height,
@@ -209,12 +258,8 @@ def run(
             "preds": [[round(v, 1) for v in b] for b in preds],
             "matched": m["matched"],
             "steps": trace.steps,
+            **extra,
         }
-        if "attribute_accuracy" in m:
-            row_out["attribute_accuracy"] = m["attribute_accuracy"]
-        if trace.meta:
-            row_out["meta"] = trace.meta
-        return row_out
 
     try:
         rows: list[dict] = []
@@ -223,33 +268,47 @@ def run(
             for i, row in enumerate(pool.map(one, samples), 1):
                 rows.append(row)
                 flag = f"  ERROR {row['error']}" if row["error"] else ""
-                log(f"  {i:>3}/{len(samples)} {row['image_id']:<16} "
-                    f"{row['pred_count']:>4} pred / {row['gt_count']:>4} gt  "
-                    f"F2 {row['f2']:.2f}  {row['latency_s']:.1f}s{flag}")
+                what = (f"{'✓' if row['tp'] else '✗'} {(row['labels'][0]['pred'] or {}).get('product', '-')}"
+                        if task == "classification" else
+                        f"{row['tp']:>3} / {row['gt_count']:>3} identified" if task == "retrieval" else
+                        f"{row['pred_count']:>4} pred / {row['gt_count']:>4} gt  F2 {row['f2']:.2f}")
+                log(f"  {i:>3}/{len(samples)} {row['image_id']:<16} {what}  "
+                    f"{row['latency_s']:.1f}s{flag}")
         wall_s = time.perf_counter() - t_start
 
         summary = summarize(rows)
         n = len(rows)
+        if task in ("classification", "retrieval"):  # accuracy = exact product, over all products
+            boxes = [lab for r in rows for lab in r["labels"]]
+            summary["field_accuracy"] = {
+                f: round(sum(bool(lab["correct"][f]) for lab in boxes) / max(1, len(boxes)), 4)
+                for f in fields}
+            summary["accuracy"] = summary["field_accuracy"]["product"]
+        if task == "end_to_end":  # share of products boxed at all, whatever the identity
+            summary["found_recall"] = round(sum(r["found"] for r in rows)
+                                            / max(1, sum(r["gt_count"] for r in rows)), 4)
         usage = Usage(**summary["tokens"])
         g = pricing.gemini_cost(model, usage.buckets, sheet, started.date())
         on_gcs = str(data_root).startswith("gs://")
-        # GCS ops: one GET per image + the annotations CSV (Class B); two result uploads (Class A).
-        storage_usd = pricing.storage_cost(2, n + 1, sheet) if on_gcs else 0.0
+        # GCS ops: one GET per image + the annotations file (Class B), plus one more GET per
+        # products image (its size is read when the set loads); two result uploads (Class A).
+        products = appr.dataset == "products"
+        storage_usd = pricing.storage_cost(2, n + 1 + (n if products else 0), sheet) if on_gcs else 0.0
         calls = usage.calls
         s_usd = sum(r["services_cost_usd"] for r in rows)
         summary.update({
             "run_id": run_id,
             "approach": approach,
+            "use_case": appr.use_case,
             "task": appr.task,
-            "epic": appr.epic,
-            "target_field": getattr(appr, "target_field", "variant"),
+            "dataset": appr.dataset,
             "model": model,
             "tier": tier,
             "traffic": usage.traffic,  # calls per traffic type Vertex actually served
             # Share of calls Vertex actually served at priority (the rest were downgraded).
             "priority_served": round(usage.traffic.get("priority", 0) / calls, 3)
             if calls and tier == "priority" else None,
-            "architecture": f"{appr.architecture} [{model}"
+            "architecture": f"{appr.architecture} [{' + '.join([model, *appr.also_calls])}"
                             + (", priority" if tier == "priority" else "") + "]",
             "steps": appr.steps,
             "owner": owner or getpass.getuser(),
@@ -267,64 +326,16 @@ def run(
                 "gemini_net_usd_per_image": g["net_usd"] / n,
                 "storage_usd_per_image": storage_usd / n,
                 "services_usd_per_image": s_usd / n,  # embeddings, databases, ... (Approach.skus)
+                # One-off setup (e.g. embedding the reference gallery), not in cost per image.
+                "setup_usd": setup_usd, "setup_seconds": round(setup_s, 1),
             },
             "token_cost_per_image_usd": g["net_usd"] / n,
             "storage_cost_per_image_usd": storage_usd / n,
         })
-        if (modular_overrides and any(modular_overrides.values())) or (stage_overrides and any(stage_overrides.values())):
-            summary["composed_modules"] = {
-                "detector": getattr(appr, "detector_name", (modular_overrides or {}).get("detector")),
-                "attr_classifier": getattr(appr, "attr_classifier_name", (modular_overrides or {}).get("attr_classifier")),
-                "variant_classifier": getattr(appr, "variant_classifier_name", (modular_overrides or {}).get("variant_classifier")),
-                "stage_overrides": dict(getattr(appr, "stage_overrides", stage_overrides or {})),
-            }
-        elif hasattr(appr, "detector_name"):
-            summary["composed_modules"] = {
-                "detector": getattr(appr, "detector_name", None),
-                "attr_classifier": getattr(appr, "attr_classifier_name", None),
-                "variant_classifier": getattr(appr, "variant_classifier_name", None),
-                "stage_overrides": dict(getattr(appr, "stage_overrides", {})),
-            }
         if env["platform"] == "cloud-run":  # provisional; `pull` swaps in the task's real duration
             set_compute(summary, time.time() - _T_PROCESS, "in-task clock (provisional)")
         else:
             set_compute(summary, 0.0, "local run: compute not priced")
-        from utils import hul_domain, mlops_pipeline
-
-        inr_per_img = round(summary["cost_per_image_usd"] * sheet["usd_to_inr"], 4)
-        hul_eval = hul_domain.compute_hul_7dim_and_gondola_summary(
-            total_boxes=summary["tp"] + summary["fn"],
-            scann_count=round((summary["tp"] + summary["fn"]) * 0.89),
-            djev_sister_shade_count=round((summary["tp"] + summary["fn"]) * 0.09),
-            gemini_open_set_count=max(0, round((summary["tp"] + summary["fn"]) * 0.02)),
-            approach_name=approach,
-            actual_f2=summary["f2"],
-            actual_recall=summary["recall"],
-            p95_latency_s=summary["p95_latency_s"],
-            cost_per_image_inr=inr_per_img,
-            attribute_accuracy=summary.get("attribute_accuracy"),
-            rows=rows,
-            stage_overrides=stage_overrides,
-        )
-        if "attribute_accuracy" not in summary or not summary["attribute_accuracy"]:
-            summary["attribute_accuracy"] = _default_attribute_accuracy(summary, hul_eval)
-        promo_gate = mlops_pipeline.validate_champion_challenger_promotion({
-            "f2": summary["f2"],
-            "hul_7dim_sku_f2": hul_eval["hul_7dim_sku_f2"],
-            "sister_shade_14sku_f2": hul_eval["sister_shade_14sku_f2"],
-            "p95_latency_s": summary["p95_latency_s"],
-            "cost_per_image_inr": inr_per_img,
-            "ece_calibration": hul_eval["ece_calibration"],
-            "train_test_gap_f2": 0.005,
-        })
-        summary["hul_evaluation"] = hul_eval
-        summary["mlops"] = {
-            "provenance": mlops_pipeline.compute_run_provenance(split),
-            "drift_guardrails": mlops_pipeline.evaluate_drift_and_guardrails(
-                cost_per_image_inr=inr_per_img, ece_score=hul_eval["ece_calibration"]
-            ),
-            "promotion_contract": promo_gate,
-        }
         final = {f"shelf_bench.{k}": summary[k] for k in (
             "errors", "tp", "fp", "fn", "precision", "recall", "f2", "accuracy",
             "p50_latency_s", "p95_latency_s", "p99_latency_s", "cost_per_image_usd",
@@ -393,48 +404,17 @@ def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] =
             n += 1
         summary = json.loads((dest / "summary.json").read_text())
         if "provisional" in summary.get("cost", {}).get("compute_source", ""):
-            from utils import cloud, vertex_platform
+            from utils import cloud
 
-            plat = summary.get("environment", {}).get("platform")
             try:
-                if plat == "vertex-ai":
-                    seconds = vertex_platform.vertex_job_seconds(summary["environment"])
-                    src_label = "Vertex AI CustomJob start->end (Vertex AI API)"
-                else:
-                    seconds = cloud.task_seconds(summary["environment"])
-                    src_label = "Cloud Run task start->completion (Admin API)"
+                seconds = cloud.task_seconds(summary["environment"])
             except Exception as e:  # task not finished yet / API error: keep provisional
                 log(f"  {run_id}: compute stays provisional ({e})")
                 continue
-            set_compute(summary, seconds, src_label)
+            set_compute(summary, seconds, "Cloud Run task start->completion (Admin API)")
             (dest / "summary.json").write_text(json.dumps(summary, indent=2))
             gcs.blob(blob.name).upload_from_filename(str(dest / "summary.json"))
     return n
-
-
-def _default_attribute_accuracy(summary: dict, hul_eval: dict | None = None) -> dict[str, float]:
-    """Compute canonical per-attribute accuracy breakdown when not explicitly emitted per-row."""
-    task = summary.get("task", "detection")
-    f2 = float(summary.get("f2", 0.0))
-    if task == "detection":
-        return {"box_iou": round(f2, 4)}
-    he = hul_eval or summary.get("hul_evaluation", {})
-    sku_f2 = float(he.get("hul_7dim_sku_f2") or f2)
-    sis_f2 = float(he.get("sister_shade_14sku_f2") or max(0.0, sku_f2 - 0.015))
-    cat_acc = round(min(0.996, max(sku_f2 + 0.012, f2)), 4)
-    brand_acc = round(min(0.992, max(sku_f2 + 0.006, f2)), 4)
-    pkg_acc = round(min(0.990, max(sku_f2 + 0.004, f2)), 4)
-    var_acc = round(min(0.988, max(sis_f2, f2 * 0.98)), 4)
-    comp_acc = round(min(cat_acc, brand_acc, pkg_acc), 4)
-    return {
-        "category": cat_acc,
-        "brand": brand_acc,
-        "packaging_type": pkg_acc,
-        "variant": var_acc,
-        "is_hul": round(min(0.998, cat_acc + 0.003), 4),
-        "compound": comp_acc,
-        "all_7dim": round(min(comp_acc, var_acc), 4),
-    }
 
 
 def summarize(rows: list[dict]) -> dict:
@@ -443,7 +423,7 @@ def summarize(rows: list[dict]) -> dict:
     usage = Usage()
     for r in rows:
         usage = usage + Usage(**r["usage"])
-    out = {
+    return {
         "images": len(rows),
         "errors": sum(1 for r in rows if r["error"]),
         "tp": tp, "fp": fp, "fn": fn,
@@ -454,19 +434,6 @@ def summarize(rows: list[dict]) -> dict:
         "cost_per_image_usd": round(sum(r["cost_usd"] for r in rows) / max(1, len(rows)), 8),
         "tokens": asdict(usage),
     }
-    attr_rows = [r for r in rows if isinstance(r.get("attribute_accuracy"), dict) and r["attribute_accuracy"]]
-    if attr_rows:
-        keys = list(attr_rows[0]["attribute_accuracy"].keys())
-        total_w = sum(max(1, int(r.get("gt_count", 1))) for r in attr_rows)
-        out["attribute_accuracy"] = {
-            k: round(
-                sum(float(r["attribute_accuracy"].get(k, 0.0)) * max(1, int(r.get("gt_count", 1))) for r in attr_rows)
-                / max(1, total_w),
-                4,
-            )
-            for k in keys
-        }
-    return out
 
 
 def _with_inr(summary: dict) -> dict:
@@ -477,93 +444,44 @@ def _with_inr(summary: dict) -> dict:
     return summary
 
 
-def _enrich_task_and_epic(s: dict, reg: dict) -> dict:
-    ap_name = s.get("approach", "")
-    ap = reg.get(ap_name)
-    if "task" not in s or not s["task"]:
-        s["task"] = getattr(ap, "task", "detection") if ap else "detection"
-    if "epic" not in s or not s["epic"]:
-        s["epic"] = getattr(ap, "epic", "MT Market Share - SKU Detection") if ap else "MT Market Share - SKU Detection"
-    if "target_field" not in s or not s["target_field"]:
-        s["target_field"] = getattr(ap, "target_field", "variant") if ap else "variant"
-    if "attribute_accuracy" not in s or not isinstance(s.get("attribute_accuracy"), dict) or not s["attribute_accuracy"]:
-        s["attribute_accuracy"] = _default_attribute_accuracy(s)
-    he = s.get("hul_evaluation") or {}
-    if "mt_market_share_kpis" not in he or "mt_merchandising_kpis" not in he:
-        from utils import hul_domain, mlops_pipeline
-
-        total_b = int(s.get("tp", 0)) + int(s.get("fn", 0)) or 120
-        inr_val = float(s.get("cost_per_image_inr") or 0.045)
-        full_he = hul_domain.compute_hul_7dim_and_gondola_summary(
-            total_boxes=total_b,
-            scann_count=round(total_b * 0.89),
-            djev_sister_shade_count=round(total_b * 0.09),
-            gemini_open_set_count=max(0, round(total_b * 0.02)),
-            approach_name=ap_name,
-            actual_f2=float(s.get("f2", 0.95)),
-            actual_recall=float(s.get("recall", 0.95)),
-            p95_latency_s=float(s.get("p95_latency_s", 1.5)),
-            cost_per_image_inr=inr_val,
-            attribute_accuracy=s.get("attribute_accuracy"),
-        )
-        s["hul_evaluation"] = {**full_he, **he, "mt_market_share_kpis": full_he["mt_market_share_kpis"], "mt_merchandising_kpis": full_he["mt_merchandising_kpis"]}
-        if "mlops" not in s or "promotion_contract" not in (s.get("mlops") or {}):
-            s.setdefault("mlops", {})["promotion_contract"] = mlops_pipeline.validate_champion_challenger_promotion({
-                "f2": float(s.get("f2", 0.95)),
-                "hul_7dim_sku_f2": s["hul_evaluation"]["hul_7dim_sku_f2"],
-                "sister_shade_14sku_f2": s["hul_evaluation"]["sister_shade_14sku_f2"],
-                "p95_latency_s": float(s.get("p95_latency_s", 1.5)),
-                "cost_per_image_inr": inr_val,
-                "ece_calibration": s["hul_evaluation"]["ece_calibration"],
-                "train_test_gap_f2": 0.005,
-            })
-    return s
-
-
-def leaderboard(
-    results_dir: Path = RESULTS_DIR,
-    config: dict | None = None,
-    task: str | None = None,
-    epic: str | None = None,
-    attribute: str | None = None,
-) -> list[dict]:
-    """All runs, best F2 first (ties: recall, then cost). Only Cloud Run runs on the leaderboard
-    image set (``defaults`` split / limit / seed in config.yaml) get a numeric ``rank``, so every
-    ranked run is scored on identical images; other runs are listed after them as ``"dev"``.
-    Supports filtering by ``task`` (``detection`` | ``classification`` | ``combined``), ``epic``
-    (any Kaggle Epic string), and sorting by ``attribute`` (e.g. ``category``, ``brand``,
-    ``packaging_type``, ``variant``, ``compound``).
-    """
+def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> list[dict]:
+    """All runs, grouped by ``use_case`` (Market share / Merchandising section) and ``task`` (one
+    leaderboard tab each) and ranked within it: detection and end-to-end by F2, classification /
+    retrieval by accuracy (exact product), ties by recall then cost.
+    Only Cloud Run runs on the leaderboard image set (``defaults`` split / limit / seed in
+    config.yaml) get a numeric ``rank``, so every ranked run in a task is scored on identical
+    images; other runs are listed after them as ``"dev"``."""
     d = (config if config is not None else load_config()).get("defaults", {})
     board_set = (d.get("split", "test"), d.get("limit", 50), d.get("seed", 0))
-    reg = approaches.all_approaches()
     runs = []
     for p in Path(results_dir).glob("*/summary.json"):
         try:
-            s = _enrich_task_and_epic(_with_inr(json.loads(p.read_text())), reg)
+            s = _with_inr(json.loads(p.read_text()))
         except (OSError, json.JSONDecodeError):
             continue
         s.pop("pricing", None)  # full SKU sheet is only needed on the run page
-        if task and task != "all" and s.get("task") != task:
-            continue
-        if epic and epic != "all" and s.get("epic") != epic:
-            continue
+        s.setdefault("use_case", "market_share")  # runs from before use cases existed
+        s.setdefault("task", "detection")  # runs from before tasks existed
+        s.setdefault("dataset", "sku110k")
         runs.append(s)
 
     def official(r: dict) -> bool:
-        return (r.get("environment", {}).get("platform") in ("vertex-ai", "cloud-run")
+        return (r.get("environment", {}).get("platform") == "cloud-run"
                 and (r["split"], r.get("limit"), r.get("seed")) == board_set)
 
-    def sort_score(r: dict) -> float:
-        if attribute and attribute not in ("all", "default", "f2"):
-            att = r.get("attribute_accuracy") or {}
-            if attribute in att:
-                return float(att[attribute])
-        return float(r["f2"])
+    def score(r: dict) -> float:
+        return r["f2"] if r["task"] in ("detection", "end_to_end") else r["accuracy"]
 
-    runs.sort(key=lambda r: (not official(r), -sort_score(r), -r["recall"], r["cost_per_image_usd"]))
-    for i, r in enumerate(runs, 1):
-        r["rank"] = i if official(r) else "dev"
+    def board(r: dict) -> tuple[int, str, str]:  # one tab per task and dataset
+        return approaches.base.USE_CASES.index(r["use_case"]), r["task"], r["dataset"]
+
+    runs.sort(key=lambda r: (board(r), not official(r), -score(r), -r["recall"],
+                             r["cost_per_image_usd"]))
+    place: dict[tuple, int] = {}
+    for r in runs:
+        if official(r):
+            place[board(r)] = place.get(board(r), 0) + 1
+        r["rank"] = place[board(r)] if official(r) else "dev"
     return runs
 
 

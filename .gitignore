@@ -1,7 +1,6 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
 *.egg-info/
 .venv/
 .pytest_cache/
@@ -9,9 +8,9 @@ __pycache__/
 build/
 dist/
 
-# Large raw dataset archives (keep lightweight manifests and benchmark slices tracked)
-data/SKU110K_fixed/
-data/raw/
+# Datasets. SKU-110K: `make data` (~12 GB). The small labelled products set is committed.
+data/*
+!data/labeled_retail_benchmarks/
 
 # Credentials
 .env
@@ -28,9 +27,3 @@ application_default_credentials.json
 *.log
 
 # results/ IS committed: each run is a small JSON folder so the leaderboard is shared.
-results/active_learning_queue.jsonl
-reports/*.sqlite
-reports/*.json
-
-# Customer Code Azure Samples
-docs/customer_code/
