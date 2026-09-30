@@ -1,0 +1,73 @@
+{
+  "spec_version": "SPEC-006",
+  "total_datasets_indexed": 7,
+  "total_open_images_streamable": 298821,
+  "total_fine_grained_sku_classes": 12517,
+  "local_verified_shelf_images": 25,
+  "local_verified_human_boxes": 3649,
+  "datasets": [
+    {
+      "dataset_id": "sku110k_full",
+      "hf_repo": "finedet/sku110k",
+      "total_images_available": 11743,
+      "total_sku_classes": 1,
+      "primary_mt_use_case": "Tier 1 Dense Gondola Facing Detection (147.4 boxes/image, 2nd-Row Depth-Ghost NMS)",
+      "local_cached_images": 20,
+      "streaming_supported": true
+    },
+    {
+      "dataset_id": "smart_retail_shelf_v1",
+      "hf_repo": "adnankhan-11/smart-retail-shelf-auditing-v1",
+      "total_images_available": 7000,
+      "total_sku_classes": 12,
+      "primary_mt_use_case": "Tier 1 Multi-Shelf Row Clustering & Empty-Shelf OOS Void Gap Localization",
+      "local_cached_images": 5,
+      "streaming_supported": true
+    },
+    {
+      "dataset_id": "rp2k_fine_grained",
+      "hf_repo": "mteb/rp2k",
+      "total_images_available": 39457,
+      "total_sku_classes": 2388,
+      "primary_mt_use_case": "Tier 2/2.5 Sister-Pack Disambiguation (180ml vs 340ml Bottle vs Pouch)",
+      "local_cached_images": 25,
+      "streaming_supported": true
+    },
+    {
+      "dataset_id": "products_10k_scann",
+      "hf_repo": "amaye15/Products-10k",
+      "total_images_available": 149922,
+      "total_sku_classes": 9691,
+      "primary_mt_use_case": "Tier 2 ScaNN + DINOv2-Registers 10,000-SKU Master Catalog Stress Benchmark",
+      "local_cached_images": 25,
+      "streaming_supported": true
+    },
+    {
+      "dataset_id": "rpc_checkout_200",
+      "hf_repo": "benjamintli/retail-product-checkout",
+      "total_images_available": 83739,
+      "total_sku_classes": 200,
+      "primary_mt_use_case": "Tier 2 Multi-Angle Pack Retrieval & Clutter Occlusion Recovery (I-JEPA)",
+      "local_cached_images": 25,
+      "streaming_supported": true
+    },
+    {
+      "dataset_id": "grocery_in_context",
+      "hf_repo": "ComputerScienceHouse/GroceryInContext",
+      "total_images_available": 2840,
+      "total_sku_classes": 85,
+      "primary_mt_use_case": "Tier 3 Gondola Planogram Sequence Compliance & Brand-Block Purity",
+      "local_cached_images": 10,
+      "streaming_supported": true
+    },
+    {
+      "dataset_id": "sea_fmcg_sachets",
+      "hf_repo": "kierth/retail-products-philippines",
+      "total_images_available": 4120,
+      "total_sku_classes": 140,
+      "primary_mt_use_case": "Tier 2.5 Specular Foil Glare & Hanging Sachet Strip Recognition",
+      "local_cached_images": 10,
+      "streaming_supported": true
+    }
+  ]
+}

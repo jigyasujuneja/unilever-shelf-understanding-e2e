@@ -1,9 +1,18 @@
-"""Approach interface + registry.
+"""Approach interface + registry across all Tasks and Kaggle Epics.
 
-An approach turns one shelf image into product boxes and records the steps it took.
-To add one: drop a module in ``src/approaches/`` that defines a subclass and
-decorates it with ``@register``. It then shows up in ``shelf-bench list`` and can be run
-with ``shelf-bench run -a <name> -m <model>``. See ``single_pass.py`` for a ~30-line example.
+An approach lives in ``src/approaches/`` and declares:
+  * ``task``: ``"detection"`` | ``"classification"`` | ``"combined"``
+  * ``epic``: e.g.
+      - ``"MT Market Share - SKU Detection"``
+      - ``"MT Market Share - Variant Classification"``
+      - ``"MT Market Share - Other (Category, Brand and Package Type) Classifiers"``
+      - ``"MT Market Share - Combined Classification"``
+      - ``"MT Merchandising - Promotion Asset Detection"``
+      - ``"MT Merchandising - Promotion Product Detection"``
+      (or any new custom Epic string — the UI and CLI discover Epics dynamically!)
+
+Decorate the class with ``@register`` and it shows up in ``shelf-bench list``,
+``shelf-bench run -a <name> -m <model>``, and ``shelf-bench cloud-run -a <name> -m <model>``.
 """
 
 from __future__ import annotations
@@ -19,10 +28,20 @@ from typing import Any
 
 from PIL import Image
 
-from utils import telemetry
+from utils import metrics, telemetry
 from utils.llm import LLMResult, Usage
 
 Box = tuple[float, float, float, float]  # x1, y1, x2, y2 in original-image pixels
+
+TASKS = ("detection", "classification", "combined")
+EPICS = (
+    "MT Market Share - SKU Detection",
+    "MT Market Share - Variant Classification",
+    "MT Market Share - Other (Category, Brand and Package Type) Classifiers",
+    "MT Market Share - Combined Classification",
+    "MT Merchandising - Promotion Asset Detection",
+    "MT Merchandising - Promotion Product Detection",
+)
 
 # JSON schema for "a list of [ymin, xmin, ymax, xmax] boxes normalised to 0..1000",
 # which is Gemini's native box format.
@@ -39,12 +58,14 @@ class Trace:
     steps: list[dict] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
     billed: dict[str, float] = field(default_factory=dict)  # non-Gemini usage, see Context.bill
+    labels: list[Any] = field(default_factory=list)         # predicted SKU/compound labels per box
+    meta: dict[str, Any] = field(default_factory=dict)      # optional task telemetry (e.g. compression_ratio)
     span: Any = None  # the image's OpenTelemetry span; each step is also an event on it
     _t0: float = field(default_factory=time.perf_counter)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def step(self, name: str, detail: str = "", boxes: list[Box] | None = None,
-             regions: list[Box] | None = None) -> None:
+             regions: list[Box] | None = None, labels: list[Any] | None = None) -> None:
         """Record a step. ``boxes`` are detections to overlay; ``regions`` e.g. tiles."""
         now = time.perf_counter()
         s: dict[str, Any] = {"name": name, "detail": detail, "ms": round((now - self._t0) * 1000)}
@@ -52,6 +73,8 @@ class Trace:
             s["boxes"] = [[round(v, 1) for v in b] for b in boxes]
         if regions is not None:
             s["regions"] = [[round(v, 1) for v in r] for r in regions]
+        if labels is not None:
+            s["labels"] = [lbl if isinstance(lbl, (str, dict)) else str(lbl) for lbl in labels]
         self.steps.append(s)
         self._t0 = now
         if self.span is not None:
@@ -76,6 +99,7 @@ class Context:
     # usage -> Gemini cost dict (list_usd / credit_usd / net_usd) for the span.
     otel_parent: Any = None
     price: Callable[[Usage], dict] | None = None
+    sample: Any = None
 
     def ask(self, image: Image.Image, prompt: str, **kw) -> LLMResult:
         """Call the run's Gemini model. kw: schema=<JSON schema>, max_side=<px downscale>.
@@ -137,9 +161,12 @@ class Context:
 
 
 class Approach:
-    name: str = ""          # CLI id
-    architecture: str = ""  # one line for the leaderboard
-    steps: list[str] = []   # static description of the pipeline for the UI
+    name: str = ""                                     # CLI id
+    task: str = "detection"                            # "detection" | "classification" | "combined"
+    epic: str = "MT Market Share - SKU Detection"      # Kaggle Epic / Leaderboard group (any string)
+    target_field: str = "variant"                      # "variant" | "compound" | "category" | "brand" | "packaging_type"
+    architecture: str = ""                             # one line for the leaderboard
+    steps: list[str] = []                              # static description of the pipeline for the UI
     # Non-Gemini billable units -> (Billing Catalog service id, SKU description), e.g.
     # utils.embeddings.SKUS. Priced at run start; charge them with ctx.bill(unit, amount).
     skus: dict[str, tuple[str, str]] = {}
@@ -148,7 +175,41 @@ class Approach:
         """Called once per run before any image: create clients (embeddings, AlloyDB, ...)."""
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        """Task 1 (``task = "detection"``): return detected product bounding boxes."""
         raise NotImplementedError
+
+    def classify(
+        self,
+        image: Image.Image,
+        boxes: list[Box],
+        ctx: Context,
+        prior: list[dict[str, Any]] | None = None,
+    ) -> list[Any]:
+        """Task 2 (``task = "classification"``): return one SKU string or compound dict per box.
+        ``prior`` is optional conditioning from an upstream coarse classifier (e.g. Pipeline 1+2).
+        """
+        raise NotImplementedError
+
+    def detect_and_classify(
+        self, image: Image.Image, ctx: Context
+    ) -> tuple[list[Box], list[Any]]:
+        """Task 3 (``task = "combined"``): return ``(boxes, pred_labels)`` end-to-end.
+        For backward compatibility, if a combined approach only overrides ``detect()`` and sets
+        ``ctx.trace.labels``, the runner uses ``(boxes, ctx.trace.labels)``.
+        """
+        boxes = self.detect(image, ctx)
+        return boxes, list(ctx.trace.labels)
+
+    def score(self, preds: list[Box], pred_labels: list[Any], sample: Any) -> dict:
+        """Default scoring hook for ``detection``, ``classification``, and ``combined``.
+        Any custom or undefined task can override ``score()`` to return custom metrics!
+        """
+        gt_labels = getattr(sample, "labels", None) or ["object"] * len(sample.boxes)
+        if self.task == "classification":
+            return metrics.match_classification(pred_labels, gt_labels, target_field=self.target_field)
+        if self.task == "combined" and pred_labels:
+            return metrics.match_combined(preds, pred_labels, sample.boxes, gt_labels, target_field=self.target_field)
+        return metrics.match(preds, sample.boxes)
 
 
 REGISTRY: dict[str, Approach] = {}
@@ -216,7 +277,12 @@ CATEGORIES = ["food", "beverage", "personal_care", "home_care", "other_product",
 NOT_PRODUCT = "not_a_product"
 
 
-def label_counts(labels: list[str]) -> str:
+def label_counts(labels: list[Any]) -> str:
     from collections import Counter
 
-    return ", ".join(f"{n} {c}" for n, c in Counter(labels).most_common())
+    strs = [
+        (x.get("variant") or x.get("sku_id") or x.get("brand") or "product")
+        if isinstance(x, dict) else str(x)
+        for x in labels
+    ]
+    return ", ".join(f"{n} {c}" for c, n in Counter(strs).most_common()[:5])

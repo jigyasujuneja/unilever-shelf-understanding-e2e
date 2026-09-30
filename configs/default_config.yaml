@@ -1,0 +1,24 @@
+# Default Configuration for SPEC-001 & SPEC-002 Retail Shelf Understanding Benchmark
+sla_constraints:
+  max_cost_inr_per_image: 0.22
+  usd_to_inr_rate: 84.0
+  max_p95_latency_ms: 20000.0
+  concurrency_targets: [100, 250, 525]
+  daily_image_volume: 500000
+
+pricing_rates_usd:
+  gemini_2_5_flash_lite_input_per_1m: 0.075
+  gemini_2_5_flash_lite_output_per_1m: 0.300
+  cloud_run_l4_gpu_hourly_usd: 0.85
+  cloud_run_vcpu_hourly_usd: 0.086
+  scann_vector_search_per_1k_queries_usd: 0.00015
+  multimodal_embedding_per_1k_crops_usd: 0.00020
+
+datasets:
+  sku110k:
+    avg_facings_per_image: 147
+    total_images: 11762
+  rpc_catalog:
+    total_categories: 200
+    total_images: 83000
+    catalog_file: "configs/mock_rpc_catalog.json"

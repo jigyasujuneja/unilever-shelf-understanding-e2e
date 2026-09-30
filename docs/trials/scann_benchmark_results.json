@@ -1,0 +1,1377 @@
+{
+  "status": "PASS",
+  "registered_approaches_count": 22,
+  "registered_stage_groups_count": 6,
+  "core_pillars": [
+    "detect_shelf_skus",
+    "match_sku_vectors",
+    "resolve_ambiguous_skus"
+  ],
+  "total_benchmark_runs": 23,
+  "vector_and_hybrid_runs": [
+    {
+      "images": 3,
+      "errors": 0,
+      "tp": 342,
+      "fp": 43,
+      "fn": 43,
+      "precision": 0.8883,
+      "recall": 0.8883,
+      "f2": 0.8883,
+      "accuracy": 0.7991,
+      "p50_latency_s": 9.649,
+      "p95_latency_s": 10.348,
+      "p99_latency_s": 10.348,
+      "cost_per_image_usd": 0.015306916666666667,
+      "tokens": {
+        "input_tokens": 4881,
+        "output_tokens": 2736,
+        "thinking_tokens": 0,
+        "calls": 3,
+        "traffic": {
+          "standard": 3
+        },
+        "buckets": {
+          "standard/output": 2736,
+          "standard/text_input": 1641,
+          "standard/image_input": 3240
+        }
+      },
+      "attribute_accuracy": {
+        "category": 0.8961,
+        "brand": 0.8831,
+        "packaging_type": 0.9974,
+        "variant": 0.8883,
+        "is_hul": 0.961,
+        "compound": 0.8831,
+        "all_7dim": 0.8831
+      },
+      "run_id": "0929-184811-sister_shade_systemone-gemini-3.8-flash",
+      "approach": "sister_shade_systemone",
+      "task": "classification",
+      "epic": "MT Market Share - Variant Classification",
+      "target_field": "variant",
+      "model": "gemini-3.8-flash",
+      "tier": "standard",
+      "traffic": {
+        "standard": 3
+      },
+      "priority_served": null,
+      "architecture": "Divided Stage 3.5+4.5+5: Complete-Linkage Clustering (tau=0.94) + ScaNN + 3x Sub-ROI CIELAB Delta-E Sister-Shade Disambiguator + /v1/systemone 64-Token Jacobi VLM [gemini-3.8-flash]",
+      "steps": [
+        "Stage 3.5: High-Purity Complete-Linkage Visual Clustering (tau=0.94)",
+        "Stage 4.5: 3x Sub-ROI Zoom & CIELAB Delta-E Sister-Shade Disambiguation",
+        "Stage 5: /v1/systemone (64-Token Jacobi) + Constrained Variant Trie Resolution"
+      ],
+      "owner": "jjuneja",
+      "split": "test",
+      "limit": 3,
+      "seed": 0,
+      "workers": 3,
+      "created_at": "2026-09-29T18:48:11+00:00",
+      "environment": {
+        "platform": "local"
+      },
+      "telemetry": {
+        "trace_id": "5f9499373589773783edd2d8eaf87b7f",
+        "span_id": "602c02e5d8cdd836",
+        "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=5f9499373589773783edd2d8eaf87b7f?project=jjuneja-fde-sandbox",
+        "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2F5f9499373589773783edd2d8eaf87b7f%22%20timestamp%3E%3D%222026-09-29T18%3A43%3A11Z%22%20timestamp%3C%3D%222026-09-30T18%3A48%3A11Z%22?project=jjuneja-fde-sandbox"
+      },
+      "wall_time_s": 10.4,
+      "usd_to_inr": 95.54500000065303,
+      "cost": {
+        "gemini_list_usd_per_image": 0.0092805,
+        "gemini_credit_usd_per_image": 0.00464025,
+        "gemini_net_usd_per_image": 0.00464025,
+        "storage_usd_per_image": 0.0,
+        "services_usd_per_image": 0.010666666666666666,
+        "compute_seconds": 0.0,
+        "compute_source": "local run: compute not priced",
+        "compute_usd_per_image": 0.0,
+        "total_usd_per_image": 0.015306916666666667
+      },
+      "token_cost_per_image_usd": 0.00464025,
+      "storage_cost_per_image_usd": 0.0,
+      "compute_cost_per_image_usd": 0.0,
+      "hul_evaluation": {
+        "hul_7dim_sku_f2": 0.8867,
+        "sister_shade_14sku_f2": 0.8883,
+        "ece_calibration": 0.0159,
+        "routing_distribution": {
+          "fast_scann_pct": 89.09,
+          "sister_shade_djev_pct": 9.09,
+          "open_set_gemini38_pct": 2.08
+        },
+        "shelf_metrics": {
+          "linear_sos_hul_pct": 57.17,
+          "area_sos_hul_pct": 59.08,
+          "oos_void_count": 1,
+          "brand_block_purity": 0.9024,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.916,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "gondola_kpis": {
+          "linear_sos_hul_pct": 57.17,
+          "area_sos_hul_pct": 59.08,
+          "oos_void_count": 1,
+          "brand_block_purity": 0.9024,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.916,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "mt_market_share_kpis": {
+          "use_case": "Market Share (6-Image Shelf Stitch)",
+          "sla_target_s": 30.0,
+          "panorama_6img_latency_s": 22.25,
+          "sla_30s_pass": true,
+          "hul_7dim_sku_f2": 0.8867,
+          "sister_shade_14sku_f2": 0.8883,
+          "hul_linear_sos_pct": 57.17,
+          "hul_area_sos_pct": 59.08,
+          "sos_mae_pct": 1.33,
+          "panorama_dedup_dropped": 50,
+          "cost_per_6img_aisle_inr": 8.775
+        },
+        "mt_merchandising_kpis": {
+          "use_case": "Merchandising & Planogram Compliance (Single Image)",
+          "sla_target_s": 10.0,
+          "single_img_p95_s": 10.35,
+          "sla_10s_pass": false,
+          "box_detection_f2": 0.8883,
+          "oos_voids_detected": 1,
+          "oos_void_recall": 0.8794,
+          "oos_classification": "TRUE_OOS_VOID",
+          "planogram_compliance_pct": 91.6,
+          "brand_block_purity_pct": 90.2,
+          "eye_level_sos_pct": 61.7,
+          "competitor_intrusion_count": 1,
+          "cost_per_image_inr": 1.4625
+        },
+        "slas": {
+          "marketshare_30s_met": true,
+          "merchandizing_10s_met": false,
+          "finops_0_22_inr_met": false
+        }
+      },
+      "mlops": {
+        "provenance": {
+          "git_commit_sha": "aecb183",
+          "dataset_split": "test",
+          "dataset_split_sha256": "7d967bb24f609381",
+          "zero_leakage_verified": true,
+          "split_image_counts": {
+            "train": 20,
+            "val": 25,
+            "test": 60
+          },
+          "taxonomy_sha256": "2e48deb7e567e4aa",
+          "total_hul_variants": 245,
+          "total_hul_facings": 17118
+        },
+        "drift_guardrails": {
+          "status": "DRIFT_ALERT",
+          "psi_glare_shift": 0.062,
+          "psi_threshold": 0.2,
+          "psi_healthy": true,
+          "ece_calibration": 0.0159,
+          "ece_threshold": 0.025,
+          "ece_healthy": true,
+          "escalation_rate": 0.11,
+          "escalation_budget_cap": 0.15,
+          "escalation_healthy": true,
+          "cost_per_image_inr": 1.4625,
+          "finops_ceiling_inr": 0.22,
+          "finops_healthy": false
+        },
+        "promotion_contract": {
+          "promoted": false,
+          "passed_count": 2,
+          "total_gates": 7,
+          "gates": {
+            "gate_1_box_f2_ge_96pct": false,
+            "gate_2_hul_7dim_sku_f2_ge_95pct": false,
+            "gate_3_sister_shade_14sku_f2_ge_94pct": false,
+            "gate_4_p95_latency_le_10s": false,
+            "gate_5_cost_inr_le_0_22": false,
+            "gate_6_ece_calibration_le_0_025": true,
+            "gate_7_train_test_gap_le_0_008": true
+          }
+        }
+      },
+      "cost_per_image_inr": 1.4625,
+      "rank": "dev"
+    },
+    {
+      "images": 3,
+      "errors": 0,
+      "tp": 341,
+      "fp": 44,
+      "fn": 44,
+      "precision": 0.8857,
+      "recall": 0.8857,
+      "f2": 0.8857,
+      "accuracy": 0.7949,
+      "p50_latency_s": 13.572,
+      "p95_latency_s": 26.44,
+      "p99_latency_s": 26.44,
+      "cost_per_image_usd": 0.013019833333333335,
+      "tokens": {
+        "input_tokens": 4881,
+        "output_tokens": 3539,
+        "thinking_tokens": 2514,
+        "calls": 3,
+        "traffic": {
+          "standard": 3
+        },
+        "buckets": {
+          "standard/output": 6053,
+          "standard/text_input": 1641,
+          "standard/image_input": 3240
+        }
+      },
+      "attribute_accuracy": {
+        "category": 0.8831,
+        "brand": 0.8805,
+        "packaging_type": 0.9974,
+        "variant": 0.8857,
+        "is_hul": 0.9974,
+        "compound": 0.8805,
+        "all_7dim": 0.8805
+      },
+      "run_id": "0929-184741-scann_vector_retriever-gemini-3.8-flash",
+      "approach": "scann_vector_retriever",
+      "task": "classification",
+      "epic": "MT Market Share - Variant Classification",
+      "target_field": "variant",
+      "model": "gemini-3.8-flash",
+      "tier": "standard",
+      "traffic": {
+        "standard": 3
+      },
+      "priority_served": null,
+      "architecture": "Divided Stage 4: I-JEPA Specular De-Glare + 4-Zone Sub-ROI gemini-embedding-2-preview + Cloud SQL pgvector / Vertex AI Vector Search Cosine Margin Retrieval [gemini-3.8-flash]",
+      "steps": [
+        "Stage 4A: 4-Zone Sub-ROI Crop Embedding & I-JEPA Specular Glare Compensation",
+        "Stage 4B: Cloud SQL pgvector / Vertex AI Vector Search Top-2 Cosine Similarity & Margin Lookup"
+      ],
+      "owner": "jjuneja",
+      "split": "test",
+      "limit": 3,
+      "seed": 0,
+      "workers": 3,
+      "created_at": "2026-09-29T18:47:41+00:00",
+      "environment": {
+        "platform": "local"
+      },
+      "telemetry": {
+        "trace_id": "40473d14558543d7dac5ac3174e296e9",
+        "span_id": "34fa5f06b84c0b5d",
+        "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=40473d14558543d7dac5ac3174e296e9?project=jjuneja-fde-sandbox",
+        "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2F40473d14558543d7dac5ac3174e296e9%22%20timestamp%3E%3D%222026-09-29T18%3A42%3A41Z%22%20timestamp%3C%3D%222026-09-30T18%3A47%3A41Z%22?project=jjuneja-fde-sandbox"
+      },
+      "wall_time_s": 26.4,
+      "usd_to_inr": 95.54500000065303,
+      "cost": {
+        "gemini_list_usd_per_image": 0.017573000000000002,
+        "gemini_credit_usd_per_image": 0.008786500000000001,
+        "gemini_net_usd_per_image": 0.008786500000000001,
+        "storage_usd_per_image": 0.0,
+        "services_usd_per_image": 0.004233333333333333,
+        "compute_seconds": 0.0,
+        "compute_source": "local run: compute not priced",
+        "compute_usd_per_image": 0.0,
+        "total_usd_per_image": 0.013019833333333335
+      },
+      "token_cost_per_image_usd": 0.008786500000000001,
+      "storage_cost_per_image_usd": 0.0,
+      "compute_cost_per_image_usd": 0.0,
+      "hul_evaluation": {
+        "hul_7dim_sku_f2": 0.8841,
+        "sister_shade_14sku_f2": 0.8857,
+        "ece_calibration": 0.0162,
+        "routing_distribution": {
+          "fast_scann_pct": 89.09,
+          "sister_shade_djev_pct": 9.09,
+          "open_set_gemini38_pct": 2.08
+        },
+        "shelf_metrics": {
+          "linear_sos_hul_pct": 57.14,
+          "area_sos_hul_pct": 59.05,
+          "oos_void_count": 1,
+          "brand_block_purity": 0.9012,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.915,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "gondola_kpis": {
+          "linear_sos_hul_pct": 57.14,
+          "area_sos_hul_pct": 59.05,
+          "oos_void_count": 1,
+          "brand_block_purity": 0.9012,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.915,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "mt_market_share_kpis": {
+          "use_case": "Market Share (6-Image Shelf Stitch)",
+          "sla_target_s": 30.0,
+          "panorama_6img_latency_s": 56.85,
+          "sla_30s_pass": false,
+          "hul_7dim_sku_f2": 0.8841,
+          "sister_shade_14sku_f2": 0.8857,
+          "hul_linear_sos_pct": 57.14,
+          "hul_area_sos_pct": 59.05,
+          "sos_mae_pct": 1.36,
+          "panorama_dedup_dropped": 50,
+          "cost_per_6img_aisle_inr": 7.464
+        },
+        "mt_merchandising_kpis": {
+          "use_case": "Merchandising & Planogram Compliance (Single Image)",
+          "sla_target_s": 10.0,
+          "single_img_p95_s": 26.44,
+          "sla_10s_pass": false,
+          "box_detection_f2": 0.8857,
+          "oos_voids_detected": 1,
+          "oos_void_recall": 0.8768,
+          "oos_classification": "TRUE_OOS_VOID",
+          "planogram_compliance_pct": 91.5,
+          "brand_block_purity_pct": 90.1,
+          "eye_level_sos_pct": 61.7,
+          "competitor_intrusion_count": 1,
+          "cost_per_image_inr": 1.244
+        },
+        "slas": {
+          "marketshare_30s_met": false,
+          "merchandizing_10s_met": false,
+          "finops_0_22_inr_met": false
+        }
+      },
+      "mlops": {
+        "provenance": {
+          "git_commit_sha": "aecb183",
+          "dataset_split": "test",
+          "dataset_split_sha256": "7d967bb24f609381",
+          "zero_leakage_verified": true,
+          "split_image_counts": {
+            "train": 20,
+            "val": 25,
+            "test": 60
+          },
+          "taxonomy_sha256": "2e48deb7e567e4aa",
+          "total_hul_variants": 245,
+          "total_hul_facings": 17118
+        },
+        "drift_guardrails": {
+          "status": "DRIFT_ALERT",
+          "psi_glare_shift": 0.062,
+          "psi_threshold": 0.2,
+          "psi_healthy": true,
+          "ece_calibration": 0.0162,
+          "ece_threshold": 0.025,
+          "ece_healthy": true,
+          "escalation_rate": 0.11,
+          "escalation_budget_cap": 0.15,
+          "escalation_healthy": true,
+          "cost_per_image_inr": 1.244,
+          "finops_ceiling_inr": 0.22,
+          "finops_healthy": false
+        },
+        "promotion_contract": {
+          "promoted": false,
+          "passed_count": 2,
+          "total_gates": 7,
+          "gates": {
+            "gate_1_box_f2_ge_96pct": false,
+            "gate_2_hul_7dim_sku_f2_ge_95pct": false,
+            "gate_3_sister_shade_14sku_f2_ge_94pct": false,
+            "gate_4_p95_latency_le_10s": false,
+            "gate_5_cost_inr_le_0_22": false,
+            "gate_6_ece_calibration_le_0_025": true,
+            "gate_7_train_test_gap_le_0_008": true
+          }
+        }
+      },
+      "cost_per_image_inr": 1.244,
+      "rank": "dev"
+    },
+    {
+      "images": 3,
+      "errors": 0,
+      "tp": 338,
+      "fp": 41,
+      "fn": 47,
+      "precision": 0.8918,
+      "recall": 0.8779,
+      "f2": 0.8807,
+      "accuracy": 0.7934,
+      "p50_latency_s": 19.505,
+      "p95_latency_s": 22.85,
+      "p99_latency_s": 22.85,
+      "cost_per_image_usd": 0.0116185,
+      "tokens": {
+        "input_tokens": 3579,
+        "output_tokens": 8259,
+        "thinking_tokens": 0,
+        "calls": 3,
+        "traffic": {
+          "standard": 3
+        },
+        "buckets": {
+          "standard/output": 8259,
+          "standard/text_input": 387,
+          "standard/image_input": 3192
+        }
+      },
+      "run_id": "0929-185144-djev_systemone_sister_shade-gemini-3.8-flash",
+      "approach": "djev_systemone_sister_shade",
+      "task": "combined",
+      "epic": "MT Market Share - Combined Classification",
+      "target_field": "variant",
+      "model": "gemini-3.8-flash",
+      "tier": "standard",
+      "traffic": {
+        "standard": 3
+      },
+      "priority_served": null,
+      "architecture": "Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) + Stage 4 gemini-embedding-2-preview ScaNN (89%) + Stage 4.5 Sister-Shade Sub-ROI CIELAB + Stage 5 /v1/systemone (64-Token Canvas, 8.9 ms Jacobi) [gemini-3.8-flash]",
+      "steps": [
+        "Stage 3: RT-DETR-v2 + DIoU-NMS + Stage 3.5 ORB Homography Seam Deduplication",
+        "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2)",
+        "Stage 4: gemini-embedding-2-preview + Specular Glare Mask + AlloyDB/ScaNN Vector Match (89% clear SKUs)",
+        "Stage 4.5: 3x Sub-ROI Shade/SPF Zoom + CIELAB Delta-E + Conditioner Aspect-Ratio Geometry",
+        "Stage 5: /v1/systemone (64-Token Fixed Canvas, 3-Step Jacobi Denoising in 8.9 ms, vllm#58216 Trie)"
+      ],
+      "owner": "jjuneja",
+      "split": "test",
+      "limit": 3,
+      "seed": 0,
+      "workers": 3,
+      "created_at": "2026-09-29T18:51:44+00:00",
+      "environment": {
+        "platform": "local"
+      },
+      "telemetry": {
+        "trace_id": "8688db1111c3f765a9b377d499a81f6d",
+        "span_id": "575e94c7a4b5f659",
+        "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=8688db1111c3f765a9b377d499a81f6d?project=jjuneja-fde-sandbox",
+        "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2F8688db1111c3f765a9b377d499a81f6d%22%20timestamp%3E%3D%222026-09-29T18%3A46%3A44Z%22%20timestamp%3C%3D%222026-09-30T18%3A51%3A44Z%22?project=jjuneja-fde-sandbox"
+      },
+      "wall_time_s": 22.9,
+      "usd_to_inr": 95.54500000065303,
+      "cost": {
+        "gemini_list_usd_per_image": 0.022437000000000002,
+        "gemini_credit_usd_per_image": 0.011218500000000001,
+        "gemini_net_usd_per_image": 0.011218500000000001,
+        "storage_usd_per_image": 0.0,
+        "services_usd_per_image": 0.0004,
+        "compute_seconds": 0.0,
+        "compute_source": "local run: compute not priced",
+        "compute_usd_per_image": 0.0,
+        "total_usd_per_image": 0.0116185
+      },
+      "token_cost_per_image_usd": 0.011218500000000001,
+      "storage_cost_per_image_usd": 0.0,
+      "compute_cost_per_image_usd": 0.0,
+      "attribute_accuracy": {
+        "category": 0.8927,
+        "brand": 0.8867,
+        "packaging_type": 0.8847,
+        "variant": 0.8807,
+        "is_hul": 0.8957,
+        "compound": 0.8847,
+        "all_7dim": 0.8807
+      },
+      "hul_evaluation": {
+        "hul_7dim_sku_f2": 0.8807,
+        "sister_shade_14sku_f2": 0.8807,
+        "ece_calibration": 0.0167,
+        "routing_distribution": {
+          "fast_scann_pct": 89.09,
+          "sister_shade_djev_pct": 9.09,
+          "open_set_gemini38_pct": 2.08
+        },
+        "shelf_metrics": {
+          "linear_sos_hul_pct": 57.1,
+          "area_sos_hul_pct": 59.02,
+          "oos_void_count": 1,
+          "brand_block_purity": 0.9013,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.914,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "gondola_kpis": {
+          "linear_sos_hul_pct": 57.1,
+          "area_sos_hul_pct": 59.02,
+          "oos_void_count": 1,
+          "brand_block_purity": 0.9013,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.914,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "mt_market_share_kpis": {
+          "use_case": "Market Share (6-Image Shelf Stitch)",
+          "sla_target_s": 30.0,
+          "panorama_6img_latency_s": 49.13,
+          "sla_30s_pass": false,
+          "hul_7dim_sku_f2": 0.8807,
+          "sister_shade_14sku_f2": 0.8807,
+          "hul_linear_sos_pct": 57.1,
+          "hul_area_sos_pct": 59.02,
+          "sos_mae_pct": 1.4,
+          "panorama_dedup_dropped": 50,
+          "cost_per_6img_aisle_inr": 6.661
+        },
+        "mt_merchandising_kpis": {
+          "use_case": "Merchandising & Planogram Compliance (Single Image)",
+          "sla_target_s": 10.0,
+          "single_img_p95_s": 22.85,
+          "sla_10s_pass": false,
+          "box_detection_f2": 0.8807,
+          "oos_voids_detected": 1,
+          "oos_void_recall": 0.8691,
+          "oos_classification": "TRUE_OOS_VOID",
+          "planogram_compliance_pct": 91.4,
+          "brand_block_purity_pct": 90.1,
+          "eye_level_sos_pct": 61.7,
+          "competitor_intrusion_count": 1,
+          "cost_per_image_inr": 1.1101
+        },
+        "slas": {
+          "marketshare_30s_met": false,
+          "merchandizing_10s_met": false,
+          "finops_0_22_inr_met": false
+        }
+      },
+      "mlops": {
+        "provenance": {
+          "git_commit_sha": "aecb183",
+          "dataset_split": "test",
+          "dataset_split_sha256": "7d967bb24f609381",
+          "zero_leakage_verified": true,
+          "split_image_counts": {
+            "train": 20,
+            "val": 25,
+            "test": 60
+          },
+          "taxonomy_sha256": "2e48deb7e567e4aa",
+          "total_hul_variants": 245,
+          "total_hul_facings": 17118
+        },
+        "drift_guardrails": {
+          "status": "DRIFT_ALERT",
+          "psi_glare_shift": 0.062,
+          "psi_threshold": 0.2,
+          "psi_healthy": true,
+          "ece_calibration": 0.0167,
+          "ece_threshold": 0.025,
+          "ece_healthy": true,
+          "escalation_rate": 0.11,
+          "escalation_budget_cap": 0.15,
+          "escalation_healthy": true,
+          "cost_per_image_inr": 1.1101,
+          "finops_ceiling_inr": 0.22,
+          "finops_healthy": false
+        },
+        "promotion_contract": {
+          "promoted": false,
+          "passed_count": 2,
+          "total_gates": 7,
+          "gates": {
+            "gate_1_box_f2_ge_96pct": false,
+            "gate_2_hul_7dim_sku_f2_ge_95pct": false,
+            "gate_3_sister_shade_14sku_f2_ge_94pct": false,
+            "gate_4_p95_latency_le_10s": false,
+            "gate_5_cost_inr_le_0_22": false,
+            "gate_6_ece_calibration_le_0_025": true,
+            "gate_7_train_test_gap_le_0_008": true
+          }
+        }
+      },
+      "cost_per_image_inr": 1.1101,
+      "rank": "dev"
+    },
+    {
+      "images": 3,
+      "errors": 0,
+      "tp": 339,
+      "fp": 46,
+      "fn": 46,
+      "precision": 0.8805,
+      "recall": 0.8805,
+      "f2": 0.8805,
+      "accuracy": 0.7865,
+      "p50_latency_s": 8.784,
+      "p95_latency_s": 11.122,
+      "p99_latency_s": 11.122,
+      "cost_per_image_usd": 0.00672525,
+      "tokens": {
+        "input_tokens": 4881,
+        "output_tokens": 2724,
+        "thinking_tokens": 0,
+        "calls": 3,
+        "traffic": {
+          "standard": 3
+        },
+        "buckets": {
+          "standard/output": 2724,
+          "standard/text_input": 1641,
+          "standard/image_input": 3240
+        }
+      },
+      "attribute_accuracy": {
+        "category": 0.8831,
+        "brand": 0.8805,
+        "packaging_type": 0.9974,
+        "variant": 0.8857,
+        "is_hul": 0.9974,
+        "compound": 0.8805,
+        "all_7dim": 0.8805
+      },
+      "run_id": "0929-184726-djev_diffusiongemma_compound-gemini-3.8-flash",
+      "approach": "djev_diffusiongemma_compound",
+      "task": "classification",
+      "epic": "MT Market Share - Other (Category, Brand and Package Type) Classifiers",
+      "target_field": "compound",
+      "model": "gemini-3.8-flash",
+      "tier": "standard",
+      "traffic": {
+        "standard": 3
+      },
+      "priority_served": null,
+      "architecture": "diffusiongemma-jev (mmastrac/djev /v1/systemone) 64-Token Canvas: 1-Step Parallel Compound Decode for (Category, Brand, Packaging Type) + Entropy-Gated ScaNN Pre-Filter [gemini-3.8-flash]",
+      "steps": [
+        "Step 1: 64-Token Seeded Canvas & vllm#58216 Trie Constraint Setup (11 Cats, 66 Brands, 25 Pkg Types)",
+        "Step 2: 1-Step /v1/systemone Parallel Compound Denoising (Category | Brand | Packaging Type)",
+        "Step 3: H3 Packaging-Entropy Gate & ScaNN Candidate Pool Pre-Filter (50,000 -> ~11 SKUs)"
+      ],
+      "owner": "jjuneja",
+      "split": "test",
+      "limit": 3,
+      "seed": 0,
+      "workers": 3,
+      "created_at": "2026-09-29T18:47:26+00:00",
+      "environment": {
+        "platform": "local"
+      },
+      "telemetry": {
+        "trace_id": "0f203492ae99de782bf992c8a68f233e",
+        "span_id": "8f98a54d456732b7",
+        "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=0f203492ae99de782bf992c8a68f233e?project=jjuneja-fde-sandbox",
+        "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2F0f203492ae99de782bf992c8a68f233e%22%20timestamp%3E%3D%222026-09-29T18%3A42%3A26Z%22%20timestamp%3C%3D%222026-09-30T18%3A47%3A26Z%22?project=jjuneja-fde-sandbox"
+      },
+      "wall_time_s": 11.1,
+      "usd_to_inr": 95.54500000065303,
+      "cost": {
+        "gemini_list_usd_per_image": 0.0092505,
+        "gemini_credit_usd_per_image": 0.00462525,
+        "gemini_net_usd_per_image": 0.00462525,
+        "storage_usd_per_image": 0.0,
+        "services_usd_per_image": 0.0021,
+        "compute_seconds": 0.0,
+        "compute_source": "local run: compute not priced",
+        "compute_usd_per_image": 0.0,
+        "total_usd_per_image": 0.00672525
+      },
+      "token_cost_per_image_usd": 0.00462525,
+      "storage_cost_per_image_usd": 0.0,
+      "compute_cost_per_image_usd": 0.0,
+      "hul_evaluation": {
+        "hul_7dim_sku_f2": 0.8823,
+        "sister_shade_14sku_f2": 0.8844,
+        "ece_calibration": 0.0165,
+        "routing_distribution": {
+          "fast_scann_pct": 89.09,
+          "sister_shade_djev_pct": 9.09,
+          "open_set_gemini38_pct": 2.08
+        },
+        "shelf_metrics": {
+          "linear_sos_hul_pct": 57.12,
+          "area_sos_hul_pct": 59.03,
+          "oos_void_count": 1,
+          "brand_block_purity": 0.9012,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.914,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "gondola_kpis": {
+          "linear_sos_hul_pct": 57.12,
+          "area_sos_hul_pct": 59.03,
+          "oos_void_count": 1,
+          "brand_block_purity": 0.9012,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.914,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "mt_market_share_kpis": {
+          "use_case": "Market Share (6-Image Shelf Stitch)",
+          "sla_target_s": 30.0,
+          "panorama_6img_latency_s": 23.91,
+          "sla_30s_pass": true,
+          "hul_7dim_sku_f2": 0.8823,
+          "sister_shade_14sku_f2": 0.8844,
+          "hul_linear_sos_pct": 57.12,
+          "hul_area_sos_pct": 59.03,
+          "sos_mae_pct": 1.38,
+          "panorama_dedup_dropped": 50,
+          "cost_per_6img_aisle_inr": 3.856
+        },
+        "mt_merchandising_kpis": {
+          "use_case": "Merchandising & Planogram Compliance (Single Image)",
+          "sla_target_s": 10.0,
+          "single_img_p95_s": 11.12,
+          "sla_10s_pass": false,
+          "box_detection_f2": 0.8805,
+          "oos_voids_detected": 1,
+          "oos_void_recall": 0.8717,
+          "oos_classification": "TRUE_OOS_VOID",
+          "planogram_compliance_pct": 91.4,
+          "brand_block_purity_pct": 90.1,
+          "eye_level_sos_pct": 61.7,
+          "competitor_intrusion_count": 1,
+          "cost_per_image_inr": 0.6426
+        },
+        "slas": {
+          "marketshare_30s_met": true,
+          "merchandizing_10s_met": false,
+          "finops_0_22_inr_met": false
+        }
+      },
+      "mlops": {
+        "provenance": {
+          "git_commit_sha": "aecb183",
+          "dataset_split": "test",
+          "dataset_split_sha256": "7d967bb24f609381",
+          "zero_leakage_verified": true,
+          "split_image_counts": {
+            "train": 20,
+            "val": 25,
+            "test": 60
+          },
+          "taxonomy_sha256": "2e48deb7e567e4aa",
+          "total_hul_variants": 245,
+          "total_hul_facings": 17118
+        },
+        "drift_guardrails": {
+          "status": "DRIFT_ALERT",
+          "psi_glare_shift": 0.062,
+          "psi_threshold": 0.2,
+          "psi_healthy": true,
+          "ece_calibration": 0.0165,
+          "ece_threshold": 0.025,
+          "ece_healthy": true,
+          "escalation_rate": 0.11,
+          "escalation_budget_cap": 0.15,
+          "escalation_healthy": true,
+          "cost_per_image_inr": 0.6426,
+          "finops_ceiling_inr": 0.22,
+          "finops_healthy": false
+        },
+        "promotion_contract": {
+          "promoted": false,
+          "passed_count": 2,
+          "total_gates": 7,
+          "gates": {
+            "gate_1_box_f2_ge_96pct": false,
+            "gate_2_hul_7dim_sku_f2_ge_95pct": false,
+            "gate_3_sister_shade_14sku_f2_ge_94pct": false,
+            "gate_4_p95_latency_le_10s": false,
+            "gate_5_cost_inr_le_0_22": false,
+            "gate_6_ece_calibration_le_0_025": true,
+            "gate_7_train_test_gap_le_0_008": true
+          }
+        }
+      },
+      "cost_per_image_inr": 0.6426,
+      "rank": "dev"
+    },
+    {
+      "images": 3,
+      "errors": 0,
+      "tp": 322,
+      "fp": 44,
+      "fn": 63,
+      "precision": 0.8798,
+      "recall": 0.8364,
+      "f2": 0.8447,
+      "accuracy": 0.7506,
+      "p50_latency_s": 18.773,
+      "p95_latency_s": 19.253,
+      "p99_latency_s": 19.253,
+      "cost_per_image_usd": 0.01140475,
+      "tokens": {
+        "input_tokens": 3579,
+        "output_tokens": 8008,
+        "thinking_tokens": 0,
+        "calls": 3,
+        "traffic": {
+          "standard": 3
+        },
+        "buckets": {
+          "standard/output": 8008,
+          "standard/text_input": 387,
+          "standard/image_input": 3192
+        }
+      },
+      "run_id": "0929-185118-tiered_hybrid_scann-gemini-3.8-flash",
+      "approach": "tiered_hybrid_scann",
+      "task": "combined",
+      "epic": "MT Market Share - Combined Classification",
+      "target_field": "variant",
+      "model": "gemini-3.8-flash",
+      "tier": "standard",
+      "traffic": {
+        "standard": 3
+      },
+      "priority_served": null,
+      "architecture": "3-tier hybrid: Stage 3 RT-DETR-v2 + Stage 3.8 Complete-Linkage Clustering (ADR-008) -> Stage 4 gemini-embedding-2-preview / Cloud SQL pgvector & Vertex Vector Search match (sim>=0.82, 89% crops) -> Gemini 3.8 Flash fallback on 11% low-margin cluster medoids [gemini-3.8-flash]",
+      "steps": [
+        "Stage 3: RT-DETR-v2 + DIoU-NMS dense shelf detection (22 ms)",
+        "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2)",
+        "Stage 4: gemini-embedding-2-preview + Cloud SQL pgvector / Vertex Vector Search top-1 match on cluster medoids (0.8 ms/medoid)",
+        "Stage 5: Gemini fallback on low-confidence cluster medoids (<0.82 similarity or <0.045 margin)"
+      ],
+      "owner": "jjuneja",
+      "split": "test",
+      "limit": 3,
+      "seed": 0,
+      "workers": 3,
+      "created_at": "2026-09-29T18:51:18+00:00",
+      "environment": {
+        "platform": "local"
+      },
+      "telemetry": {
+        "trace_id": "0d1536ad7cd9fb3fe505e18c51dedcda",
+        "span_id": "0317174d9e9fb31c",
+        "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=0d1536ad7cd9fb3fe505e18c51dedcda?project=jjuneja-fde-sandbox",
+        "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2F0d1536ad7cd9fb3fe505e18c51dedcda%22%20timestamp%3E%3D%222026-09-29T18%3A46%3A20Z%22%20timestamp%3C%3D%222026-09-30T18%3A51%3A20Z%22?project=jjuneja-fde-sandbox"
+      },
+      "wall_time_s": 19.3,
+      "usd_to_inr": 95.54500000065303,
+      "cost": {
+        "gemini_list_usd_per_image": 0.0218095,
+        "gemini_credit_usd_per_image": 0.01090475,
+        "gemini_net_usd_per_image": 0.01090475,
+        "storage_usd_per_image": 0.0,
+        "services_usd_per_image": 0.0005,
+        "compute_seconds": 0.0,
+        "compute_source": "local run: compute not priced",
+        "compute_usd_per_image": 0.0,
+        "total_usd_per_image": 0.01140475
+      },
+      "token_cost_per_image_usd": 0.01090475,
+      "storage_cost_per_image_usd": 0.0,
+      "compute_cost_per_image_usd": 0.0,
+      "attribute_accuracy": {
+        "category": 0.8567,
+        "brand": 0.8507,
+        "packaging_type": 0.8487,
+        "variant": 0.8447,
+        "is_hul": 0.8597,
+        "compound": 0.8487,
+        "all_7dim": 0.8447
+      },
+      "hul_evaluation": {
+        "hul_7dim_sku_f2": 0.8447,
+        "sister_shade_14sku_f2": 0.8447,
+        "ece_calibration": 0.0217,
+        "routing_distribution": {
+          "fast_scann_pct": 89.09,
+          "sister_shade_djev_pct": 9.09,
+          "open_set_gemini38_pct": 2.08
+        },
+        "shelf_metrics": {
+          "linear_sos_hul_pct": 56.68,
+          "area_sos_hul_pct": 58.66,
+          "oos_void_count": 2,
+          "brand_block_purity": 0.8851,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.902,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "gondola_kpis": {
+          "linear_sos_hul_pct": 56.68,
+          "area_sos_hul_pct": 58.66,
+          "oos_void_count": 2,
+          "brand_block_purity": 0.8851,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.902,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "mt_market_share_kpis": {
+          "use_case": "Market Share (6-Image Shelf Stitch)",
+          "sla_target_s": 30.0,
+          "panorama_6img_latency_s": 41.39,
+          "sla_30s_pass": false,
+          "hul_7dim_sku_f2": 0.8447,
+          "sister_shade_14sku_f2": 0.8447,
+          "hul_linear_sos_pct": 56.68,
+          "hul_area_sos_pct": 58.66,
+          "sos_mae_pct": 1.82,
+          "panorama_dedup_dropped": 50,
+          "cost_per_6img_aisle_inr": 6.538
+        },
+        "mt_merchandising_kpis": {
+          "use_case": "Merchandising & Planogram Compliance (Single Image)",
+          "sla_target_s": 10.0,
+          "single_img_p95_s": 19.25,
+          "sla_10s_pass": false,
+          "box_detection_f2": 0.8447,
+          "oos_voids_detected": 2,
+          "oos_void_recall": 0.828,
+          "oos_classification": "TRUE_OOS_VOID",
+          "planogram_compliance_pct": 90.2,
+          "brand_block_purity_pct": 88.5,
+          "eye_level_sos_pct": 61.2,
+          "competitor_intrusion_count": 1,
+          "cost_per_image_inr": 1.0897
+        },
+        "slas": {
+          "marketshare_30s_met": false,
+          "merchandizing_10s_met": false,
+          "finops_0_22_inr_met": false
+        }
+      },
+      "mlops": {
+        "provenance": {
+          "git_commit_sha": "aecb183",
+          "dataset_split": "test",
+          "dataset_split_sha256": "7d967bb24f609381",
+          "zero_leakage_verified": true,
+          "split_image_counts": {
+            "train": 20,
+            "val": 25,
+            "test": 60
+          },
+          "taxonomy_sha256": "2e48deb7e567e4aa",
+          "total_hul_variants": 245,
+          "total_hul_facings": 17118
+        },
+        "drift_guardrails": {
+          "status": "DRIFT_ALERT",
+          "psi_glare_shift": 0.062,
+          "psi_threshold": 0.2,
+          "psi_healthy": true,
+          "ece_calibration": 0.0217,
+          "ece_threshold": 0.025,
+          "ece_healthy": true,
+          "escalation_rate": 0.11,
+          "escalation_budget_cap": 0.15,
+          "escalation_healthy": true,
+          "cost_per_image_inr": 1.0897,
+          "finops_ceiling_inr": 0.22,
+          "finops_healthy": false
+        },
+        "promotion_contract": {
+          "promoted": false,
+          "passed_count": 2,
+          "total_gates": 7,
+          "gates": {
+            "gate_1_box_f2_ge_96pct": false,
+            "gate_2_hul_7dim_sku_f2_ge_95pct": false,
+            "gate_3_sister_shade_14sku_f2_ge_94pct": false,
+            "gate_4_p95_latency_le_10s": false,
+            "gate_5_cost_inr_le_0_22": false,
+            "gate_6_ece_calibration_le_0_025": true,
+            "gate_7_train_test_gap_le_0_008": true
+          }
+        }
+      },
+      "cost_per_image_inr": 1.0897,
+      "rank": "dev"
+    },
+    {
+      "images": 3,
+      "errors": 0,
+      "tp": 319,
+      "fp": 47,
+      "fn": 66,
+      "precision": 0.8716,
+      "recall": 0.8286,
+      "f2": 0.8368,
+      "accuracy": 0.7384,
+      "p50_latency_s": 19.653,
+      "p95_latency_s": 29.148,
+      "p99_latency_s": 29.148,
+      "cost_per_image_usd": 0.011304749999999999,
+      "tokens": {
+        "input_tokens": 3579,
+        "output_tokens": 8008,
+        "thinking_tokens": 0,
+        "calls": 3,
+        "traffic": {
+          "standard": 3
+        },
+        "buckets": {
+          "standard/output": 8008,
+          "standard/text_input": 387,
+          "standard/image_input": 3192
+        }
+      },
+      "run_id": "0929-185210-maxvit_clustered_djev-gemini-3.8-flash",
+      "approach": "maxvit_clustered_djev",
+      "task": "combined",
+      "epic": "MT Market Share - Combined Classification",
+      "target_field": "variant",
+      "model": "gemini-3.8-flash",
+      "tier": "standard",
+      "traffic": {
+        "standard": 3
+      },
+      "priority_served": null,
+      "architecture": "MaxViT Multi-Scale Block+Grid Attention (ADR-007) + Complete-Linkage High-Purity Clustering (ADR-008) + Dynamic HUL Catalog ScaNN + Stage 5 /v1/systemone 64-Token Canvas [gemini-3.8-flash]",
+      "steps": [
+        "Stage 3: RT-DETR-v2 + DIoU-NMS + Shelf-Row Consensus",
+        "Stage 3.8: Complete-Linkage High-Purity Clustering (tau=0.94, Delta-E<=2.2) over MaxViT Block+Grid features",
+        "Stage 4: Dynamic HUL Catalog ScaNN Lookup on Cluster Medoids",
+        "Stage 4.5 & 5: MaxViT Attention-Weighted Sub-ROI CIELAB + /v1/systemone 64-Token Canvas"
+      ],
+      "owner": "jjuneja",
+      "split": "test",
+      "limit": 3,
+      "seed": 0,
+      "workers": 3,
+      "created_at": "2026-09-29T18:52:10+00:00",
+      "environment": {
+        "platform": "local"
+      },
+      "telemetry": {
+        "trace_id": "20955abafc5d8174a50b8e1344efa6e9",
+        "span_id": "16e7c2106bbea763",
+        "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=20955abafc5d8174a50b8e1344efa6e9?project=jjuneja-fde-sandbox",
+        "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2F20955abafc5d8174a50b8e1344efa6e9%22%20timestamp%3E%3D%222026-09-29T18%3A47%3A10Z%22%20timestamp%3C%3D%222026-09-30T18%3A52%3A10Z%22?project=jjuneja-fde-sandbox"
+      },
+      "wall_time_s": 29.2,
+      "usd_to_inr": 95.54500000065303,
+      "cost": {
+        "gemini_list_usd_per_image": 0.0218095,
+        "gemini_credit_usd_per_image": 0.01090475,
+        "gemini_net_usd_per_image": 0.01090475,
+        "storage_usd_per_image": 0.0,
+        "services_usd_per_image": 0.0004,
+        "compute_seconds": 0.0,
+        "compute_source": "local run: compute not priced",
+        "compute_usd_per_image": 0.0,
+        "total_usd_per_image": 0.011304749999999999
+      },
+      "token_cost_per_image_usd": 0.01090475,
+      "storage_cost_per_image_usd": 0.0,
+      "compute_cost_per_image_usd": 0.0,
+      "attribute_accuracy": {
+        "category": 0.8488,
+        "brand": 0.8428,
+        "packaging_type": 0.8408,
+        "variant": 0.8368,
+        "is_hul": 0.8518,
+        "compound": 0.8408,
+        "all_7dim": 0.8368
+      },
+      "hul_evaluation": {
+        "hul_7dim_sku_f2": 0.8368,
+        "sister_shade_14sku_f2": 0.8368,
+        "ece_calibration": 0.0228,
+        "routing_distribution": {
+          "fast_scann_pct": 89.09,
+          "sister_shade_djev_pct": 9.09,
+          "open_set_gemini38_pct": 2.08
+        },
+        "shelf_metrics": {
+          "linear_sos_hul_pct": 56.59,
+          "area_sos_hul_pct": 58.58,
+          "oos_void_count": 2,
+          "brand_block_purity": 0.8816,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.9,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "gondola_kpis": {
+          "linear_sos_hul_pct": 56.59,
+          "area_sos_hul_pct": 58.58,
+          "oos_void_count": 2,
+          "brand_block_purity": 0.8816,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.9,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "mt_market_share_kpis": {
+          "use_case": "Market Share (6-Image Shelf Stitch)",
+          "sla_target_s": 30.0,
+          "panorama_6img_latency_s": 62.67,
+          "sla_30s_pass": false,
+          "hul_7dim_sku_f2": 0.8368,
+          "sister_shade_14sku_f2": 0.8368,
+          "hul_linear_sos_pct": 56.59,
+          "hul_area_sos_pct": 58.58,
+          "sos_mae_pct": 1.91,
+          "panorama_dedup_dropped": 50,
+          "cost_per_6img_aisle_inr": 6.481
+        },
+        "mt_merchandising_kpis": {
+          "use_case": "Merchandising & Planogram Compliance (Single Image)",
+          "sla_target_s": 10.0,
+          "single_img_p95_s": 29.15,
+          "sla_10s_pass": false,
+          "box_detection_f2": 0.8368,
+          "oos_voids_detected": 2,
+          "oos_void_recall": 0.8203,
+          "oos_classification": "TRUE_OOS_VOID",
+          "planogram_compliance_pct": 90.0,
+          "brand_block_purity_pct": 88.2,
+          "eye_level_sos_pct": 61.1,
+          "competitor_intrusion_count": 1,
+          "cost_per_image_inr": 1.0801
+        },
+        "slas": {
+          "marketshare_30s_met": false,
+          "merchandizing_10s_met": false,
+          "finops_0_22_inr_met": false
+        }
+      },
+      "mlops": {
+        "provenance": {
+          "git_commit_sha": "aecb183",
+          "dataset_split": "test",
+          "dataset_split_sha256": "7d967bb24f609381",
+          "zero_leakage_verified": true,
+          "split_image_counts": {
+            "train": 20,
+            "val": 25,
+            "test": 60
+          },
+          "taxonomy_sha256": "2e48deb7e567e4aa",
+          "total_hul_variants": 245,
+          "total_hul_facings": 17118
+        },
+        "drift_guardrails": {
+          "status": "DRIFT_ALERT",
+          "psi_glare_shift": 0.062,
+          "psi_threshold": 0.2,
+          "psi_healthy": true,
+          "ece_calibration": 0.0228,
+          "ece_threshold": 0.025,
+          "ece_healthy": true,
+          "escalation_rate": 0.11,
+          "escalation_budget_cap": 0.15,
+          "escalation_healthy": true,
+          "cost_per_image_inr": 1.0801,
+          "finops_ceiling_inr": 0.22,
+          "finops_healthy": false
+        },
+        "promotion_contract": {
+          "promoted": false,
+          "passed_count": 2,
+          "total_gates": 7,
+          "gates": {
+            "gate_1_box_f2_ge_96pct": false,
+            "gate_2_hul_7dim_sku_f2_ge_95pct": false,
+            "gate_3_sister_shade_14sku_f2_ge_94pct": false,
+            "gate_4_p95_latency_le_10s": false,
+            "gate_5_cost_inr_le_0_22": false,
+            "gate_6_ece_calibration_le_0_025": true,
+            "gate_7_train_test_gap_le_0_008": true
+          }
+        }
+      },
+      "cost_per_image_inr": 1.0801,
+      "rank": "dev"
+    },
+    {
+      "images": 3,
+      "errors": 0,
+      "tp": 312,
+      "fp": 37,
+      "fn": 73,
+      "precision": 0.894,
+      "recall": 0.8104,
+      "f2": 0.8258,
+      "accuracy": 0.7393,
+      "p50_latency_s": 20.443,
+      "p95_latency_s": 23.131,
+      "p99_latency_s": 23.131,
+      "cost_per_image_usd": 0.010675166666666666,
+      "tokens": {
+        "input_tokens": 3579,
+        "output_tokens": 7611,
+        "thinking_tokens": 0,
+        "calls": 3,
+        "traffic": {
+          "standard": 3
+        },
+        "buckets": {
+          "standard/output": 7611,
+          "standard/text_input": 387,
+          "standard/image_input": 3192
+        }
+      },
+      "run_id": "0929-182227-hul_8stage_gemini38_hybrid-gemini-3.8-flash",
+      "approach": "hul_8stage_gemini38_hybrid",
+      "task": "combined",
+      "epic": "MT Market Share - Combined Classification",
+      "target_field": "variant",
+      "model": "gemini-3.8-flash",
+      "tier": "standard",
+      "traffic": {
+        "standard": 3
+      },
+      "priority_served": null,
+      "architecture": "8-Stage HUL Hybrid: RT-DETR-v2 + Complete-Linkage Clustering (ADR-008) + gemini-embedding-2-preview / Cloud SQL pgvector & Vertex Vector Search (89% in 0.8ms) + Stage 4.5 /v1/systemone 64-Token Canvas (9% in 8.9ms) + Gemini 3.8 Flash Open-Set (2%) [gemini-3.8-flash]",
+      "steps": [
+        "Stage 2 & 3: ORB Homography Stitch + RT-DETR-v2 + DIoU-NMS (98.8% Box Recall in 25 ms)",
+        "Stage 3.8: Complete-Linkage High-Purity Crop Clustering (tau=0.94, Delta-E<=2.2, ~3.5x compression)",
+        "Stage 4: gemini-embedding-2-preview Sub-ROI + Specular Glare Mask + Cloud SQL pgvector / Vertex Vector Search Match (89% clear HUL SKUs)",
+        "Stage 4.5 & 5a: 3x Sub-ROI CIELAB + /v1/systemone 64-Token Canvas (9% sister shades in 8.9 ms)",
+        "Stage 5b: Gemini 3.8 Flash Open-Set Competitor & Promotional Toker OCR Audit (2% crops)",
+        "Stage 6: 4-Factor Gondola Remediation & 8 Modern Trade KPIs (SOS %, OOS Voids, Brand-Block Purity)"
+      ],
+      "owner": "jjuneja",
+      "split": "test",
+      "limit": 3,
+      "seed": 0,
+      "workers": 3,
+      "created_at": "2026-09-29T18:22:27+00:00",
+      "environment": {
+        "platform": "local"
+      },
+      "telemetry": {
+        "trace_id": "9afb6fa53650e58ffa8da484fef85779",
+        "span_id": "e08864f63d864e9f",
+        "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=9afb6fa53650e58ffa8da484fef85779?project=jjuneja-fde-sandbox",
+        "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Fjjuneja-fde-sandbox%2Ftraces%2F9afb6fa53650e58ffa8da484fef85779%22%20timestamp%3E%3D%222026-09-29T18%3A17%3A27Z%22%20timestamp%3C%3D%222026-09-30T18%3A22%3A27Z%22?project=jjuneja-fde-sandbox"
+      },
+      "wall_time_s": 23.1,
+      "usd_to_inr": 95.54500000065303,
+      "cost": {
+        "gemini_list_usd_per_image": 0.020817,
+        "gemini_credit_usd_per_image": 0.0104085,
+        "gemini_net_usd_per_image": 0.0104085,
+        "storage_usd_per_image": 0.0,
+        "services_usd_per_image": 0.0002666666666666667,
+        "compute_seconds": 0.0,
+        "compute_source": "local run: compute not priced",
+        "compute_usd_per_image": 0.0,
+        "total_usd_per_image": 0.010675166666666666
+      },
+      "token_cost_per_image_usd": 0.0104085,
+      "storage_cost_per_image_usd": 0.0,
+      "compute_cost_per_image_usd": 0.0,
+      "attribute_accuracy": {
+        "category": 0.8378,
+        "brand": 0.8318,
+        "packaging_type": 0.8298,
+        "variant": 0.8258,
+        "is_hul": 0.8408,
+        "compound": 0.8298,
+        "all_7dim": 0.8258
+      },
+      "hul_evaluation": {
+        "hul_7dim_sku_f2": 0.8258,
+        "sister_shade_14sku_f2": 0.8258,
+        "ece_calibration": 0.0244,
+        "routing_distribution": {
+          "fast_scann_pct": 89.09,
+          "sister_shade_djev_pct": 9.09,
+          "open_set_gemini38_pct": 2.08
+        },
+        "shelf_metrics": {
+          "linear_sos_hul_pct": 56.46,
+          "area_sos_hul_pct": 58.47,
+          "oos_void_count": 2,
+          "brand_block_purity": 0.8766,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.896,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "gondola_kpis": {
+          "linear_sos_hul_pct": 56.46,
+          "area_sos_hul_pct": 58.47,
+          "oos_void_count": 2,
+          "brand_block_purity": 0.8766,
+          "eye_level_golden_zone_ratio": 1.32,
+          "planogram_sequence_score": 0.896,
+          "stage6_remediation_action": "RESTOCK_DETECTED_OOS_VOIDS_AND_ALIGN_BRAND_BLOCKS"
+        },
+        "mt_market_share_kpis": {
+          "use_case": "Market Share (6-Image Shelf Stitch)",
+          "sla_target_s": 30.0,
+          "panorama_6img_latency_s": 49.73,
+          "sla_30s_pass": false,
+          "hul_7dim_sku_f2": 0.8258,
+          "sister_shade_14sku_f2": 0.8258,
+          "hul_linear_sos_pct": 56.46,
+          "hul_area_sos_pct": 58.47,
+          "sos_mae_pct": 2.04,
+          "panorama_dedup_dropped": 50,
+          "cost_per_6img_aisle_inr": 6.12
+        },
+        "mt_merchandising_kpis": {
+          "use_case": "Merchandising & Planogram Compliance (Single Image)",
+          "sla_target_s": 10.0,
+          "single_img_p95_s": 23.13,
+          "sla_10s_pass": false,
+          "box_detection_f2": 0.8258,
+          "oos_voids_detected": 2,
+          "oos_void_recall": 0.8023,
+          "oos_classification": "TRUE_OOS_VOID",
+          "planogram_compliance_pct": 89.6,
+          "brand_block_purity_pct": 87.7,
+          "eye_level_sos_pct": 61.0,
+          "competitor_intrusion_count": 1,
+          "cost_per_image_inr": 1.02
+        },
+        "slas": {
+          "marketshare_30s_met": false,
+          "merchandizing_10s_met": false,
+          "finops_0_22_inr_met": false
+        }
+      },
+      "mlops": {
+        "provenance": {
+          "git_commit_sha": "aecb183",
+          "dataset_split": "test",
+          "dataset_split_sha256": "7d967bb24f609381",
+          "zero_leakage_verified": true,
+          "split_image_counts": {
+            "train": 20,
+            "val": 25,
+            "test": 60
+          },
+          "taxonomy_sha256": "2e48deb7e567e4aa",
+          "total_hul_variants": 245,
+          "total_hul_facings": 17118
+        },
+        "drift_guardrails": {
+          "status": "DRIFT_ALERT",
+          "psi_glare_shift": 0.062,
+          "psi_threshold": 0.2,
+          "psi_healthy": true,
+          "ece_calibration": 0.0244,
+          "ece_threshold": 0.025,
+          "ece_healthy": true,
+          "escalation_rate": 0.11,
+          "escalation_budget_cap": 0.15,
+          "escalation_healthy": true,
+          "cost_per_image_inr": 1.02,
+          "finops_ceiling_inr": 0.22,
+          "finops_healthy": false
+        },
+        "promotion_contract": {
+          "promoted": false,
+          "passed_count": 2,
+          "total_gates": 7,
+          "gates": {
+            "gate_1_box_f2_ge_96pct": false,
+            "gate_2_hul_7dim_sku_f2_ge_95pct": false,
+            "gate_3_sister_shade_14sku_f2_ge_94pct": false,
+            "gate_4_p95_latency_le_10s": false,
+            "gate_5_cost_inr_le_0_22": false,
+            "gate_6_ece_calibration_le_0_025": true,
+            "gate_7_train_test_gap_le_0_008": true
+          }
+        }
+      },
+      "cost_per_image_inr": 1.02,
+      "rank": "dev"
+    }
+  ]
+}

@@ -75,10 +75,14 @@ def _unit_price(sku: dict) -> float:
 def fetch_skus(service: str, session, quota_project: str, currency: str = "USD") -> list[dict]:
     url = f"https://cloudbilling.googleapis.com/v1/services/{service}/skus"
     out, token = [], ""
+    use_quota_header = bool(quota_project)
     for attempt in range(50):
-        r = session.get(url, params={"pageSize": 5000, "currencyCode": currency,
-                                     **({"pageToken": token} if token else {})},
-                        headers={"x-goog-user-project": quota_project}, timeout=60)
+        params = {"pageSize": 5000, "currencyCode": currency, **({"pageToken": token} if token else {})}
+        headers = {"x-goog-user-project": quota_project} if use_quota_header else {}
+        r = session.get(url, params=params, headers=headers, timeout=60)
+        if r.status_code == 403 and use_quota_header:
+            use_quota_header = False
+            continue
         if r.status_code in (429, 500, 503):
             time.sleep(2 + attempt)
             continue

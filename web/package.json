@@ -1,0 +1,12 @@
+{
+  "name": "perfect-store-control-plane",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Unilever Perfect Store AI — Decision-First Shelf Intelligence Validation UI & EPIC Control Plane",
+  "scripts": {
+    "start": "PYTHONPATH=../src python3 -m cli serve --port 8080"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.1"
+  }
+}

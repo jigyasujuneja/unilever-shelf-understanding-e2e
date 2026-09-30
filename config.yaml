@@ -1,34 +1,47 @@
 # shelf-bench configuration. This is the only config file.
 
 gcp:
-  project: unilever-shelf-understanding
+  project: jjuneja-fde-sandbox
   location: global                 # Vertex AI Gemini endpoint
-  region: us-central1              # Cloud Run + Cloud Build + bucket region
-  data: gs://unilever-shelf-understanding-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
-  results: gs://unilever-shelf-understanding-shelf-images/results        # run outputs from Cloud Run
+  region: us-central1              # Vertex AI + Cloud SQL + Cloud Build + bucket region
+  data: gs://jjuneja-fde-sandbox-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
+  hul_labeled_data: gs://jjuneja-fde-sandbox-shelf-images/HUL_labeled_benchmarks
+  hul_catalog_data: gs://jjuneja-fde-sandbox-shelf-images/HUL_catalog
+  results: gs://jjuneja-fde-sandbox-shelf-images/results        # run outputs from Vertex AI / Cloud Run
 
-# Cloud Run job that executes benchmark runs (shelf-bench cloud-run). One task per
-# approach x tier x model. Its compute is priced from the Billing Catalog API (Jobs CPU/Memory
-# SKUs for the region) and the task's real duration from the Cloud Run Admin API.
+# Vertex AI & Vertex AI Agent Platform configuration for training, evaluation jobs, and agent deployment:
+#   - `shelf-bench vertex-job`: runs evaluation splits on Vertex AI Custom Jobs (`CustomJob`)
+#   - `shelf-bench vertex-train`: submits Vertex AI Supervised Tuning (`TuningJob`) on `--split train`
+#   - `shelf-bench vertex-deploy`: deploys the Shelf Intelligence Agent on Vertex AI Agent Engine (`ReasoningEngine`)
+vertex_ai:
+  job_prefix: shelf-bench-eval
+  machine_type: n1-standard-4
+  accelerator_type: ""             # optional: NVIDIA_TESLA_T4 or NVIDIA_L4 for GPU approaches
+  accelerator_count: 0
+  cpu: 4
+  memory_gib: 15
+  agent_engine_name: perfect-store-shelf-agent
+  tuning_train_uri: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_train.jsonl
+  tuning_val_uri: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_val.jsonl
+
+# Cloud Run job/service configuration (retained for lightweight web UI hosting via `shelf-bench cloud-service`).
 cloud_run:
   job: shelf-bench
+  service: perfect-store-control-plane
   cpu: 2
   memory_gib: 4
-  parallelism: 2    # tasks at once (default: number of models) - concurrent tasks use different models
-  # Direct VPC egress, needed to reach a private-IP AlloyDB instance. Leave unset otherwise.
-  # network: default
-  # subnet: default
+  parallelism: 2
 
 # Defaults for `shelf-bench run` (all overridable on the command line).
 defaults:
-  split: test      # leaderboard split
+  split: test      # leaderboard split (train | val | test)
   limit: 50        # images per run (0 = entire split: 2,936 test images). Only runs with this
-                   # limit + seed on the test split, from Cloud Run, are ranked.
+                   # limit + seed on the test split, from Vertex AI or Cloud Run, are ranked.
   seed: 0          # same seed + limit => identical image set for every run
   workers: 4       # images processed concurrently
   tier: [standard] # Gemini PayGo tier(s) to run: standard and/or priority (-t on the CLI)
 
-# OpenTelemetry: one Cloud Trace trace per run (run -> image -> Gemini call spans with every
+# OpenTelemetry: one Cloud Trace trace per run (run -> image -> Gemini/stage call spans with every
 # token count, traffic type, retry and cost) plus matching Cloud Logging entries (with prompts
 # and responses). Links land in summary.json["telemetry"]. SHELF_BENCH_TELEMETRY=0 overrides.
 telemetry:
@@ -39,20 +52,59 @@ models:
   - gemini-3.8-flash
   - gemini-3.5-flash-lite
 
-# AlloyDB, for approaches that identify products by vector lookup (utils/alloydb.py has the
-# setup SQL and IAM). Approaches read this in setup(): AlloyDB(**config["alloydb"]).
-alloydb:
-  instance: projects/unilever-shelf-understanding/locations/us-central1/clusters/CLUSTER/instances/INSTANCE
+# Product Vector Store & Cloud SQL for PostgreSQL (`pgvector`) configuration (`src/utils/vector_store.py`).
+# Supported backends:
+#   - `cloudsql_pgvector`: Cloud SQL for PostgreSQL with `pgvector` HNSW index (mTLS + IAM auth)
+#   - `vertex_vector_search`: Managed Vertex AI Vector Search (`IndexEndpoint:findNeighbors` ScaNN)
+#   - `bigquery`: BigQuery `VECTOR_SEARCH` SQL
+#   - `gcs_inmemory`: Fast-path in-memory NumPy/ScaNN catalog loaded from GCS
+vector_store:
+  backend: cloudsql_pgvector
+  instance: unilever-shelf-understanding:us-central1:shelf-catalog-pg
   database: postgres
-  ip_type: PRIVATE       # PRIVATE (needs cloud_run.network) | PUBLIC | PSC
-  # user: defaults to the IAM user of the current credentials
+  ip_type: PRIVATE       # PRIVATE | PUBLIC | PSC
+  index_endpoint: projects/unilever-shelf-understanding/locations/us-central1/indexEndpoints/INDEX_ENDPOINT
+  deployed_index_id: hul_sku_scann_index
+  bq_dataset: hul_shelf_analytics
+  bq_table: sku_catalog
+  fallback_local_scann: true
+
+# Cloud SQL alias block for approaches reading `config["cloudsql"]` (or legacy `config["alloydb"]`).
+cloudsql:
+  instance: unilever-shelf-understanding:us-central1:shelf-catalog-pg
+  database: postgres
+  ip_type: PRIVATE
+  fallback_local_scann: true
+
+alloydb:
+  instance: unilever-shelf-understanding:us-central1:shelf-catalog-pg
+  database: postgres
+  ip_type: PRIVATE
+  fallback_local_scann: true
+
+# HUL Production SLAs and Routing Gate Thresholds (tuned on `val` split, locked for `test` split)
+hul_slas:
+  marketshare_p95_s: 30.0
+  merchandizing_p95_s: 10.0
+  max_cost_per_image_inr: 0.22
+  min_sku_f2: 0.95
+  min_sister_shade_f2: 0.94
+  scann_similarity_gate: 0.82
+  sister_shade_margin_gate: 0.045
+  calibration_temperature: 0.78
+
+# MLOps & GenAIOps 7-Gate CI/CD Promotion Contract & Drift Guardrails
+mlops_gates:
+  max_psi_drift: 0.20
+  max_ece_calibration: 0.025
+  max_escalation_rate: 0.15
+  min_box_f2: 0.96
+  max_train_test_gap_f2: 0.008
+  mcnemar_alpha: 0.05
 
 # Prices are NOT configured here: every run fetches current list prices from GCP's Cloud
-# Billing Catalog API (Gemini SKUs per traffic type, Cloud Run, Cloud Storage) and GCP's own
+# Billing Catalog API (Gemini SKUs per traffic type, Vertex AI / Cloud Run, Cloud Storage) and GCP's own
 # USD->INR rate, and stores that price sheet in its summary. See src/utils/pricing.py.
-#
-# Promotions GCP pays back as billing credits are not in the catalog, so they are listed here.
-# Applied only to runs on or before `until`, and shown as a separate credit line.
 promotions:
   - name: Gemini 3.x Flash introductory pricing (50% credit back on net spend)
     models: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash]

@@ -423,7 +423,7 @@ flowchart TD
 
   subgraph WEEKDAY_STOP["True: Mon-Fri at 18:00 IST"]
     direction TB
-    CLUSTERS_MF["Clusters_to_Stop-copy (ParseJson)<br/>['ulafs-msind-aks-P-57426-001',<br/>'ulafs-msind-aks-P-57426-002']"]:::step
+    CLUSTERS_MF["Clusters_to_Stop-copy (ParseJson)<br/>['masked-cluster-001',<br/>'masked-cluster-002']"]:::step
     subgraph FE_MF["For_each_AKS_cluster-Mon-Fri"]
       STOP_MF["Stop_AKS_cluster_1 (ApiConnection POST via arm)<br/>.../Microsoft.ContainerService/managedClusters/{cluster}/stop<br/>API Version: 2021-03-01"]:::aks
     end
@@ -454,7 +454,7 @@ flowchart TD
 1. **Schedule (`Run_at_the_end_of_the_business_day`):** Triggers twice daily at **18:00 IST** and **19:00 IST** (`hours: [18, 19]`, `minutes: [0]`).
 2. **Variable Initialization (`day_-_hour`):** Computes `day` (`dayOfWeek` in IST: `0`=Sunday, `1..5`=Mon–Fri, `6`=Saturday) and `hour` (`18` or `19`).
 3. **Weekday Shutdown (`Condition_-_Mon-Fri`):**
-   * When `day >= 1 AND day <= 5 AND hour == 18`, iterates over `["ulafs-msind-aks-P-57426-001", "ulafs-msind-aks-P-57426-002"]` and calls the ARM `stop` endpoint (`managedClusters/<cluster>/stop`).
+   * When `day >= 1 AND day <= 5 AND hour == 18`, iterates over `["masked-cluster-001", "masked-cluster-002"]` and calls the ARM `stop` endpoint (`managedClusters/<cluster>/stop`).
 4. **Weekend Shutdown (`Condition-_Sun_and_Sat`):**
    * When `hour == 19 AND (day == 0 OR day == 6)`, iterates over the two AKS clusters and stops them one hour later (at **19:00 IST**) on Saturdays and Sundays.
    * On the off-hour triggers (19:00 on weekdays or 18:00 on weekends), neither condition matches and the workflow exits with no action.

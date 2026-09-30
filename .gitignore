@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
 .venv/
 .pytest_cache/
@@ -8,8 +9,9 @@ __pycache__/
 build/
 dist/
 
-# Dataset (download with `make data`, ~12 GB archive / ~13 GB extracted)
-data/
+# Large raw dataset archives (keep lightweight manifests and benchmark slices tracked)
+data/SKU110K_fixed/
+data/raw/
 
 # Credentials
 .env
@@ -26,6 +28,9 @@ application_default_credentials.json
 *.log
 
 # results/ IS committed: each run is a small JSON folder so the leaderboard is shared.
+results/active_learning_queue.jsonl
+reports/*.sqlite
+reports/*.json
 
 # Customer Code Azure Samples
 docs/customer_code/
