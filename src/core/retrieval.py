@@ -747,15 +747,30 @@ def classify_shelf_boxes_7dim(
                 if isinstance(b_i, int) and 0 <= b_i < len(batch):
                     target_c_idx = batch[b_i][0]
                     cur = medoid_results[target_c_idx]
-                    override_pred = {
-                        "sku_id": str(item.get("sku_id") or cur["sku_id"]),
-                        "category": str(item.get("category") or cur["category"]),
-                        "brand": str(item.get("brand") or cur["brand"]),
-                        "packaging_type": str(item.get("packaging_type") or cur["packaging_type"]),
-                        "variant": str(item.get("variant") or cur["variant"]),
-                        "is_hul": bool(item.get("is_hul", cur["is_hul"])),
-                        "confidence": 0.94,
-                    }
+                    raw_sku_id = str(item.get("sku_id") or "").strip()
+                    if raw_sku_id.lower() in ("", "none", "null", "unknown", "n/a"):
+                        continue
+                    if raw_sku_id in CANONICAL_BY_CODE:
+                        c_meta = CANONICAL_BY_CODE[raw_sku_id]
+                        override_pred = {
+                            "sku_id": str(c_meta["sku_id"]),
+                            "category": str(c_meta["category"]),
+                            "brand": str(c_meta["brand"]),
+                            "packaging_type": str(c_meta["packaging_type"]),
+                            "variant": str(c_meta["variant"]),
+                            "is_hul": bool(c_meta["is_hul"]),
+                            "confidence": 0.94,
+                        }
+                    else:
+                        override_pred = {
+                            "sku_id": raw_sku_id,
+                            "category": str(item.get("category") or cur["category"]),
+                            "brand": str(item.get("brand") or cur["brand"]),
+                            "packaging_type": str(item.get("packaging_type") or cur["packaging_type"]),
+                            "variant": str(item.get("variant") or cur["variant"]),
+                            "is_hul": bool(item.get("is_hul", cur["is_hul"])),
+                            "confidence": 0.94,
+                        }
                     validate_canonical_7dim_prediction(override_pred)
                     medoid_results[target_c_idx] = override_pred
                     for m_idx in cluster_summary.clusters[target_c_idx].member_indices:

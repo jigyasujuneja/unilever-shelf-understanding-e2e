@@ -126,6 +126,36 @@ def run_rectification(
     }
 
 
+def unrectify_boxes(
+    boxes: list[tuple[float, float, float, float]],
+    yaw_deg: float,
+    width: int,
+    height: int,
+) -> list[tuple[float, float, float, float]]:
+    """Map bounding boxes detected in the rectified image frame back to the original unrectified image frame."""
+    if not boxes or abs(yaw_deg) < 0.15:
+        return list(boxes)
+    import cv2
+    import numpy as np
+
+    center = (width * 0.5, height * 0.5)
+    inv_rot_mat = cv2.getRotationMatrix2D(center, -yaw_deg, 1.0)
+    out: list[tuple[float, float, float, float]] = []
+    for bx1, by1, bx2, by2 in boxes:
+        pts = np.array(
+            [[[bx1, by1], [bx2, by1], [bx2, by2], [bx1, by2]]],
+            dtype=np.float32,
+        )
+        warped_pts = cv2.transform(pts, inv_rot_mat)[0]
+        nx1 = float(np.clip(np.min(warped_pts[:, 0]), 0.0, float(width - 1)))
+        ny1 = float(np.clip(np.min(warped_pts[:, 1]), 0.0, float(height - 1)))
+        nx2 = float(np.clip(np.max(warped_pts[:, 0]), nx1 + 1.0, float(width)))
+        ny2 = float(np.clip(np.max(warped_pts[:, 1]), ny1 + 1.0, float(height)))
+        out.append((round(nx1, 2), round(ny1, 2), round(nx2, 2), round(ny2, 2)))
+    return out
+
+
+
 register_stage(
     StageSpec(
         stage_group="rectifier",

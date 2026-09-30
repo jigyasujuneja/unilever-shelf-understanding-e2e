@@ -131,7 +131,15 @@ class ModularEndToEndPipeline(Approach):
         # Stage 2 & 3: Product detection and post-detection filtering
         raw_boxes = self.detector.detect(working_image, ctx)
         post_spec = stages.get_stage("post_detector", self.stage_overrides.get("post_detector"))
-        boxes = post_spec.fn(working_image, raw_boxes) if post_spec.fn else raw_boxes
+        rect_boxes = post_spec.fn(working_image, raw_boxes) if post_spec.fn else raw_boxes
+        from stages.stage1_rectification import unrectify_boxes
+
+        boxes = unrectify_boxes(
+            rect_boxes,
+            float(rect_info.get("yaw_corrected_deg", 0.0)),
+            image.width,
+            image.height,
+        )
 
         # Coarse attribute classification (category, brand, packaging_type)
         coarse_prior = self.attr_classifier.classify(working_image, boxes, ctx)
