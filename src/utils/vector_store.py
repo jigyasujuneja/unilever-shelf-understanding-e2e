@@ -99,14 +99,15 @@ class CloudSQL:
         database: str = "postgres",
         user: str | None = None,
         ip_type: str = "PRIVATE",
-        fallback_local: bool = True,
+        fallback_local: bool = False,
+        fallback_local_scann: bool | None = None,
         **_: Any,
     ):
         self.instance = instance
         self.database = database
         self.user = user
         self.ip_type = ip_type.upper()
-        self.fallback_local = fallback_local
+        self.fallback_local = bool(fallback_local_scann) if fallback_local_scann is not None else fallback_local
         self._connector = None
         self._local = threading.local()
         self._fallback_catalog: VectorCatalog | None = None
@@ -150,7 +151,7 @@ class CloudSQL:
             cur.execute(sql, params)
             return list(cur.fetchall())
         except Exception:
-            if not getattr(self, "fallback_local", True):
+            if not getattr(self, "fallback_local", False):
                 raise
             if self._fallback_catalog is None:
                 self._fallback_catalog = VectorCatalog(backend="gcs_inmemory")
@@ -184,12 +185,12 @@ class VectorCatalog:
         backend: str | None = None,
         config_override: dict[str, Any] | None = None,
     ):
-        cfg = config or load_config()
+        cfg = config if config is not None else load_config()
         vs_cfg = {**cfg.get("vector_store", {}), **cfg.get("cloudsql", {}), **(config_override or {})}
         self.gcp = cfg.get("gcp", {})
         self.backend = (backend or vs_cfg.get("backend") or "cloudsql_pgvector").lower()
         self.vs_cfg = vs_cfg
-        self.fallback_local = bool(vs_cfg.get("fallback_local_scann", True))
+        self.fallback_local = bool(vs_cfg.get("fallback_local_scann", False))
         self._cloudsql: CloudSQL | None = None
         self._inmemory_entries: list[dict[str, Any]] | None = None
 
@@ -205,10 +206,10 @@ class VectorCatalog:
     def _ensure_inmemory_catalog(self) -> list[dict[str, Any]]:
         if self._inmemory_entries is not None:
             return self._inmemory_entries
-        from utils import hul_domain
+        from core.catalog import _build_real_catalog_prototype_bank
 
         entries: list[dict[str, Any]] = []
-        for item in hul_domain._build_real_catalog_prototype_bank():
+        for item in _build_real_catalog_prototype_bank():
             entries.append(
                 {
                     "sku_id": str(item["sku_id"]),

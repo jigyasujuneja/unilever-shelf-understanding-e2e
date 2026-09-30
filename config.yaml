@@ -21,8 +21,8 @@ vertex_ai:
   cpu: 4
   memory_gib: 15
   agent_engine_name: perfect-store-shelf-agent
-  tuning_train_uri: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_train.jsonl
-  tuning_val_uri: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_val.jsonl
+  tuning_train_uri: gs://jjuneja-fde-sandbox-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_train.jsonl
+  tuning_val_uri: gs://jjuneja-fde-sandbox-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_val.jsonl
 
 # Cloud Run job/service configuration (retained for lightweight web UI hosting via `shelf-bench cloud-service`).
 cloud_run:
@@ -30,7 +30,7 @@ cloud_run:
   service: perfect-store-control-plane
   cpu: 2
   memory_gib: 4
-  parallelism: 2
+  parallelism: 8
 
 # Defaults for `shelf-bench run` (all overridable on the command line).
 defaults:
@@ -49,6 +49,8 @@ telemetry:
 
 # Models offered by `shelf-bench list`. Any Vertex Gemini model id works with -m.
 models:
+  - gemini-2.5-flash
+  - gemini-3.1-flash-lite-preview
   - gemini-3.8-flash
   - gemini-3.5-flash-lite
 

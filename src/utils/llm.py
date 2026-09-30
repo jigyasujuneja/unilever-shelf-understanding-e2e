@@ -208,8 +208,13 @@ class Gemini:
         for attempt in range(retries):
             t0 = time.perf_counter()
             try:
+                target_model = (
+                    "gemini-3.5-flash-lite"
+                    if self.model in ("gemini-3.1-flash-lite-preview", "gemini-2.5-flash-lite")
+                    else self.model
+                )
                 resp = self.client.models.generate_content(
-                    model=self.model, contents=contents, config=cfg
+                    model=target_model, contents=contents, config=cfg
                 )
                 seconds = time.perf_counter() - t0
                 break

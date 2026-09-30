@@ -12,6 +12,9 @@ dist/
 # Large raw dataset archives (keep lightweight manifests and benchmark slices tracked)
 data/SKU110K_fixed/
 data/raw/
+/yolo26n.pt
+/rtdetr-l.pt
+/mobile_sam.pt
 
 # Credentials
 .env

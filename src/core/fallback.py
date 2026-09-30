@@ -14,7 +14,7 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Box, Context
-from utils.hul_domain import _build_real_catalog_prototype_bank
+from core.catalog import _build_real_catalog_prototype_bank
 
 FALLBACK_PROMPT = (
     "You are the HUL Perfect Store Stage 5 Sister-Shade & Open-Set Fallback Verifier. "

@@ -9,7 +9,14 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, register
-from utils import embeddings, hul_domain, maxvit_clustering
+from core import clustering as core_clustering
+from core import detection as core_detection
+from core.retrieval import (
+    CONFIG_SISTER_SHADE_SYSTEMONE,
+    classify_shelf_boxes_7dim,
+    scann_vector_lookup,
+)
+from utils import embeddings
 
 
 @register
@@ -35,7 +42,7 @@ class DjevSystemOneSisterShade(Approach):
         self.margin_gate = config.get("hul_slas", {}).get("sister_shade_margin_gate", 0.045)
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
-        proposals = hul_domain.propose_rtdetr_shelf_boxes(
+        proposals = core_detection.propose_rtdetr_shelf_boxes(
             image, recall_rate=0.988, ctx=ctx, approach_name=self.name
         )
         ctx.trace.step(
@@ -44,7 +51,7 @@ class DjevSystemOneSisterShade(Approach):
             boxes=proposals,
         )
 
-        cluster_summary, crop_feats = maxvit_clustering.cluster_shelf_facings_high_purity(
+        cluster_summary, crop_feats = core_clustering.cluster_shelf_facings_high_purity(
             image, proposals, feature_mode="gemini_subroi", tau=0.94
         )
         ctx.trace.step(
@@ -58,7 +65,7 @@ class DjevSystemOneSisterShade(Approach):
         sister_shade_rois: list[Box] = []
         for cluster in cluster_summary.clusters:
             med_idx = cluster.medoid_idx
-            lookup = hul_domain.scann_vector_lookup(
+            lookup = scann_vector_lookup(
                 med_idx,
                 cluster.medoid_box,
                 use_ijepa_deglare=True,
@@ -78,8 +85,8 @@ class DjevSystemOneSisterShade(Approach):
             boxes=scann_fast,
         )
 
-        preds = hul_domain.classify_shelf_boxes_7dim(
-            image, proposals, ctx=ctx, mode=self.name
+        preds = classify_shelf_boxes_7dim(
+            image, proposals, ctx=ctx, config=CONFIG_SISTER_SHADE_SYSTEMONE
         )
         ctx.trace.labels = preds
         ctx.trace.step(

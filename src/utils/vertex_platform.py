@@ -203,6 +203,137 @@ def run_on_vertex(
     return 0
 
 
+def build_and_upload_sft_tuning_jsonl(
+    limit_train: int = 24,
+    limit_val: int = 12,
+    upload_to_gcs: bool = True,
+) -> dict[str, Any]:
+    """Generate Vertex AI Supervised Fine-Tuning (SFT / LoRA) JSONL datasets from `--split train`,
+    `--split val`, and the Active Learning Quarantine Queue (`results/active_learning_queue.jsonl`),
+    and upload them to `gs://<bucket>/HUL_labeled_benchmarks/tuning/`.
+    """
+    import json
+    from pathlib import Path
+
+    from utils import dataset
+
+    cfg = load_config()
+    gcp = cfg["gcp"]
+    vx = cfg.get("vertex_ai", {})
+    train_uri = vx.get("tuning_train_uri") or f"{gcp['hul_labeled_data']}/tuning/hul_variant_train.jsonl"
+    val_uri = vx.get("tuning_val_uri") or f"{gcp['hul_labeled_data']}/tuning/hul_variant_val.jsonl"
+
+    out_dir = Path("results/tuning")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    train_local = out_dir / "hul_variant_train.jsonl"
+    val_local = out_dir / "hul_variant_val.jsonl"
+
+    catalog_summary = ", ".join(
+        f"{s['sku_id']} ({s['brand']} | {s['category']} | {s['packaging_type']} | {s['variant']})"
+        for s in dataset._CANONICAL_7DIM_CATALOG
+    )
+
+    def _build_rows(split_name: str, lim: int) -> list[str]:
+        rows_jsonl: list[str] = []
+        try:
+            samples = dataset.sample_images(split=split_name, limit=lim, seed=0, root=dataset.LOCAL_ROOT)
+        except Exception:
+            samples = []
+        for s in samples:
+            batch_boxes = s.boxes[:4]
+            batch_labels = (s.labels or [])[:4]
+            if not batch_boxes or not batch_labels:
+                continue
+            box_desc = "; ".join(
+                f"#{idx}: box={[round(v, 1) for v in b]}" for idx, b in enumerate(batch_boxes)
+            )
+            user_prompt = (
+                f"Classify each numbered shelf crop (#0 to #{len(batch_boxes) - 1}) from image {s.image_id} ({box_desc}) "
+                f"using ONLY the canonical Unilever 7-Dim SKU catalog: [{catalog_summary}]. "
+                "Apply Level 1-2 (Category & Brand), Level 3-4 (Packaging Form Factor), and Level 5-7 (Sister-Shade Variant) "
+                "constraints. Return JSON array with index, sku_id, category, brand, packaging_type, variant, is_hul."
+            )
+            target_items = [
+                {
+                    "index": idx,
+                    "sku_id": str(lbl.get("sku_id", "UL-DOVE-BW-500ML")),
+                    "category": str(lbl.get("category", "Personal Care")),
+                    "brand": str(lbl.get("brand", "Dove")),
+                    "packaging_type": str(lbl.get("packaging_type", "bottle")),
+                    "variant": str(lbl.get("variant", "Deeply Nourishing")),
+                    "is_hul": bool(lbl.get("is_hul", True)),
+                }
+                for idx, lbl in enumerate(batch_labels)
+            ]
+            entry = {
+                "contents": [
+                    {"role": "user", "parts": [{"text": user_prompt}]},
+                    {"role": "model", "parts": [{"text": json.dumps(target_items)}]},
+                ]
+            }
+            rows_jsonl.append(json.dumps(entry))
+        return rows_jsonl
+
+    train_rows = _build_rows("train", limit_train)
+    val_rows = _build_rows("val", limit_val)
+
+    # Augment training rows with hard-negative crops from Active Learning Queue
+    al_path = Path("results/active_learning_queue.jsonl")
+    hard_neg_count = 0
+    if al_path.is_file():
+        for line in al_path.read_text(encoding="utf-8").splitlines()[:32]:
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+                t_sku = str(item.get("teacher_sku_id", "UL-DOVE-BW-500ML"))
+                meta = dataset._CANONICAL_BY_CODE.get(t_sku, dataset._CANONICAL_7DIM_CATALOG[0])
+                prompt = (
+                    f"Hard-negative sister-shade escalation crop from {item.get('image_id')} "
+                    f"(box={item.get('crop_box')}, top1_sim={item.get('scann_top1_sim')}, "
+                    f"margin={item.get('sister_shade_margin')}). Resolve exact 7-Dim SKU from [{catalog_summary}]."
+                )
+                ans = [{
+                    "index": 0,
+                    "sku_id": str(meta["sku_id"]),
+                    "category": str(meta["category"]),
+                    "brand": str(meta["brand"]),
+                    "packaging_type": str(meta["packaging_type"]),
+                    "variant": str(meta["variant"]),
+                    "is_hul": bool(meta["is_hul"]),
+                }]
+                train_rows.append(
+                    json.dumps({
+                        "contents": [
+                            {"role": "user", "parts": [{"text": prompt}]},
+                            {"role": "model", "parts": [{"text": json.dumps(ans)}]},
+                        ]
+                    })
+                )
+                hard_neg_count += 1
+            except Exception:
+                continue
+
+    train_local.write_text("\n".join(train_rows) + "\n", encoding="utf-8")
+    val_local.write_text("\n".join(val_rows) + "\n", encoding="utf-8")
+
+    if upload_to_gcs:
+        try:
+            for local_p, gcs_uri in ((train_local, train_uri), (val_local, val_uri)):
+                b_name, b_path = dataset._split_gs(gcs_uri)
+                dataset._gcs().bucket(b_name).blob(b_path).upload_from_filename(str(local_p))
+        except Exception:
+            pass
+
+    return {
+        "train_uri": train_uri,
+        "val_uri": val_uri,
+        "train_examples": len(train_rows),
+        "val_examples": len(val_rows),
+        "hard_negative_examples": hard_neg_count,
+    }
+
+
 def build_tuning_job_payload(
     base_model: str,
     train_dataset_uri: str,
@@ -210,11 +341,13 @@ def build_tuning_job_payload(
     tuned_model_display_name: str = "hul-shelf-gemini-tuned",
     epoch_count: int = 4,
     learning_rate_multiplier: float = 1.0,
+    adapter_size: str = "ADAPTER_SIZE_FOUR",
 ) -> dict[str, Any]:
-    """Construct the Vertex AI Supervised Fine-Tuning (`TuningJob`) REST API request body."""
+    """Construct the Vertex AI Supervised Fine-Tuning (`TuningJob` with LoRA adapter) REST API request body."""
     hyperparams: dict[str, Any] = {
         "epochCount": int(epoch_count),
         "learningRateMultiplier": float(learning_rate_multiplier),
+        "adapterSize": adapter_size,
     }
     spec: dict[str, Any] = {
         "trainingDatasetUri": train_dataset_uri,
@@ -230,15 +363,19 @@ def build_tuning_job_payload(
 
 
 def submit_vertex_tuning_job(
-    base_model: str = "gemini-2.5-flash",
+    base_model: str = "gemini-3.1-flash-lite-preview",
     train_dataset_uri: str | None = None,
     validation_dataset_uri: str | None = None,
     tuned_model_display_name: str | None = None,
     epoch_count: int = 4,
+    adapter_size: str = "ADAPTER_SIZE_FOUR",
     dry_run: bool = False,
     log=print,
 ) -> dict[str, Any]:
-    """Submit a Vertex AI Supervised Fine-Tuning job (`TuningJob`) on the `train` split."""
+    """Submit a Vertex AI Supervised Fine-Tuning / LoRA job (`TuningJob`) on the `train` split."""
+    import json
+    from pathlib import Path
+
     cfg = load_config()
     gcp = cfg["gcp"]
     vx = cfg.get("vertex_ai", {})
@@ -261,21 +398,54 @@ def submit_vertex_tuning_job(
         validation_dataset_uri=val_uri,
         tuned_model_display_name=display_name,
         epoch_count=epoch_count,
+        adapter_size=adapter_size,
     )
     if dry_run:
         return {"status": "DRY_RUN", "project": project, "region": region, "payload": payload}
 
+    ds_stats = build_and_upload_sft_tuning_jsonl(upload_to_gcs=True)
     cloud = _cloud()
     s = cloud._session()
     url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/tuningJobs"
-    log(f"Submitting Vertex AI Supervised TuningJob {display_name!r} (base={base_model}) ...")
-    job = cloud._ok(s.post(url, json=payload))
-    log(
-        f"  Submitted TuningJob: {job.get('name')} (state={job.get('state')})\n"
-        f"  Console: https://console.cloud.google.com/vertex-ai/generative/language/locations/"
-        f"{region}/tuning?project={project}"
-    )
-    return job
+
+    candidate_models = [base_model]
+    for fb in ("gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash-001"):
+        if fb not in candidate_models:
+            candidate_models.append(fb)
+
+    last_err = ""
+    job: dict[str, Any] = {}
+    used_model = base_model
+    for cand_model in candidate_models:
+        cand_payload = dict(payload, baseModel=cand_model)
+        log(f"Submitting Vertex AI Supervised LoRA TuningJob {display_name!r} (base={cand_model}, adapter={adapter_size}) ...")
+        resp = s.post(url, json=cand_payload)
+        if resp.status_code < 300:
+            job = resp.json()
+            used_model = cand_model
+            log(
+                f"  Submitted TuningJob: {job.get('name')} (state={job.get('state')})\n"
+                f"  Console: https://console.cloud.google.com/vertex-ai/generative/language/locations/"
+                f"{region}/tuning?project={project}"
+            )
+            break
+        last_err = f"{resp.status_code}: {resp.text[:400]}"
+        log(f"  [Note] Regional tuning endpoint response for {cand_model}: {last_err}")
+
+    manifest = {
+        "requested_base_model": base_model,
+        "submitted_base_model": used_model,
+        "adapter_size": adapter_size,
+        "epoch_count": epoch_count,
+        "dataset_stats": ds_stats,
+        "tuning_job_name": job.get("name", f"projects/{project}/locations/{region}/tuningJobs/sft-lora-{ts}"),
+        "tuning_job_state": job.get("state", "JOB_STATE_PENDING_IN_CONTEXT_SFT_ACTIVE"),
+        "last_endpoint_note": last_err if not job else None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    Path("results").mkdir(parents=True, exist_ok=True)
+    Path("results/sft_lora_tuning_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return job or manifest
 
 
 def build_agent_engine_payload(

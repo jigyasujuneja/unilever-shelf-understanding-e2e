@@ -77,6 +77,9 @@ class DetectClassify(Approach):
     ]
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        from approaches.base import validate_image_and_boxes
+
+        validate_image_and_boxes(image)
         w, h = image.size
         res = ctx.ask(image, DETECT_PROMPT, schema=BOX_LIST_SCHEMA, max_side=2048)
         boxes = to_pixels(res.data, 0, 0, w, h)
@@ -101,8 +104,11 @@ class DetectClassify(Approach):
         # A crop the model skipped keeps its box (treated as a product).
         names = [labels.get(i, "other_product") for i in range(len(boxes))]
         kept = [b for b, n in zip(boxes, names, strict=True) if n != "not_a_product"]
+        kept_labels = [n for n in names if n != "not_a_product"]
+        ctx.trace.labels = kept_labels
         ctx.trace.step("Pass 2: classification",
                        f"{len(starts)} contact sheet call(s) -> {label_counts(names)}; "
                        f"dropped {len(boxes) - len(kept)} -> {len(kept)} boxes",
-                       boxes=kept)
+                       boxes=kept,
+                       labels=kept_labels)
         return kept

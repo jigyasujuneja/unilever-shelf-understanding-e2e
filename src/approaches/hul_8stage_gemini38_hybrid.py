@@ -14,7 +14,11 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, register
-from utils import embeddings, hul_domain, maxvit_clustering, mlops_pipeline
+from core import analytics as core_analytics
+from core import clustering as core_clustering
+from core import detection as core_detection
+from core.retrieval import CONFIG_FULL_HYBRID, classify_shelf_boxes_7dim, scann_vector_lookup
+from utils import embeddings, mlops_pipeline
 
 
 @register
@@ -44,7 +48,7 @@ class HUL8StageGemini38Hybrid(Approach):
         image_id = getattr(ctx.sample, "image_id", "shelf_frame.jpg") if ctx.sample is not None else "shelf_frame.jpg"
 
         # Step 1: Stage 2 ORB Seam Dedup + Stage 3 RT-DETR-v2 + DIoU-NMS (ZERO ground-truth leakage)
-        proposals = hul_domain.propose_rtdetr_shelf_boxes(
+        proposals = core_detection.propose_rtdetr_shelf_boxes(
             image, recall_rate=0.988, ctx=ctx, approach_name=self.name
         )
         ctx.trace.step(
@@ -54,8 +58,8 @@ class HUL8StageGemini38Hybrid(Approach):
         )
 
         # Step 1.5: Stage 3.8 Complete-Linkage High-Purity Crop Clustering (ADR-008)
-        cluster_summary, crop_feats = maxvit_clustering.cluster_shelf_facings_high_purity(
-            image, proposals, feature_mode="gemini_subroi", tau=0.94
+        cluster_summary, crop_feats = core_clustering.cluster_shelf_facings_high_purity(
+            image, proposals, feature_mode="maxvit", tau=0.94
         )
         ctx.trace.step(
             "Stage 3.8: Complete-Linkage High-Purity Clustering (ADR-008)",
@@ -64,19 +68,19 @@ class HUL8StageGemini38Hybrid(Approach):
             boxes=[c.medoid_box for c in cluster_summary.clusters],
         )
 
-        # Step 2: Stage 4 Medoid Embedding (gemini-embedding-2-preview Sub-ROI) + AlloyDB / ScaNN Cosine Routing
+        # Step 2: Stage 4 Medoid Embedding (MaxViT + gemini-embedding-2-preview Sub-ROI) + AlloyDB / ScaNN Cosine Routing
         fast_scann_boxes: list[Box] = []
         sister_shade_boxes: list[Box] = []
         open_set_boxes: list[Box] = []
 
         for cluster in cluster_summary.clusters:
             med_idx = cluster.medoid_idx
-            lookup = hul_domain.scann_vector_lookup(
+            lookup = scann_vector_lookup(
                 med_idx,
                 cluster.medoid_box,
                 use_ijepa_deglare=True,
                 image=image,
-                feature_mode="gemini_subroi",
+                feature_mode="maxvit",
                 precomputed_crop_feats=crop_feats[med_idx],
             )
             if lookup["routing_branch"] == "fast_scann":
@@ -117,16 +121,21 @@ class HUL8StageGemini38Hybrid(Approach):
         )
 
         # Step 5: Stage 6 4-Factor Remediation & 8 Modern Trade Gondola KPIs
-        preds = hul_domain.classify_shelf_boxes_7dim(
-            image, proposals, ctx=ctx, mode=self.name
+        preds = classify_shelf_boxes_7dim(
+            image,
+            proposals,
+            ctx=ctx,
+            config=CONFIG_FULL_HYBRID,
+            precomputed_clusters=(cluster_summary, crop_feats),
         )
         ctx.trace.labels = preds
-        kpis = hul_domain.compute_hul_7dim_and_gondola_summary(
+        kpis = core_analytics.evaluate_shelf_summary(
             total_boxes=len(proposals),
             scann_count=len(fast_scann_boxes),
             djev_sister_shade_count=len(sister_shade_boxes),
             gemini_open_set_count=len(open_set_boxes),
             approach_name=self.name,
+            rows=[{"preds": [list(b) for b in proposals], "pred_labels": preds, "width": image.width, "height": image.height}],
         )
         ctx.trace.step(
             "Stage 6: 4-Factor Recommend & 8 Gondola KPIs",

@@ -207,6 +207,7 @@ def run(
             "cost_list_usd": g["list_usd"],  # Gemini, catalog list price
             "error": error,
             "preds": [[round(v, 1) for v in b] for b in preds],
+            "pred_labels": pred_labels,
             "matched": m["matched"],
             "steps": trace.steps,
         }

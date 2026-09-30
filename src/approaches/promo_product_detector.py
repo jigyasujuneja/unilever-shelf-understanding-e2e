@@ -12,7 +12,8 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
-from utils import hul_domain
+from core import detection as core_detection
+from core.retrieval import CONFIG_SISTER_SHADE_SYSTEMONE, classify_shelf_boxes_7dim
 
 
 @register
@@ -37,7 +38,7 @@ class PromoProductDetector(Approach):
     def detect_and_classify(
         self, image: Image.Image, ctx: Context
     ) -> tuple[list[Box], list[Any]]:
-        raw_boxes = hul_domain.propose_rtdetr_shelf_boxes(
+        raw_boxes = core_detection.propose_rtdetr_shelf_boxes(
             image, recall_rate=0.985, ctx=ctx, approach_name="hul_8stage_gemini38_hybrid"
         )
         boxes = list(raw_boxes)
@@ -46,8 +47,8 @@ class PromoProductDetector(Approach):
             f"Detected {len(boxes)} promotional display & shelf facings",
             boxes=boxes,
         )
-        preds = hul_domain.classify_shelf_boxes_7dim(
-            image, boxes, ctx=ctx, mode=self.name
+        preds = classify_shelf_boxes_7dim(
+            image, boxes, ctx=ctx, config=CONFIG_SISTER_SHADE_SYSTEMONE
         )
         ctx.trace.labels = preds
         ctx.trace.step(

@@ -1,0 +1,52 @@
+{
+  "requested_base_model": "gemini-3.1-flash-lite-preview",
+  "submitted_base_model": "gemini-2.5-flash-lite",
+  "adapter_size": "ADAPTER_SIZE_FOUR",
+  "epoch_count": 4,
+  "dataset_stats": {
+    "train_uri": "gs://jjuneja-fde-sandbox-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_train.jsonl",
+    "val_uri": "gs://jjuneja-fde-sandbox-shelf-images/HUL_labeled_benchmarks/tuning/hul_variant_val.jsonl",
+    "train_examples": 52,
+    "val_examples": 12,
+    "hard_negative_examples": 32
+  },
+  "tuning_job_name": "projects/475699710501/locations/us-central1/tuningJobs/1334262729015296000",
+  "tuning_job_state": "JOB_STATE_SUCCEEDED",
+  "last_endpoint_note": null,
+  "timestamp": "2026-09-30T01:23:03.250374+00:00",
+  "tuned_model": {
+    "model": "projects/475699710501/locations/us-central1/models/3774764705399177216@1",
+    "endpoint": "projects/475699710501/locations/us-central1/endpoints/7055298384357228544",
+    "checkpoints": [
+      {
+        "checkpointId": "1",
+        "epoch": "2",
+        "step": "4",
+        "endpoint": "projects/475699710501/locations/us-central1/endpoints/7038691360731299840"
+      },
+      {
+        "checkpointId": "2",
+        "epoch": "3",
+        "step": "8",
+        "endpoint": "projects/475699710501/locations/us-central1/endpoints/3435811658834903040"
+      },
+      {
+        "checkpointId": "3",
+        "epoch": "4",
+        "step": "12",
+        "endpoint": "projects/475699710501/locations/us-central1/endpoints/126510357647720448"
+      },
+      {
+        "checkpointId": "4",
+        "epoch": "4",
+        "step": "16",
+        "endpoint": "projects/475699710501/locations/us-central1/endpoints/7055298384357228544"
+      }
+    ]
+  },
+  "experiment": "projects/475699710501/locations/us-central1/metadataStores/default/contexts/tuning-experiment-20260929182757338566",
+  "vertex_tuning_data_stats": {
+    "tuningDatasetExampleCount": "52",
+    "totalBillableTokenCount": "29348"
+  }
+}

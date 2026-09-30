@@ -17,6 +17,32 @@
     "hul_india_live_count": 57,
     "wikipedia_global_live_count": 185
   },
+  "gt_mt_scale_parameters": {
+    "categories_gt": 10,
+    "categories_mt": 10,
+    "hul_brands_gt": 56,
+    "hul_brands_mt": 56,
+    "non_hul_brands_gt": 123,
+    "non_hul_brands_mt": 123,
+    "total_brands": 179,
+    "hul_variants_gt": 960,
+    "hul_variants_mt": 960,
+    "non_hul_variants_gt": 953,
+    "non_hul_variants_mt": 953,
+    "total_variants": 1913
+  },
+  "legacy_13_model_baseline": {
+    "total_models": 13,
+    "components": [
+      {"component": "SKU Detection", "model": "YOLO", "application": "GT, MT", "count": 1},
+      {"component": "Brand Classification (HUL and Non-HUL)", "model": "XceptionNet", "application": "GT, MT", "count": 2},
+      {"component": "Variant Classification (6 Category Domains)", "model": "InceptionNet", "application": "GT, MT", "count": 6},
+      {"component": "Packaging Type", "model": "InceptionNet", "application": "GT, MT", "count": 1},
+      {"component": "Asset SKU Detection", "model": "YOLO", "application": "Merchandising", "count": 1},
+      {"component": "Promotion Recognition", "model": "ViT-B-16-plus-240", "application": "Merchandising", "count": 1},
+      {"component": "Merchandising Product Recognition", "model": "InceptionNet", "application": "Merchandising", "count": 1}
+    ]
+  },
   "unilever_variant_domains": [
     "Hair Care - DMT",
     "Skin Care",

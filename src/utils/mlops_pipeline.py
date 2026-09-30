@@ -15,13 +15,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.catalog import compute_real_onboarding_embedding
 from utils import dataset
 
 ACTIVE_LEARNING_QUEUE_PATH = Path("results/active_learning_queue.jsonl")
@@ -65,12 +64,9 @@ def hot_swap_onboard_sku(
     is_hul: bool = True,
     reference_crops_count: int = 5,
 ) -> dict[str, Any]:
-    """Zero-Retrain SKU Onboarding: inserts vector prototypes and updates the constrained token trie."""
+    """Zero-Retrain SKU Onboarding: inserts real visual vector prototypes and updates the constrained token trie."""
     trie_token_path = f"{category} > {brand} > {sub_brand} > {variant} > {size}"
-    vector_seed = hashlib.sha256(f"{sku_id}:{trie_token_path}".encode()).digest()
-    raw_vec = [((b / 127.5) - 1.0) for b in vector_seed] * 16  # 512-D normalized anchor
-    norm = math.sqrt(sum(v * v for v in raw_vec)) or 1.0
-    embedding_512d = [round(v / norm, 5) for v in raw_vec]
+    embedding_512d = compute_real_onboarding_embedding(category=category, brand=brand)
 
     return {
         "status": "ONBOARDED_HOT_SWAP",
@@ -94,7 +90,7 @@ def record_active_learning_sample(
     routing_branch: str,
     teacher_sku_id: str,
     trace_url: str | None = None,
-    queue_path: Path = ACTIVE_LEARNING_QUEUE_PATH,
+    queue_path: Path | None = None,
 ) -> dict[str, Any]:
     """Append hard-negative / low-margin crop to the Active Learning Quarantine Queue for teacher->student distillation."""
     entry = {
@@ -109,9 +105,7 @@ def record_active_learning_sample(
         "trace_url": trace_url,
         "distillation_target": "CloudSQL_pgvector_and_Vertex_Vector_Search_Bank",
     }
-    if queue_path != ACTIVE_LEARNING_QUEUE_PATH or (
-        "pytest" not in sys.modules and "unittest" not in sys.modules
-    ):
+    if queue_path is not None and queue_path != ACTIVE_LEARNING_QUEUE_PATH:
         queue_path.parent.mkdir(parents=True, exist_ok=True)
         with queue_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")

@@ -14,7 +14,7 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
-from utils import hul_domain
+from core.retrieval import CONFIG_FT_GEMINI31_VARIANT, classify_shelf_boxes_7dim
 
 
 @register
@@ -31,6 +31,23 @@ class FTGemini31VariantCompoundClassifier(Approach):
         "Step 1: Sub-ROI Shade & Claim Zone Crop Preparation",
         "Step 2: Fine-Tuned Gemini 3.1 Flash Lite Compound Variant Decode",
     ]
+    sft_lora_endpoint: str = ""
+
+    def setup(self, config: dict) -> None:
+        del config
+        import json
+        from pathlib import Path
+
+        manifest_path = Path(__file__).resolve().parents[2] / "results" / "sft_lora_tuning_manifest.json"
+        if not manifest_path.is_file():
+            manifest_path = Path("results/sft_lora_tuning_manifest.json")
+        if not manifest_path.is_file():
+            raise RuntimeError("Missing results/sft_lora_tuning_manifest.json for FTGemini31VariantCompoundClassifier")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        endpoint = str(manifest.get("tuned_model", {}).get("endpoint") or "").strip()
+        if not endpoint:
+            raise RuntimeError("Empty tuned_model.endpoint in results/sft_lora_tuning_manifest.json")
+        self.sft_lora_endpoint = endpoint
 
     def classify(
         self,
@@ -39,14 +56,17 @@ class FTGemini31VariantCompoundClassifier(Approach):
         ctx: Context,
         prior: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
+        if not self.sft_lora_endpoint:
+            self.setup({})
+        ctx.trace.meta["sft_lora_endpoint"] = self.sft_lora_endpoint
         prior_msg = "conditioned on Stage-1 (Category, Brand, Package Type) prior" if prior else "unconditioned standalone mode"
         ctx.trace.step(
             "Step 1: Sub-ROI Shade & Claim Crop Preparation",
-            f"Preparing {len(boxes)} crops ({prior_msg})",
+            f"Preparing {len(boxes)} crops ({prior_msg}, endpoint={self.sft_lora_endpoint})",
             boxes=boxes,
         )
-        preds = hul_domain.classify_shelf_boxes_7dim(
-            image, boxes, ctx=ctx, mode="ft_gemini31_variant_compound", prior=prior
+        preds = classify_shelf_boxes_7dim(
+            image, boxes, ctx=ctx, config=CONFIG_FT_GEMINI31_VARIANT, prior=prior
         )
         ctx.trace.labels = preds
         ctx.trace.step(

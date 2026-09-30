@@ -216,10 +216,9 @@ def ensure_local_sku110k_splits(root: str | Path = LOCAL_ROOT, force_rebuild: bo
     )
     local_pool = shelf_pool + sorted(Path("data/labeled_retail_benchmarks/images").glob("*.jpg"))
     if not local_pool:
-        from PIL import Image
-        fallback_img = root / "images" / "fallback.jpg"
-        Image.new("RGB", (640, 480), "white").save(fallback_img)
-        local_pool = [fallback_img]
+        raise FileNotFoundError(
+            "No local retail benchmark images found under data/sku110k/images or data/labeled_retail_benchmarks/images"
+        )
 
     # 1. Load real 3,649 human-annotated shelf boxes for the 25 `sku110k_val_*` & `smart_retail_val_*` images
     slice_gt: dict[str, tuple[int, int, list[tuple[float, float, float, float, str]]]] = {}

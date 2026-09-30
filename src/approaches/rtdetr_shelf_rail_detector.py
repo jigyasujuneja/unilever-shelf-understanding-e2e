@@ -10,7 +10,8 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, register
-from utils import hul_domain
+from core import detection as core_detection
+from core.models import load_rtdetr_detector
 
 
 @register
@@ -29,15 +30,34 @@ class RTDETRShelfRailDetector(Approach):
     ]
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        if not isinstance(image, Image.Image) or image.width <= 0 or image.height <= 0:
+            raise ValueError("RTDETRShelfRailDetector requires a valid non-empty PIL.Image.Image")
+
         w, h = image.size
         ctx.trace.step("Stage 1: Shelf-Rail Segmentation", f"{w}x{h}px gondola rectified into 5 horizontal shelf bays")
 
-        raw_proposals = hul_domain.propose_rtdetr_shelf_boxes(
-            image, recall_rate=0.988, ctx=ctx, approach_name=self.name
+        model = load_rtdetr_detector()
+        preds = model.predict(
+            image.convert("RGB"),
+            imgsz=640,
+            conf=0.08,
+            iou=0.55,
+            verbose=False,
+        )
+        rtdetr_boxes: list[Box] = []
+        if preds and getattr(preds[0], "boxes", None) is not None and len(preds[0].boxes) > 0:
+            xyxy = preds[0].boxes.xyxy.cpu().numpy()
+            for row in xyxy:
+                rtdetr_boxes.append((float(row[0]), float(row[1]), float(row[2]), float(row[3])))
+
+        # Pure pixel-level shelf-rail Sobel segmentation (ZERO Gemini VLM calls)
+        rail_proposals = core_detection.detect_shelf_boxes_from_pixels(image)
+        raw_proposals = core_detection.deduplicate_depth_stacked_facings(
+            core_detection._suppress_container_boxes(rtdetr_boxes + list(rail_proposals), ar_limit=0.78, nms_thr=0.55)
         )
         ctx.trace.step(
             "Stage 2: RT-DETR-v2 Dense Proposals",
-            f"{len(raw_proposals)} raw facing proposals extracted",
+            f"{len(rtdetr_boxes)} RT-DETR-L neural boxes -> {len(raw_proposals)} fused facing proposals",
             boxes=raw_proposals,
         )
 

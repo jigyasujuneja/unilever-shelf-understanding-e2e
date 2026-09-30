@@ -14,7 +14,7 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
-from utils import hul_domain
+from core.retrieval import CONFIG_FT_GEMINI31_CAT_BRAND_PKG, classify_shelf_boxes_7dim
 
 COMPOUND_CAT_BRAND_PKG_SCHEMA = {
     "type": "array",
@@ -46,6 +46,23 @@ class FTGemini31CatBrandPkgClassifier(Approach):
         "Step 1: Contact-Sheet Crop Batching & High-Purity Clustering",
         "Step 2: Fine-Tuned Gemini 3.1 Flash Lite Compound (Category + Brand + Package Type) Decode",
     ]
+    sft_lora_endpoint: str = ""
+
+    def setup(self, config: dict) -> None:
+        del config
+        import json
+        from pathlib import Path
+
+        manifest_path = Path(__file__).resolve().parents[2] / "results" / "sft_lora_tuning_manifest.json"
+        if not manifest_path.is_file():
+            manifest_path = Path("results/sft_lora_tuning_manifest.json")
+        if not manifest_path.is_file():
+            raise RuntimeError("Missing results/sft_lora_tuning_manifest.json for FTGemini31CatBrandPkgClassifier")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        endpoint = str(manifest.get("tuned_model", {}).get("endpoint") or "").strip()
+        if not endpoint:
+            raise RuntimeError("Empty tuned_model.endpoint in results/sft_lora_tuning_manifest.json")
+        self.sft_lora_endpoint = endpoint
 
     def classify(
         self,
@@ -54,13 +71,16 @@ class FTGemini31CatBrandPkgClassifier(Approach):
         ctx: Context,
         prior: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
+        if not self.sft_lora_endpoint:
+            self.setup({})
+        ctx.trace.meta["sft_lora_endpoint"] = self.sft_lora_endpoint
         ctx.trace.step(
             "Step 1: Contact-Sheet Crop Batching",
-            f"Packing {len(boxes)} crops into clustered contact sheets for Fine-Tuned Gemini 3.1 Flash Lite",
+            f"Packing {len(boxes)} crops into clustered contact sheets for Fine-Tuned Gemini 3.1 Flash Lite ({self.sft_lora_endpoint})",
             boxes=boxes,
         )
-        preds = hul_domain.classify_shelf_boxes_7dim(
-            image, boxes, ctx=ctx, mode="ft_gemini31_cat_brand_pkg", prior=prior
+        preds = classify_shelf_boxes_7dim(
+            image, boxes, ctx=ctx, config=CONFIG_FT_GEMINI31_CAT_BRAND_PKG, prior=prior
         )
         ctx.trace.labels = preds
         ctx.trace.step(

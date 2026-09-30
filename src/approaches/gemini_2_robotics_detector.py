@@ -10,7 +10,7 @@ from __future__ import annotations
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, register
-from utils import hul_domain
+from core import detection as core_detection
 
 
 @register
@@ -28,8 +28,11 @@ class Gemini2RoboticsDetector(Approach):
     ]
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        from approaches.base import validate_image_and_boxes
+
+        validate_image_and_boxes(image)
         w, h = image.size
-        raw_boxes = hul_domain.propose_rtdetr_shelf_boxes(
+        raw_boxes = core_detection.propose_rtdetr_shelf_boxes(
             image, recall_rate=0.925, ctx=ctx, approach_name=self.name
         )
         ctx.trace.step(

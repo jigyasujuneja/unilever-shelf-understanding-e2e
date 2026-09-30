@@ -13,7 +13,8 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
-from utils import embeddings, hul_domain
+from core.retrieval import CONFIG_HUL_HIERARCHY, classify_shelf_boxes_7dim
+from utils import embeddings
 
 
 @register
@@ -48,8 +49,8 @@ class HULHierarchyClassifier(Approach):
         if boxes:
             ctx.bill("embedding_image", max(1, len(boxes) // 4))
 
-        preds = hul_domain.classify_shelf_boxes_7dim(
-            image, boxes, ctx=ctx, mode="hul_hierarchy_classifier", prior=prior
+        preds = classify_shelf_boxes_7dim(
+            image, boxes, ctx=ctx, config=CONFIG_HUL_HIERARCHY, prior=prior
         )
         ctx.trace.labels = preds
         ctx.trace.step(

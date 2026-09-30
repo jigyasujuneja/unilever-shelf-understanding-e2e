@@ -14,7 +14,8 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
-from utils import embeddings, hul_domain
+from core.retrieval import CONFIG_SCANN_FLAT, classify_shelf_boxes_7dim
+from utils import embeddings
 from utils.vector_store import VectorCatalog
 
 
@@ -51,8 +52,8 @@ class ScaNNVectorRetriever(Approach):
             f"Extracted 4-zone embeddings + glare compensation across {len(boxes)} crops",
             boxes=boxes,
         )
-        preds = hul_domain.classify_shelf_boxes_7dim(
-            image, boxes, ctx=ctx, mode="scann_vector_retriever", prior=prior
+        preds = classify_shelf_boxes_7dim(
+            image, boxes, ctx=ctx, config=CONFIG_SCANN_FLAT, prior=prior
         )
         ctx.trace.labels = preds
         ctx.trace.step(

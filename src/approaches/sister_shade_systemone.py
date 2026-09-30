@@ -13,7 +13,9 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
-from utils import embeddings, hul_domain, maxvit_clustering
+from core import clustering as core_clustering
+from core.retrieval import CONFIG_SISTER_SHADE_SYSTEMONE, classify_shelf_boxes_7dim
+from utils import embeddings
 
 
 @register
@@ -41,7 +43,7 @@ class SisterShadeSystemOneClassifier(Approach):
         prior: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         sample_boxes = boxes[:16] if len(boxes) > 16 else boxes
-        clustered, _ = maxvit_clustering.cluster_shelf_facings_high_purity(
+        clustered, _ = core_clustering.cluster_shelf_facings_high_purity(
             image, sample_boxes, feature_mode="gemini_subroi", tau=0.94
         )
         est_clusters = max(1, round(len(boxes) / max(1.0, clustered.compression_ratio))) if boxes else 0
@@ -54,8 +56,8 @@ class SisterShadeSystemOneClassifier(Approach):
             boxes=boxes,
         )
 
-        preds = hul_domain.classify_shelf_boxes_7dim(
-            image, boxes, ctx=ctx, mode="sister_shade_systemone", prior=prior
+        preds = classify_shelf_boxes_7dim(
+            image, boxes, ctx=ctx, config=CONFIG_SISTER_SHADE_SYSTEMONE, prior=prior
         )
         ctx.trace.labels = preds
         ctx.trace.step(

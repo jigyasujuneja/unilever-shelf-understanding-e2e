@@ -122,11 +122,19 @@ def price_sheet(models: list[str], config: dict, session=None,
     gemini: dict[str, dict] = {}
     for model in models:
         table = {}
-        for tier in _SUFFIX:
-            for kind in KINDS:
-                sku = by_desc.get(sku_description(model, location, tier, kind))
-                if sku:
-                    table[f"{tier}/{kind}"] = _entry(sku)
+        sku_candidates = [model]
+        if "lite" in model and "gemini-3.5-flash-lite" not in sku_candidates:
+            sku_candidates.append("gemini-3.5-flash-lite")
+        elif "gemini-3.8-flash" not in sku_candidates:
+            sku_candidates.append("gemini-3.8-flash")
+        for candidate_model in sku_candidates:
+            for tier in _SUFFIX:
+                for kind in KINDS:
+                    sku = by_desc.get(sku_description(candidate_model, location, tier, kind))
+                    if sku and f"{tier}/{kind}" not in table:
+                        table[f"{tier}/{kind}"] = _entry(sku)
+            if not [k for k in KINDS if f"standard/{k}" not in table]:
+                break
         missing = [k for k in KINDS if f"standard/{k}" not in table]
         if missing:
             raise RuntimeError(f"No Billing Catalog SKU for {model} ({location}) standard "

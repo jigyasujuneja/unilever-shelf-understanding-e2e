@@ -10,41 +10,77 @@ from __future__ import annotations
 
 from typing import Any
 
+from PIL import Image
+
+from core import catalog as core_catalog
+from core import features as core_features
+from core.features import compute_ciede2000_approx
+from core.retrieval import DjevSystemOneClient
 from stages.registry import StageSpec, register_stage
-from utils.hul_domain import DjevSystemOneClient, compute_ciede2000_approx
 
 
 def run_sister_shade_tiebreaker(
-    box_xyxy: list[float] | None = None,
+    box_xyxy: list[float] | tuple[float, ...] | None = None,
     candidate_skus: list[str] | None = None,
     mode: str = "cielab_delta_e_and_systemone",
+    image: Image.Image | None = None,
+    ctx: Any | None = None,
 ) -> dict[str, Any]:
-    """Disambiguate near-identical product variants using CIELAB color distance and VLM decoding."""
-    box = box_xyxy or [10.0, 20.0, 70.0, 180.0]
-    candidates = candidate_skus or [
-        "BP-LAKME-CC-ALMOND",
-        "BP-LAKME-CC-HONEY",
-        "BP-LAKME-CC-BRONZE",
-    ]
-    delta_e = compute_ciede2000_approx((72.4, 8.2, 19.5), (71.1, 8.9, 18.2))
+    """Disambiguate near-identical product variants using real crop CIELAB color distance and VLM decoding."""
+    if mode not in ("cielab_delta_e_and_systemone", "cielab_delta_e_only", "direct_vlm_only"):
+        raise ValueError(f"Unsupported tiebreaker mode: {mode!r}")
+
+    protos = core_catalog._build_real_catalog_prototype_bank()
+    proto_by_sku = {p["sku_id"]: p for p in protos}
+    candidates = list(candidate_skus) if candidate_skus else [p["sku_id"] for p in protos[:3]]
+    if not candidates:
+        raise ValueError("stage5_compound_vlm requires at least one candidate SKU")
+
+    box = tuple(float(v) for v in (box_xyxy or (0.0, 0.0, 64.0, 128.0)))
+    if len(box) < 4 or box[2] <= box[0] or box[3] <= box[1]:
+        raise ValueError(f"Invalid bounding box coordinates in tiebreaker: {box}")
+
+    if not isinstance(image, Image.Image) or image.width <= 0 or image.height <= 0:
+        raise ValueError("stage5_compound_vlm requires a valid non-empty PIL.Image.Image")
+
+    crop_feats = core_features.extract_real_crop_features(image, (box[0], box[1], box[2], box[3]))
+    observed_lab = tuple(crop_feats["claim_lab"])
+    glare_val = float(crop_feats["glare_ratio"])
+
+    scored_by_color: list[tuple[float, str]] = []
+    for cand_id in candidates:
+        proto = proto_by_sku.get(cand_id)
+        ref_lab = tuple(proto["cap_lab"]) if proto and "cap_lab" in proto else (71.1, 8.9, 18.2)
+        de = compute_ciede2000_approx(observed_lab, ref_lab)
+        scored_by_color.append((de, cand_id))
+    scored_by_color.sort(key=lambda t: t[0])
+    best_de, best_color_sku = scored_by_color[0]
+
     if mode == "cielab_delta_e_only":
         return {
             "mode": mode,
-            "cielab_delta_e00": delta_e,
-            "resolved_sku_id": candidates[0],
+            "cielab_delta_e00": best_de,
+            "resolved_sku_id": best_color_sku,
             "vlm_invoked": False,
         }
+
     vlm_client = DjevSystemOneClient()
+    ordered_cands = [cand_id for _, cand_id in scored_by_color] if mode == "cielab_delta_e_and_systemone" else candidates
     vlm_result = vlm_client.resolve_crop_systemone(
-        box_xyxy=box,
-        scann_top5=candidates[:5],
+        box_xyxy=list(box),
+        scann_top5=ordered_cands[:5],
         raw_similarity=0.94,
-        glare_intensity=0.18,
-        ocr_snippet="30g",
+        glare_intensity=glare_val,
+        ocr_snippet="",
+        image=image,
+        ctx=ctx,
     )
+    if vlm_result.resolved_base_pack_id not in candidates:
+        raise RuntimeError(f"Hallucinated SKU ID {vlm_result.resolved_base_pack_id!r} not in candidate set {candidates}")
+
     return {
         "mode": mode,
-        "cielab_delta_e00": delta_e,
+        "cielab_delta_e00": best_de,
         "resolved_sku_id": vlm_result.resolved_base_pack_id,
         "pinned_ratio": vlm_result.pinned_ratio,
         "vlm_invoked": True,

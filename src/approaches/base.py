@@ -92,8 +92,8 @@ class Context:
     AlloyDB, ...) it creates itself in ``Approach.setup`` from the helpers in ``utils/``.
     """
 
-    model: str
-    llm: Callable[..., LLMResult]
+    model: str = "gemini-3.8-flash"
+    llm: Callable[..., LLMResult] | None = None
     trace: Trace = field(default_factory=Trace)
     # Set by the runner: OTel parent for model-call spans (works from any thread), and
     # usage -> Gemini cost dict (list_usd / credit_usd / net_usd) for the span.
@@ -160,6 +160,22 @@ class Context:
             self.trace.billed[unit] = self.trace.billed.get(unit, 0) + amount
 
 
+def validate_image_and_boxes(
+    image: Image.Image | None,
+    boxes: list[Box] | None = None,
+) -> None:
+    """Validate that ``image`` is a non-empty PIL Image and ``boxes`` (if provided) have valid coordinates."""
+    if not isinstance(image, Image.Image) or image.width <= 0 or image.height <= 0:
+        raise ValueError(f"Expected a valid PIL.Image.Image (non-empty), got {image!r}")
+    if boxes is not None:
+        for idx, b in enumerate(boxes):
+            if not isinstance(b, (list, tuple)) or len(b) < 4:
+                raise ValueError(f"Box at index {idx} must have 4 coordinates, got {b!r}")
+            x1, y1, x2, y2 = float(b[0]), float(b[1]), float(b[2]), float(b[3])
+            if x2 <= x1 or y2 <= y1:
+                raise ValueError(f"Degenerate box coordinates at index {idx}: ({x1}, {y1}, {x2}, {y2})")
+
+
 class Approach:
     name: str = ""                                     # CLI id
     task: str = "detection"                            # "detection" | "classification" | "combined"
@@ -197,6 +213,7 @@ class Approach:
         For backward compatibility, if a combined approach only overrides ``detect()`` and sets
         ``ctx.trace.labels``, the runner uses ``(boxes, ctx.trace.labels)``.
         """
+        validate_image_and_boxes(image)
         boxes = self.detect(image, ctx)
         return boxes, list(ctx.trace.labels)
 

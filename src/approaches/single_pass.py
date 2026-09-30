@@ -63,14 +63,20 @@ class SinglePass(Approach):
     ]
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        from approaches.base import validate_image_and_boxes
+
+        validate_image_and_boxes(image)
         w, h = image.size
         res = ctx.ask(image, PROMPT, schema=SCHEMA, max_side=2048)
         boxes, labels = labelled_boxes(res.data, w, h)
         kept = [b for b, n in zip(boxes, labels, strict=True) if n != NOT_PRODUCT]
+        kept_labels = [n for n in labels if n != NOT_PRODUCT]
+        ctx.trace.labels = kept_labels
         ctx.trace.step(
             "Gemini detection + classification",
             f"1 call, {res.usage.input_tokens} in / {res.usage.output_tokens} out tokens, "
             f"{res.seconds:.1f}s -> {len(kept)} products ({label_counts(labels) or 'none'})",
             boxes=kept,
+            labels=kept_labels,
         )
         return kept

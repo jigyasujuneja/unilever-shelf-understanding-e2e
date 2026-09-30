@@ -19,8 +19,8 @@ from typing import Any
 from PIL import Image
 
 from approaches.base import Approach, Box, Context, label_counts, register
-from utils import embeddings, hul_domain
-from utils.hul_domain import DjevSystemOneClient
+from core.retrieval import CONFIG_DJEV_COMPOUND, DjevSystemOneClient, classify_shelf_boxes_7dim
+from utils import embeddings
 
 
 @register
@@ -63,8 +63,8 @@ class DjevDiffusionGemmaCompoundClassifier(Approach):
             boxes=boxes,
         )
 
-        preds = hul_domain.classify_shelf_boxes_7dim(
-            image, boxes, ctx=ctx, mode="djev_diffusiongemma_compound", prior=prior
+        preds = classify_shelf_boxes_7dim(
+            image, boxes, ctx=ctx, config=CONFIG_DJEV_COMPOUND, prior=prior
         )
 
         # Execute the real 64-token canvas + 3-task ScaNN prefilter protocol on each crop

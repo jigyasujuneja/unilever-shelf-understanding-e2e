@@ -29,7 +29,7 @@ from utils import dataset
 from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ["Dockerfile", "pyproject.toml", "requirements.txt", "README.md", "config.yaml", "configs", "data/splits", "results", "src", "web"]
+SOURCE_FILES = ["Dockerfile", "pyproject.toml", "requirements.txt", "README.md", "config.yaml", "configs", "data/splits", "data/models", "data/labeled_retail_benchmarks", "results", "src", "web"]
 AuthorizedSession = Any
 
 
@@ -367,12 +367,12 @@ def _wait_op(s, name: str, log=None, every: int = 5) -> dict:
 
 
 def run_on_cloud(approaches: list[str], models: list[str], tiers: list[str], split: str, limit: int, seed: int,
-                 workers: int, owner: str, log=print) -> int:
+                 workers: int, owner: str, log=print, image: str | None = None) -> int:
     cfg = load_config()
     gcp = cfg["gcp"]
     project, region = gcp["project"], gcp["region"]
     s = _session()
-    image = build_image(s, project, region, log)
+    image = image or build_image(s, project, region, log)
     tasks = len(approaches) * len(tiers) * len(models)
     args = ["run", "-a", *approaches, "-m", *models, "-t", *tiers, "--split", split, "--limit", str(limit),
             "--seed", str(seed), "--workers", str(workers), "--owner", owner,
