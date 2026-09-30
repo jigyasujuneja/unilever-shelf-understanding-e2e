@@ -29,10 +29,13 @@ class CascadingViTTrackA(Approach):
         boxes = hul_domain.propose_rtdetr_shelf_boxes(
             image, recall_rate=0.968, ctx=ctx, approach_name=self.name
         )
+        preds = hul_domain.classify_shelf_boxes_7dim(image, boxes, ctx=ctx, mode=self.name)
+        ctx.trace.labels = preds
         ctx.trace.step(
             "GEAP MaxViT-Small / EfficientNet-B4 Cascade",
             f"{len(boxes)} boxes classified across supervised heads (88.4% Top-1, 18.4% Sister-Shade F2)",
             boxes=boxes,
+            labels=preds,
         )
         return boxes
 
@@ -53,8 +56,15 @@ class OpenVocabGroundingTrackE(Approach):
         boxes = hul_domain.propose_rtdetr_shelf_boxes(
             image, recall_rate=0.972, ctx=ctx, approach_name=self.name
         )
+        preds = hul_domain.classify_shelf_boxes_7dim(image, boxes, ctx=ctx, mode=self.name)
+        ctx.trace.labels = preds
         ctx.bill("embedding_image", max(1, round(len(boxes) * 0.05)))
-        ctx.trace.step("OWL-v2 + SigLIP-So400m", f"{len(boxes)} open-vocabulary grounded boxes", boxes=boxes)
+        ctx.trace.step(
+            "OWL-v2 + SigLIP-So400m",
+            f"{len(boxes)} open-vocabulary grounded boxes",
+            boxes=boxes,
+            labels=preds,
+        )
         return boxes
 
 
@@ -74,8 +84,15 @@ class Sam2MaskScannTrackF(Approach):
         boxes = hul_domain.propose_rtdetr_shelf_boxes(
             image, recall_rate=0.986, ctx=ctx, approach_name=self.name
         )
+        preds = hul_domain.classify_shelf_boxes_7dim(image, boxes, ctx=ctx, mode=self.name)
+        ctx.trace.labels = preds
         ctx.bill("embedding_image", max(1, round(len(boxes) * 0.05)))
-        ctx.trace.step("SAM-3 Mask + ScaNN", f"{len(boxes)} segmented & background-zeroed facings", boxes=boxes)
+        ctx.trace.step(
+            "SAM-3 Mask + ScaNN",
+            f"{len(boxes)} segmented & background-zeroed facings",
+            boxes=boxes,
+            labels=preds,
+        )
         return boxes
 
 
@@ -141,11 +158,16 @@ class MaxViTClusteredDjevApproach(Approach):
             else:
                 open_set_boxes.extend(cluster.member_boxes)
 
+        preds = hul_domain.classify_shelf_boxes_7dim(
+            image, proposals, ctx=ctx, mode=self.name
+        )
+        ctx.trace.labels = preds
         ctx.bill("embedding_image", max(1, round(cluster_summary.num_clusters * 0.04)))
         ctx.trace.step(
             "Stage 4 & 5: MaxViT Medoid ScaNN + /v1/systemone",
             f"Fast ScaNN: {len(fast_scann_boxes)} | Sister-Shade dJev: {len(sister_shade_boxes)} | Open-Set: {len(open_set_boxes)}",
             boxes=proposals,
+            labels=preds,
         )
         return proposals
 

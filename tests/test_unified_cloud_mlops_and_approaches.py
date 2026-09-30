@@ -485,6 +485,85 @@ class UnifiedCloudArchitectureTests(unittest.TestCase):
             httpd.shutdown()
             httpd.server_close()
 
+    def test_cross_seam_stitching_shelf_row_smoothing_and_joint_combined_scoring(self) -> None:
+        from approaches.base import Context, Trace
+        from utils import hul_domain
+
+        # 1. Cross-seam vertical box stitching for tiled detectors (yolo_n26_sku110k)
+        seam_boxes = [
+            (100.0, 410.0, 150.0, 515.0),  # Top-band fragment ending near mid_y=500
+            (101.0, 490.0, 149.0, 610.0),  # Bottom-band fragment starting near mid_y=500
+            (220.0, 100.0, 270.0, 220.0),  # Unrelated box far from seam
+        ]
+        stitched = hul_domain._merge_seam_split_boxes(seam_boxes, 500.0, 1000)
+        self.assertEqual(len(stitched), 2)
+        self.assertIn((100.0, 410.0, 150.0, 610.0), stitched)
+
+        # 2. 1D horizontal shelf-row Markov brand-block continuity smoothing
+        row_boxes = [
+            (20.0, 100.0, 65.0, 210.0),
+            (72.0, 102.0, 118.0, 212.0),
+            (125.0, 101.0, 170.0, 211.0),
+        ]
+        raw_preds = [
+            {
+                "sku_id": "UL-DOVE-BW-500ML",
+                "category": "Personal Care",
+                "brand": "Dove",
+                "packaging_type": "bottle",
+                "variant": "Deeply Nourishing",
+                "is_hul": True,
+                "confidence": 0.91,
+            },
+            {
+                "sku_id": "COMP-NIVEA-SM-400ML",
+                "category": "Skin Care",
+                "brand": "Nivea",
+                "packaging_type": "bottle",
+                "variant": "Smooth Milk",
+                "is_hul": False,
+                "confidence": 0.65,
+            },
+            {
+                "sku_id": "UL-DOVE-BW-500ML",
+                "category": "Personal Care",
+                "brand": "Dove",
+                "packaging_type": "bottle",
+                "variant": "Deeply Nourishing",
+                "is_hul": True,
+                "confidence": 0.89,
+            },
+        ]
+        smoothed = hul_domain.smooth_shelf_row_predictions(row_boxes, raw_preds)
+        self.assertEqual(smoothed[1]["sku_id"], "UL-DOVE-BW-500ML")
+        self.assertEqual(smoothed[1]["brand"], "Dove")
+        self.assertTrue(smoothed[1]["is_hul"])
+
+        # 3. Verify all combined approaches populate ctx.trace.labels with 7-dim attributes
+        img = Image.new("RGB", (320, 240), (220, 210, 200))
+        combined_names = [
+            "hul_8stage_gemini38_hybrid",
+            "djev_systemone_sister_shade",
+            "tiered_hybrid_scann",
+            "promo_product_detector",
+            "compound_pipeline_1_plus_2",
+            "modular_e2e_pipeline",
+            "track_a_cascading_vit",
+            "track_e_open_vocab",
+            "track_f_sam2_scann",
+            "maxvit_clustered_djev",
+        ]
+        for name in combined_names:
+            appr = approaches.get(name)
+            appr.setup({})
+            ctx = Context(model="gemini-3.8-flash", llm=_MockLLM(), trace=Trace(), otel_parent=None, price=lambda _: {})
+            boxes, labels = appr.detect_and_classify(img, ctx)
+            self.assertGreater(len(boxes), 0, f"{name} returned 0 boxes")
+            self.assertEqual(len(labels), len(boxes), f"{name} label count mismatch")
+            self.assertIsInstance(labels[0], dict, f"{name} did not return 7-dim dict labels")
+            for k in ("sku_id", "category", "brand", "packaging_type", "variant", "is_hul"):
+                self.assertIn(k, labels[0], f"{name} missing {k} in predicted label")
+
 
 if __name__ == "__main__":
     unittest.main()

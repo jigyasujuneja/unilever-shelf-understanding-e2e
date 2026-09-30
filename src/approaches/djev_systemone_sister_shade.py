@@ -78,9 +78,14 @@ class DjevSystemOneSisterShade(Approach):
             boxes=scann_fast,
         )
 
+        preds = hul_domain.classify_shelf_boxes_7dim(
+            image, proposals, ctx=ctx, mode=self.name
+        )
+        ctx.trace.labels = preds
         ctx.trace.step(
             "Stage 4.5 & 5: 3x Sub-ROI CIELAB + /v1/systemone (64 Tokens)",
             f"{len(sister_shade_rois)} sister-shade crops resolved in 8.9 ms (88.5% vllm#58216 trie-pinned tokens, 0% hallucination)",
             boxes=sister_shade_rois,
+            labels=preds,
         )
         return proposals

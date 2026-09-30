@@ -77,11 +77,16 @@ class TieredHybridScann(Approach):
             boxes=scann_resolved,
         )
 
+        preds = hul_domain.classify_shelf_boxes_7dim(
+            image, proposals, ctx=ctx, mode=self.name
+        )
+        ctx.trace.labels = preds
         if escalated:
             ctx.trace.step(
                 "Stage 5: Gemini Tier-3 Fallback",
                 f"Disambiguated {len(escalated)} low-margin / unseen crops via {ctx.model}",
                 boxes=escalated,
+                labels=preds,
             )
 
         return proposals

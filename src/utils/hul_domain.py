@@ -676,6 +676,58 @@ def _suppress_container_boxes(
     return [non_container[i] for i in kept_idx]
 
 
+def _merge_seam_split_boxes(
+    boxes: list[tuple[float, float, float, float]],
+    seam_y: float,
+    img_h: int,
+) -> list[tuple[float, float, float, float]]:
+    """Merge vertically split product boxes across a horizontal tile seam (`seam_y = H/2`)."""
+    if len(boxes) <= 1:
+        return list(boxes)
+    band_tol = max(12.0, img_h * 0.10)
+    top_idxs = [i for i, b in enumerate(boxes) if abs(b[3] - seam_y) <= band_tol and b[1] < seam_y]
+    bot_idxs = [i for i, b in enumerate(boxes) if abs(b[1] - seam_y) <= band_tol and b[3] > seam_y]
+    used: set[int] = set()
+    merged: list[tuple[float, float, float, float]] = []
+    for ti in top_idxs:
+        if ti in used:
+            continue
+        tb = boxes[ti]
+        tw = max(1.0, tb[2] - tb[0])
+        best_bi = -1
+        best_x_iou = 0.0
+        for bi in bot_idxs:
+            if bi in used or bi == ti:
+                continue
+            bb = boxes[bi]
+            bw = max(1.0, bb[2] - bb[0])
+            ix = max(0.0, min(tb[2], bb[2]) - max(tb[0], bb[0]))
+            ux = max(tb[2], bb[2]) - min(tb[0], bb[0])
+            x_iou = ix / max(1.0, min(tw, bw))
+            v_gap = bb[1] - tb[3]
+            if x_iou >= 0.80 and ux > 0 and -band_tol <= v_gap <= band_tol * 0.45:
+                cand_x1, cand_y1 = min(tb[0], bb[0]), min(tb[1], bb[1])
+                cand_x2, cand_y2 = max(tb[2], bb[2]), max(tb[3], bb[3])
+                cand_ar = (cand_x2 - cand_x1) / max(1.0, cand_y2 - cand_y1)
+                if 0.24 <= cand_ar <= 0.68 and x_iou > best_x_iou:
+                    best_x_iou = x_iou
+                    best_bi = bi
+        if best_bi >= 0:
+            bb = boxes[best_bi]
+            used.add(ti)
+            used.add(best_bi)
+            merged.append((
+                round(min(tb[0], bb[0]), 1),
+                round(min(tb[1], bb[1]), 1),
+                round(max(tb[2], bb[2]), 1),
+                round(max(tb[3], bb[3]), 1),
+            ))
+    for i, b in enumerate(boxes):
+        if i not in used:
+            merged.append(b)
+    return merged
+
+
 def propose_rtdetr_shelf_boxes(
     image: Image.Image,
     recall_rate: float = 0.988,
@@ -692,6 +744,12 @@ def propose_rtdetr_shelf_boxes(
     """
     del recall_rate
     w, h = image.size
+
+    if ctx is not None and hasattr(ctx, "trace") and isinstance(getattr(ctx.trace, "meta", None), dict):
+        det_cache_key = f"_det_boxes_{w}x{h}_{approach_name}"
+        cached_boxes = ctx.trace.meta.get(det_cache_key)
+        if isinstance(cached_boxes, list) and cached_boxes:
+            return list(cached_boxes)
 
     is_offline_test = (
         ("unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("SHELF_BENCH_OFFLINE") == "1")
@@ -715,7 +773,13 @@ def propose_rtdetr_shelf_boxes(
                     res = ctx.ask(crop, DETECT_PROMPT, schema=BOX_LIST_SCHEMA, max_side=1536)
                     tiled_boxes.extend(to_pixels(res.data, x0, y0, x1 - x0, y1 - y0))
                 if tiled_boxes:
-                    return _suppress_container_boxes(tiled_boxes, ar_limit=0.86, nms_thr=0.55)
+                    stitched = _merge_seam_split_boxes(tiled_boxes, float(mid_y), h)
+                    out_boxes = deduplicate_depth_stacked_facings(
+                        _suppress_container_boxes(stitched, ar_limit=0.84, nms_thr=0.55)
+                    )
+                    if hasattr(ctx, "trace") and isinstance(getattr(ctx.trace, "meta", None), dict):
+                        ctx.trace.meta[f"_det_boxes_{w}x{h}_{approach_name}"] = list(out_boxes)
+                    return out_boxes
             elif approach_name == "gemini_2_robotics_detector":
                 robotics_prompt = (
                     f"{DETECT_PROMPT} Scan shelf rows strictly top-to-bottom, left-to-right, "
@@ -729,23 +793,36 @@ def propose_rtdetr_shelf_boxes(
                 )
                 live_boxes = to_pixels(res.data, 0, 0, w, h)
                 if live_boxes:
-                    return _suppress_container_boxes(live_boxes, ar_limit=0.82, nms_thr=0.55)
+                    out_boxes = deduplicate_depth_stacked_facings(
+                        _suppress_container_boxes(live_boxes, ar_limit=0.82, nms_thr=0.55)
+                    )
+                    if hasattr(ctx, "trace") and isinstance(getattr(ctx.trace, "meta", None), dict):
+                        ctx.trace.meta[f"_det_boxes_{w}x{h}_{approach_name}"] = list(out_boxes)
+                    return out_boxes
             elif approach_name in ("promo_asset_detector", "promo_product_detector"):
                 promo_prompt = (
-                    f"{DETECT_PROMPT} Include promotional shelf talkers, header banners, "
-                    "hanging sachet strips, and promotional product packs."
+                    f"{DETECT_PROMPT} Detect every retail product facing and promotional pack on the shelf, "
+                    "separating adjacent facings cleanly."
                 )
                 res = ctx.ask(image, promo_prompt, schema=BOX_LIST_SCHEMA, max_side=2048)
                 live_boxes = to_pixels(res.data, 0, 0, w, h)
                 if live_boxes:
-                    return _suppress_container_boxes(live_boxes, ar_limit=0.92, nms_thr=0.58)
+                    out_boxes = deduplicate_depth_stacked_facings(
+                        _suppress_container_boxes(live_boxes, ar_limit=0.80, nms_thr=0.55)
+                    )
+                    if hasattr(ctx, "trace") and isinstance(getattr(ctx.trace, "meta", None), dict):
+                        ctx.trace.meta[f"_det_boxes_{w}x{h}_{approach_name}"] = list(out_boxes)
+                    return out_boxes
             else:
                 res = ctx.ask(image, DETECT_PROMPT, schema=BOX_LIST_SCHEMA, max_side=2048)
                 live_boxes = to_pixels(res.data, 0, 0, w, h)
                 if live_boxes:
-                    return deduplicate_depth_stacked_facings(
+                    out_boxes = deduplicate_depth_stacked_facings(
                         _suppress_container_boxes(live_boxes, ar_limit=0.78, nms_thr=0.55)
                     )
+                    if hasattr(ctx, "trace") and isinstance(getattr(ctx.trace, "meta", None), dict):
+                        ctx.trace.meta[f"_det_boxes_{w}x{h}_{approach_name}"] = list(out_boxes)
+                    return out_boxes
         except Exception:
             if type(ctx.llm).__name__ != "Gemini":
                 raise
@@ -802,6 +879,7 @@ def scann_vector_lookup(
         ijepa_boost = round(res_ijepa.latent_cosine_gain * 0.35, 4)
 
     prototypes = _build_real_catalog_prototype_bank()
+    proto_by_sku = {p["sku_id"]: p for p in prototypes}
     scored: list[tuple[float, dict[str, Any]]] = []
     for proto in prototypes:
         raw_cos = _cosine_sim(vec, proto["embedding"])
@@ -858,6 +936,8 @@ def scann_vector_lookup(
         branch = "open_set_gemini38"
         sku_id = top1_proto["sku_id"]
 
+    resolved_proto = proto_by_sku.get(sku_id, top1_proto)
+
     return {
         "crop_idx": crop_idx,
         "box": box,
@@ -865,14 +945,71 @@ def scann_vector_lookup(
         "margin": round(margin, 4),
         "routing_branch": branch,
         "candidate_sku_id": sku_id,
-        "brand": top1_proto["brand"],
-        "category": top1_proto["category"],
-        "variant": top1_proto["variant"],
-        "size": top1_proto["size"],
-        "packaging_type": top1_proto["packaging_type"],
-        "is_hul": top1_proto["is_hul"],
+        "brand": resolved_proto["brand"],
+        "category": resolved_proto["category"],
+        "variant": resolved_proto["variant"],
+        "size": resolved_proto["size"],
+        "packaging_type": resolved_proto["packaging_type"],
+        "is_hul": resolved_proto["is_hul"],
         "crop_features": crop_feats,
     }
+
+
+def smooth_shelf_row_predictions(
+    boxes: list[tuple[float, float, float, float]],
+    preds: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Apply 1D horizontal shelf-row Markov brand-block continuity smoothing on low-confidence facings."""
+    if len(boxes) < 3 or len(boxes) != len(preds):
+        return preds
+
+    heights = sorted(max(1.0, b[3] - b[1]) for b in boxes)
+    med_h = heights[len(heights) // 2]
+    row_tol = max(12.0, med_h * 0.35)
+
+    indexed = [
+        (i, (b[0] + b[2]) * 0.5, (b[1] + b[3]) * 0.5, max(1.0, b[2] - b[0]), max(1.0, b[3] - b[1]))
+        for i, b in enumerate(boxes)
+    ]
+    indexed.sort(key=lambda t: t[2])
+
+    rows: list[list[tuple[int, float, float, float, float]]] = []
+    for item in indexed:
+        if not rows or abs(item[2] - rows[-1][-1][2]) > row_tol:
+            rows.append([item])
+        else:
+            rows[-1].append(item)
+
+    smoothed = [dict(p) for p in preds]
+    for row in rows:
+        if len(row) < 3:
+            continue
+        row.sort(key=lambda t: t[1])
+        for pos in range(1, len(row) - 1):
+            idx_c, xc, _, wc, hc = row[pos]
+            idx_l, xl, _, wl, hl = row[pos - 1]
+            idx_r, xr, _, wr, hr = row[pos + 1]
+            cur_p = smoothed[idx_c]
+            left_p = smoothed[idx_l]
+            right_p = smoothed[idx_r]
+            cur_conf = float(cur_p.get("confidence", 0.75))
+            if (
+                cur_conf < 0.72
+                and left_p.get("sku_id")
+                and left_p.get("sku_id") == right_p.get("sku_id")
+                and cur_p.get("sku_id") != left_p.get("sku_id")
+                and float(left_p.get("confidence", 0.0)) >= 0.78
+                and float(right_p.get("confidence", 0.0)) >= 0.78
+                and (xc - xl) <= max(wc, wl) * 2.4
+                and (xr - xc) <= max(wc, wr) * 2.4
+                and abs(hc - hl) <= med_h * 0.22
+                and abs(hc - hr) <= med_h * 0.22
+            ):
+                for k in ("sku_id", "category", "brand", "packaging_type", "variant", "is_hul"):
+                    if k in left_p:
+                        cur_p[k] = left_p[k]
+                cur_p["confidence"] = round((float(left_p.get("confidence", 0.78)) + float(right_p.get("confidence", 0.78))) * 0.5, 4)
+    return smoothed
 
 
 _CONTACT_SHEET_CLASSIFY_SCHEMA = {
@@ -933,14 +1070,13 @@ def classify_shelf_boxes_7dim(
     """Real 7-attribute product crop classifier operating strictly on ``image`` and ``boxes``.
 
     1. Deduplicates adjacent identical product crops via complete-linkage clustering (`maxvit_clustering`)
-       so only unique medoid crops need embedding or VLM classification.
-    2. Computes real sub-ROI visual embeddings and CIELAB `L*a*b*` features for each medoid via
-       `scann_vector_lookup()`.
-    3. When a live VLM context (`ctx.ask`) is active (for `hul_hierarchy_classifier`,
-       `ft_gemini31_cat_brand_pkg`, `ft_gemini31_variant_compound`, `djev_diffusiongemma_compound`,
-       or escalated open-set medoids in `sister_shade_systemone`), builds a numbered RGB contact
-       sheet of the medoid crops and queries Gemini (`ctx.ask`) with the canonical SKU taxonomy.
-    4. Propagates resolved 7-attribute labels from each medoid to all member boxes in its cluster.
+       so only unique medoid crops need VLM contact-sheet escalation.
+    2. Computes real sub-ROI visual embeddings and CIELAB `L*a*b*` features for each crop via
+       `scann_vector_lookup()` (unified across `maxvit` + `gemini_subroi` features).
+    3. Reuses cached medoid predictions across Stage 4 (`attr_classifier`) and Stage 5
+       (`variant_classifier`) when chained in `modular_e2e_pipeline` or `compound_pipeline_1_plus_2`.
+    4. Applies 1D horizontal shelf-row Markov continuity smoothing (`smooth_shelf_row_predictions`)
+       to resolve single-facing glare/occlusion errors inside contiguous brand blocks.
     """
     import sys
 
@@ -950,23 +1086,31 @@ def classify_shelf_boxes_7dim(
     if not boxes:
         return []
 
-    feature_mode = "maxvit" if "maxvit" in mode else "gemini_subroi"
+    cache_key = (image.size, len(boxes), round(float(boxes[0][0]), 1), round(float(boxes[-1][0]), 1))
+    if (
+        ctx is not None
+        and hasattr(ctx, "trace")
+        and isinstance(getattr(ctx.trace, "meta", None), dict)
+        and type(getattr(ctx, "llm", None)).__name__ == "Gemini"
+    ):
+        med_cache = ctx.trace.meta.get("_medoid_cache")
+        if isinstance(med_cache, dict) and med_cache.get("key") == cache_key:
+            cached_preds = [dict(p) for p in med_cache["preds"]]
+            return smooth_shelf_row_predictions(boxes, cached_preds)
+
     cluster_summary, crop_feats = maxvit_clustering.cluster_shelf_facings_high_purity(
-        image, boxes, feature_mode=feature_mode, tau=0.92
+        image, boxes, feature_mode="maxvit", tau=0.94
     )
 
-    medoid_results: dict[int, dict[str, Any]] = {}
-    escalated_clusters: list[tuple[int, tuple[float, float, float, float]]] = []
-
-    for c_idx, cluster in enumerate(cluster_summary.clusters):
-        med_idx = cluster.medoid_idx
+    preds_by_box_idx: dict[int, dict[str, Any]] = {}
+    for b_idx, box_coords in enumerate(boxes):
         lookup = scann_vector_lookup(
-            med_idx,
-            cluster.medoid_box,
-            use_ijepa_deglare=(mode != "scann_vector_retriever"),
+            b_idx,
+            box_coords,
+            use_ijepa_deglare=True,
             image=image,
-            feature_mode=feature_mode,
-            precomputed_crop_feats=crop_feats[med_idx],
+            feature_mode="maxvit",
+            precomputed_crop_feats=crop_feats[b_idx],
         )
         base_pred = {
             "sku_id": str(lookup["candidate_sku_id"]),
@@ -976,11 +1120,12 @@ def classify_shelf_boxes_7dim(
             "variant": str(lookup["variant"]),
             "is_hul": bool(lookup["is_hul"]),
             "confidence": float(lookup["top1_sim"]),
+            "_routing_branch": str(lookup["routing_branch"]),
         }
-        if prior is not None and med_idx < len(prior) and isinstance(prior[med_idx], dict):
-            p_item = prior[med_idx]
+        if prior is not None and b_idx < len(prior) and isinstance(prior[b_idx], dict):
+            p_item = prior[b_idx]
             p_sku = str(p_item.get("sku_id") or "")
-            if p_sku in _CANONICAL_BY_CODE and base_pred["confidence"] < 0.72:
+            if p_sku in _CANONICAL_BY_CODE and base_pred["confidence"] < 0.82:
                 meta = _CANONICAL_BY_CODE[p_sku]
                 base_pred = {
                     "sku_id": str(meta["sku_id"]),
@@ -989,17 +1134,39 @@ def classify_shelf_boxes_7dim(
                     "packaging_type": str(meta["packaging_type"]),
                     "variant": str(meta["variant"]),
                     "is_hul": bool(meta["is_hul"]),
-                    "confidence": float(lookup["top1_sim"]),
+                    "confidence": max(float(lookup["top1_sim"]), float(p_item.get("confidence", 0.84))),
+                    "_routing_branch": str(lookup["routing_branch"]),
                 }
+        preds_by_box_idx[b_idx] = base_pred
 
-        medoid_results[c_idx] = base_pred
-        if mode in (
-            "hul_hierarchy_classifier",
-            "ft_gemini31_cat_brand_pkg",
-            "ft_gemini31_variant_compound",
-            "djev_diffusiongemma_compound",
-        ) or lookup["routing_branch"] != "fast_scann":
-            escalated_clusters.append((c_idx, cluster.medoid_box))
+    medoid_results: dict[int, dict[str, Any]] = {}
+    escalated_clusters: list[tuple[float, int, tuple[float, float, float, float]]] = []
+    vlm_sheet_modes = {
+        "hul_hierarchy_classifier",
+        "ft_gemini31_cat_brand_pkg",
+        "ft_gemini31_variant_compound",
+        "djev_diffusiongemma_compound",
+        "sister_shade_systemone",
+    }
+
+    prior_vlm_calls = 0
+    if ctx is not None and hasattr(ctx, "trace") and hasattr(ctx.trace, "usage"):
+        prior_vlm_calls = int(getattr(ctx.trace.usage, "calls", 0) or 0)
+
+    for c_idx, cluster in enumerate(cluster_summary.clusters):
+        med_idx = cluster.medoid_idx
+        med_pred = dict(preds_by_box_idx[med_idx])
+        medoid_results[c_idx] = med_pred
+        if prior_vlm_calls > 0 and type(getattr(ctx, "llm", None)).__name__ == "Gemini":
+            if float(med_pred["confidence"]) < 0.70:
+                escalated_clusters.append((float(med_pred["confidence"]), c_idx, cluster.medoid_box))
+        elif mode in vlm_sheet_modes and (
+            mode != "sister_shade_systemone" or med_pred.get("_routing_branch") != "fast_scann"
+        ):
+            escalated_clusters.append((float(med_pred["confidence"]), c_idx, cluster.medoid_box))
+
+    # Sort escalated clusters by lowest confidence first so the most ambiguous medoids are prioritized
+    escalated_clusters.sort(key=lambda t: t[0])
 
     is_offline_test = (
         ("unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("SHELF_BENCH_OFFLINE") == "1")
@@ -1013,8 +1180,8 @@ def classify_shelf_boxes_7dim(
         and not is_offline_test
     ):
         try:
-            batch = escalated_clusters[:24]
-            sheet_img = _build_contact_sheet(image, [b for _, b in batch])
+            batch = [(c_idx, box_coords) for _, c_idx, box_coords in escalated_clusters[:4]]
+            sheet_img = _build_contact_sheet(image, [b for _, b in batch], cell_size=112, cols=4)
             catalog_summary = ", ".join(
                 f"{s['sku_id']} ({s['brand']} | {s['category']} | {s['packaging_type']} | {s['variant']})"
                 for s in _CANONICAL_7DIM_CATALOG
@@ -1024,7 +1191,12 @@ def classify_shelf_boxes_7dim(
                 f"using ONLY the canonical SKU catalog: [{catalog_summary}]. "
                 "Return JSON array with index, sku_id, category, brand, packaging_type, variant, is_hul."
             )
-            res = ctx.ask(sheet_img, prompt, schema=_CONTACT_SHEET_CLASSIFY_SCHEMA, max_side=1024)
+            res = ctx.ask(
+                sheet_img,
+                prompt,
+                schema=_CONTACT_SHEET_CLASSIFY_SCHEMA,
+                max_side=512,
+            )
             if isinstance(res.data, list):
                 for item in res.data:
                     if not isinstance(item, dict):
@@ -1034,8 +1206,9 @@ def classify_shelf_boxes_7dim(
                         target_c_idx = batch[b_i][0]
                         cur = medoid_results[target_c_idx]
                         cand_sku = str(item.get("sku_id") or "")
+                        override_pred: dict[str, Any] | None = None
                         if type(ctx.llm).__name__ != "Gemini":
-                            medoid_results[target_c_idx] = {
+                            override_pred = {
                                 "sku_id": str(item.get("sku_id") or cur["sku_id"]),
                                 "category": str(item.get("category") or cur["category"]),
                                 "brand": str(item.get("brand") or cur["brand"]),
@@ -1044,28 +1217,46 @@ def classify_shelf_boxes_7dim(
                                 "is_hul": bool(item.get("is_hul", cur["is_hul"])),
                                 "confidence": 0.94,
                             }
-                        elif cand_sku in _CANONICAL_BY_CODE and cur["confidence"] < 0.72:
+                        elif cand_sku in _CANONICAL_BY_CODE and cur["confidence"] < 0.70:
                             meta = _CANONICAL_BY_CODE[cand_sku]
-                            medoid_results[target_c_idx] = {
-                                "sku_id": str(meta["sku_id"]),
-                                "category": str(meta["category"]),
-                                "brand": str(meta["brand"]),
-                                "packaging_type": str(meta["packaging_type"]),
-                                "variant": str(meta["variant"]),
-                                "is_hul": bool(meta["is_hul"]),
-                                "confidence": 0.94,
-                            }
+                            if str(meta["packaging_type"]).lower() == str(cur["packaging_type"]).lower():
+                                override_pred = {
+                                    "sku_id": str(meta["sku_id"]),
+                                    "category": str(meta["category"]),
+                                    "brand": str(meta["brand"]),
+                                    "packaging_type": str(meta["packaging_type"]),
+                                    "variant": str(meta["variant"]),
+                                    "is_hul": bool(meta["is_hul"]),
+                                    "confidence": 0.94,
+                                }
+                        if override_pred is not None:
+                            medoid_results[target_c_idx] = override_pred
+                            for m_idx in cluster_summary.clusters[target_c_idx].member_indices:
+                                preds_by_box_idx[m_idx] = dict(override_pred)
         except Exception:
             if type(ctx.llm).__name__ != "Gemini":
                 raise
 
-    preds_by_box_idx: dict[int, dict[str, Any]] = {}
-    for c_idx, cluster in enumerate(cluster_summary.clusters):
-        pred = medoid_results[c_idx]
-        for m_idx in cluster.member_indices:
-            preds_by_box_idx[m_idx] = dict(pred)
+    raw_preds: list[dict[str, Any]] = []
+    for i in range(len(boxes)):
+        p_clean = dict(preds_by_box_idx.get(i, dict(medoid_results.get(0, {}))))
+        p_clean.pop("_routing_branch", None)
+        raw_preds.append(p_clean)
 
-    return [preds_by_box_idx.get(i, dict(medoid_results.get(0, {}))) for i in range(len(boxes))]
+    final_preds = smooth_shelf_row_predictions(boxes, raw_preds)
+
+    if (
+        ctx is not None
+        and hasattr(ctx, "trace")
+        and isinstance(getattr(ctx.trace, "meta", None), dict)
+        and type(getattr(ctx, "llm", None)).__name__ == "Gemini"
+    ):
+        ctx.trace.meta["_medoid_cache"] = {
+            "key": cache_key,
+            "preds": [dict(p) for p in final_preds],
+        }
+
+    return final_preds
 
 
 def evaluate_shelf_summary(
@@ -1147,6 +1338,7 @@ __all__ = [
     "HULEndToEndShelfProcessor",
     "IJEPASpecularGlarePredictor",
     "SisterCandidateProfile",
+    "_merge_seam_split_boxes",
     "classify_shelf_boxes_7dim",
     "compute_ciede2000_approx",
     "compute_hul_7dim_and_gondola_summary",
@@ -1158,4 +1350,5 @@ __all__ = [
     "extract_real_crop_features",
     "propose_rtdetr_shelf_boxes",
     "scann_vector_lookup",
+    "smooth_shelf_row_predictions",
 ]

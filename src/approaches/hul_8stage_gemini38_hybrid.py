@@ -117,6 +117,10 @@ class HUL8StageGemini38Hybrid(Approach):
         )
 
         # Step 5: Stage 6 4-Factor Remediation & 8 Modern Trade Gondola KPIs
+        preds = hul_domain.classify_shelf_boxes_7dim(
+            image, proposals, ctx=ctx, mode=self.name
+        )
+        ctx.trace.labels = preds
         kpis = hul_domain.compute_hul_7dim_and_gondola_summary(
             total_boxes=len(proposals),
             scann_count=len(fast_scann_boxes),
@@ -128,5 +132,6 @@ class HUL8StageGemini38Hybrid(Approach):
             "Stage 6: 4-Factor Recommend & 8 Gondola KPIs",
             f"7-Dim SKU F2={kpis['hul_7dim_sku_f2']:.3f} | Linear SOS={kpis['gondola_kpis']['linear_sos_hul_pct']}% | Action={kpis['gondola_kpis']['stage6_remediation_action']}",
             boxes=proposals,
+            labels=preds,
         )
         return proposals

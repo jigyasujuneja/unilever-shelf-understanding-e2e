@@ -47,7 +47,7 @@ class PromoProductDetector(Approach):
             boxes=boxes,
         )
         preds = hul_domain.classify_shelf_boxes_7dim(
-            image, boxes, ctx=ctx, mode="sister_shade_systemone"
+            image, boxes, ctx=ctx, mode=self.name
         )
         ctx.trace.labels = preds
         ctx.trace.step(
