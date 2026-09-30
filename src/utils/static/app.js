@@ -138,7 +138,8 @@ async function showLeaderboard(useCase, task) {
 // ---------------------------------------------------------------- run detail
 async function showRun(runId) {
   const { summary: s, images } = await getJSON(`/api/runs/${encodeURIComponent(runId)}`);
-  const task = taskOf(s);
+  const tab = taskOf(s);
+  const task = s.task || "detection";
   const single = task === "classification"; // one product per photo
   const fa = s.field_accuracy || {};
   const stats = {
@@ -165,7 +166,7 @@ async function showRun(runId) {
     (cells ? cells(r) : "") + num(sec(r.latency_s));
   const setupNote = s.cost?.setup_usd ? ` · one-off setup ${inr(s.cost.setup_usd * s.usd_to_inr)} (${s.cost.setup_seconds}s), not in cost/img` : "";
   app.innerHTML = `
-    <a href="#/board/${useCaseOf(s)}/${encodeURIComponent(task)}" class="back">&larr; Leaderboard</a>
+    <a href="#/board/${useCaseOf(s)}/${encodeURIComponent(tab)}" class="back">&larr; Leaderboard</a>
     <h1 class="mono">${esc(s.run_id)}</h1>
     <p class="muted">${esc(s.architecture)} · ${esc(s.owner)} · ${s.images} ${esc(s.dataset || "sku110k")} ${esc(s.split)} images · precision ${pct(s.precision)}</p>
     <p class="muted">${envLine(s)}${setupNote}</p>
