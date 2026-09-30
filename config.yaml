@@ -18,7 +18,7 @@ cloud_run:
   service: perfect-store-control-plane   # leaderboard UI (shelf-bench serve-cloud), private
   cpu: 2
   memory_gib: 4
-  parallelism: 2    # tasks at once (default: number of models) - concurrent tasks use different models
+  parallelism: 6    # tasks at once - concurrent tasks alternate across models
   # Direct VPC egress, needed to reach a private-IP AlloyDB instance. Leave unset otherwise.
   # network: default
   # subnet: default

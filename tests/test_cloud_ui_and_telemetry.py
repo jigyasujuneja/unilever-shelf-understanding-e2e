@@ -118,16 +118,19 @@ def test_approaches_only_run_the_models_they_call(monkeypatch):
     combos = runner.combos(
         ["gemini_classify", "embedding_retrieval"],
         ["standard", "priority"],
-        ["gemini-1", "multimodalembedding@001"],
+        ["gemini-1", "multimodalembedding@001", "gemini-embedding-2-preview"],
         log=lambda *_: None,
     )
     assert combos == [
         ("gemini_classify", "standard", "gemini-1"),
         ("gemini_classify", "priority", "gemini-1"),
         ("embedding_retrieval", "standard", "multimodalembedding@001"),
+        ("embedding_retrieval", "standard", "gemini-embedding-2-preview"),
     ]
     with pytest.raises(ValueError, match="doesn't run"):
         runner.run("gemini_classify", "multimodalembedding@001", log=lambda *_: None)
+    with pytest.raises(ValueError, match="doesn't run"):
+        runner.run("gemini_classify", "gemini-embedding-2-preview", log=lambda *_: None)
     calls = []
     monkeypatch.setattr(runner, "run", lambda name, model, *a, **k: calls.append((name, model)))
     monkeypatch.setenv("CLOUD_RUN_TASK_COUNT", "3")

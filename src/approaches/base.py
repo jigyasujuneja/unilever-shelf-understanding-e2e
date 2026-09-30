@@ -178,11 +178,15 @@ class Approach:
     skus: dict[str, tuple[str, str]] = {}
 
     def accepts(self, model: str) -> bool:
-        return model in self.models if self.models is not None else model.startswith("gemini-")
+        if self.models is not None:
+            return model in self.models
+        return model.startswith("gemini-") and not model.startswith("gemini-embedding")
 
     @property
     def uses_gemini(self) -> bool:
-        return self.models is None or all(m.startswith("gemini-") for m in self.models)
+        return self.models is None or all(
+            m.startswith("gemini-") and not m.startswith("gemini-embedding") for m in self.models
+        )
 
     def setup(self, config: dict, ctx: Context) -> None:
         """Called once per run before any image: create clients (embeddings, AlloyDB, ...) and

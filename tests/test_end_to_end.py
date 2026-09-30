@@ -20,6 +20,12 @@ from utils.llm import LLMResult
 
 
 def test_registry_has_builtin_approaches():
+    from pathlib import Path
+
+    import tomllib
+
+    cfg = tomllib.loads(Path("pyproject.toml").read_text())
+    assert cfg["tool"]["setuptools"]["packages"]["find"] == {"where": ["src"]}
     names = set(approaches.all_approaches())
     assert {"single_pass", "detect_classify", "detect_retrieve", "shelf_detect_tiered"} <= names
     for ap in approaches.all_approaches().values():

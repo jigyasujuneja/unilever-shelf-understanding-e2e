@@ -141,6 +141,9 @@ def _wait_op(s, name: str, log=None, every: int = 5) -> dict:
         op = _ok(s.get(f"https://run.googleapis.com/v2/{name}"))
         if log:
             md = op.get("metadata", {})
+            exec_name = md.get("name", "")
+            if "/executions/" in exec_name and not any(k in md for k in ("succeededCount", "runningCount", "failedCount")):
+                md = _ok(s.get(f"https://run.googleapis.com/v2/{exec_name}"))
             log(f"  tasks: {md.get('succeededCount', 0)} succeeded, "
                 f"{md.get('failedCount', 0)} failed, {md.get('runningCount', 0)} running")
         if op.get("done"):
