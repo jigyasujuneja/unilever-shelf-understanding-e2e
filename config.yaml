@@ -43,6 +43,19 @@ models:
   - gemini-3.8-flash
   - gemini-3.5-flash-lite
 
+# Vertex AI Supervised Fine-Tuning (LoRA) endpoints (`shelf-bench tune`).
+# When `endpoint` is set (or via $SHELF_BENCH_SFT_ENDPOINT), `Gemini(model)` routes calls to that
+# live Vertex AI endpoint in `location` while pricing tokens at `base_model`'s Billing Catalog SKU.
+tuned_models:
+  gemini-2.5-flash-lite-sft:
+    base_model: gemini-2.5-flash-lite
+    location: us-central1
+    endpoint: projects/unilever-shelf-understanding/locations/us-central1/endpoints/ENDPOINT_ID
+  gemini-2.5-flash-sft:
+    base_model: gemini-2.5-flash
+    location: us-central1
+    endpoint: projects/unilever-shelf-understanding/locations/us-central1/endpoints/ENDPOINT_ID
+
 # AlloyDB, for approaches that identify products by vector lookup (utils/alloydb.py has the
 # setup SQL and IAM). Approaches read this in setup(): AlloyDB(**config["alloydb"]).
 alloydb:

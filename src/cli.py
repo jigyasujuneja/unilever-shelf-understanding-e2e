@@ -95,6 +95,17 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--host", default="127.0.0.1")
     sub.add_parser("bootstrap", help="prepare a new GCP project (APIs, bucket, registry, data)")
 
+    s = sub.add_parser("tune", help="build zero-leakage SFT JSONL data and launch/list Vertex AI LoRA tuning jobs")
+    s.add_argument("--dataset", default="shelves", choices=("shelves", "rpc"))
+    s.add_argument("--base-model", default="gemini-2.5-flash-lite")
+    s.add_argument("--display-name", default="shelf-bench-jev-laya-sft")
+    s.add_argument("--epochs", type=int, default=4)
+    s.add_argument("--adapter-size", type=int, default=4, choices=(1, 4, 8, 16))
+    s.add_argument("--lr-multiplier", type=float, default=1.0)
+    s.add_argument("--out-dir", default="data/tuning")
+    s.add_argument("--build-only", action="store_true", help="only build local train/val JSONL files")
+    s.add_argument("--status", action="store_true", help="list Vertex AI tuning jobs and endpoints")
+
     a = p.parse_args(argv)
 
     if a.cmd == "download":
@@ -157,6 +168,29 @@ def main(argv: list[str] | None = None) -> int:
         from utils import cloud
 
         cloud.bootstrap()
+    elif a.cmd == "tune":
+        from utils import tuning
+
+        if a.status:
+            for j in tuning.list_sft_jobs(cfg):
+                print(f"  {j['name']}  state={j['state']}  base={j['base_model']}  endpoint={j['endpoint']}")
+            return 0
+        built = tuning.build_sft_jsonl(a.dataset, a.out_dir)
+        print(f"Built {built['train_count']} train / {built['val_count']} val examples in {built['out_dir']}")
+        if a.build_only:
+            return 0
+        uris = tuning.upload_sft_dataset(built["out_dir"], built["gcs_prefix"])
+        job = tuning.launch_sft_job(
+            uris["train_uri"],
+            uris["val_uri"],
+            base_model=a.base_model,
+            display_name=a.display_name,
+            epochs=a.epochs,
+            adapter_size=a.adapter_size,
+            learning_rate_multiplier=a.lr_multiplier,
+            config=cfg,
+        )
+        print(f"Launched Vertex AI SFT job: {job['name']} (state={job['state']}, endpoint={job['endpoint']})")
     return 0
 
 

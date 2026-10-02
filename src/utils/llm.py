@@ -134,6 +134,33 @@ TIER_HEADERS = {
 }
 
 
+def resolve_model(model: str, config: dict | None = None) -> tuple[str, str, str]:
+    """Resolve ``model`` -> ``(target_model_or_endpoint, billing_base_model, location)``.
+
+    If ``model`` is configured under ``tuned_models`` in ``config.yaml`` (or via
+    ``$SHELF_BENCH_SFT_ENDPOINT``), routes API calls to its live Vertex AI tuned endpoint in
+    ``us-central1`` while billing tokens against its ``base_model`` SKU.
+    """
+    cfg = config or load_config()
+    gcp = cfg.get("gcp", {})
+    default_loc = gcp.get("location", "global")
+    tuned = cfg.get("tuned_models", {}).get(model)
+    if isinstance(tuned, dict):
+        base = tuned.get("base_model", model.removesuffix("-sft"))
+        cfg_ep = str(tuned.get("endpoint") or "")
+        if "ENDPOINT_ID" in cfg_ep:
+            cfg_ep = ""
+        endpoint = os.environ.get("SHELF_BENCH_SFT_ENDPOINT") or cfg_ep or base
+        loc = tuned.get("location") or ("us-central1" if "endpoints/" in str(endpoint) else default_loc)
+        return str(endpoint), str(base), str(loc)
+    if model.startswith("projects/") and "/endpoints/" in model:
+        parts = model.split("/")
+        loc = parts[parts.index("locations") + 1] if "locations" in parts else gcp.get("region", "us-central1")
+        base = os.environ.get("SHELF_BENCH_SFT_BASE_MODEL", "gemini-2.5-flash-lite")
+        return model, base, loc
+    return model, model, default_loc
+
+
 class Gemini:
     """Callable: ``Gemini(model)(image, prompt) -> LLMResult``."""
 
@@ -148,12 +175,16 @@ class Gemini:
 
         if tier not in TIERS:
             raise ValueError(f"tier must be one of {TIERS}, got {tier!r}")
-        cfg = (config or load_config()).get("gcp", {})
+        full_cfg = config or load_config()
+        cfg = full_cfg.get("gcp", {})
+        target, base_model, loc = resolve_model(model, full_cfg)
         self.model = model
-        self.thinking_level = thinking_level
+        self.target_model = target
+        self.base_model = base_model
+        self.thinking_level = thinking_level if base_model.startswith("gemini-3") else None
         self.tier = tier
         self.client = genai.Client(
-            vertexai=True, project=cfg.get("project"), location=cfg.get("location", "global"),
+            vertexai=True, project=cfg.get("project"), location=loc,
             http_options=types.HttpOptions(headers=TIER_HEADERS[tier]) if tier in TIER_HEADERS else None,
         )
 
@@ -183,7 +214,7 @@ class Gemini:
             t0 = time.perf_counter()
             try:
                 resp = self.client.models.generate_content(
-                    model=self.model, contents=contents, config=cfg
+                    model=self.target_model, contents=contents, config=cfg
                 )
                 seconds = time.perf_counter() - t0
                 break

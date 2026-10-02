@@ -244,3 +244,44 @@ def test_alloydb_helper_runs_sql_on_a_per_thread_connection():
     ) == [("sku-1", 0.93)]
     assert seen["q"][1] == ("[0.1,0.2]",)
     assert seen["connect"][1]["enable_iam_auth"] is True
+
+
+def test_sft_jsonl_builder_and_tuned_endpoint_resolution(rpc_root, tmp_path):
+    from PIL import Image
+
+    from utils import dataset, llm, tuning
+
+    # Add a 2nd gallery view per product + 1 val image so build_sft_jsonl generates both splits
+    for pid, colour in ((1, "red"), (2, "green"), (3, "blue")):
+        Image.new("RGB", (40, 60), colour).save(rpc_root / "gallery" / f"{pid}_1.jpg")
+    Image.new("RGB", (400, 300), "white").save(rpc_root / "images" / "val_0.jpg")
+    meta = json.loads((rpc_root / dataset.RPC_JSON).read_text())
+    for pid in ("1", "2", "3"):
+        meta["gallery"][pid].append(f"gallery/{pid}_1.jpg")
+    meta["splits"]["val"] = [
+        {"image": "val_0.jpg", "width": 400, "height": 300, "boxes": [[10, 10, 60, 90]], "products": [1]}
+    ]
+    (rpc_root / dataset.RPC_JSON).write_text(json.dumps(meta))
+    dataset._rpc_json.cache_clear()
+    dataset.load_rpc.cache_clear()
+
+    built = tuning.build_sft_jsonl("rpc", out_dir=tmp_path / "tuning", gcs_prefix="gs://b/tuning/rpc")
+    assert built["train_count"] == 6 and built["val_count"] == 1
+    first_train = json.loads(built["train_jsonl"].read_text().splitlines()[0])
+    assert first_train["contents"][0]["parts"][0]["fileData"]["fileUri"].startswith("gs://b/tuning/rpc/sheets/")
+    assert "choice" in json.loads(first_train["contents"][1]["parts"][0]["text"])
+
+    cfg = {
+        "gcp": {"project": "p", "location": "global", "region": "us-central1"},
+        "tuned_models": {
+            "gemini-2.5-flash-lite-sft": {
+                "base_model": "gemini-2.5-flash-lite",
+                "location": "us-central1",
+                "endpoint": "projects/p/locations/us-central1/endpoints/12345",
+            }
+        },
+    }
+    target, base, loc = llm.resolve_model("gemini-2.5-flash-lite-sft", cfg)
+    assert target == "projects/p/locations/us-central1/endpoints/12345"
+    assert base == "gemini-2.5-flash-lite" and loc == "us-central1"
+

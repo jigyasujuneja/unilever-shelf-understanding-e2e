@@ -379,6 +379,8 @@ src/
     metrics.py                   IoU matching, accuracy/recall/F2, product matching, percentiles
     llm.py                       Vertex Gemini client (retries, JSON parsing, token usage)
     embeddings.py                Vertex embeddings client (multimodalembedding@001, gemini-embedding-2-preview)
+    photometry.py                glare inpainting + 3-zone CIELAB & Sobel shape descriptors
+    tuning.py                    Vertex AI Supervised Fine-Tuning (LoRA) dataset builder & job launcher
     alloydb.py                   AlloyDB connection + query (for retrieval approaches)
     pricing.py                   live prices from the Cloud Billing Catalog API
     telemetry.py                 OpenTelemetry traces (Cloud Trace) + linked logs (Cloud Logging)
