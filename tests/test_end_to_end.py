@@ -107,8 +107,8 @@ def test_end_to_end_needs_the_right_box_and_the_right_product(rpc_root, colour_e
     )
     # Boxes 1-2 right; box 3 is on a real product but names the wrong one (FP + FN); box 4 FP.
     assert (s["tp"], s["fp"], s["fn"]) == (2, 2, 1) and s["found_recall"] == 1.0
-    assert colour_embeddings == ["gemini-embedding-2-preview"]
-    assert s["architecture"].endswith("[gemini-t + gemini-embedding-2-preview]")
+    assert colour_embeddings == ["gemini-embedding-2"]
+    assert s["architecture"].endswith("[gemini-t + gemini-embedding-2]")
     _, rows = runner.load_run(s["run_id"], tmp_path)
     labels = rows[0]["labels"]
     assert labels[2]["gt"]["sku_id"] == 3 and labels[2]["correct"]["product"] is False

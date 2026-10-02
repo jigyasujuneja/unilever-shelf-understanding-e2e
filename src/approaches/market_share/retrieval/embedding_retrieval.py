@@ -2,13 +2,13 @@
 
 The RPC reference gallery has ``REFS_PER_PRODUCT`` photos of every product on its own, from
 different angles. At setup each is embedded with the run's embedding model (``multimodalembedding@001``
-or ``gemini-embedding-2-preview``; reported as the run's setup cost, like building a vector index
+or ``gemini-embedding-2``; reported as the run's setup cost, like building a vector index
 once). Per product crop we embed the crop and return the product whose closest reference photo is
 most similar (cosine). That's what a vector database (``utils/alloydb.py``) would do; with 800
 vectors a Python loop is enough.
 
 When this step runs under a Gemini model (the ``detect_*`` pipelines), the embedder is fixed:
-``shortlist_model``. It is ``gemini-embedding-2-preview`` because on RPC it identified 89.9% of
+``shortlist_model``. It is ``gemini-embedding-2`` because on RPC it identified 89.9% of
 crops vs 74.2% for ``multimodalembedding@001`` at about the same price per crop.
 """
 

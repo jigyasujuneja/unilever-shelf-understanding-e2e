@@ -165,7 +165,7 @@ shelf-bench leaderboard                                      # print in the term
 ```
 
 Each run writes `results/<run_id>/summary.json` (the leaderboard row) and `images.jsonl`
-(per-image boxes, metrics, and step trace). These are small, so commit them to share the leaderboard.
+(per-image boxes, metrics, and step trace). Official Cloud Run runs are stored in GCS (`gcp.results`) and pulled automatically by the leaderboard UI (`shelf-bench serve --pull`).
 
 ### Built-in approaches
 
@@ -174,10 +174,10 @@ Each run writes `results/<run_id>/summary.json` (the leaderboard row) and `image
 | `single_pass_dedup` | Detection | any `gemini-*` | One Gemini call on the full (downscaled) image returns every box with its class; drop `not_a_product`, container boxes, NMS at IoU 0.58 and depth ghosts (smaller boxes behind a front box). No extra call |
 | `tiled_dedup` | Detection | any `gemini-*` | Two Gemini calls, one per half of the photo (top/bottom, each at full detail). A product cut by the seam is re-joined when both halves touch the seam and overlap by >= 80% in x, then `single_pass_dedup`'s filters |
 | `hierarchy_classify` | Classification | any `gemini-*` | Call 1: Gemini picks the brand from the catalog's brand list and reads the pack size. The catalog is filtered to that brand and size; if one product is left that's the answer, otherwise call 2 picks from the short list |
-| `embedding_text_match` | Classification | `multimodalembedding@001` or `gemini-embedding-2-preview` | Embeds the photo and returns the catalog product whose **text** embedding is closest (cosine). No Gemini call |
-| `embedding_retrieval` | Retrieval | `multimodalembedding@001` or `gemini-embedding-2-preview` | Embeds each crop and returns the product whose closest **reference photo** is most similar (cosine). No Gemini call |
+| `embedding_text_match` | Classification | `multimodalembedding@001` or Gemini Embedding 2 | Embeds the photo and returns the catalog product whose **text** embedding is closest (cosine). No Gemini call |
+| `embedding_retrieval` | Retrieval | `multimodalembedding@001` or Gemini Embedding 2 | Embeds each crop and returns the product whose closest **reference photo** is most similar (cosine). No Gemini call |
 | `tiered_hybrid` | Retrieval | any `gemini-*` (+ `multimodalembedding@001`) | Accepts the embedding answer when it is clearly ahead (cosine >= 0.70 and >= 0.045 above the runner-up, tuned on val for `multimodalembedding@001`); otherwise one Gemini call sees the crop next to one reference photo of each of the top 5 products and picks one, or none |
-| `detect_retrieve` | End-to-end (RPC) | any `gemini-*` (+ `gemini-embedding-2-preview`) | One Gemini call boxes every product, then `embedding_retrieval` on each box |
+| `detect_retrieve` | End-to-end (RPC) | any `gemini-*` (+ Gemini Embedding 2) | One Gemini call boxes every product, then `embedding_retrieval` on each box |
 | `detect_tiered` | End-to-end (RPC) | any `gemini-*` (+ `multimodalembedding@001`) | One Gemini call boxes every product, then `tiered_hybrid` on each box |
 | `shelf_detect_retrieve`, `shelf_detect_tiered` | End-to-end (Shelves) | as above | `single_pass_dedup` boxes, then the same identification as the two pipelines above, on HoloSelecta shelves (`tiered_hybrid`'s thresholds are the ones tuned on RPC) |
 
@@ -190,7 +190,7 @@ labels are shown on the run page but not scored, since SKU-110K has a single cla
 filters), `detect_classify` (a second contact-sheet pass cost more and scored lower),
 `rail_profile_cv` (F2 0.16), `gemini_classify` (no more accurate than `hierarchy_classify`, 31-69%
 more per photo), `sister_shade_rerank` (below plain `embedding_retrieval` with
-`gemini-embedding-2-preview`), and the always-escalate `gemini_rerank` / `detect_rerank` /
+`gemini-embedding-2`), and the always-escalate `gemini_rerank` / `detect_rerank` /
 `shelf_detect_rerank` (more ₹ than the tiered versions for no better F2 on shelves).
 
 `single_pass_dedup`, `tiled_dedup`, `hierarchy_classify`, `tiered_hybrid` and `detect_tiered`
@@ -280,7 +280,7 @@ New pip dependencies go in `pyproject.toml`.
 | `setup(self, config, ctx)` | Optional hook run once per run before any image: create clients (embeddings, databases...) from `config.yaml`, build an index. What it bills to `ctx` is the run's **setup cost**, shown on the run page and not in cost/img |
 | `compose(name, detector, *identifiers, dataset=...)` | Chains any detector approach with 1+ classification/retrieval steps into a registered `end_to_end` approach. Intermediate classifiers narrow the catalog via `narrow(image, catalog, ctx) -> set[int]` before the final step's `identify(image, ctx, allowed_ids=...)` |
 | `detect_and_identify(self, image, ctx)` | Override on an `end_to_end` approach when a single model call returns both `boxes` and `sku_id`s in one pass |
-| `VertexEmbeddings(config, model)` | [utils/embeddings.py](src/utils/embeddings.py): `.image(img, ctx)` / `.text(s, ctx)` with `multimodalembedding@001` or `gemini-embedding-2-preview`, billed to `ctx`. For a vector database see [docs/reference.md](docs/reference.md#retrieval-with-a-vector-database-alloydb) |
+| `VertexEmbeddings(config, model)` | [utils/embeddings.py](src/utils/embeddings.py): `.image(img, ctx)` / `.text(s, ctx)` with `multimodalembedding@001` or `gemini-embedding-2`, billed to `ctx`. For a vector database see [docs/reference.md](docs/reference.md#retrieval-with-a-vector-database-alloydb) |
 | `skus = {unit: catalog query}` + `ctx.bill(unit, amount)` | For non-Gemini paid APIs: list their Billing Catalog SKUs and record usage per image, and it's priced into cost/img. The embeddings client already does this |
 | `ctx.trace.step(name, detail, boxes=None, regions=None, info=None)` | Adds a step to the run page. `boxes` are drawn as detections, `regions` as outlines (tiles, crops). `info` (any JSON: candidates, scores, `removed` boxes) plus the Gemini calls (tokens, latency, cost, prompt, response) and billed units since the previous step appear behind the step's ⓘ icon. Keep it to 2-4 meaningful steps |
 | `ctx.model` | The model id for this run |
@@ -368,8 +368,8 @@ src/
   approaches/                  base.py (Approach, compose, register) + modular hierarchy (_*.py = templates):
     market_share/
       detection/                 SKU-110K shelf product detectors (single_pass_dedup, tiled_dedup)
-      classification/            closed-catalog classifiers (hierarchy_classify, embedding_text_match)
-      retrieval/                 reference-photo retrievers (embedding_retrieval, tiered_hybrid)
+      classification/            closed-catalog classifiers (hierarchy_classify, embedding_text_match, djev_classify)
+      retrieval/                 reference-photo retrievers (embedding_retrieval, tiered_hybrid, jev_laya_hybrid)
       end_to_end/                composed pipelines (detect_identify.py) + single-call / AlloyDB templates
     merchandising/
       planogram_compliance/      shelf-row layout, facings & share-of-shelf approaches (awaiting labelled data)
@@ -378,7 +378,9 @@ src/
     dataset.py                   download, upload, load SKU-110K, the labelled products and RPC (local or gs://)
     metrics.py                   IoU matching, accuracy/recall/F2, product matching, percentiles
     llm.py                       Vertex Gemini client (retries, JSON parsing, token usage)
-    embeddings.py                Vertex embeddings client (multimodalembedding@001, gemini-embedding-2-preview)
+    embeddings.py                Vertex embeddings client (multimodalembedding@001, gemini-embedding-2)
+    photometry.py                glare inpainting + 3-zone CIELAB & Sobel shape descriptors
+    tuning.py                    Vertex AI Supervised Fine-Tuning (LoRA) dataset builder & job launcher
     alloydb.py                   AlloyDB connection + query (for retrieval approaches)
     pricing.py                   live prices from the Cloud Billing Catalog API
     telemetry.py                 OpenTelemetry traces (Cloud Trace) + linked logs (Cloud Logging)

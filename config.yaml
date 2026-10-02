@@ -1,14 +1,15 @@
 # shelf-bench configuration. This is the only config file.
 
 gcp:
-  project: unilever-shelf-understanding
+  project: ul-fs-s-sandbx-16-prj
   location: global                 # Vertex AI Gemini endpoint
   region: us-central1              # Cloud Run + Cloud Build + bucket region
-  data: gs://unilever-shelf-understanding-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
-  products: gs://unilever-shelf-understanding-shelf-images/HUL_labeled_benchmarks  # labelled products (utils/dataset.py)
-  rpc: gs://unilever-shelf-understanding-shelf-images/RPC                # checkout photos + reference gallery (shelf-bench rpc)
-  shelves: gs://unilever-shelf-understanding-shelf-images/shelves        # HoloSelecta shelves + gallery (shelf-bench shelves)
-  results: gs://unilever-shelf-understanding-shelf-images/results        # run outputs from Cloud Run
+  data: gs://ul-fs-s-sandbx-16-prj-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
+  products: gs://ul-fs-s-sandbx-16-prj-shelf-images/HUL_labeled_benchmarks  # labelled products (utils/dataset.py)
+  rpc: gs://ul-fs-s-sandbx-16-prj-shelf-images/RPC                # checkout photos + reference gallery (shelf-bench rpc)
+  shelves: gs://ul-fs-s-sandbx-16-prj-shelf-images/shelves        # HoloSelecta shelves + gallery (shelf-bench shelves)
+  tuning: gs://ul-fs-s-sandbx-16-prj-shelf-images/tuning          # SFT training/val jsonl + sheets (shelf-bench tune)
+  results: gs://ul-fs-s-sandbx-16-prj-shelf-images/results        # run outputs from Cloud Run
 
 # Cloud Run job that executes benchmark runs (shelf-bench cloud-run). One task per
 # approach x tier x model. Its compute is priced from the Billing Catalog API (Jobs CPU/Memory
@@ -40,13 +41,26 @@ telemetry:
 
 # Models offered by `shelf-bench list`. Any Vertex Gemini model id works with -m.
 models:
-  - gemini-3.8-flash
+  - gemini-3.5-flash
   - gemini-3.5-flash-lite
+
+# Vertex AI Supervised Fine-Tuning (LoRA) endpoints (`shelf-bench tune`).
+# When `endpoint` is set (or via $SHELF_BENCH_SFT_ENDPOINT), `Gemini(model)` routes calls to that
+# live Vertex AI endpoint in `location` while pricing tokens at `base_model`'s Billing Catalog SKU.
+tuned_models:
+  gemini-3.5-flash-lite-sft:
+    base_model: gemini-3.5-flash-lite
+    location: us-central1
+    endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/ENDPOINT_ID
+  gemini-3.5-flash-sft:
+    base_model: gemini-3.5-flash
+    location: us-central1
+    endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/ENDPOINT_ID
 
 # AlloyDB, for approaches that identify products by vector lookup (utils/alloydb.py has the
 # setup SQL and IAM). Approaches read this in setup(): AlloyDB(**config["alloydb"]).
 alloydb:
-  instance: projects/unilever-shelf-understanding/locations/us-central1/clusters/CLUSTER/instances/INSTANCE
+  instance: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/clusters/CLUSTER/instances/INSTANCE
   database: postgres
   ip_type: PRIVATE       # PRIVATE (needs cloud_run.network) | PUBLIC | PSC
   # user: defaults to the IAM user of the current credentials
@@ -59,7 +73,7 @@ alloydb:
 # Applied only to runs on or before `until`, and shown as a separate credit line.
 promotions:
   - name: Gemini 3.x Flash introductory pricing (50% credit back on net spend)
-    models: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash]
+    models: [gemini-3.5-flash, gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash]
     credit_share: 0.5
     until: 2026-12-31
     source: https://cloud.google.com/vertex-ai/generative-ai/pricing

@@ -39,7 +39,7 @@ class DetectRetrieveAlloyDB(EmbeddingRetrieval):
     also_calls = [MODEL]
     architecture = "Gemini detects boxes, Vertex embeddings + AlloyDB identify each product"
     steps = ["Gemini detects every product box",
-             "Embed each crop (gemini-embedding-2-preview) and look it up in AlloyDB"]
+             "Embed each crop (gemini-embedding-2) and look it up in AlloyDB"]
     skus = embeddings.SKUS  # priced from the Billing Catalog at run start
 
     def setup(self, config: dict, ctx: Context) -> None:

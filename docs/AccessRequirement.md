@@ -11,7 +11,7 @@ enable them up front.
 
 | API | Used for | Called from |
 |-----|----------|-------------|
-| `aiplatform.googleapis.com` | Gemini (`gemini-*`), `multimodalembedding@001` and `gemini-embedding-2-preview` | [llm.py](../src/utils/llm.py), [embeddings.py](../src/utils/embeddings.py) |
+| `aiplatform.googleapis.com` | Gemini (`gemini-*`), `multimodalembedding@001` and `gemini-embedding-2` | [llm.py](../src/utils/llm.py), [embeddings.py](../src/utils/embeddings.py) |
 | `run.googleapis.com` | The `shelf-bench` Cloud Run job and the private UI service | [cloud.py](../src/utils/cloud.py) |
 | `cloudbuild.googleapis.com` | Building the container from the working tree | [cloud.py](../src/utils/cloud.py) |
 | `artifactregistry.googleapis.com` | The `cloud-run-source-deploy` image repo | [cloud.py](../src/utils/cloud.py) |

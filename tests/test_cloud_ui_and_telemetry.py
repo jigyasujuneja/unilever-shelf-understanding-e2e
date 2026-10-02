@@ -22,7 +22,7 @@ from utils.llm import LLMResult, Usage
 from utils.server import Handler
 
 
-def test_server_endpoints(fake_root, tmp_path):
+def test_server_endpoints(fake_root, tmp_path, monkeypatch):
     s = runner.run(
         "single_pass_dedup",
         "gemini-t",
@@ -36,7 +36,10 @@ def test_server_endpoints(fake_root, tmp_path):
         llm=OracleLLM(),
         log=lambda *_: None,
     )
+    pulls = []
+    monkeypatch.setattr(runner, "pull", lambda src, dst: pulls.append((src, dst)) or 0)
     Handler.results_dir, Handler.data_root = tmp_path, fake_root
+    Handler.pull_src, Handler._last_pull = "gs://b/results", 0.0
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_port}"
@@ -45,12 +48,16 @@ def test_server_endpoints(fake_root, tmp_path):
         assert b"Leaderboard" in get("/")
         board = json.loads(get("/api/leaderboard"))
         assert board[0]["run_id"] == s["run_id"]
+        assert len(pulls) == 1  # pulled once, subsequent requests within TTL skip
+        json.loads(get("/api/leaderboard"))
+        assert len(pulls) == 1
         run = json.loads(get(f"/api/runs/{s['run_id']}"))
         img_id = run["images"][0]["image_id"]
         detail = json.loads(get(f"/api/runs/{s['run_id']}/images/{img_id}"))
         assert len(detail["gt"]) == 4 and detail["steps"]
         assert get(f"/img/test/{img_id}")[:2] == b"\xff\xd8"
     finally:
+        Handler.pull_src = None
         httpd.shutdown()
 
 
@@ -119,7 +126,7 @@ def test_approaches_only_run_the_models_they_call(monkeypatch):
     combos = runner.combos(
         ["hierarchy_classify", "embedding_retrieval"],
         ["standard", "priority", "flex"],
-        ["gemini-1", "multimodalembedding@001", "gemini-embedding-2-preview"],
+        ["gemini-1", "multimodalembedding@001", "gemini-embedding-2"],
         log=lambda *_: None,
     )
     assert combos == [
@@ -127,12 +134,12 @@ def test_approaches_only_run_the_models_they_call(monkeypatch):
         ("hierarchy_classify", "priority", "gemini-1"),
         ("hierarchy_classify", "flex", "gemini-1"),
         ("embedding_retrieval", "standard", "multimodalembedding@001"),
-        ("embedding_retrieval", "standard", "gemini-embedding-2-preview"),
+        ("embedding_retrieval", "standard", "gemini-embedding-2"),
     ]
     with pytest.raises(ValueError, match="doesn't run"):
         runner.run("hierarchy_classify", "multimodalembedding@001", log=lambda *_: None)
     with pytest.raises(ValueError, match="doesn't run"):
-        runner.run("hierarchy_classify", "gemini-embedding-2-preview", log=lambda *_: None)
+        runner.run("hierarchy_classify", "gemini-embedding-2", log=lambda *_: None)
     calls = []
     monkeypatch.setattr(runner, "run", lambda name, model, *a, **k: calls.append((name, model)))
     monkeypatch.setenv("CLOUD_RUN_TASK_COUNT", "3")

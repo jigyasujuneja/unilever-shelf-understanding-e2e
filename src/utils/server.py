@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import io
 import json
+import threading
+import time
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,6 +31,8 @@ STATIC = Path(__file__).parent / "static"
 LIGHT_KEYS = ("image_id", "gt_count", "pred_count", "accuracy", "recall", "f2",
               "latency_s", "cost_inr", "error", "labels")
 GALLERY_SETS = ("rpc", "shelves")  # RPC layout: photos with identified boxes + reference photos
+PULL_TTL_S = 30.0
+_PULL_LOCK = threading.Lock()
 
 
 @lru_cache(maxsize=64)
@@ -75,9 +79,24 @@ def _samples(name: str, split: str | None, root: str) -> dict[str, dataset.Sampl
 class Handler(BaseHTTPRequestHandler):
     results_dir = runner.RESULTS_DIR
     data_root = dataset.DEFAULT_ROOT
+    pull_src: str | None = None
+    pull_ttl_s: float = PULL_TTL_S
+    _last_pull: float = 0.0
 
     def log_message(self, *args):  # quiet
         pass
+
+    def _maybe_pull(self) -> None:
+        if not self.pull_src or (time.monotonic() - Handler._last_pull) < self.pull_ttl_s:
+            return
+        with _PULL_LOCK:
+            if (time.monotonic() - Handler._last_pull) < self.pull_ttl_s:
+                return
+            Handler._last_pull = time.monotonic()
+            try:
+                runner.pull(self.pull_src, self.results_dir)
+            except Exception:
+                pass
 
     def _send(self, body: bytes, ctype: str, code: int = 200) -> None:
         self.send_response(code)
@@ -98,6 +117,7 @@ class Handler(BaseHTTPRequestHandler):
                 ctype = ("text/javascript" if parts[1].endswith(".js") else "text/css") + "; charset=utf-8"
                 return self._send((STATIC / parts[1]).read_bytes(), ctype)
             if parts == ["api", "leaderboard"]:
+                self._maybe_pull()
                 return self._json(runner.leaderboard(self.results_dir))
             if parts[:2] == ["api", "runs"] and len(parts) == 3:
                 summary, images = runner.load_run(parts[2], self.results_dir)
@@ -144,8 +164,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(host: str = "127.0.0.1", port: int = 8080, results_dir: Path = runner.RESULTS_DIR,
-          data_root: str = dataset.DEFAULT_ROOT) -> None:
+          data_root: str = dataset.DEFAULT_ROOT, pull_src: str | None = None) -> None:
     Handler.results_dir, Handler.data_root = Path(results_dir), str(data_root)
+    Handler.pull_src = pull_src
+    Handler._last_pull = time.monotonic() if pull_src else 0.0
     httpd = ThreadingHTTPServer((host, port), Handler)
     print(f"Leaderboard: http://{host}:{port}")
     try:
