@@ -181,7 +181,9 @@ Each run writes `results/<run_id>/summary.json` (the leaderboard row) and `image
 | `jev_laya_hybrid` | Retrieval | any `gemini-*` (+ Gemini Embedding 2) | De-glare + Gemini Embedding 2 + 3-zone CIELAB Laya ranking; accepts when cosine >= 0.72 and margin >= 0.034 (or >= 0.020 at cosine >= 0.905), otherwise clusters identical uncertain crops (cosine >= 0.92) and verifies up to 4 medoids per Gemini contact sheet |
 | `detect_retrieve` | End-to-end (RPC) | any `gemini-*` (+ Gemini Embedding 2) | One Gemini call boxes every product, then `embedding_retrieval` on each box |
 | `detect_tiered` | End-to-end (RPC) | any `gemini-*` (+ `multimodalembedding@001`) | One Gemini call boxes every product, then `tiered_hybrid` on each box |
+| `detect_jev_laya` | End-to-end (RPC) | any `gemini-*` (+ Gemini Embedding 2) | One Gemini call boxes every product, then `jev_laya_hybrid` (with medoid clustering and batched contact sheets) on the boxes |
 | `shelf_detect_retrieve`, `shelf_detect_tiered` | End-to-end (Shelves) | as above | `single_pass_dedup` boxes, then the same identification as the two pipelines above, on HoloSelecta shelves (`tiered_hybrid`'s thresholds are the ones tuned on RPC) |
+| `shelf_jev_laya` | End-to-end (Shelves) | any `gemini-*` (+ Gemini Embedding 2) | `single_pass_dedup` boxes, then `jev_laya_hybrid` + visually-gated 1D horizontal row smoothing (`[P, None, P] -> P` when neighbour cosine >= 0.86) |
 
 Models in brackets are fixed: they are called on every run whatever `-m` says (`also_calls`).
 Detection approaches also label boxes (food, beverage, ...) and drop `not_a_product` ones; the
