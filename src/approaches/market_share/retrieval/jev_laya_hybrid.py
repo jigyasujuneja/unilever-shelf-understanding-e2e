@@ -5,9 +5,8 @@ Combines ``SHORTLIST_MODEL`` (``jev``) with the 4-layer ``Laya`` visual/layout s
 1. **Photometric De-glare Restoration:** Cleans specular glare highlights on shelf/counter crops
    before embedding and contact-sheet generation (``utils.photometry.restore_photometry``).
 2. **jev + CIELAB Sister-Shade Ranking:** Embeds reference gallery photos and query crops with
-   Gemini Embedding 2 (89.9% base retrieval accuracy on RPC vs 74.2% for
-   ``multimodalembedding@001``) and breaks close cosine ties using 3-zone CIELAB chromatic +
-   log-aspect similarity (``utils.photometry.lab_zones``).
+   ``gemini-embedding-2`` on the ``global`` endpoint and breaks close cosine ties using 3-zone
+   CIELAB chromatic + log-aspect similarity (``utils.photometry.lab_zones``).
 3. **Spatial-Visual Medoid Clustering + Batched Multi-Crop Escalation:** On multi-product photos
    (``identify_boxes``), adjacent uncertain crops on the same shelf row with embedding cosine
    ``>= 0.92`` and identical top-1 candidate are grouped into a medoid cluster, and up to
