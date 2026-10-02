@@ -65,6 +65,13 @@ alloydb:
   ip_type: PRIVATE       # PRIVATE (needs cloud_run.network) | PUBLIC | PSC
   # user: defaults to the IAM user of the current credentials
 
+# Optional OpenJEV / djev (/v1/systemone) server (https://github.com/mmastrac/djev,
+# https://github.com/razorback16/openjev). Leave base_url empty to run djev single-step
+# logprob + 1 - H(p)/ln(N) entropy calibration natively on Vertex AI Gemini.
+openjev:
+  base_url: ""           # or set $OPENJEV_BASE_URL (e.g. http://localhost:8000)
+  model: openjev-latest  # e.g. openjev-latest or google/diffusiongemma-26B-A4B-it
+
 # Prices are NOT configured here: every run fetches current list prices from GCP's Cloud
 # Billing Catalog API (Gemini SKUs per traffic type, Cloud Run, Cloud Storage) and GCP's own
 # USD->INR rate, and stores that price sheet in its summary. See src/utils/pricing.py.

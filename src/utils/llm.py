@@ -187,6 +187,7 @@ class Gemini:
         self.base_model = base_model
         self.thinking_level = thinking_level if base_model.startswith("gemini-3") else None
         self.tier = tier
+        self._logprobs_unsupported = False
         self.client = genai.Client(
             vertexai=True, project=cfg.get("project"), location=loc,
             http_options=types.HttpOptions(headers=TIER_HEADERS[tier]) if tier in TIER_HEADERS else None,
@@ -199,8 +200,11 @@ class Gemini:
         schema: dict | None = None,
         max_side: int | None = None,
         retries: int = 6,
+        logprobs: int | None = None,
     ) -> LLMResult:
         from google.genai import types
+
+        from utils.openjev import serialize_logprobs
 
         cfg = types.GenerateContentConfig(
             temperature=0.0,
@@ -210,6 +214,9 @@ class Gemini:
         )
         if self.thinking_level:
             cfg.thinking_config = types.ThinkingConfig(thinking_level=self.thinking_level)
+        if logprobs and logprobs > 0 and not self._logprobs_unsupported:
+            cfg.response_logprobs = True
+            cfg.logprobs = int(logprobs)
         jpeg = image_to_jpeg(image, max_side)
         contents = [types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), prompt]
         span = otel_trace.get_current_span()  # the call's span, opened by Context.ask
@@ -222,7 +229,12 @@ class Gemini:
                 )
                 seconds = time.perf_counter() - t0
                 break
-            except Exception as e:  # 429 / 5xx / transient network
+            except Exception as e:  # 429 / 5xx / transient network / logprobs unsupported
+                if cfg.response_logprobs and "logprob" in str(e).lower():
+                    self._logprobs_unsupported = True
+                    cfg.response_logprobs = None
+                    cfg.logprobs = None
+                    continue
                 if attempt == retries - 1 or not _retryable(e):
                     raise
                 sleep = 2 ** (attempt + 1) + random.random() * 2  # 2..66s, jittered
@@ -236,6 +248,7 @@ class Gemini:
         text = resp.text or ""
         cand = (resp.candidates or [None])[0]
         finish = getattr(getattr(cand, "finish_reason", None), "name", None)
+        lp_steps = serialize_logprobs(getattr(cand, "logprobs_result", None))
         meta = {
             "attempts": attempt + 1,
             "retry_errors": retries_seen,
@@ -252,6 +265,8 @@ class Gemini:
             # Output hit max_output_tokens: parse_json kept only the complete boxes.
             "truncated": finish == "MAX_TOKENS",
         }
+        if lp_steps:
+            meta["logprobs"] = lp_steps
         return LLMResult(parse_json(text) if text else [], usage, seconds, text, meta)
 
 

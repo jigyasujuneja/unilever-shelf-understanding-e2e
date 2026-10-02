@@ -43,10 +43,12 @@ from approaches.market_share.classification.hierarchy_classify import (
 )
 from utils import dataset
 from utils.embeddings import GEMINI_EMBEDDING, MODELS, SKUS, VertexEmbeddings
+from utils.openjev import extract_slot_distributions
 from utils.photometry import restore_photometry
 
 SHORTLIST_MODEL = GEMINI_EMBEDDING
 SISTER_MARGIN = 0.025  # image-to-text cosine margin below which same-brand sister variants escalate
+MIN_JEV_CONFIDENCE = 0.25  # djev 1 - H(p)/ln(N) entropy threshold below which embedding tie-break assists
 # Top-K embedding shortlist size: on the 184-product HUL benchmark, top-1 recall is 87.5%,
 # top-5 is 99.3%, top-10 is 99.7%, and top-15 reaches 100.0% recall while keeping prompts compact.
 TOP_K_EMB = 15
@@ -67,16 +69,18 @@ class DjevClassify(Approach):
     models: list[str] | None = None
     also_calls = [SHORTLIST_MODEL]
     skus = SKUS
+    min_jev_confidence = MIN_JEV_CONFIDENCE
     architecture = (
         f"Photometric de-glare -> {SHORTLIST_MODEL} (accept if unique brand or margin >= "
-        f"{SISTER_MARGIN}) -> brand-scoped size + Gemini sister-variant verification"
+        f"{SISTER_MARGIN}) -> brand-scoped size + djev logprob-calibrated sister-variant verification"
     )
     steps = [
         "Setup (once per run, reported apart from cost/img): embed each catalog product's text",
         "Photometric restoration: inpaint localized specular glare highlights",
         f"Embed photo ({SHORTLIST_MODEL}); accept top match when brand is unique or "
         f"margin >= {SISTER_MARGIN}",
-        "Otherwise filter catalog to the matched brand, read pack size, and pick exact sister variant",
+        "Otherwise filter catalog to the matched brand, read pack size, and pick exact sister "
+        "variant with djev 1 - H(p)/ln(N) entropy calibration",
     ]
 
     def setup(self, config: dict, ctx: Context) -> None:
@@ -214,15 +218,36 @@ class DjevClassify(Approach):
                 for i, p in cands.items()
             )
         )
-        data = ctx.ask(restored, prompt, schema=PICK_SCHEMA, max_side=1024).data
+        res = ctx.ask(
+            restored,
+            prompt,
+            schema=PICK_SCHEMA,
+            max_side=1024,
+            logprobs=min(len(cands) + 1, 10),
+        )
+        data = res.data
         sku = data.get("sku_id") if isinstance(data, dict) else None
+        slots = extract_slot_distributions(
+            res.meta.get("logprobs"),
+            valid_options=set(cands.keys()) | {-1},
+            n_options=len(cands) + 1,
+        )
+        slot = slots[0] if slots else None
+        conf = float(slot["confidence"]) if slot else 1.0
         p = cands.get(sku)
-        if p is None and top_id in cands:
-            # If the model answered -1 or returned an invalid/out-of-shortlist SKU ID, fall back to top_id
+        if (p is None or conf < self.min_jev_confidence) and top_id in cands:
+            # If the model answered -1, returned an out-of-shortlist ID, or had near-uniform entropy
+            # across sister variants, fall back to the top embedding match within cands
             sku, p = top_id, cands[top_id]
+        step_info = candidates_info(top_brand, size, cands)
+        if slot:
+            step_info["jev_confidence"] = conf
+            step_info["jev_probabilities"] = {
+                str(k): round(v, 4) for k, v in (slot.get("probabilities") or {}).items()
+            }
         ctx.trace.step(
             f"dJev picks from {len(cands)} {top_brand} candidates",
-            f"id {sku}: {p['product']}" if p else f"id {sku}: none of them",
-            info=candidates_info(top_brand, size, cands),
+            f"id {sku}: {p['product']} (jev_conf {conf:.2f})" if p else f"id {sku}: none of them",
+            info=step_info,
         )
         return sku if p else None
