@@ -25,6 +25,11 @@ from PIL import Image
 
 from approaches.base import BOX_LIST_SCHEMA, Approach, Box, Context, compose, to_pixels
 from approaches.market_share.detection.single_pass_dedup import SinglePassDedup
+from approaches.market_share.retrieval.coarse_jev_laya import (
+    COARSE_DISTINCT_MARGIN,
+    SISTER_FAMILY_MARGIN,
+    CoarseJevLaya,
+)
 from approaches.market_share.retrieval.embedding_retrieval import MODEL, EmbeddingRetrieval
 from approaches.market_share.retrieval.jev_laya_hybrid import (
     CLUSTER_COSINE,
@@ -119,6 +124,24 @@ DetectJevLaya = compose(
     ],
 )
 
+DetectCoarseJevGemini = compose(
+    "detect_coarse_jev_gemini",
+    GeminiBoxDetector,
+    CoarseJevLaya,
+    dataset="rpc",
+    architecture=(
+        f"Gemini detects boxes -> Stage A Coarse JEV family triage ({MODEL} + 1-H(p)/ln(N) gate) "
+        f"-> Stage B Gemini 3.5 batched top-{K} contact sheets"
+    ),
+    steps=[
+        "Setup (once per run, reported apart from cost/img): embed reference photos, CIELAB zones & SKU family centroids",
+        "One Gemini call on the photo returns every product box",
+        f"Stage A: Coarse JEV family triage; accept when distinct-family margin >= {COARSE_DISTINCT_MARGIN} "
+        f"(or sister margin >= {SISTER_FAMILY_MARGIN})",
+        f"Stage B: Cluster uncertain crops (cos >= {CLUSTER_COSINE}) and verify medoids in batched top-{K} Gemini 3.5 contact sheets",
+    ],
+)
+
 
 # ---- Real store shelves (Shelf Images parent-level, 96 products, 16-39 facings/photo) ---------
 
@@ -167,5 +190,24 @@ ShelfJevLaya = compose(
         f"Cluster adjacent uncertain facings (cos >= {CLUSTER_COSINE}) and verify medoids in "
         f"batched top-{K} Gemini contact sheets",
         f"Visually-gated 1D shelf-row smoothing ([P, None, P] -> P when neighbour cos >= {SMOOTH_COSINE})",
+    ],
+)
+
+ShelfCoarseJevGemini = compose(
+    "shelf_coarse_jev_gemini",
+    SinglePassDedup,
+    CoarseJevLaya,
+    dataset="shelves",
+    architecture=(
+        f"single_pass_dedup boxes -> Stage A Coarse JEV family triage ({MODEL} + 1-H(p)/ln(N) gate) "
+        f"-> Stage B Gemini 3.5 batched top-{K} contact sheets & row smoothing"
+    ),
+    steps=[
+        "Setup (once per run, reported apart from cost/img): embed reference crops, CIELAB zones & SKU family centroids",
+        "single_pass_dedup: one Gemini call + container, NMS and depth-ghost filters",
+        f"Stage A: Coarse JEV family triage; accept when distinct-family margin >= {COARSE_DISTINCT_MARGIN} "
+        f"(or sister margin >= {SISTER_FAMILY_MARGIN})",
+        f"Stage B: Cluster uncertain facings (cos >= {CLUSTER_COSINE}) and verify medoids in batched top-{K} Gemini 3.5 contact sheets",
+        f"Visually-gated 1D shelf-row smoothing ([P, None/?, P] -> P when neighbour cos >= {SMOOTH_COSINE})",
     ],
 )

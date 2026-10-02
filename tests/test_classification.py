@@ -186,3 +186,20 @@ def test_djev_classify_combines_photometry_embedding_fastpath_and_multihead_vlm(
     assert s["accuracy"] == pytest.approx(1.0)
     assert sorted(llm_calls) == [61, 62]  # p3 (width 63) answered on embedding fast-path without LLM!
 
+    llm_calls.clear()
+    s_coarse = runner.run(
+        "coarse_jev_gemini",
+        "gemini-t",
+        "test",
+        0,
+        0,
+        1,
+        "t",
+        results_dir=tmp_path,
+        llm=llm,
+        log=lambda *_: None,
+    )
+    assert s_coarse["accuracy"] == pytest.approx(1.0)
+    assert sorted(llm_calls) == [61, 62]
+
+

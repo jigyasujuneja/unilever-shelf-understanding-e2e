@@ -329,3 +329,89 @@ class OpenJevClient:
             buckets={"standard/text_input": in_tok} if in_tok else {},
         )
         return choices, slots, usage, seconds
+
+
+def coarse_jev_triage(
+    ranked: list[tuple[float, int]],
+    catalog: dict[int, dict[str, Any]],
+    *,
+    temp: float = 0.04,
+    top_k: int = 12,
+) -> dict[str, Any]:
+    """Stage A Coarse JEV Multi-Attribute Triage over ``(category, brand, sku_id)``.
+
+    Aggregates temperature-scaled Boltzmann probability mass ``exp((cos - max_cos) / temp)``
+    across the top-``k`` multimodal embedding matches into hierarchical attribute slots
+    (``category``, ``brand``, and intra-brand ``sku_id``) and computes the ``djev`` normalized
+    Shannon entropy confidence ``1 - H(p) / ln(N)`` for each slot.
+    """
+    if not ranked:
+        return {
+            "top_id": None,
+            "top_score": 0.0,
+            "margin": 0.0,
+            "intra_brand_margin": 0.0,
+            "top_category": "",
+            "category_confidence": 0.0,
+            "top_brand": "",
+            "brand_confidence": 0.0,
+            "sku_confidence": 0.0,
+            "brand_candidates": {},
+        }
+
+    top_slice = ranked[: max(2, min(top_k, len(ranked)))]
+    max_cos = top_slice[0][0]
+    cat_mass: dict[str, float] = {}
+    brand_mass: dict[str, float] = {}
+    sku_mass: dict[int, float] = {}
+
+    for cos, pid in top_slice:
+        w = math.exp((cos - max_cos) / max(1e-4, temp))
+        p = catalog.get(pid) or {}
+        cat = str(p.get("category") or "unknown")
+        brand = str(p.get("brand") or cat)
+        cat_mass[cat] = cat_mass.get(cat, 0.0) + w
+        brand_mass[brand] = brand_mass.get(brand, 0.0) + w
+        sku_mass[pid] = w
+
+    all_cats = {str(p.get("category") or "unknown") for p in catalog.values()}
+    all_brands = {str(p.get("brand") or p.get("category") or "unknown") for p in catalog.values()}
+
+    top_id = ranked[0][1]
+    top_score = ranked[0][0]
+    second_score = ranked[1][0] if len(ranked) > 1 else 0.0
+    margin = top_score - second_score
+
+    top_p = catalog[top_id]
+    top_cat = str(top_p.get("category") or "unknown")
+    top_brand = str(top_p.get("brand") or top_cat)
+
+    cat_conf = jev_entropy_confidence(cat_mass, n_options=max(2, len(all_cats)))
+    brand_conf = jev_entropy_confidence(brand_mass, n_options=max(2, len(all_brands)))
+    sku_conf = jev_entropy_confidence(sku_mass, n_options=len(top_slice))
+
+    cos_by_id = {pid: cos for cos, pid in ranked}
+    brand_ids = [
+        pid
+        for _, pid in ranked
+        if str(catalog[pid].get("brand") or catalog[pid].get("category") or "") == top_brand
+    ]
+    if len(brand_ids) >= 2:
+        intra_brand_margin = cos_by_id[brand_ids[0]] - cos_by_id[brand_ids[1]]
+    else:
+        intra_brand_margin = 1.0
+
+    brand_candidates = {pid: catalog[pid] for pid in brand_ids}
+    return {
+        "top_id": top_id,
+        "top_score": round(top_score, 4),
+        "margin": round(margin, 4),
+        "intra_brand_margin": round(intra_brand_margin, 4),
+        "top_category": top_cat,
+        "category_confidence": cat_conf,
+        "top_brand": top_brand,
+        "brand_confidence": brand_conf,
+        "sku_confidence": sku_conf,
+        "brand_candidates": brand_candidates,
+    }
+

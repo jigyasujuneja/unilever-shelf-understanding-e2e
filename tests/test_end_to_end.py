@@ -29,10 +29,10 @@ def test_registry_has_builtin_approaches():
     names = set(approaches.all_approaches())
     assert names == {
         "single_pass_dedup", "tiled_dedup",                               # detection
-        "hierarchy_classify", "embedding_text_match", "djev_classify",    # classification
-        "embedding_retrieval", "tiered_hybrid", "jev_laya_hybrid",        # retrieval
-        "detect_retrieve", "detect_tiered", "detect_jev_laya",            # end-to-end (RPC)
-        "shelf_detect_retrieve", "shelf_detect_tiered", "shelf_jev_laya", # end-to-end (shelves)
+        "hierarchy_classify", "embedding_text_match", "djev_classify", "coarse_jev_gemini",
+        "embedding_retrieval", "tiered_hybrid", "jev_laya_hybrid", "coarse_jev_laya",
+        "detect_retrieve", "detect_tiered", "detect_jev_laya", "detect_coarse_jev_gemini",
+        "shelf_detect_retrieve", "shelf_detect_tiered", "shelf_jev_laya", "shelf_coarse_jev_gemini",
     }
     for ap in approaches.all_approaches().values():
         assert ap.architecture and ap.steps
