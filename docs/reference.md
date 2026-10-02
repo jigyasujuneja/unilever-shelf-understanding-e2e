@@ -216,5 +216,23 @@ flowchart LR
 * **Our Hybrid Step 2 (Laya `K=4` Contact Sheet):** For ambiguous crops, tile the query crop next to its top-4 gallery photos (`[1]..[4]`) in one composite image (up to `8` crops batched per Gemini 3.5 call).
 * **Our Hybrid Step 3 (`choice = 0` Competitor Rejection):** If the crop is a non-HUL competitor product, Gemini returns `{"choice": 0}` and rejects the false match.
 
+## End-to-End Share-of-Shelf Composition (`detect_jev_laya` & `shelf_jev_laya`)
+
+```mermaid
+flowchart LR
+  IMG["Store Shelf Photo<br/>(40+ SKUs, Glare, Competitor Packs)"] --> DET["Stage 1: SinglePassDedup<br/>Detect All Category Facings<br/>(HUL + Competitor Denominator)"]
+  DET --> CROPS["N Bounding Boxes"]
+  CROPS --> RET["Stage 2: JevLayaHybrid.identify_boxes()<br/>Photometry + Global Embedding + Medoid Batch"]
+  RET --> SMOOTH["Stage 3: 1D Shelf-Row Smoothing<br/>[P, None, P] -> [P, P, P] if cos >= 0.86"]
+  SMOOTH --> SOS["Share of Shelf KPI<br/>HUL Numerator / Total Category Denominator"]
+```
+
+### 1. End-to-End Operation ([`src/approaches/market_share/end_to_end/detect_identify.py`](../src/approaches/market_share/end_to_end/detect_identify.py))
+* **Stage 1 (Category-Agnostic Detection):** `SinglePassDedup` detects every visible bottle, box, or pouch on the shelf (`HUL` and competitor packs) so the **Total Category Denominator** is complete.
+* **Stage 2 (Batched Identification):** `JevLayaHybrid.identify_boxes()` normalizes each crop, resolves high-margin crops via `gemini-embedding-2` (`global`), clusters adjacent identical uncertain crops (`cos >= 0.92`), and verifies medoids in batched `4-row` Laya contact sheets.
+* **Stage 3 (Competitor Middle Bottle Rule):** When a middle bottle is a non-HUL competitor product, Gemini returns `0` (`None`). The facing remains in the total shelf denominator and is excluded from the HUL numerator.
+* **Stage 4 (Visually Gated Row Smoothing):** Fill an abstained interior facing `[P, None, P] -> [P, P, P]` only when its embedding cosine with both flanking neighbors is `>= 0.86`.
+
+
 
 
