@@ -342,6 +342,45 @@ that produced it. A non-Gemini approach sets `models` to its own id and ignores 
 that pulls every run from GCS on start; it is never made public. Open it with `make ui-proxy`
 (an authenticated proxy on http://localhost:8083, using `gcloud auth print-identity-token`).
 
+### Updating and deploying the UI
+
+```mermaid
+flowchart LR
+  EDIT["1. Edit Frontend / Backend<br/>src/utils/static/* or src/utils/server.py"] --> LOCAL["2. Preview Locally<br/>make ui (localhost:8080)<br/>Auto-syncs GCS results every 15s"]
+  LOCAL --> TEST["3. Run Offline Tests<br/>uv run pytest tests/test_cloud_ui_and_telemetry.py"]
+  TEST --> DEPLOY["4. Deploy to Cloud Run<br/>make ui-cloud<br/>(perfect-store-control-plane)"]
+  DEPLOY --> PROXY["5. Open via IAM Proxy<br/>make ui-proxy (localhost:8083)"]
+```
+
+The leaderboard and run-inspection UI is a zero-build vanilla JS/CSS single-page app served by the Python standard library HTTP server:
+
+| Layer | Files | What to edit |
+|---|---|---|
+| **Frontend SPA** | `src/utils/static/index.html`, `src/utils/static/app.js`, `src/utils/static/styles.css` | Leaderboard tables, task tabs, bounding-box canvas overlays, step-by-step trace drawers, and Cloud Trace / Logging panels. |
+| **Backend HTTP & GCS sync** | `src/utils/server.py` | JSON routes (`/api/runs`, `/api/run/<run_id>`, `/api/trace/...`), GCS image streaming, and the background thread that auto-pulls new runs from `gcp.results` (`SHELF_BENCH_SYNC_SECONDS`, default `15`s). |
+| **Approach step traces** | `src/approaches/<use_case>/<task>/<name>.py` | Set class attributes `architecture` and `steps`, and call `ctx.trace.step(name, detail, boxes=..., regions=..., info=...)` inside `detect()` or `identify()`. New approaches and step metadata appear in the UI automatically without frontend changes. |
+
+**Step-by-step workflow to update and deploy the UI:**
+
+```bash
+# 1. Preview locally on http://localhost:8080 (auto-syncs finished runs from GCS)
+make ui
+# or: uv run shelf-bench serve --port 8080
+# Edit src/utils/static/{app.js,styles.css,index.html} and refresh the browser.
+
+# 2. Run offline UI, server, and telemetry unit tests
+uv run pytest tests/test_cloud_ui_and_telemetry.py -q
+make lint
+
+# 3. Build and deploy the updated UI container to the private Cloud Run service
+#    (deploys to cloud_run.service in config.yaml, e.g. perfect-store-control-plane)
+make ui-cloud
+# or: uv run shelf-bench serve-cloud
+
+# 4. Verify the deployed Cloud Run UI locally via authenticated IAM proxy on http://localhost:8083
+make ui-proxy
+```
+
 ## Limitations
 
 * **No labelled HUL shelf photos.** Detection is scored on SKU-110K shelves (no identities),
