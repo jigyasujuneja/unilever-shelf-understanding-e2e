@@ -91,6 +91,10 @@ def test_price_sheet_parses_billing_catalog(monkeypatch):
         sku(pricing.sku_description("gemini-9-flash", "global", t, k), 0, n)
         for t, n in (("standard", 300), ("priority", 540))
         for k in pricing.KINDS
+    ] + [
+        sku(pricing.sku_description("gemini-9-flash", "us-central1", t, k), 0, n)
+        for t, n in (("standard", 330), ("priority", 594))
+        for k in pricing.KINDS
     ]
     catalog = {
         pricing.VERTEX_AI: gemini,
@@ -118,11 +122,19 @@ def test_price_sheet_parses_billing_catalog(monkeypatch):
     )
     cfg = {
         "gcp": {"project": "p", "location": "global", "region": "us-central1"},
+        "tuned_models": {
+            "gemini-9-flash-sft": {
+                "base_model": "gemini-9-flash",
+                "location": "us-central1",
+                "endpoint": "projects/p/locations/us-central1/endpoints/12345",
+            }
+        },
         "promotions": [{"models": ["x"], "credit_share": 0.5, "until": date(2026, 12, 31)}],
     }
     # (YAML parses `until` as a date; the sheet must still be JSON-serialisable.)
-    sheet = REAL_PRICE_SHEET(["gemini-9-flash"], cfg, session=object())
+    sheet = REAL_PRICE_SHEET(["gemini-9-flash", "gemini-9-flash-sft"], cfg, session=object())
     assert sheet["gemini"]["gemini-9-flash"]["priority/output"]["usd"] == pytest.approx(5.4e-7)
+    assert sheet["gemini"]["gemini-9-flash-sft"]["standard/image_input"]["usd"] == pytest.approx(3.0e-7)
     assert sheet["usd_to_inr"] == pytest.approx(95.545)
     assert sheet["cloud_run"]["vcpu_second"]["usd"] == 1.8e-5
     assert sheet["storage"]["class_b_op"]["usd"] == pytest.approx(4e-7)  # paid tier, not free
@@ -208,12 +220,14 @@ def test_gemini_embedding_uses_embed_content_and_bills_reported_tokens(monkeypat
     monkeypatch.setattr(embeddings, "AuthorizedSession", Session)
     bills = []
     ctx = NS(bill=lambda unit, n: bills.append((unit, n)))
-    emb = embeddings.VertexEmbeddings({"gcp": {"project": "p"}}, model="gemini-embedding-2-preview")
+    emb = embeddings.VertexEmbeddings({"gcp": {"project": "p"}}, model="gemini-embedding-2")
     assert emb.image(Image.new("RGB", (8, 8)), ctx) == [0.6, 0.8] and emb.text("Knorr", ctx)
-    assert posts[0][0].endswith("/models/gemini-embedding-2-preview:embedContent")
+    assert posts[0][0].endswith("/locations/global/publishers/google/models/gemini-embedding-2:embedContent")
     assert posts[0][1]["outputDimensionality"] == 768
     assert bills == [("gemini_embedding_image_token", 258), ("gemini_embedding_text_token", 258)]
     assert set(u for u, _ in bills) <= set(embeddings.SKUS)
+    mm = embeddings.VertexEmbeddings({"gcp": {"project": "p"}}, model="multimodalembedding@001")
+    assert mm.url.endswith("/locations/global/publishers/google/models/multimodalembedding@001:predict")
     with pytest.raises(ValueError, match="embedding model"):
         embeddings.VertexEmbeddings({"gcp": {"project": "p"}}, model="gemini-3.8-flash")
 
@@ -244,3 +258,47 @@ def test_alloydb_helper_runs_sql_on_a_per_thread_connection():
     ) == [("sku-1", 0.93)]
     assert seen["q"][1] == ("[0.1,0.2]",)
     assert seen["connect"][1]["enable_iam_auth"] is True
+
+
+def test_sft_jsonl_builder_and_tuned_endpoint_resolution(rpc_root, tmp_path, monkeypatch):
+    from PIL import Image
+
+    from utils import dataset, llm, tuning
+
+    # Add a 2nd gallery view per product + 1 val image so build_sft_jsonl generates both splits
+    for pid, colour in ((1, "red"), (2, "green"), (3, "blue")):
+        Image.new("RGB", (40, 60), colour).save(rpc_root / "gallery" / f"{pid}_1.jpg")
+    Image.new("RGB", (400, 300), "white").save(rpc_root / "images" / "val_0.jpg")
+    meta = json.loads((rpc_root / dataset.RPC_JSON).read_text())
+    for pid in ("1", "2", "3"):
+        meta["gallery"][pid].append(f"gallery/{pid}_1.jpg")
+    meta["splits"]["val"] = [
+        {"image": "val_0.jpg", "width": 400, "height": 300, "boxes": [[10, 10, 60, 90]], "products": [1]}
+    ]
+    (rpc_root / dataset.RPC_JSON).write_text(json.dumps(meta))
+    dataset._rpc_json.cache_clear()
+    dataset.load_rpc.cache_clear()
+
+    uploaded = []
+    monkeypatch.setattr(dataset, "upload", lambda src, dst: uploaded.append((src, dst)))
+    built = tuning.build_sft_jsonl("rpc", out_dir=tmp_path / "tuning", gcs_prefix="gs://b/tuning/rpc")
+    assert built["train_count"] == 6 and built["val_count"] == 1
+    assert built["train_uri"] == "gs://b/tuning/rpc/train.jsonl" and len(uploaded) == 1
+    first_train = json.loads(built["train_jsonl"].read_text().splitlines()[0])
+    assert first_train["contents"][0]["parts"][0]["fileData"]["fileUri"].startswith("gs://b/tuning/rpc/sheets/")
+    assert "choice" in json.loads(first_train["contents"][1]["parts"][0]["text"])
+
+    cfg = {
+        "gcp": {"project": "p", "location": "global", "region": "us-central1"},
+        "tuned_models": {
+            "gemini-3.5-flash-lite-sft": {
+                "base_model": "gemini-3.5-flash-lite",
+                "location": "us-central1",
+                "endpoint": "projects/p/locations/us-central1/endpoints/12345",
+            }
+        },
+    }
+    target, base, loc = llm.resolve_model("gemini-3.5-flash-lite-sft", cfg)
+    assert target == "projects/p/locations/us-central1/endpoints/12345"
+    assert base == "gemini-3.5-flash-lite" and loc == "us-central1"
+

@@ -1,4 +1,4 @@
-"""Vertex AI multimodal embeddings client: ``multimodalembedding@001`` or ``gemini-embedding-2-preview``.
+"""Vertex AI multimodal embeddings client: ``multimodalembedding@001`` or ``gemini-embedding-2``.
 
 Crops and text share one vector space, so a shelf crop can be matched against catalog product
 photos or names. An approach creates one in ``setup()`` and calls ``image(crop, ctx)``; passing
@@ -25,7 +25,7 @@ from utils.llm import image_to_jpeg, load_config
 
 VERTEX_AI = "C7E2-9256-1C43"  # Billing Catalog service id
 MULTIMODAL = "multimodalembedding@001"
-GEMINI_EMBEDDING = "gemini-embedding-2-preview"
+GEMINI_EMBEDDING = "gemini-embedding-2"
 MODELS = [MULTIMODAL, GEMINI_EMBEDDING]  # approaches that only embed can run either
 
 # Billable unit -> (Billing Catalog service, SKU description). Add to Approach.skus.
@@ -40,11 +40,13 @@ class VertexEmbeddings:
         if model not in MODELS:
             raise ValueError(f"embedding model must be one of {MODELS}, got {model!r}")
         gcp = (config or load_config())["gcp"]
-        region = gcp.get("region", "us-central1")
+        # Use the global Vertex AI endpoint for all embedding models for lower latency/cost (and GA gemini-embedding-2 requires global).
+        loc = gcp.get("location", "global")
+        host = "aiplatform.googleapis.com" if loc == "global" else f"{loc}-aiplatform.googleapis.com"
         self.model = model
         self.gemini = model == GEMINI_EMBEDDING
-        self.url = (f"https://{region}-aiplatform.googleapis.com/v1/projects/{gcp['project']}"
-                    f"/locations/{region}/publishers/google/models/{model}:"
+        self.url = (f"https://{host}/v1/projects/{gcp['project']}"
+                    f"/locations/{loc}/publishers/google/models/{model}:"
                     + ("embedContent" if self.gemini else "predict"))
         self.dimension = dimension or (768 if self.gemini else 512)
         creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])

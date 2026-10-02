@@ -114,20 +114,28 @@ def price_sheet(models: list[str], config: dict, session=None,
     gcp = config.get("gcp", {})
     project, location, region = gcp["project"], gcp.get("location", "global"), gcp["region"]
 
+    from utils.llm import resolve_model
+
     by_desc = {s["description"]: s for s in fetch_skus(VERTEX_AI, session, project)}
     gemini: dict[str, dict] = {}
     for model in models:
+        _, base_model, model_loc = resolve_model(model, config)
         table = {}
         for tier in _SUFFIX:
             for kind in KINDS:
-                sku = by_desc.get(sku_description(model, location, tier, kind))
+                # Always take Global region SKU prices first (lower cost than Regional SKUs).
+                sku = (
+                    by_desc.get(sku_description(base_model, "global", tier, kind))
+                    or by_desc.get(sku_description(base_model, location, tier, kind))
+                    or by_desc.get(sku_description(base_model, model_loc, tier, kind))
+                )
                 if sku:
                     table[f"{tier}/{kind}"] = _entry(sku)
         missing = [k for k in KINDS if f"standard/{k}" not in table]
         if missing:
-            raise RuntimeError(f"No Billing Catalog SKU for {model} ({location}) standard "
+            raise RuntimeError(f"No Billing Catalog SKU for {base_model} (global) standard "
                                f"{missing}; expected e.g. "
-                               f"{sku_description(model, location, 'standard', missing[0])!r}")
+                               f"{sku_description(base_model, 'global', 'standard', missing[0])!r}")
         gemini[model] = table
 
     extra, catalogs = {}, {VERTEX_AI: by_desc}

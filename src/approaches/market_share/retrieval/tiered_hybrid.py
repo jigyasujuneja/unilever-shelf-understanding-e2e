@@ -19,7 +19,7 @@ answered 39% of crops without Gemini, 95% of them correctly (embedding alone: 74
 similarity floor barely matters; the margin does. His 0.82 / 0.045 were for another embedding.
 Because the thresholds belong to that embedder's cosine scale, this approach keeps
 ``multimodalembedding@001`` as its shortlist model until they are re-tuned for
-``gemini-embedding-2-preview`` (the default of the other pipelines).
+``gemini-embedding-2`` (the default of the other pipelines).
 """
 
 from __future__ import annotations

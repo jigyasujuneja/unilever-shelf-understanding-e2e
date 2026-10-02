@@ -5,7 +5,7 @@ SB := .venv/bin/shelf-bench
 A ?= single_pass_dedup tiled_dedup hierarchy_classify embedding_text_match embedding_retrieval \
      tiered_hybrid detect_retrieve detect_tiered shelf_detect_retrieve shelf_detect_tiered
 # gemini-3.8-flash and multimodalembedding@001 lost to these on every tab (F2 per ₹); add them with M=.
-M ?= gemini-3.5-flash-lite gemini-embedding-2-preview
+M ?= gemini-3.5-flash-lite gemini-embedding-2
 
 .PHONY: help setup auth bootstrap test lint run cloud pull ui ui-cloud ui-proxy data rpc docs clean
 

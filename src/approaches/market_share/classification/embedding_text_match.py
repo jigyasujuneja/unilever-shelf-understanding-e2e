@@ -1,6 +1,6 @@
 """Nearest catalog product by text embedding (the Classification tab). No Gemini call.
 
-Vertex AI multimodal embeddings (``multimodalembedding@001`` or ``gemini-embedding-2-preview``)
+Vertex AI multimodal embeddings (``multimodalembedding@001`` or ``gemini-embedding-2``)
 put images and text in one vector space. At setup every
 catalog product's text ("brand product-with-size (category)") is embedded once (reported as the
 run's setup cost); per photo we embed the image and return the catalog product with the highest

@@ -142,3 +142,36 @@ Approaches get all of this for free through `ctx.ask` and `ctx.trace.step`. Writ
 `roles/cloudtrace.agent` + `roles/logging.logWriter`, and viewing needs `roles/cloudtrace.user` +
 `roles/logging.viewer`. Logs take up to a minute to show up. To turn it off, set
 `telemetry.enabled: false` in `config.yaml` or `SHELF_BENCH_TELEMETRY=0`. Tests never export.
+
+## Global Vertex AI Endpoints, Global Billing & LoRA SFT
+
+```mermaid
+flowchart LR
+  subgraph CFG["1. Global Routing (llm.py + embeddings.py)"]
+    G["Gemini 3.5 Flash / Flash Lite"] --> GL["locations/global<br/>aiplatform.googleapis.com"]
+    E["gemini-embedding-2 (768-D)<br/>multimodalembedding@001 (512-D)"] --> GL
+  end
+  subgraph BILL["2. Global SKU Pricing (pricing.py)"]
+    GL --> CAT["Cloud Billing Catalog API<br/>Select 'Global' SKU First (-10% vs Regional)"]
+  end
+  subgraph SFT["3. LoRA Fine-Tuning (tuning.py)"]
+    DATA["RPC / Shelves Gallery"] --> JSONL["build_sft_jsonl()<br/>4-Candidate Contact Sheets + Choice=0"]
+    JSONL --> TUNE["launch_sft_job()<br/>Vertex AI LoRA Adapter"]
+  end
+```
+
+### 1. Global Endpoint Routing ([`src/utils/llm.py`](../src/utils/llm.py), [`src/utils/embeddings.py`](../src/utils/embeddings.py))
+* **Rule:** Route all model calls to the `global` Vertex AI endpoint (`https://aiplatform.googleapis.com/v1/projects/{project}/locations/global/...`) by default.
+* **Reason 1 (Latency & Quota):** The `global` endpoint routes traffic across available regions and avoids single-region quota exhaustion.
+* **Reason 2 (Model Availability):** GA `gemini-embedding-2` requires the `global` endpoint (`us-central1` returns `404 Not Found`). Both `gemini-embedding-2` (`768-dim`) and `multimodalembedding@001` (`512-dim`) run on `locations/global`.
+* **Reason 3 (Lower Cost):** Global region SKUs in the Cloud Billing Catalog cost **10% less** than Regional SKUs (for example, `$0.30 / 1M` vs. `$0.33 / 1M` image input tokens on `gemini-3.5-flash-lite`).
+
+### 2. Global Region SKU Pricing ([`src/utils/pricing.py`](../src/utils/pricing.py))
+* **Rule:** `price_sheet()` queries `sku_description(base_model, "global", tier, kind)` first in the Cloud Billing Catalog API.
+* **Fallback:** The lookup falls back to a regional SKU only if a global SKU does not exist for that model.
+
+### 3. Parameter-Efficient LoRA SFT Pipeline ([`src/utils/tuning.py`](../src/utils/tuning.py))
+* **Step 1 (`build_sft_jsonl`):** Build Laya 4-candidate visual contact sheets from the reference gallery, including `20%` negative examples (`{"choice": 0}`) for open-world competitor rejection, and upload `train.jsonl` and `val.jsonl` to GCS.
+* **Step 2 (`launch_sft_job`):** Submit a parameter-efficient LoRA supervised fine-tuning job on Vertex AI (`adapter_size` in `{1, 4, 8, 16}`).
+* **Step 3 (`resolve_model`):** Route `-sft` model aliases in `config.yaml` to the tuned endpoint while billing tokens at the base model's `Global` SKU rate.
+
