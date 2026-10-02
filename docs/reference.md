@@ -233,6 +233,26 @@ flowchart LR
 * **Stage 3 (Competitor Middle Bottle Rule):** When a middle bottle is a non-HUL competitor product, Gemini returns `0` (`None`). The facing remains in the total shelf denominator and is excluded from the HUL numerator.
 * **Stage 4 (Visually Gated Row Smoothing):** Fill an abstained interior facing `[P, None, P] -> [P, P, P]` only when its embedding cosine with both flanking neighbors is `>= 0.86`.
 
+## Two-Stage Coarse JEV Triage + Dense Gemini 3.5 (`coarse_jev_gemini`, `coarse_jev_laya`, `detect_coarse_jev_gemini`)
+
+```mermaid
+flowchart LR
+  CROP["Normalized Shelf Crop<br/>(Photometry Stage 0)"] --> JEV["Stage 1: Coarse JEV Triage (openjev.py)<br/>0.75 * cos(gemini-embedding-2) + 0.25 * cos(112-D JEV)<br/>+ Brand / Category Centroid Gate"]
+  JEV --> GATE{"Score >= 0.90 &<br/>Margin >= 0.04?"}
+  GATE -- "YES (~65% Easy Crops)" --> FAST["Auto-Accept Top-1 SKU<br/>(0 Gemini LLM Calls)"]
+  GATE -- "NO (~35% Hard / Competitor Crops)" --> DENSE["Stage 2: Dense Gemini 3.5 + Laya Sheet<br/>Verify Variant / Pack Size or Reject (choice=0)"]
+  DENSE --> OUT["Final SKU or Competitor Rejection"]
+  FAST --> OUT
+```
+
+### 1. Why Split Coarse Triage and Dense Verification ([`src/utils/openjev.py`](../src/utils/openjev.py))
+* **Problem on 40-SKU Shelves:** Calling a generative LLM on all 40 shelf crops takes over `25 seconds` per image, while pure embedding search confuses sister sizes (`10g` vs. `60g`) and competitor bottles.
+* **Stage 1 (`coarse_jev_triage`):** Combine the `768-dim` `gemini-embedding-2` vector (`global` endpoint) with our `112-dim` JEV visual descriptor (`64-dim` `8x8` spatial Gram matrix + `48-dim` RGB/LAB color histogram and edge sharpness) and narrow the catalog by brand/category centroid similarity.
+* **Fast-Path Gate:** When top-1 combined similarity is `>= 0.90` and the margin over rank-2 is `>= 0.04`, assign the SKU immediately with **zero Gemini calls** (`~65%` of shelf crops).
+* **Stage 2 (Dense Gemini 3.5 Escalation):** Send only the remaining `~35%` ambiguous, occluded, sister-size, or competitor crops to `gemini-3.5-flash-lite` (`coarse_jev_gemini`, `coarse_jev_laya`, `detect_coarse_jev_gemini`).
+* **Benchmark Result (`ul-fs-s-sandbx-16-prj`):** `detect_coarse_jev_gemini` reaches **`0.871` End-to-End F2** at **`5.3s` p95 latency** (`₹0.215/img`), and `coarse_jev_laya` reaches **`0.900` Retrieval F2** at **`3.0s` p95 latency**.
+
+
 
 
 

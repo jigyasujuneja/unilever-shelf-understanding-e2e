@@ -197,3 +197,116 @@ def test_jev_laya_hybrid_clusters_twins_batches_medoids_and_smooths_rows(
     assert len(calls) == 1
     assert s["accuracy"] >= 2 / 3
 
+
+def test_djev_logprob_entropy_calibration_and_openjev_systemone_client(
+    rpc_root, colour_embeddings, tmp_path, monkeypatch
+):
+    import math
+    from http.server import BaseHTTPRequestHandler
+    from types import SimpleNamespace as NS
+
+    from approaches.market_share.retrieval import jev_laya_hybrid
+    from approaches.market_share.retrieval.jev_laya_hybrid import smooth_shelf_rows
+    from utils.openjev import (
+         extract_slot_distributions,
+        jev_entropy_confidence,
+        resolve_jev_choice,
+        serialize_logprobs,
+    )
+
+    # 1. Verify djev normalized Shannon entropy confidence: 1 - H(p)/ln(N)
+    assert jev_entropy_confidence({1: 1.0, 2: 0.0}, n_options=6) == 1.0
+    assert jev_entropy_confidence({0: 0.25, 1: 0.25, 2: 0.25, 3: 0.25}, n_options=4) == 0.0
+    split_conf = jev_entropy_confidence({1: 0.49, 2: 0.51}, n_options=3)
+    assert 0.30 < split_conf < 0.40
+
+    # 2. Verify Vertex AI LogprobsResult serialization + slot extraction + Bayesian visual fusion
+    fake_lp = NS(
+        chosen_candidates=[
+            NS(token='{"choices": [', log_probability=-0.001),
+            NS(token="2", log_probability=math.log(0.51)),
+            NS(token="]}", log_probability=-0.001),
+        ],
+        top_candidates=[
+            NS(candidates=[NS(token='{"choices": [', log_probability=-0.001)]),
+            NS(
+                candidates=[
+                    NS(token="2", log_probability=math.log(0.51)),
+                    NS(token="1", log_probability=math.log(0.48)),
+                    NS(token="0", log_probability=math.log(0.01)),
+                ]
+            ),
+            NS(candidates=[NS(token="]}", log_probability=-0.001)]),
+        ],
+    )
+    steps = serialize_logprobs(fake_lp)
+    slots = extract_slot_distributions(steps, valid_options={0, 1, 2, 3}, n_options=3)
+    assert len(slots) == 1 and slots[0]["choice"] == 2
+    assert slots[0]["confidence"] < 0.40  # uncertain 51% vs 48% split
+    # Because candidate 1 has a much stronger visual cosine (0.91 vs 0.78), Bayesian fusion picks SKU 101
+    top_cands = [(0.91, 101, "g/1.jpg"), (0.78, 202, "g/2.jpg")]
+    ans, conf, meta = resolve_jev_choice(2, slots[0], top_cands, min_confidence=0.45)
+    assert ans == 101 and conf == slots[0]["confidence"] and meta["mode"] == "jev_visual_fusion"
+
+    # 3. Verify smooth_shelf_rows smooths low-confidence interior slots but keeps confident ones
+    boxes = [(10.0, 10.0, 50.0, 80.0), (55.0, 12.0, 95.0, 82.0), (100.0, 10.0, 140.0, 80.0)]
+    s_vecs = [[1.0, 0.0], [0.95, 0.31], [1.0, 0.0]]
+    smoothed_low, s_info = smooth_shelf_rows(
+        boxes, [1, 2, 1], s_vecs, [{1, 2}, {1, 2}, {1, 2}], confidences=[1.0, 0.22, 1.0]
+    )
+    assert smoothed_low == [1, 1, 1] and s_info[0]["from"] == 2 and s_info[0]["mid_confidence"] == 0.22
+
+    # 4. Verify direct /v1/systemone OpenJevClient integration
+    systemone_requests = []
+
+    class SystemOneHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            systemone_requests.append(body)
+            results = {}
+            for q_key in body["questions"]:
+                results[q_key] = {
+                    "choice": "1",
+                    "confidence": 0.92,
+                    "probabilities": {"0": 0.02, "1": 0.95, "2": 0.03},
+                }
+            resp = json.dumps({
+                "results": results,
+                "model": body.get("model", "openjev-latest"),
+                "usage": {"prompt_tokens": 310, "output_tokens": 0},
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
+            self.end_headers()
+            self.wfile.write(resp)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SystemOneHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("OPENJEV_BASE_URL", f"http://127.0.0.1:{server.server_port}")
+        monkeypatch.setattr(jev_laya_hybrid.JevLayaHybrid, "min_margin", 2.0)
+        monkeypatch.setattr(jev_laya_hybrid.JevLayaHybrid, "high_cosine_margin", 2.0)
+        s_oj = runner.run(
+            "jev_laya_hybrid",
+            "gemini-t",
+            "test",
+            0,
+            0,
+            1,
+            "t",
+            results_dir=tmp_path,
+            llm=OracleLLM(),
+            log=lambda *_: None,
+        )
+        assert len(systemone_requests) == 1
+        assert "questions" in systemone_requests[0] and "images" in systemone_requests[0]
+        assert s_oj["accuracy"] >= 2 / 3
+    finally:
+        server.shutdown()
+
+

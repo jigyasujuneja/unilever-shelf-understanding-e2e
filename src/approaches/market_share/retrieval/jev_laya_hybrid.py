@@ -30,6 +30,7 @@ from approaches.market_share.classification.embedding_text_match import unit
 from approaches.market_share.retrieval.embedding_retrieval import EmbeddingRetrieval
 from approaches.market_share.retrieval.tiered_hybrid import CELL, PROMPT, SCHEMA, K, sheet
 from utils.embeddings import GEMINI_EMBEDDING
+from utils.openjev import OpenJevClient, extract_slot_distributions, resolve_jev_choice
 from utils.photometry import lab_similarity, lab_zones, restore_photometry
 
 # Hyperparameters tuned on the RPC / Shelves validation splits (see class attributes on
@@ -39,6 +40,8 @@ MIN_MARGIN = 0.034
 HIGH_COSINE = 0.905
 HIGH_COSINE_MARGIN = 0.020
 FALLBACK_COSINE = 0.82  # fallback threshold when Gemini returns malformed/missing JSON (choice is None)
+MIN_JEV_CONFIDENCE = 0.35  # djev normalized entropy confidence (1 - H(p)/ln N) below which visual fusion triggers
+SMOOTH_MAX_CONFIDENCE = 0.40  # max djev confidence eligible for [P, ?, P] -> [P, P, P] neighbour smoothing
 LAB_WEIGHT = 0.035      # CIELAB tie-breaker weight (breaks sister-shade ties within ~0.03 cosine)
 CLUSTER_COSINE = 0.92   # crop-to-crop embedding cosine to merge adjacent uncertain shelf facings
 SMOOTH_COSINE = 0.86    # visual agreement gate required before [P, None, P] -> [P, P, P] row smoothing
@@ -128,8 +131,15 @@ def smooth_shelf_rows(
     ids: list[int | None],
     vecs: list[list[float]],
     shortlists: list[set[int]],
+    confidences: list[float] | None = None,
+    max_smooth_confidence: float = SMOOTH_MAX_CONFIDENCE,
 ) -> tuple[list[int | None], list[dict]]:
-    """Visually-gated 1D Markov shelf-row smoothing: [P, None, P] -> [P, P, P] when cosine >= SMOOTH_COSINE."""
+    """Visually-gated 1D Markov shelf-row smoothing: [P, None/?, P] -> [P, P, P].
+
+    Smooths an interior slot only when it was either abstained (``None``) or had low ``djev``
+    entropy confidence (``< max_smooth_confidence``), so confident Gemini-verified or high-cosine
+    predictions are never overwritten by neighbour smoothing.
+    """
     n = len(boxes)
     if n < 3:
         return ids, []
@@ -157,9 +167,9 @@ def smooth_shelf_rows(
         for pos in range(1, len(row) - 1):
             left, mid, right = row[pos - 1], row[pos], row[pos + 1]
             pid = out[left]
-            # Only smooth when the middle crop was abstained (None) so Gemini-verified or
-            # high-cosine predictions are never overwritten by neighbour smoothing.
-            if pid is None or out[right] != pid or out[mid] is not None:
+            mid_conf = confidences[mid] if confidences is not None and mid < len(confidences) else 1.0
+            can_smooth_mid = out[mid] is None or (mid_conf < max_smooth_confidence and out[mid] != pid)
+            if pid is None or out[right] != pid or not can_smooth_mid:
                 continue
             avg_w = ((boxes[left][2] - boxes[left][0]) + (boxes[right][2] - boxes[right][0])) / 2
             gap_l = max(0.0, boxes[mid][0] - boxes[left][2])
@@ -169,11 +179,13 @@ def smooth_shelf_rows(
             cos_l = _dot(vecs[mid], vecs[left])
             cos_r = _dot(vecs[mid], vecs[right])
             if cos_l >= SMOOTH_COSINE and cos_r >= SMOOTH_COSINE and pid in shortlists[mid]:
+                prev = out[mid]
                 out[mid] = pid
                 smoothed.append({
                     "box_index": mid,
-                    "from": None,
+                    "from": prev,
                     "to": pid,
+                    "mid_confidence": round(mid_conf, 4),
                     "cos_left": round(cos_l, 4),
                     "cos_right": round(cos_r, 4),
                 })
@@ -191,22 +203,25 @@ class JevLayaHybrid(EmbeddingRetrieval):
     high_cosine = HIGH_COSINE
     high_cosine_margin = HIGH_COSINE_MARGIN
     fallback_cosine = FALLBACK_COSINE
+    min_jev_confidence = MIN_JEV_CONFIDENCE
+    smooth_max_confidence = SMOOTH_MAX_CONFIDENCE
     architecture = (
         f"Photometric de-glare -> {SHORTLIST_MODEL} + CIELAB Laya ranking "
         f"(accept if cos >= {MIN_COSINE}, margin >= {MIN_MARGIN}) -> medoid clustering & "
-        f"batched top-{K} Gemini verification -> visually-gated shelf-row smoothing"
+        f"batched top-{K} djev logprob-calibrated verification -> visually-gated shelf-row smoothing"
     )
     steps = [
         "Setup (once per run, reported apart from cost/img): embed reference photos + CIELAB zones",
         f"Per crop: photometric de-glare + {SHORTLIST_MODEL} + CIELAB sister-shade ranking",
         f"Accept embedding answer when cosine >= {MIN_COSINE} and margin >= {MIN_MARGIN}",
         f"Cluster visually identical uncertain facings (cos >= {CLUSTER_COSINE}) and verify medoids "
-        f"in batched top-{K} Gemini contact sheets",
-        f"Visually-gated 1D shelf-row smoothing ([P, None, P] -> P when neighbour cosine >= {SMOOTH_COSINE})",
+        f"via batched top-{K} contact sheets with djev 1 - H(p)/ln(N) entropy calibration",
+        f"Visually-gated 1D shelf-row smoothing ([P, None/?, P] -> P when neighbour cosine >= {SMOOTH_COSINE})",
     ]
 
     def setup(self, config: dict, ctx: Context) -> None:
         super().setup(config, ctx)
+        self.openjev = OpenJevClient(config)
         self.lab_index: dict[str, list[float]] = {}
         for _, path, _ in self.index:
             if path not in self.lab_index and path in self.jpeg:
@@ -244,17 +259,81 @@ class JevLayaHybrid(EmbeddingRetrieval):
         reranked = [(cos, pid, path) for _, cos, pid, path in head] + coarse[2 * K :]
         return reranked, q, restored
 
-    def pick(self, image: Image.Image, top: list[tuple[float, int, str]], ctx: Context) -> int | None:
+    def pick_with_confidence(
+        self, image: Image.Image, top: list[tuple[float, int, str]], ctx: Context
+    ) -> tuple[int | None, float, dict]:
         refs = [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
-        data = ctx.ask(sheet(image, refs), PROMPT, schema=SCHEMA).data
-        choice = data.get("choice") if isinstance(data, dict) else None
-        if isinstance(choice, int) and 1 <= choice <= len(top):
-            return top[choice - 1][1]
-        if choice == 0:
-            return None
-        if top and top[0][0] >= self.fallback_cosine:
-            return top[0][1]
-        return None
+        sheet_im = sheet(image, refs)
+        openjev = getattr(self, "openjev", None)
+        if openjev is not None and openjev.enabled:
+            choices, slots, usage, _ = openjev.ask_choices(sheet_im, 1, len(top), PROMPT)
+            with ctx.trace._lock:
+                ctx.trace.usage = ctx.trace.usage + usage
+            raw_choice = choices[0] if choices else None
+            slot = slots[0] if slots else None
+        else:
+            res = ctx.ask(sheet_im, PROMPT, schema=SCHEMA, logprobs=len(top) + 1)
+            data = res.data
+            raw_choice = data.get("choice") if isinstance(data, dict) else None
+            valid_opts = set(range(0, len(top) + 1))
+            slots = extract_slot_distributions(
+                res.meta.get("logprobs"), valid_options=valid_opts, n_options=len(top) + 1
+            )
+            slot = slots[0] if slots else None
+        return resolve_jev_choice(
+            raw_choice,
+            slot,
+            top,
+            fallback_cosine=self.fallback_cosine,
+            min_confidence=self.min_jev_confidence,
+        )
+
+    def pick(self, image: Image.Image, top: list[tuple[float, int, str]], ctx: Context) -> int | None:
+        ans, _, _ = self.pick_with_confidence(image, top, ctx)
+        return ans
+
+    def pick_batch_with_confidence(
+        self,
+        queries: list[Image.Image],
+        tops: list[list[tuple[float, int, str]]],
+        ctx: Context,
+    ) -> list[tuple[int | None, float, dict]]:
+        if len(queries) == 1:
+            return [self.pick_with_confidence(queries[0], tops[0], ctx)]
+        refs_per_q = [
+            [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
+            for top in tops
+        ]
+        prompt = BATCH_PROMPT.format(m=len(queries), k=K)
+        sheet_im = multi_sheet(queries, refs_per_q)
+        openjev = getattr(self, "openjev", None)
+        if openjev is not None and openjev.enabled:
+            choices, slots, usage, _ = openjev.ask_choices(sheet_im, len(queries), K, prompt)
+            with ctx.trace._lock:
+                ctx.trace.usage = ctx.trace.usage + usage
+        else:
+            res = ctx.ask(sheet_im, prompt, schema=BATCH_SCHEMA, logprobs=K + 1)
+            data = res.data
+            raw = data.get("choices") if isinstance(data, dict) else None
+            choices = raw if isinstance(raw, list) else []
+            valid_opts = set(range(0, K + 1))
+            slots = extract_slot_distributions(
+                res.meta.get("logprobs"), valid_options=valid_opts, n_options=K + 1
+            )
+        out: list[tuple[int | None, float, dict]] = []
+        for idx, top in enumerate(tops):
+            c = choices[idx] if idx < len(choices) else None
+            slot = slots[idx] if idx < len(slots) else None
+            out.append(
+                resolve_jev_choice(
+                    c,
+                    slot,
+                    top,
+                    fallback_cosine=self.fallback_cosine,
+                    min_confidence=self.min_jev_confidence,
+                )
+            )
+        return out
 
     def pick_batch(
         self,
@@ -262,28 +341,7 @@ class JevLayaHybrid(EmbeddingRetrieval):
         tops: list[list[tuple[float, int, str]]],
         ctx: Context,
     ) -> list[int | None]:
-        if len(queries) == 1:
-            return [self.pick(queries[0], tops[0], ctx)]
-        refs_per_q = [
-            [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
-            for top in tops
-        ]
-        prompt = BATCH_PROMPT.format(m=len(queries), k=K)
-        data = ctx.ask(multi_sheet(queries, refs_per_q), prompt, schema=BATCH_SCHEMA).data
-        raw = data.get("choices") if isinstance(data, dict) else None
-        choices = raw if isinstance(raw, list) else []
-        out: list[int | None] = []
-        for idx, top in enumerate(tops):
-            c = choices[idx] if idx < len(choices) else None
-            if isinstance(c, int) and 1 <= c <= len(top):
-                out.append(top[c - 1][1])
-            elif c == 0:
-                out.append(None)
-            elif top and top[0][0] >= self.fallback_cosine:
-                out.append(top[0][1])
-            else:
-                out.append(None)
-        return out
+        return [ans for ans, _, _ in self.pick_batch_with_confidence(queries, tops, ctx)]
 
     def identify(
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None
@@ -305,12 +363,12 @@ class JevLayaHybrid(EmbeddingRetrieval):
                 info={**info, "answer": pid},
             )
             return pid
-        choice = self.pick(restored, ranked[:K], ctx)
+        choice, conf, jev_meta = self.pick_with_confidence(restored, ranked[:K], ctx)
         ctx.trace.step(
             "Gemini tier",
-            f"escalated (cos {s1:.3f}, margin {s1 - s2:.3f}) -> "
+            f"escalated (cos {s1:.3f}, margin {s1 - s2:.3f}, jev_conf {conf:.2f}) -> "
             + (f"#{choice}" if choice is not None else "none"),
-            info={**info, "answer": choice},
+            info={**info, **jev_meta, "answer": choice},
         )
         return choice
 
@@ -324,6 +382,7 @@ class JevLayaHybrid(EmbeddingRetrieval):
             crop_data = list(pool.map(lambda c: self._rank_crop(c, ctx), crops))
 
         ids: list[int | None] = [None] * len(boxes)
+        confidences: list[float] = [1.0] * len(boxes)
         vecs: list[list[float]] = []
         shortlists: list[set[int]] = []
         top_ids: list[int | None] = []
@@ -338,6 +397,7 @@ class JevLayaHybrid(EmbeddingRetrieval):
             shortlists.append({pid for _, pid, _ in ranked[:K]})
             if not ranked:
                 top_ids.append(None)
+                confidences[idx] = 0.0
                 continue
             (s1, pid, _) = ranked[0]
             s2 = max((s for s, _, _ in ranked[1:]), default=-1.0)
@@ -351,6 +411,7 @@ class JevLayaHybrid(EmbeddingRetrieval):
             }
             if s1 >= self.min_cosine and margin >= req_margin:
                 ids[idx] = pid
+                confidences[idx] = 1.0
                 ctx.trace.step(
                     "Embedding tier",
                     f"box {idx + 1}: #{pid} accepted (cos {s1:.3f}, margin {margin:.3f})",
@@ -368,25 +429,26 @@ class JevLayaHybrid(EmbeddingRetrieval):
             ]
             batches = [medoids[i : i + BATCH_SIZE] for i in range(0, len(medoids), BATCH_SIZE)]
 
-            def run_batch(batch: list[int]) -> list[int | None]:
+            def run_batch(batch: list[int]) -> list[tuple[int | None, float, dict]]:
                 qs = [restored_crops[m] for m in batch]
                 ts = [ranked_lists[m][:K] for m in batch]
-                return self.pick_batch(qs, ts, ctx)
+                return self.pick_batch_with_confidence(qs, ts, ctx)
 
             with ThreadPoolExecutor(max_workers=4) as pool:
                 batch_results = list(pool.map(run_batch, batches))
 
-            medoid_answers = [ans for b_res in batch_results for ans in b_res]
-            for cl, med, ans in zip(clusters, medoids, medoid_answers, strict=True):
+            medoid_outcomes = [item for b_res in batch_results for item in b_res]
+            for cl, med, (ans, conf, jev_meta) in zip(clusters, medoids, medoid_outcomes, strict=True):
                 for member in cl:
                     ids[member] = ans
+                    confidences[member] = conf
                 s1 = ranked_lists[med][0][0]
                 s2 = max((s for s, _, _ in ranked_lists[med][1:]), default=-1.0)
                 twins = f" (+{len(cl) - 1} cluster twins)" if len(cl) > 1 else ""
                 ctx.trace.step(
                     "Gemini tier",
-                    f"box {med + 1}{twins}: escalated (cos {s1:.3f}, margin {s1 - s2:.3f}) -> "
-                    + (f"#{ans}" if ans is not None else "none"),
+                    f"box {med + 1}{twins}: escalated (cos {s1:.3f}, margin {s1 - s2:.3f}, "
+                    f"jev_conf {conf:.2f}) -> " + (f"#{ans}" if ans is not None else "none"),
                     info={
                         "medoid_box": med,
                         "cluster_boxes": cl,
@@ -394,11 +456,19 @@ class JevLayaHybrid(EmbeddingRetrieval):
                             {"sku_id": i, "cosine": round(s, 4)} for s, i, _ in ranked_lists[med][:K]
                         ],
                         "thresholds": {"min_cosine": self.min_cosine, "min_margin": self.min_margin},
+                        **jev_meta,
                         "answer": ans,
                     },
                 )
 
-        ids, smoothed = smooth_shelf_rows(boxes, ids, vecs, shortlists)
+        ids, smoothed = smooth_shelf_rows(
+            boxes,
+            ids,
+            vecs,
+            shortlists,
+            confidences=confidences,
+            max_smooth_confidence=self.smooth_max_confidence,
+        )
         if smoothed:
             ctx.trace.step(
                 "Laya row smoothing",
