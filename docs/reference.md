@@ -175,3 +175,26 @@ flowchart LR
 * **Step 2 (`launch_sft_job`):** Submit a parameter-efficient LoRA supervised fine-tuning job on Vertex AI (`adapter_size` in `{1, 4, 8, 16}`).
 * **Step 3 (`resolve_model`):** Route `-sft` model aliases in `config.yaml` to the tuned endpoint while billing tokens at the base model's `Global` SKU rate.
 
+## Stage 0 Photometry & `djev_classify` Hierarchy Classifier
+
+```mermaid
+flowchart LR
+  RAW["Raw Product Crop<br/>(Specular Glare + Yellow Cast)"] --> PHOT["Stage 0: restore_photometry()<br/>Inpaint Glare + LAB CLAHE + WB<br/>(CPU, <5 ms)"]
+  PHOT --> EMB["Stage 1: gemini-embedding-2 (global)<br/>Cosine Rank vs Catalog Text"]
+  EMB --> GATE{"Unique Brand or<br/>Margin >= 0.025?"}
+  GATE -- "YES (Fast Path)" --> OUT["Return Top-1 SKU<br/>(0 Gemini Calls)"]
+  GATE -- "NO (Same-Brand Sister Variants)" --> GEM["Stage 2: Gemini 3.5 Size + Variant Check<br/>Filter by Brand + Printed Pack Size"]
+  GEM --> OUT
+```
+
+### 1. Why Photometry Runs at Stage 0 ([`src/utils/photometry.py`](../src/utils/photometry.py))
+* **Problem:** Store lights create white specular glare on glossy packs and warm yellow color casts.
+* **Effect on Models:** Glare hides printed pack sizes (`10g` vs. `60g`) and shifts package colors away from studio catalog photos.
+* **Action (`restore_photometry`):** Detect saturated low-chroma glare regions (`L >= 242`), inpaint localized glare from surrounding package pixels, and normalize contrast on the CPU in under `5 ms`.
+
+### 2. How `djev_classify` Identifies Brand, Variant, and SKU ([`src/approaches/market_share/classification/djev_classify.py`](../src/approaches/market_share/classification/djev_classify.py))
+* **Step 1 (Global Embedding Shortlist):** Embed the restored crop with `gemini-embedding-2` (`global` endpoint) and rank all catalog items by cosine similarity.
+* **Step 2 (Fast-Path Gate):** Accept the top-1 SKU immediately (with **zero Gemini calls**) when the brand has only one product in the catalog, when rank-1 and rank-2 belong to different brands, or when the cosine margin is `>= 0.025`.
+* **Step 3 (Sister-Variant Verification):** When rank-1 and rank-2 belong to the same brand within `< 0.025` margin, filter the catalog to that brand, read the printed pack size (`10g`, `130ml`, `1kg`) with Gemini 3.5, and select the exact SKU.
+
+
