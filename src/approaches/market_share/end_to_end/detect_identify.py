@@ -26,6 +26,17 @@ from PIL import Image
 from approaches.base import BOX_LIST_SCHEMA, Approach, Box, Context, compose, to_pixels
 from approaches.market_share.detection.single_pass_dedup import SinglePassDedup
 from approaches.market_share.retrieval.embedding_retrieval import MODEL, EmbeddingRetrieval
+from approaches.market_share.retrieval.jev_laya_hybrid import (
+    CLUSTER_COSINE,
+    SMOOTH_COSINE,
+    JevLayaHybrid,
+)
+from approaches.market_share.retrieval.jev_laya_hybrid import (
+    MIN_COSINE as LAYA_MIN_COSINE,
+)
+from approaches.market_share.retrieval.jev_laya_hybrid import (
+    MIN_MARGIN as LAYA_MIN_MARGIN,
+)
 from approaches.market_share.retrieval.tiered_hybrid import (
     MIN_COSINE,
     MIN_MARGIN,
@@ -89,6 +100,25 @@ DetectTiered = compose(
     ],
 )
 
+DetectJevLaya = compose(
+    "detect_jev_laya",
+    GeminiBoxDetector,
+    JevLayaHybrid,
+    dataset="rpc",
+    architecture=(
+        "Gemini detects boxes -> de-glare + gemini-embedding-2-preview + CIELAB Laya ranking -> "
+        "medoid clustering & batched Gemini verification"
+    ),
+    steps=[
+        "Setup (once per run, reported apart from cost/img): embed reference photos + CIELAB zones",
+        "One Gemini call on the photo returns every product box",
+        f"Per box: de-glare + gemini-embedding-2-preview + CIELAB ranking; accept if cos >= "
+        f"{LAYA_MIN_COSINE} and margin >= {LAYA_MIN_MARGIN}",
+        f"Cluster adjacent uncertain crops (cos >= {CLUSTER_COSINE}) and verify medoids in "
+        f"batched top-{K} Gemini contact sheets",
+    ],
+)
+
 
 # ---- Real store shelves (Shelf Images parent-level, 96 products, 16-39 facings/photo) ---------
 
@@ -117,5 +147,25 @@ ShelfDetectTiered = compose(
         "single_pass_dedup: one Gemini call + container, NMS and depth-ghost filters",
         f"Per box: embedding match; if top >= {MIN_COSINE} and margin >= {MIN_MARGIN}, keep it, "
         f"else Gemini picks from the top {K}",
+    ],
+)
+
+ShelfJevLaya = compose(
+    "shelf_jev_laya",
+    SinglePassDedup,
+    JevLayaHybrid,
+    dataset="shelves",
+    architecture=(
+        "single_pass_dedup boxes -> de-glare + gemini-embedding-2-preview + CIELAB Laya ranking -> "
+        "medoid clustering, batched Gemini verification & visually-gated row smoothing"
+    ),
+    steps=[
+        "Setup (once per run, reported apart from cost/img): embed reference crops + CIELAB zones",
+        "single_pass_dedup: one Gemini call + container, NMS and depth-ghost filters",
+        f"Per box: de-glare + gemini-embedding-2-preview + CIELAB ranking; accept if cos >= "
+        f"{LAYA_MIN_COSINE} and margin >= {LAYA_MIN_MARGIN}",
+        f"Cluster adjacent uncertain facings (cos >= {CLUSTER_COSINE}) and verify medoids in "
+        f"batched top-{K} Gemini contact sheets",
+        f"Visually-gated 1D shelf-row smoothing ([P, ?, P] -> P when neighbour cos >= {SMOOTH_COSINE})",
     ],
 )
