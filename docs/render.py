@@ -21,7 +21,8 @@ PAGE = """<!doctype html><html><body style="margin:0;background:#fff">
 async def main() -> None:
     (HERE / "images").mkdir(exist_ok=True)
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
+        chrome = Path("/usr/bin/google-chrome")
+        browser = await p.chromium.launch(executable_path=str(chrome) if chrome.exists() else None)
         page = await browser.new_page(device_scale_factor=2, viewport={"width": 1600, "height": 1000})
         await page.set_content(PAGE)
         await page.wait_for_function("window.mermaid !== undefined")

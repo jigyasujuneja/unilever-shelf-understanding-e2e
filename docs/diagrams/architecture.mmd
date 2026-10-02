@@ -13,7 +13,7 @@ flowchart TB
     CLI -- "4. pull runs" --> RES --> UI
   end
 
-  subgraph GCP["GCP project: unilever-shelf-understanding"]
+  subgraph GCP["GCP project: ul-fs-s-sandbx-16-prj"]
     direction TB
     subgraph BUILD["Build"]
       direction LR
@@ -26,16 +26,16 @@ flowchart TB
       ADMIN["Admin API<br/>real task durations"]:::gcp
     end
 
-    subgraph SERVICES["Called by every task"]
+    subgraph SERVICES["Called by every task (Global Endpoint + Global SKU Prices)"]
       direction LR
-      GEM["Vertex AI Gemini (global)<br/>gemini-3.8-flash<br/>gemini-3.5-flash-lite"]:::ai
-      BILL["Cloud Billing Catalog API<br/>live prices + USD to INR"]:::gcp
-      DS[("Cloud Storage<br/>SKU110K_fixed/ dataset<br/>results/ output")]:::data
+      GEM["Vertex AI Gemini (global)<br/>gemini-3.5-flash<br/>gemini-3.5-flash-lite"]:::ai
+      BILL["Cloud Billing Catalog API<br/>Global region SKUs + USD to INR"]:::gcp
+      DS[("Cloud Storage<br/>SKU110K_fixed / HUL / RPC / shelves<br/>results/ auto-synced")]:::data
     end
 
-    subgraph RET["Product retrieval (optional)"]
+    subgraph RET["Product retrieval & LoRA SFT"]
       direction LR
-      EMB["Vertex AI multimodal<br/>embeddings"]:::future --> ADB[("AlloyDB<br/>pgvector / ScaNN<br/>not provisioned yet")]:::future
+      EMB["Vertex AI Embeddings (global)<br/>gemini-embedding-2 (768-D)<br/>multimodalembedding@001 (512-D)"]:::ai --> ADB[("AlloyDB<br/>pgvector / ScaNN<br/>optional")]:::future
     end
   end
 
