@@ -197,4 +197,24 @@ flowchart LR
 * **Step 2 (Fast-Path Gate):** Accept the top-1 SKU immediately (with **zero Gemini calls**) when the brand has only one product in the catalog, when rank-1 and rank-2 belong to different brands, or when the cosine margin is `>= 0.025`.
 * **Step 3 (Sister-Variant Verification):** When rank-1 and rank-2 belong to the same brand within `< 0.025` margin, filter the catalog to that brand, read the printed pack size (`10g`, `130ml`, `1kg`) with Gemini 3.5, and select the exact SKU.
 
+## `jev_laya_hybrid` Visual Retrieval & Contact-Sheet Verifier
+
+```mermaid
+flowchart LR
+  CROP["Normalized Shelf Crop"] --> JEV["Stage 1: Hybrid Rank<br/>gemini-embedding-2 (global) + CIELAB Color"]
+  JEV --> GATE{"Cos >= 0.80 &<br/>Margin >= 0.034?"}
+  GATE -- "YES (Fast Path)" --> MATCH["Accept Top-1 SKU<br/>(0 Gemini Calls)"]
+  GATE -- "NO (Ambiguous / Competitor)" --> LAYA["Stage 2: Laya Contact Sheet<br/>Tile [Query | Ref 1 | Ref 2 | Ref 3 | Ref 4]"]
+  LAYA --> CHOICE{"Gemini 3.5 Choice"}
+  CHOICE -- "1..4" --> MATCH
+  CHOICE -- "0 (Competitor)" --> REJ["Reject from HUL Numerator<br/>Keep in Shelf Denominator"]
+```
+
+### 1. How `jev_laya_hybrid` Differs from Public OpenJEV & Laya ([`src/approaches/market_share/retrieval/jev_laya_hybrid.py`](../src/approaches/market_share/retrieval/jev_laya_hybrid.py))
+* **Public Baseline Limitation:** Public OpenJEV returns the top-1 cosine neighbor for every crop, and public Laya calls Gemini on every crop.
+* **Our Hybrid Step 1 (Embedding + CIELAB Margin Gate):** Rank the reference gallery with `gemini-embedding-2` (`global`) plus CIELAB chromatic histograms. Accept the top-1 SKU immediately when `cos >= 0.80` and `margin >= 0.034` (or `cos >= 0.90` and `margin >= 0.020`).
+* **Our Hybrid Step 2 (Laya `K=4` Contact Sheet):** For ambiguous crops, tile the query crop next to its top-4 gallery photos (`[1]..[4]`) in one composite image (up to `8` crops batched per Gemini 3.5 call).
+* **Our Hybrid Step 3 (`choice = 0` Competitor Rejection):** If the crop is a non-HUL competitor product, Gemini returns `{"choice": 0}` and rejects the false match.
+
+
 
