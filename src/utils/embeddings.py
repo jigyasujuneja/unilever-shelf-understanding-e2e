@@ -40,12 +40,11 @@ class VertexEmbeddings:
         if model not in MODELS:
             raise ValueError(f"embedding model must be one of {MODELS}, got {model!r}")
         gcp = (config or load_config())["gcp"]
-        region = gcp.get("region", "us-central1")
+        # Use the global Vertex AI endpoint for all embedding models for lower latency/cost (and GA gemini-embedding-2 requires global).
+        loc = gcp.get("location", "global")
+        host = "aiplatform.googleapis.com" if loc == "global" else f"{loc}-aiplatform.googleapis.com"
         self.model = model
         self.gemini = model == GEMINI_EMBEDDING
-        # GA gemini-embedding-2 is served on the global Vertex AI endpoint (regional us-central1 returns 404).
-        host = "aiplatform.googleapis.com" if self.gemini else f"{region}-aiplatform.googleapis.com"
-        loc = "global" if self.gemini else region
         self.url = (f"https://{host}/v1/projects/{gcp['project']}"
                     f"/locations/{loc}/publishers/google/models/{model}:"
                     + ("embedContent" if self.gemini else "predict"))

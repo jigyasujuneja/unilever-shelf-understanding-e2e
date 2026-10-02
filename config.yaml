@@ -50,11 +50,11 @@ models:
 tuned_models:
   gemini-3.5-flash-lite-sft:
     base_model: gemini-3.5-flash-lite
-    location: us-central1
+    location: global
     endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/ENDPOINT_ID
   gemini-3.5-flash-sft:
     base_model: gemini-3.5-flash
-    location: us-central1
+    location: global
     endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/ENDPOINT_ID
 
 # AlloyDB, for approaches that identify products by vector lookup (utils/alloydb.py has the

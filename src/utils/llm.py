@@ -137,9 +137,8 @@ TIER_HEADERS = {
 def resolve_model(model: str, config: dict | None = None) -> tuple[str, str, str]:
     """Resolve ``model`` -> ``(target_model_or_endpoint, billing_base_model, location)``.
 
-    If ``model`` is configured under ``tuned_models`` in ``config.yaml`` (or via
-    ``$SHELF_BENCH_SFT_ENDPOINT``), routes API calls to its live Vertex AI tuned endpoint in
-    ``us-central1`` while billing tokens against its ``base_model`` SKU.
+    Uses ``global`` for all standard and fallback models for lower latency and cost; only uses a
+    regional location when calling a live deployed Vertex AI ``/endpoints/`` resource.
     """
     cfg = config or load_config()
     gcp = cfg.get("gcp", {})
@@ -151,11 +150,16 @@ def resolve_model(model: str, config: dict | None = None) -> tuple[str, str, str
         if "ENDPOINT_ID" in cfg_ep:
             cfg_ep = ""
         endpoint = os.environ.get("SHELF_BENCH_SFT_ENDPOINT") or cfg_ep or base
-        loc = tuned.get("location") or ("us-central1" if "endpoints/" in str(endpoint) else default_loc)
+        if "endpoints/" in str(endpoint):
+            parts = str(endpoint).split("/")
+            ep_loc = parts[parts.index("locations") + 1] if "locations" in parts else None
+            loc = tuned.get("location") or ep_loc or default_loc
+        else:
+            loc = default_loc
         return str(endpoint), str(base), str(loc)
     if model.startswith("projects/") and "/endpoints/" in model:
         parts = model.split("/")
-        loc = parts[parts.index("locations") + 1] if "locations" in parts else gcp.get("region", "us-central1")
+        loc = parts[parts.index("locations") + 1] if "locations" in parts else default_loc
         base = os.environ.get("SHELF_BENCH_SFT_BASE_MODEL", "gemini-3.5-flash-lite")
         return model, base, loc
     return model, model, default_loc

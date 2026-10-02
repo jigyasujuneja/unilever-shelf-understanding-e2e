@@ -123,18 +123,19 @@ def price_sheet(models: list[str], config: dict, session=None,
         table = {}
         for tier in _SUFFIX:
             for kind in KINDS:
+                # Always take Global region SKU prices first (lower cost than Regional SKUs).
                 sku = (
-                    by_desc.get(sku_description(base_model, model_loc, tier, kind))
+                    by_desc.get(sku_description(base_model, "global", tier, kind))
                     or by_desc.get(sku_description(base_model, location, tier, kind))
-                    or by_desc.get(sku_description(base_model, "global", tier, kind))
+                    or by_desc.get(sku_description(base_model, model_loc, tier, kind))
                 )
                 if sku:
                     table[f"{tier}/{kind}"] = _entry(sku)
         missing = [k for k in KINDS if f"standard/{k}" not in table]
         if missing:
-            raise RuntimeError(f"No Billing Catalog SKU for {base_model} ({location}) standard "
+            raise RuntimeError(f"No Billing Catalog SKU for {base_model} (global) standard "
                                f"{missing}; expected e.g. "
-                               f"{sku_description(base_model, location, 'standard', missing[0])!r}")
+                               f"{sku_description(base_model, 'global', 'standard', missing[0])!r}")
         gemini[model] = table
 
     extra, catalogs = {}, {VERTEX_AI: by_desc}

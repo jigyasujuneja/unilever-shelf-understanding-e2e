@@ -91,6 +91,10 @@ def test_price_sheet_parses_billing_catalog(monkeypatch):
         sku(pricing.sku_description("gemini-9-flash", "global", t, k), 0, n)
         for t, n in (("standard", 300), ("priority", 540))
         for k in pricing.KINDS
+    ] + [
+        sku(pricing.sku_description("gemini-9-flash", "us-central1", t, k), 0, n)
+        for t, n in (("standard", 330), ("priority", 594))
+        for k in pricing.KINDS
     ]
     catalog = {
         pricing.VERTEX_AI: gemini,
@@ -118,11 +122,19 @@ def test_price_sheet_parses_billing_catalog(monkeypatch):
     )
     cfg = {
         "gcp": {"project": "p", "location": "global", "region": "us-central1"},
+        "tuned_models": {
+            "gemini-9-flash-sft": {
+                "base_model": "gemini-9-flash",
+                "location": "us-central1",
+                "endpoint": "projects/p/locations/us-central1/endpoints/12345",
+            }
+        },
         "promotions": [{"models": ["x"], "credit_share": 0.5, "until": date(2026, 12, 31)}],
     }
     # (YAML parses `until` as a date; the sheet must still be JSON-serialisable.)
-    sheet = REAL_PRICE_SHEET(["gemini-9-flash"], cfg, session=object())
+    sheet = REAL_PRICE_SHEET(["gemini-9-flash", "gemini-9-flash-sft"], cfg, session=object())
     assert sheet["gemini"]["gemini-9-flash"]["priority/output"]["usd"] == pytest.approx(5.4e-7)
+    assert sheet["gemini"]["gemini-9-flash-sft"]["standard/image_input"]["usd"] == pytest.approx(3.0e-7)
     assert sheet["usd_to_inr"] == pytest.approx(95.545)
     assert sheet["cloud_run"]["vcpu_second"]["usd"] == 1.8e-5
     assert sheet["storage"]["class_b_op"]["usd"] == pytest.approx(4e-7)  # paid tier, not free
@@ -214,6 +226,8 @@ def test_gemini_embedding_uses_embed_content_and_bills_reported_tokens(monkeypat
     assert posts[0][1]["outputDimensionality"] == 768
     assert bills == [("gemini_embedding_image_token", 258), ("gemini_embedding_text_token", 258)]
     assert set(u for u, _ in bills) <= set(embeddings.SKUS)
+    mm = embeddings.VertexEmbeddings({"gcp": {"project": "p"}}, model="multimodalembedding@001")
+    assert mm.url.endswith("/locations/global/publishers/google/models/multimodalembedding@001:predict")
     with pytest.raises(ValueError, match="embedding model"):
         embeddings.VertexEmbeddings({"gcp": {"project": "p"}}, model="gemini-3.8-flash")
 
