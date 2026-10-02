@@ -178,6 +178,7 @@ Each run writes `results/<run_id>/summary.json` (the leaderboard row) and `image
 | `djev_classify` | Classification | any `gemini-*` (+ `gemini-embedding-2-preview`) | De-glare + `gemini-embedding-2-preview` fast-path when the top match's brand is unique or cosine margin >= 0.025; otherwise filters to that brand, reads pack size, and Gemini picks the exact sister variant |
 | `embedding_retrieval` | Retrieval | `multimodalembedding@001` or `gemini-embedding-2-preview` | Embeds each crop and returns the product whose closest **reference photo** is most similar (cosine). No Gemini call |
 | `tiered_hybrid` | Retrieval | any `gemini-*` (+ `multimodalembedding@001`) | Accepts the embedding answer when it is clearly ahead (cosine >= 0.70 and >= 0.045 above the runner-up, tuned on val for `multimodalembedding@001`); otherwise one Gemini call sees the crop next to one reference photo of each of the top 5 products and picks one, or none |
+| `jev_laya_hybrid` | Retrieval | any `gemini-*` (+ `gemini-embedding-2-preview`) | De-glare + `gemini-embedding-2-preview` + 3-zone CIELAB Laya ranking; accepts when cosine >= 0.78 and margin >= 0.035 (or >= 0.015 at cosine >= 0.85), otherwise clusters identical uncertain crops (cosine >= 0.92) and verifies up to 4 medoids per Gemini contact sheet |
 | `detect_retrieve` | End-to-end (RPC) | any `gemini-*` (+ `gemini-embedding-2-preview`) | One Gemini call boxes every product, then `embedding_retrieval` on each box |
 | `detect_tiered` | End-to-end (RPC) | any `gemini-*` (+ `multimodalembedding@001`) | One Gemini call boxes every product, then `tiered_hybrid` on each box |
 | `shelf_detect_retrieve`, `shelf_detect_tiered` | End-to-end (Shelves) | as above | `single_pass_dedup` boxes, then the same identification as the two pipelines above, on HoloSelecta shelves (`tiered_hybrid`'s thresholds are the ones tuned on RPC) |
@@ -370,7 +371,7 @@ src/
     market_share/
       detection/                 SKU-110K shelf product detectors (single_pass_dedup, tiled_dedup)
       classification/            closed-catalog classifiers (hierarchy_classify, embedding_text_match, djev_classify)
-      retrieval/                 reference-photo retrievers (embedding_retrieval, tiered_hybrid)
+      retrieval/                 reference-photo retrievers (embedding_retrieval, tiered_hybrid, jev_laya_hybrid)
       end_to_end/                composed pipelines (detect_identify.py) + single-call / AlloyDB templates
     merchandising/
       planogram_compliance/      shelf-row layout, facings & share-of-shelf approaches (awaiting labelled data)

@@ -1,0 +1,159 @@
+{
+  "images": 5,
+  "errors": 0,
+  "tp": 33,
+  "fp": 2,
+  "fn": 2,
+  "precision": 0.9429,
+  "recall": 0.9429,
+  "f2": 0.9429,
+  "accuracy": 0.9429,
+  "p50_latency_s": 1.384,
+  "p95_latency_s": 1.448,
+  "p99_latency_s": 1.448,
+  "cost_per_image_usd": 0.0008126999999999999,
+  "tokens": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "calls": 0,
+    "traffic": {},
+    "buckets": {}
+  },
+  "field_accuracy": {
+    "product": 0.9429,
+    "category": 1.0
+  },
+  "run_id": "1001-131714-embedding_retrieval-gemini-embedding-2-preview",
+  "approach": "embedding_retrieval",
+  "use_case": "market_share",
+  "task": "retrieval",
+  "dataset": "rpc",
+  "model": "gemini-embedding-2-preview",
+  "tier": "standard",
+  "traffic": {},
+  "priority_served": null,
+  "flex_served": null,
+  "architecture": "Crop embedding -> nearest reference photo [gemini-embedding-2-preview]",
+  "steps": [
+    "Setup (once per run, reported apart from cost/img): embed every reference photo",
+    "Embed each product crop with the same model",
+    "Return the product whose reference photo is most similar (cosine)"
+  ],
+  "owner": "jjuneja",
+  "split": "test",
+  "limit": 5,
+  "seed": 0,
+  "workers": 4,
+  "created_at": "2026-10-01T13:17:14+00:00",
+  "environment": {
+    "platform": "local"
+  },
+  "telemetry": {
+    "trace_id": "537dd3e6a113375ee0e5215244e7b26f",
+    "span_id": "9cf7bba6091550e4",
+    "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=537dd3e6a113375ee0e5215244e7b26f?project=unilever-shelf-understanding",
+    "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Funilever-shelf-understanding%2Ftraces%2F537dd3e6a113375ee0e5215244e7b26f%22%20timestamp%3E%3D%222026-10-01T13%3A12%3A35Z%22%20timestamp%3C%3D%222026-10-02T13%3A17%3A35Z%22?project=unilever-shelf-understanding"
+  },
+  "wall_time_s": 2.1,
+  "pricing": {
+    "source": "cloudbilling.googleapis.com (Cloud Billing Catalog API, list prices)",
+    "fetched_at": "2026-10-01T13:17:14+00:00",
+    "location": "global",
+    "region": "us-central1",
+    "usd_to_inr": 95.98874999870618,
+    "gemini": {},
+    "extra": {
+      "embedding_image": {
+        "sku": "276A-E20A-4D82",
+        "description": "Embeddings for multimodal - Image (input)",
+        "usd": 0.0001,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "embedding_text_char": {
+        "sku": "F5F1-90ED-3B1E",
+        "description": "Embeddings for multimodal - Text (input)",
+        "usd": 2e-07,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "gemini_embedding_image_token": {
+        "sku": "330D-7FB0-87C5",
+        "description": "Gemini MM Embedding - Image Input",
+        "usd": 4.5e-07,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "gemini_embedding_text_token": {
+        "sku": "EBBD-6991-B1BB",
+        "description": "Gemini MM Embedding - Text Input",
+        "usd": 2e-07,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      }
+    },
+    "cloud_run": {
+      "vcpu_second": {
+        "sku": "257B-2A84-3396",
+        "description": "Jobs CPU in us-central1",
+        "usd": 1.8e-05,
+        "unit": "s",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "gib_second": {
+        "sku": "8A79-9F45-5F32",
+        "description": "Jobs Memory in us-central1",
+        "usd": 2e-06,
+        "unit": "GiBy.s",
+        "effective": "2026-10-01T07:00:00Z"
+      }
+    },
+    "storage": {
+      "class_a_op": {
+        "sku": "4DBF-185F-A415",
+        "description": "Regional Standard Class A Operations",
+        "usd": 5e-06,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "class_b_op": {
+        "sku": "7870-010B-2763",
+        "description": "Regional Standard Class B Operations",
+        "usd": 4e-07,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      }
+    },
+    "promotions": [
+      {
+        "name": "Gemini 3.x Flash introductory pricing (50% credit back on net spend)",
+        "models": [
+          "gemini-3.8-flash",
+          "gemini-3.7-flash",
+          "gemini-3.6-flash"
+        ],
+        "credit_share": 0.5,
+        "until": "2026-12-31",
+        "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+      }
+    ]
+  },
+  "usd_to_inr": 95.98874999870618,
+  "cost": {
+    "gemini_list_usd_per_image": 0.0,
+    "gemini_credit_usd_per_image": 0.0,
+    "gemini_net_usd_per_image": 0.0,
+    "storage_usd_per_image": 0.0,
+    "services_usd_per_image": 0.0008126999999999999,
+    "setup_usd": 0.037152,
+    "setup_seconds": 21.3,
+    "compute_seconds": 0.0,
+    "compute_source": "local run: compute not priced",
+    "compute_usd_per_image": 0.0,
+    "total_usd_per_image": 0.0008126999999999999
+  },
+  "token_cost_per_image_usd": 0.0,
+  "storage_cost_per_image_usd": 0.0,
+  "compute_cost_per_image_usd": 0.0
+}

@@ -134,3 +134,61 @@ def test_tiered_hybrid_asks_gemini_only_when_the_embedding_is_unsure(
     assert llm.calls == 3 and s["accuracy"] == 0.0
     _, rows = runner.load_run(s["run_id"], tmp_path)
     assert rows[0]["billed"] == {"embedding_image": 3}
+
+
+def test_jev_laya_hybrid_clusters_twins_batches_medoids_and_smooths_rows(
+    rpc_root, colour_embeddings, tmp_path, monkeypatch
+):
+    from approaches.market_share.retrieval import jev_laya_hybrid
+    from approaches.market_share.retrieval.jev_laya_hybrid import (
+        cluster_uncertain_crops,
+        smooth_shelf_rows,
+    )
+
+    # 1. Verify medoid clustering merges adjacent uncertain crops on the same row with high cosine
+    boxes = [(10.0, 10.0, 50.0, 80.0), (55.0, 12.0, 95.0, 82.0), (100.0, 10.0, 140.0, 80.0)]
+    vecs = [[1.0, 0.0, 0.0], [0.99, 0.14, 0.0], [0.0, 1.0, 0.0]]
+    clusters = cluster_uncertain_crops([0, 1, 2], boxes, vecs, [2, 2, 3])
+    assert clusters == [[0, 1], [2]]
+
+    # 2. Verify visually-gated 1D shelf-row Markov smoothing:
+    #    [1, None, 1] smooths to [1, 1, 1] when visual cosine >= SMOOTH_COSINE,
+    #    but does NOT overwrite when visual cosine is low!
+    s_vecs = [[1.0, 0.0], [0.95, 0.31], [1.0, 0.0]]
+    smoothed_ids, info = smooth_shelf_rows(
+        boxes, [1, None, 1], s_vecs, [0.1, 0.01, 0.1], [{1, 2}, {1, 2}, {1, 2}]
+    )
+    assert smoothed_ids == [1, 1, 1] and len(info) == 1
+    unsmoothed_ids, info2 = smooth_shelf_rows(
+        boxes, [1, None, 1], [[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]], [0.1, 0.01, 0.1], [{1}, {1}, {1}]
+    )
+    assert unsmoothed_ids == [1, None, 1] and not info2
+
+    # 3. Verify end-to-end JevLayaHybrid runner execution with batched escalation
+    monkeypatch.setattr(jev_laya_hybrid, "MIN_MARGIN", 2.0)  # force all 3 boxes into escalation
+    calls = []
+
+    def llm(sheet_im, prompt, **kw):
+        calls.append(prompt)
+        if "choices" in kw["schema"]["properties"]:
+            # Batched multi-row sheet: Q1 is red (choice 1), Q2 is green (choice 1 -> product 2,3)
+            return LLMResult({"choices": [1, 1, 2]}, usage(), 0.01)
+        return LLMResult({"choice": 1}, usage(), 0.01)
+
+    s = runner.run(
+        "jev_laya_hybrid",
+        "gemini-t",
+        "test",
+        0,
+        0,
+        1,
+        "t",
+        results_dir=tmp_path,
+        llm=llm,
+        log=lambda *_: None,
+    )
+    assert colour_embeddings == ["gemini-embedding-2-preview"]
+    # 3 uncertain crops resolved in a single batched Gemini call (vs 3 calls in tiered_hybrid)!
+    assert len(calls) == 1
+    assert s["accuracy"] >= 2 / 3
+
