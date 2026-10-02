@@ -175,6 +175,7 @@ Each run writes `results/<run_id>/summary.json` (the leaderboard row) and `image
 | `tiled_dedup` | Detection | any `gemini-*` | Two Gemini calls, one per half of the photo (top/bottom, each at full detail). A product cut by the seam is re-joined when both halves touch the seam and overlap by >= 80% in x, then `single_pass_dedup`'s filters |
 | `hierarchy_classify` | Classification | any `gemini-*` | Call 1: Gemini picks the brand from the catalog's brand list and reads the pack size. The catalog is filtered to that brand and size; if one product is left that's the answer, otherwise call 2 picks from the short list |
 | `embedding_text_match` | Classification | `multimodalembedding@001` or `gemini-embedding-2-preview` | Embeds the photo and returns the catalog product whose **text** embedding is closest (cosine). No Gemini call |
+| `djev_classify` | Classification | any `gemini-*` (+ `gemini-embedding-2-preview`) | De-glare + `gemini-embedding-2-preview` fast-path when the top match's brand is unique or cosine margin >= 0.025; otherwise filters to that brand, reads pack size, and Gemini picks the exact sister variant |
 | `embedding_retrieval` | Retrieval | `multimodalembedding@001` or `gemini-embedding-2-preview` | Embeds each crop and returns the product whose closest **reference photo** is most similar (cosine). No Gemini call |
 | `tiered_hybrid` | Retrieval | any `gemini-*` (+ `multimodalembedding@001`) | Accepts the embedding answer when it is clearly ahead (cosine >= 0.70 and >= 0.045 above the runner-up, tuned on val for `multimodalembedding@001`); otherwise one Gemini call sees the crop next to one reference photo of each of the top 5 products and picks one, or none |
 | `detect_retrieve` | End-to-end (RPC) | any `gemini-*` (+ `gemini-embedding-2-preview`) | One Gemini call boxes every product, then `embedding_retrieval` on each box |
@@ -368,7 +369,7 @@ src/
   approaches/                  base.py (Approach, compose, register) + modular hierarchy (_*.py = templates):
     market_share/
       detection/                 SKU-110K shelf product detectors (single_pass_dedup, tiled_dedup)
-      classification/            closed-catalog classifiers (hierarchy_classify, embedding_text_match)
+      classification/            closed-catalog classifiers (hierarchy_classify, embedding_text_match, djev_classify)
       retrieval/                 reference-photo retrievers (embedding_retrieval, tiered_hybrid)
       end_to_end/                composed pipelines (detect_identify.py) + single-call / AlloyDB templates
     merchandising/

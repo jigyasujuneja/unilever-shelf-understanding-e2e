@@ -1,0 +1,277 @@
+{
+  "images": 25,
+  "errors": 0,
+  "tp": 23,
+  "fp": 2,
+  "fn": 2,
+  "precision": 0.92,
+  "recall": 0.92,
+  "f2": 0.92,
+  "accuracy": 0.92,
+  "p50_latency_s": 5.343,
+  "p95_latency_s": 10.701,
+  "p99_latency_s": 12.067,
+  "cost_per_image_usd": 0.00181575,
+  "tokens": {
+    "input_tokens": 30935,
+    "output_tokens": 215,
+    "thinking_tokens": 4929,
+    "calls": 24,
+    "traffic": {
+      "standard": 24
+    },
+    "buckets": {
+      "standard/output": 5144,
+      "standard/text_input": 4800,
+      "standard/image_input": 26135
+    }
+  },
+  "field_accuracy": {
+    "product": 0.92,
+    "brand": 1.0,
+    "category": 0.96
+  },
+  "run_id": "1001-105853-djev_classify-gemini-3.8-flash",
+  "approach": "djev_classify",
+  "use_case": "market_share",
+  "task": "classification",
+  "dataset": "products",
+  "model": "gemini-3.8-flash",
+  "tier": "standard",
+  "traffic": {
+    "standard": 24
+  },
+  "priority_served": null,
+  "flex_served": null,
+  "architecture": "Photometric de-glare -> gemini-embedding-2-preview (accept if unique brand or margin >= 0.025) -> brand-scoped size + Gemini sister-variant verification [gemini-3.8-flash + gemini-embedding-2-preview]",
+  "steps": [
+    "Setup (once per run, reported apart from cost/img): embed each catalog product's text",
+    "Photometric restoration: inpaint localized specular glare highlights",
+    "Embed photo (gemini-embedding-2-preview); accept top match when brand is unique or margin >= 0.025",
+    "Otherwise filter catalog to the matched brand, read pack size, and pick exact sister variant"
+  ],
+  "owner": "jjuneja",
+  "split": "test",
+  "limit": 50,
+  "seed": 0,
+  "workers": 4,
+  "created_at": "2026-10-01T10:58:53+00:00",
+  "environment": {
+    "platform": "local"
+  },
+  "telemetry": {
+    "trace_id": "fd20b2f6ae4bf57427693e93b8a1d63f",
+    "span_id": "6383d31f0ab65ab3",
+    "trace_url": "https://console.cloud.google.com/traces/explorer;traceId=fd20b2f6ae4bf57427693e93b8a1d63f?project=unilever-shelf-understanding",
+    "logs_url": "https://console.cloud.google.com/logs/query;query=trace%3D%22projects%2Funilever-shelf-understanding%2Ftraces%2Ffd20b2f6ae4bf57427693e93b8a1d63f%22%20timestamp%3E%3D%222026-10-01T10%3A54%3A01Z%22%20timestamp%3C%3D%222026-10-02T10%3A59%3A01Z%22?project=unilever-shelf-understanding"
+  },
+  "wall_time_s": 30.2,
+  "pricing": {
+    "source": "cloudbilling.googleapis.com (Cloud Billing Catalog API, list prices)",
+    "fetched_at": "2026-10-01T10:58:53+00:00",
+    "location": "global",
+    "region": "us-central1",
+    "usd_to_inr": 95.98874999870618,
+    "gemini": {
+      "gemini-3.8-flash": {
+        "standard/text_input": {
+          "sku": "2A35-AC68-14D6",
+          "description": "Gemini 3.8 Flash Global Text Input - Predictions",
+          "usd": 1.5e-06,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "standard/image_input": {
+          "sku": "5A4B-8A14-AE05",
+          "description": "Gemini 3.8 Flash Global Image Input - Predictions",
+          "usd": 1.5e-06,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "standard/cached_text_input": {
+          "sku": "8658-6939-8BEC",
+          "description": "Gemini 3.8 Flash Global Text Input Caching",
+          "usd": 1.5e-07,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "standard/cached_image_input": {
+          "sku": "298F-1B35-42DA",
+          "description": "Gemini 3.8 Flash Global Image Input Caching",
+          "usd": 1.5e-07,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "standard/output": {
+          "sku": "90FD-DC5F-DC55",
+          "description": "Gemini 3.8 Flash Global Text Output - Predictions",
+          "usd": 7.5e-06,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "priority/text_input": {
+          "sku": "8C96-DE14-D3C8",
+          "description": "Gemini 3.8 Flash Global Text Input Priority - Predictions",
+          "usd": 2.7e-06,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "priority/image_input": {
+          "sku": "1747-3AB2-4D5D",
+          "description": "Gemini 3.8 Flash Global Image Input Priority - Predictions",
+          "usd": 2.7e-06,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "priority/cached_text_input": {
+          "sku": "895C-D13B-D9EB",
+          "description": "Gemini 3.8 Flash Global Text Input Caching Priority",
+          "usd": 2.7e-07,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "priority/cached_image_input": {
+          "sku": "C0B9-6224-0615",
+          "description": "Gemini 3.8 Flash Global Image Input Caching Priority",
+          "usd": 2.7e-07,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "priority/output": {
+          "sku": "3EF2-D8C5-4752",
+          "description": "Gemini 3.8 Flash Global Text Output Priority - Predictions",
+          "usd": 1.35e-05,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "flex/text_input": {
+          "sku": "26EC-00C3-953E",
+          "description": "Gemini 3.8 Flash Global Text Input Flex - Predictions",
+          "usd": 7.5e-07,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "flex/image_input": {
+          "sku": "15D8-E1AD-56EB",
+          "description": "Gemini 3.8 Flash Global Image Input Flex - Predictions",
+          "usd": 7.5e-07,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "flex/cached_text_input": {
+          "sku": "4390-A2ED-C406",
+          "description": "Gemini 3.8 Flash Global Text Input Caching Flex",
+          "usd": 7.5e-08,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "flex/cached_image_input": {
+          "sku": "E568-F8D6-9740",
+          "description": "Gemini 3.8 Flash Global Image Input Caching Flex",
+          "usd": 7.5e-08,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        },
+        "flex/output": {
+          "sku": "248C-A56D-DA65",
+          "description": "Gemini 3.8 Flash Global Text Output Flex - Predictions",
+          "usd": 3.75e-06,
+          "unit": "count",
+          "effective": "2026-10-01T07:00:00Z"
+        }
+      }
+    },
+    "extra": {
+      "embedding_image": {
+        "sku": "276A-E20A-4D82",
+        "description": "Embeddings for multimodal - Image (input)",
+        "usd": 0.0001,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "embedding_text_char": {
+        "sku": "F5F1-90ED-3B1E",
+        "description": "Embeddings for multimodal - Text (input)",
+        "usd": 2e-07,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "gemini_embedding_image_token": {
+        "sku": "330D-7FB0-87C5",
+        "description": "Gemini MM Embedding - Image Input",
+        "usd": 4.5e-07,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "gemini_embedding_text_token": {
+        "sku": "EBBD-6991-B1BB",
+        "description": "Gemini MM Embedding - Text Input",
+        "usd": 2e-07,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      }
+    },
+    "cloud_run": {
+      "vcpu_second": {
+        "sku": "257B-2A84-3396",
+        "description": "Jobs CPU in us-central1",
+        "usd": 1.8e-05,
+        "unit": "s",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "gib_second": {
+        "sku": "8A79-9F45-5F32",
+        "description": "Jobs Memory in us-central1",
+        "usd": 2e-06,
+        "unit": "GiBy.s",
+        "effective": "2026-10-01T07:00:00Z"
+      }
+    },
+    "storage": {
+      "class_a_op": {
+        "sku": "4DBF-185F-A415",
+        "description": "Regional Standard Class A Operations",
+        "usd": 5e-06,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      },
+      "class_b_op": {
+        "sku": "7870-010B-2763",
+        "description": "Regional Standard Class B Operations",
+        "usd": 4e-07,
+        "unit": "count",
+        "effective": "2026-10-01T07:00:00Z"
+      }
+    },
+    "promotions": [
+      {
+        "name": "Gemini 3.x Flash introductory pricing (50% credit back on net spend)",
+        "models": [
+          "gemini-3.8-flash",
+          "gemini-3.7-flash",
+          "gemini-3.6-flash"
+        ],
+        "credit_share": 0.5,
+        "until": "2026-12-31",
+        "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+      }
+    ]
+  },
+  "usd_to_inr": 95.98874999870618,
+  "cost": {
+    "gemini_list_usd_per_image": 0.0033993,
+    "gemini_credit_usd_per_image": 0.00169965,
+    "gemini_net_usd_per_image": 0.00169965,
+    "storage_usd_per_image": 0.0,
+    "services_usd_per_image": 0.00011609999999999999,
+    "setup_usd": 0.0006353999999999999,
+    "setup_seconds": 7.9,
+    "compute_seconds": 0.0,
+    "compute_source": "local run: compute not priced",
+    "compute_usd_per_image": 0.0,
+    "total_usd_per_image": 0.00181575
+  },
+  "token_cost_per_image_usd": 0.00169965,
+  "storage_cost_per_image_usd": 0.0,
+  "compute_cost_per_image_usd": 0.0
+}

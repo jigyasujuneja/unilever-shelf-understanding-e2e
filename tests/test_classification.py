@@ -123,3 +123,65 @@ def test_embedding_text_match_picks_nearest_catalog_text(products_root, tmp_path
     assert s["cost"]["gemini_net_usd_per_image"] == 0
     assert s["cost_per_image_usd"] == pytest.approx(1e-4)
     assert s["cost"]["setup_usd"] == pytest.approx(4e-4)  # 4 catalog texts, not in cost/img
+
+
+def test_djev_classify_combines_photometry_embedding_fastpath_and_multihead_vlm(
+    products_root, tmp_path, monkeypatch
+):
+    from PIL import Image
+
+    from approaches.market_share.classification import djev_classify
+    from utils.photometry import lab_similarity, lab_zones, restore_photometry
+
+    # 1. Verify specular glare inpainting on a synthetic image with a small bright highlight
+    glare_img = Image.new("RGB", (40, 40), (120, 40, 40))
+    for x in range(15, 20):
+        for y in range(15, 20):
+            glare_img.putpixel((x, y), (250, 250, 250))
+    restored, stats = restore_photometry(glare_img)
+    assert stats["inpainted"] is True and stats["glare_fraction"] > 0.005
+    assert lab_similarity(lab_zones(glare_img), lab_zones(restored)) > 0.7
+
+    # 2. Verify dJev classification:
+    #    - p3 (Dove Bar 135g, unique brand in catalog) accepted via embedding fast-path (0 LLM calls)
+    #    - p1 & p2 (Knorr Cubes 10g vs 60g, sister sizes of same brand) escalated to 1-call dJev VLM
+    names = [n for _, _, n, _ in CATALOG]
+
+    class FakeEmbeddings:
+        def __init__(self, config, model):
+            assert model == "gemini-embedding-2-preview"
+
+        def text(self, text, ctx=None):
+            ctx.bill("embedding_image", 1)
+            return [1.0 if n in text else 0.1 for n in names]
+
+        def image(self, image, ctx=None):
+            ctx.bill("embedding_image", 1)
+            i = image.width - 61  # 0 -> p1 (Knorr 10g), 1 -> p2 (Knorr 60g), 2 -> p3 (Dove 135g)
+            if i == 2:
+                return [0.0, 0.0, 1.0, 0.0]  # high-margin match to Dove (unique brand -> fast-path)
+            return [0.71, 0.70, 0.1, 0.1]  # close cosine (< 0.025 margin) between Knorr 10g and 60g
+
+    monkeypatch.setattr(djev_classify, "VertexEmbeddings", FakeEmbeddings)
+    llm_calls = []
+
+    def llm(image, prompt, **kw):
+        llm_calls.append(image.width)
+        assert "Catalog:" in prompt and kw["schema"]
+        return LLMResult({"sku_id": 1 if image.width == 61 else 2}, usage(), 0.01)
+
+    s = runner.run(
+        "djev_classify",
+        "gemini-t",
+        "test",
+        0,
+        0,
+        1,
+        "t",
+        results_dir=tmp_path,
+        llm=llm,
+        log=lambda *_: None,
+    )
+    assert s["accuracy"] == pytest.approx(1.0)
+    assert sorted(llm_calls) == [61, 62]  # p3 (width 63) answered on embedding fast-path without LLM!
+
