@@ -47,10 +47,12 @@ def test_run_single_pass_dedup_end_to_end(fake_root, tmp_path):
     assert s["recall"] == pytest.approx(1.0, abs=0.01) and s["f2"] > 0.99
     assert s["owner"] == "tester" and s["cost_per_image_usd"] > 0
     assert board_inr(out) == pytest.approx(s["cost_per_image_usd"] * 95.5, abs=1e-3)
-    # 1000 image-input + 250 output tokens per image at the fake sheet's prices; local runs
-    # read the local dataset, so no compute or storage cost.
-    assert s["cost_per_image_usd"] == pytest.approx((1000 * 0.3 + 250 * 2.5) * PER_M)
-    assert s["cost"]["compute_source"].startswith("local") and s["traffic"] == {"standard": 3}
+    # 1000 image-input + 250 output tokens per image at the fake sheet's Priority (1.8x) prices;
+    # local runs read the local dataset, so no compute or storage cost.
+    assert s["tier"] == "priority" and s["priority_served"] == 1.0
+    assert s["run_id"].endswith("-priority") and s["architecture"].endswith(", priority]")
+    assert s["cost_per_image_usd"] == pytest.approx(1.8 * (1000 * 0.3 + 250 * 2.5) * PER_M)
+    assert s["cost"]["compute_source"].startswith("local") and s["traffic"] == {"priority": 3}
     cfg = {"defaults": {"split": "test", "limit": 0, "seed": 0}}
     board = runner.leaderboard(out, cfg)
     assert board[0]["rank"] == "dev" and board[0]["run_id"] == s["run_id"]  # local: unranked
@@ -77,13 +79,29 @@ def test_run_single_pass_dedup_end_to_end(fake_root, tmp_path):
     assert [st["name"] for st in images[0]["steps"]][-1] == "Score vs ground truth"
 
 
-def test_flex_tier_runs_are_labelled_and_billed_at_flex(fake_root, tmp_path):
-    from utils.llm import TIER_HEADERS
+def test_flex_tier_runs_are_labelled_and_billed_at_flex(fake_root, tmp_path, monkeypatch):
+    import inspect
 
+    from google import genai
+
+    from utils.llm import TIER_HEADERS, Gemini, load_config
+
+    assert load_config()["defaults"]["tier"] == ["priority"]
+    assert inspect.signature(Gemini.__init__).parameters["tier"].default == "priority"
+    assert inspect.signature(runner.run).parameters["tier"].default == "priority"
+    assert TIER_HEADERS["priority"] == {
+        "X-Vertex-AI-LLM-Request-Type": "shared",
+        "X-Vertex-AI-LLM-Shared-Request-Type": "priority",
+    }
     assert TIER_HEADERS["flex"] == {
         "X-Vertex-AI-LLM-Request-Type": "shared",
         "X-Vertex-AI-LLM-Shared-Request-Type": "flex",
     }
+    client_kwargs = {}
+    monkeypatch.setattr(genai, "Client", lambda **kw: client_kwargs.update(kw) or object())
+    gem = Gemini("gemini-3.5-flash-lite", {"gcp": {"project": "p"}})
+    assert gem.tier == "priority"
+    assert client_kwargs["http_options"].headers == TIER_HEADERS["priority"]
 
     class FlexLLM(OracleLLM):  # Vertex reports ON_DEMAND_FLEX traffic -> flex token buckets
         def __call__(self, image, prompt, **kw):

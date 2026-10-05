@@ -266,7 +266,9 @@ class JevLayaHybrid(EmbeddingRetrieval):
         sheet_im = sheet(image, refs)
         openjev = getattr(self, "openjev", None)
         if openjev is not None and openjev.enabled:
-            choices, slots, usage, _ = openjev.ask_choices(sheet_im, 1, len(top), PROMPT)
+            choices, slots, usage, _ = openjev.ask_choices(
+                sheet_im, 1, len(top), PROMPT, tier=getattr(ctx.llm, "tier", None)
+            )
             with ctx.trace._lock:
                 ctx.trace.usage = ctx.trace.usage + usage
             raw_choice = choices[0] if choices else None
@@ -308,7 +310,9 @@ class JevLayaHybrid(EmbeddingRetrieval):
         sheet_im = multi_sheet(queries, refs_per_q)
         openjev = getattr(self, "openjev", None)
         if openjev is not None and openjev.enabled:
-            choices, slots, usage, _ = openjev.ask_choices(sheet_im, len(queries), K, prompt)
+            choices, slots, usage, _ = openjev.ask_choices(
+                sheet_im, len(queries), K, prompt, tier=getattr(ctx.llm, "tier", None)
+            )
             with ctx.trace._lock:
                 ctx.trace.usage = ctx.trace.usage + usage
         else:

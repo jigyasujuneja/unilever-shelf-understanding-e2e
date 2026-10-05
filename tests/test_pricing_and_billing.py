@@ -45,9 +45,15 @@ def test_usage_buckets_follow_served_traffic_type_modality_and_cache():
     assert down.traffic == {"standard": 1} and down.buckets["standard/image_input"] == 1000
     total = u + down
     assert total.calls == 2 and total.traffic == {"priority": 1, "standard": 1}
+    # When traffic_type or usage_metadata is None, buckets default to the requested tier ("priority")
+    unreported = usage_from_metadata(_meta(None))
+    assert unreported.traffic == {"priority": 1} and unreported.buckets["priority/image_input"] == 1000
+    assert usage_from_metadata(None).traffic == {"priority": 1}
 
 
 def test_gemini_cost_uses_the_sku_for_each_bucket_and_promo_credit():
+    assert pricing.PRIORITY_MULTIPLIER == 1.8
+    assert pricing.TIER_MULTIPLIERS == {"standard": 1.0, "priority": 1.8, "flex": 0.5}
     sheet = fake_sheet(["m"], [{"models": ["m"], "credit_share": 0.5, "until": "2026-12-31"}])
     buckets = {
         "standard/image_input": 1_000_000,
@@ -60,6 +66,23 @@ def test_gemini_cost_uses_the_sku_for_each_bucket_and_promo_credit():
     after = pricing.gemini_cost("m", buckets, sheet, date(2027, 1, 1))
     assert after["credit_usd"] == 0 and after["net_usd"] == after["list_usd"]
     assert pricing.gemini_cost("m", {"flex/output": 1_000_000}, sheet)["list_usd"] == pytest.approx(1.25)
+
+    # Verify 1.8x Priority PayGo multiplier across all 5 token modalities
+    all_priority = {f"priority/{k}": 1_000_000 for k in pricing.KINDS}
+    all_standard = {f"standard/{k}": 1_000_000 for k in pricing.KINDS}
+    std_cost = pricing.gemini_cost("m", all_standard, sheet, date(2027, 1, 1))["list_usd"]
+    pri_cost = pricing.gemini_cost("m", all_priority, sheet, date(2027, 1, 1))["list_usd"]
+    assert pri_cost == pytest.approx(std_cost * pricing.PRIORITY_MULTIPLIER)
+
+    # Verify 1.8x fallback in gemini_cost when priority/<kind> is absent from a standard-only table
+    std_only_sheet = {
+        "gemini": {"m": {f"standard/{k}": sheet["gemini"]["m"][f"standard/{k}"] for k in pricing.KINDS}},
+        "promotions": sheet["promotions"],
+    }
+    fallback_cost = pricing.gemini_cost("m", all_priority, std_only_sheet, date(2026, 9, 24))
+    assert fallback_cost["list_usd"] == pytest.approx(std_cost * pricing.PRIORITY_MULTIPLIER)
+    assert fallback_cost["net_usd"] == pytest.approx(fallback_cost["list_usd"] * 0.5)
+
     with pytest.raises(RuntimeError):
         pricing.gemini_cost("m", {"batch/output": 5}, sheet)
 
@@ -87,6 +110,7 @@ def test_price_sheet_parses_billing_catalog(monkeypatch):
             ],
         }
 
+    # Include standard SKUs for gemini-custom (no catalog priority SKUs) to verify 1.8x synthesis
     gemini = [
         sku(pricing.sku_description("gemini-9-flash", "global", t, k), 0, n)
         for t, n in (("standard", 300), ("priority", 540))
@@ -94,6 +118,9 @@ def test_price_sheet_parses_billing_catalog(monkeypatch):
     ] + [
         sku(pricing.sku_description("gemini-9-flash", "us-central1", t, k), 0, n)
         for t, n in (("standard", 330), ("priority", 594))
+        for k in pricing.KINDS
+    ] + [
+        sku(pricing.sku_description("gemini-custom", "global", "standard", k), 0, 300)
         for k in pricing.KINDS
     ]
     catalog = {
@@ -132,9 +159,15 @@ def test_price_sheet_parses_billing_catalog(monkeypatch):
         "promotions": [{"models": ["x"], "credit_share": 0.5, "until": date(2026, 12, 31)}],
     }
     # (YAML parses `until` as a date; the sheet must still be JSON-serialisable.)
-    sheet = REAL_PRICE_SHEET(["gemini-9-flash", "gemini-9-flash-sft"], cfg, session=object())
+    sheet = REAL_PRICE_SHEET(
+        ["gemini-9-flash", "gemini-9-flash-sft", "gemini-custom"], cfg, session=object()
+    )
     assert sheet["gemini"]["gemini-9-flash"]["priority/output"]["usd"] == pytest.approx(5.4e-7)
     assert sheet["gemini"]["gemini-9-flash-sft"]["standard/image_input"]["usd"] == pytest.approx(3.0e-7)
+    for kind in pricing.KINDS:
+        assert sheet["gemini"]["gemini-custom"][f"priority/{kind}"]["usd"] == pytest.approx(
+            3.0e-7 * pricing.PRIORITY_MULTIPLIER
+        )
     assert sheet["usd_to_inr"] == pytest.approx(95.545)
     assert sheet["cloud_run"]["vcpu_second"]["usd"] == 1.8e-5
     assert sheet["storage"]["class_b_op"]["usd"] == pytest.approx(4e-7)  # paid tier, not free
@@ -180,9 +213,12 @@ def test_approach_setup_and_billed_units_are_priced_into_cost_per_image(
         llm=OracleLLM(),
         log=lambda *_: None,
     )
-    # 4 boxes -> 4 image embeddings at $0.0001, on top of the Gemini tokens.
+    # 4 boxes -> 4 image embeddings at $0.0001, on top of the Priority PayGo Gemini tokens (1.8x).
+    assert s["tier"] == "priority"
     assert s["cost"]["services_usd_per_image"] == pytest.approx(4e-4)
-    assert s["cost_per_image_usd"] == pytest.approx((1000 * 0.3 + 250 * 2.5) * PER_M + 4e-4)
+    assert s["cost_per_image_usd"] == pytest.approx(
+        pricing.PRIORITY_MULTIPLIER * (1000 * 0.3 + 250 * 2.5) * PER_M + 4e-4
+    )
     _, images = runner.load_run(s["run_id"], tmp_path)
     assert images[0]["billed"] == {"embedding_image": 4}
     assert images[0]["steps"][1]["detail"] == "50, 50, 60, 90"

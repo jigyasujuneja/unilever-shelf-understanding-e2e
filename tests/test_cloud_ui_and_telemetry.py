@@ -115,11 +115,13 @@ def test_products_run_page_and_per_task_ranking(products_root, fake_root, tmp_pa
 
 def test_cloud_run_task_runs_only_its_combination(fake_root, tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(runner, "run", lambda name, model, *a, **k: calls.append((name, model)))
+    monkeypatch.setattr(
+        runner, "run", lambda name, model, *a, **k: calls.append((name, model, k.get("tier")))
+    )
     monkeypatch.setenv("CLOUD_RUN_TASK_COUNT", "4")
     monkeypatch.setenv("CLOUD_RUN_TASK_INDEX", "3")
     cli.main(["run", "-a", "single_pass_dedup", "tiled_dedup", "-m", "gemini-1", "gemini-2"])
-    assert calls == [("tiled_dedup", "gemini-2")]
+    assert calls == [("tiled_dedup", "gemini-2", "priority")]
 
 
 def test_approaches_only_run_the_models_they_call(monkeypatch):
@@ -135,6 +137,18 @@ def test_approaches_only_run_the_models_they_call(monkeypatch):
         ("hierarchy_classify", "flex", "gemini-1"),
         ("embedding_retrieval", "standard", "multimodalembedding@001"),
         ("embedding_retrieval", "standard", "gemini-embedding-2"),
+    ]
+    # When running with default ["priority"] tier, Gemini approaches use "priority" and
+    # pure embedding approaches automatically fall back to "standard".
+    default_combos = runner.combos(
+        ["hierarchy_classify", "embedding_retrieval"],
+        ["priority"],
+        ["gemini-1", "multimodalembedding@001"],
+        log=lambda *_: None,
+    )
+    assert default_combos == [
+        ("hierarchy_classify", "priority", "gemini-1"),
+        ("embedding_retrieval", "standard", "multimodalembedding@001"),
     ]
     with pytest.raises(ValueError, match="doesn't run"):
         runner.run("hierarchy_classify", "multimodalembedding@001", log=lambda *_: None)

@@ -37,12 +37,16 @@ TRAFFIC_TIERS = {  # usage_metadata.traffic_type -> SKU tier
     "PROVISIONED_THROUGHPUT": "provisioned",  # prepaid capacity: no per-token charge
 }
 KINDS = ("text_input", "image_input", "cached_text_input", "cached_image_input", "output")
+PRIORITY_MULTIPLIER = 1.8
+TIER_MULTIPLIERS = {"standard": 1.0, "priority": PRIORITY_MULTIPLIER, "flex": 0.5}
 _SUFFIX = {"standard": "", "priority": " Priority", "flex": " Flex"}
 
 
-def tier_of(traffic_type) -> str:
-    name = getattr(traffic_type, "name", None) or str(traffic_type or "ON_DEMAND").split(".")[-1]
-    return TRAFFIC_TIERS.get(name, "standard")
+def tier_of(traffic_type, default: str = "priority") -> str:
+    if not traffic_type:
+        return default
+    name = getattr(traffic_type, "name", None) or str(traffic_type).split(".")[-1]
+    return TRAFFIC_TIERS.get(name, default)
 
 
 def model_display(model: str) -> str:
@@ -136,6 +140,19 @@ def price_sheet(models: list[str], config: dict, session=None,
             raise RuntimeError(f"No Billing Catalog SKU for {base_model} (global) standard "
                                f"{missing}; expected e.g. "
                                f"{sku_description(base_model, 'global', 'standard', missing[0])!r}")
+        for kind in KINDS:
+            if f"priority/{kind}" not in table and f"standard/{kind}" in table:
+                std = table[f"standard/{kind}"]
+                table[f"priority/{kind}"] = {
+                    **std,
+                    "sku": f"{std['sku']}-priority-1.8x",
+                    "description": f"{sku_description(base_model, 'global', 'priority', kind)} (1.8x standard)",
+                    "usd": std["usd"] * PRIORITY_MULTIPLIER,
+                }
+        missing_priority = [k for k in KINDS if f"priority/{k}" not in table]
+        if missing_priority:
+            raise RuntimeError(f"No Billing Catalog or fallback SKU for {base_model} priority "
+                               f"{missing_priority}")
         gemini[model] = table
 
     extra, catalogs = {}, {VERTEX_AI: by_desc}
@@ -186,9 +203,13 @@ def gemini_cost(model: str, buckets: dict[str, int], sheet: dict, on: date | Non
     for key, tokens in buckets.items():
         if not tokens or key.startswith("provisioned/"):
             continue
-        if key not in table:
+        if key in table:
+            unit_usd = table[key]["usd"]
+        elif key.startswith("priority/") and f"standard/{key.removeprefix('priority/')}" in table:
+            unit_usd = table[f"standard/{key.removeprefix('priority/')}"]["usd"] * PRIORITY_MULTIPLIER
+        else:
             raise RuntimeError(f"No price for {model} {key} in the Billing Catalog sheet")
-        list_usd += tokens * table[key]["usd"]
+        list_usd += tokens * unit_usd
     credit = list_usd * promotion_share(model, sheet, on)
     return {"list_usd": list_usd, "credit_usd": credit, "net_usd": list_usd - credit}
 

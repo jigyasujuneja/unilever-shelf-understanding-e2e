@@ -2,8 +2,10 @@
 PY := .venv/bin/python
 SB := .venv/bin/shelf-bench
 # Every approach runs only the models it calls; other combinations are skipped.
-A ?= single_pass_dedup tiled_dedup hierarchy_classify embedding_text_match embedding_retrieval \
-     tiered_hybrid detect_retrieve detect_tiered shelf_detect_retrieve shelf_detect_tiered
+A ?= single_pass_dedup tiled_dedup hierarchy_classify embedding_text_match djev_classify coarse_jev_gemini \
+     embedding_retrieval tiered_hybrid jev_laya_hybrid coarse_jev_laya \
+     detect_retrieve detect_tiered detect_jev_laya detect_coarse_jev_gemini \
+     shelf_detect_retrieve shelf_detect_tiered shelf_jev_laya shelf_coarse_jev_gemini
 # gemini-3.8-flash and multimodalembedding@001 lost to these on every tab (F2 per ₹); add them with M=.
 M ?= gemini-3.5-flash-lite gemini-embedding-2
 

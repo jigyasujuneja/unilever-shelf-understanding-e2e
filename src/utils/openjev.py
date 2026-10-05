@@ -230,8 +230,9 @@ class OpenJevClient:
     distributions and ``1 - H(p) / ln(N)`` confidence for up to 12 questions simultaneously.
     """
 
-    def __init__(self, config: dict | None = None):
-        cfg = (config or load_config()).get("openjev") or {}
+    def __init__(self, config: dict | None = None, tier: str = "priority"):
+        full_cfg = config or load_config()
+        cfg = full_cfg.get("openjev") or {}
         self.base_url = (
             os.environ.get("OPENJEV_BASE_URL") or str(cfg.get("base_url") or "")
         ).rstrip("/")
@@ -241,6 +242,7 @@ class OpenJevClient:
             or str(cfg.get("model") or "openjev-latest")
         )
         self.timeout_s = float(cfg.get("timeout_s") or 30.0)
+        self.tier = tier
 
     @property
     def enabled(self) -> bool:
@@ -253,6 +255,7 @@ class OpenJevClient:
         k_options: int,
         prompt: str,
         max_side: int | None = None,
+        tier: str | None = None,
     ) -> tuple[list[int | None], list[dict[str, Any]], Usage, float]:
         """Query ``POST {base_url}/v1/systemone`` for ``n_queries`` choice slots (``0..k_options``)."""
         jpeg = image_to_jpeg(image, max_side=max_side)
@@ -317,16 +320,22 @@ class OpenJevClient:
                 "top2_margin": top2_margin,
             })
 
+        active_tier = tier or self.tier or "priority"
         u = body.get("usage") or {}
         in_tok = int(u.get("prompt_tokens") or 0)
         out_tok = int(u.get("output_tokens") or 0)
+        buckets: dict[str, int] = {}
+        if in_tok:
+            buckets[f"{active_tier}/text_input"] = in_tok
+        if out_tok:
+            buckets[f"{active_tier}/output"] = out_tok
         usage = Usage(
             input_tokens=in_tok,
             output_tokens=out_tok,
             thinking_tokens=0,
             calls=1,
-            traffic={"standard": 1},
-            buckets={"standard/text_input": in_tok} if in_tok else {},
+            traffic={active_tier: 1},
+            buckets=buckets,
         )
         return choices, slots, usage, seconds
 

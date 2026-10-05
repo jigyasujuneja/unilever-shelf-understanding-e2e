@@ -57,7 +57,7 @@ def _merge(a: dict[str, int], b: dict[str, int]) -> dict[str, int]:
     return out
 
 
-def usage_from_metadata(m) -> Usage:
+def usage_from_metadata(m, default_tier: str = "priority") -> Usage:
     """Billable buckets from a Vertex ``usage_metadata``.
 
     prompt_token_count includes cached tokens; cached tokens bill on the caching SKU, the rest
@@ -66,8 +66,8 @@ def usage_from_metadata(m) -> Usage:
     from utils.pricing import tier_of
 
     if m is None:
-        return Usage(calls=1, traffic={"standard": 1})
-    tier = tier_of(getattr(m, "traffic_type", None))
+        return Usage(calls=1, traffic={default_tier: 1})
+    tier = tier_of(getattr(m, "traffic_type", None), default=default_tier)
     prompt = m.prompt_token_count or 0
     out, think = m.candidates_token_count or 0, m.thoughts_token_count or 0
 
@@ -169,7 +169,7 @@ class Gemini:
     """Callable: ``Gemini(model)(image, prompt) -> LLMResult``."""
 
     def __init__(self, model: str, config: dict | None = None, thinking_level: str | None = "low",
-                 tier: str = "standard"):
+                 tier: str = "priority"):
         # Context-aware (ECP) client certs on corp machines fail intermittently under concurrent
         # calls ("Failed to configure client certificate and key for mTLS"). Vertex AI does not
         # need them; set GOOGLE_API_USE_CLIENT_CERTIFICATE=true yourself to opt back in.
@@ -244,7 +244,7 @@ class Gemini:
                                          "sleep_s": round(sleep, 1),
                                          "failed_after_s": round(time.perf_counter() - t0, 3)})
                 time.sleep(sleep)
-        usage = usage_from_metadata(resp.usage_metadata)
+        usage = usage_from_metadata(resp.usage_metadata, default_tier=self.tier)
         text = resp.text or ""
         cand = (resp.candidates or [None])[0]
         finish = getattr(getattr(cand, "finish_reason", None), "name", None)

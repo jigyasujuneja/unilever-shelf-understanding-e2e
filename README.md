@@ -56,9 +56,10 @@ Concurrent tasks use different models, so runs don't compete for the same Vertex
 **Cost per image** is measured, not hard-coded: tokens from every Gemini response (by traffic type
 actually served), other APIs the approach bills, the real Cloud Run task duration and GCS
 operations, each priced from the Cloud Billing Catalog API at run start, net of promotional
-credit ([details](docs/reference.md#how-cost-per-image-is-calculated)). Any run can also use the
-Priority PayGo tier with `-t priority` (1.8x per token) or the Flex PayGo tier with `-t flex`
-(0.5x per token, slower; [details](docs/reference.md#priority-and-flex-paygo)).
+credit ([details](docs/reference.md#how-cost-per-image-is-calculated)). All Gemini approaches run
+on the Priority PayGo tier by default (`-t priority`, 1.8x per token for lower, steadier latency),
+and can also run on Standard (`-t standard`, 1.0x per token) or Flex PayGo (`-t flex`, 0.5x per
+token, slower; [details](docs/reference.md#priority-and-flex-paygo)).
 
 ## Datasets
 

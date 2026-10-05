@@ -36,6 +36,14 @@ def test_registry_has_builtin_approaches():
     }
     for ap in approaches.all_approaches().values():
         assert ap.architecture and ap.steps
+    gemini_approaches = {n for n, ap in approaches.all_approaches().items() if ap.uses_gemini}
+    assert gemini_approaches == {
+        "single_pass_dedup", "tiled_dedup",
+        "hierarchy_classify", "djev_classify", "coarse_jev_gemini",
+        "tiered_hybrid", "jev_laya_hybrid", "coarse_jev_laya",
+        "detect_retrieve", "detect_tiered", "detect_jev_laya", "detect_coarse_jev_gemini",
+        "shelf_detect_retrieve", "shelf_detect_tiered", "shelf_jev_laya", "shelf_coarse_jev_gemini",
+    }
 
 
 def test_retrieval_template_is_not_registered():
@@ -108,7 +116,8 @@ def test_end_to_end_needs_the_right_box_and_the_right_product(rpc_root, colour_e
     # Boxes 1-2 right; box 3 is on a real product but names the wrong one (FP + FN); box 4 FP.
     assert (s["tp"], s["fp"], s["fn"]) == (2, 2, 1) and s["found_recall"] == 1.0
     assert colour_embeddings == ["gemini-embedding-2"]
-    assert s["architecture"].endswith("[gemini-t + gemini-embedding-2]")
+    assert s["tier"] == "priority"
+    assert s["architecture"].endswith("[gemini-t + gemini-embedding-2, priority]")
     _, rows = runner.load_run(s["run_id"], tmp_path)
     labels = rows[0]["labels"]
     assert labels[2]["gt"]["sku_id"] == 3 and labels[2]["correct"]["product"] is False
