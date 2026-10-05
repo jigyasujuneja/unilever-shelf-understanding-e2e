@@ -35,6 +35,7 @@ def test_classification_scores_product_brand_and_category(products_root, tmp_pat
         log=lambda *_: None,
     )
     assert (s["task"], s["dataset"], s["images"]) == ("classification", "products", 3)
+    assert s["tier"] == "priority" and s["priority_served"] == 1.0
     assert s["accuracy"] == pytest.approx(1 / 3, abs=1e-4)
     assert s["recall"] == pytest.approx(1 / 3, abs=1e-4)
     assert s["precision"] == pytest.approx(1 / 2, abs=1e-4)  # 1 right of the 2 answered
@@ -119,6 +120,7 @@ def test_embedding_text_match_picks_nearest_catalog_text(products_root, tmp_path
         log=lambda *_: None,
     )
     assert s["task"] == "classification" and s["accuracy"] == pytest.approx(2 / 3, abs=1e-4)
+    assert s["tier"] == "standard"  # pure embedding approach falls back to standard tier
     assert s["field_accuracy"]["category"] == pytest.approx(2 / 3, abs=1e-4)
     assert s["cost"]["gemini_net_usd_per_image"] == 0
     assert s["cost_per_image_usd"] == pytest.approx(1e-4)
@@ -183,7 +185,7 @@ def test_djev_classify_combines_photometry_embedding_fastpath_and_multihead_vlm(
         llm=llm,
         log=lambda *_: None,
     )
-    assert s["accuracy"] == pytest.approx(1.0)
+    assert s["tier"] == "priority" and s["accuracy"] == pytest.approx(1.0)
     assert sorted(llm_calls) == [61, 62]  # p3 (width 63) answered on embedding fast-path without LLM!
 
     llm_calls.clear()
@@ -199,7 +201,7 @@ def test_djev_classify_combines_photometry_embedding_fastpath_and_multihead_vlm(
         llm=llm,
         log=lambda *_: None,
     )
-    assert s_coarse["accuracy"] == pytest.approx(1.0)
+    assert s_coarse["tier"] == "priority" and s_coarse["accuracy"] == pytest.approx(1.0)
     assert sorted(llm_calls) == [61, 62]
 
 

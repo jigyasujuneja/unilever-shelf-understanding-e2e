@@ -51,21 +51,28 @@ Local runs (`shelf-bench run`) price Gemini and other APIs only and are for deve
 
 ## Priority and Flex PayGo
 
-Every run can call Gemini on the Standard, the [Priority PayGo](https://cloud.google.com/vertex-ai/generative-ai/docs/priority-paygo)
-or the [Flex PayGo](https://cloud.google.com/vertex-ai/generative-ai/docs/flex-paygo) tier.
-Priority costs 1.8x per token and aims for steadier latency; Flex costs 0.5x per token in exchange
-for longer, less predictable latency and more throttling, which suits batch shelf processing
-(nobody waits on a market-share report per photo). No setup is needed beyond the request headers,
-which `llm.py` sends for `-t priority` / `-t flex`. Both work on the global endpoint only.
+All 16 Gemini approaches run on the [Priority PayGo](https://cloud.google.com/vertex-ai/generative-ai/docs/priority-paygo)
+tier by default (`tier: [priority]` in `config.yaml`), and any run can also target Standard
+(`-t standard`) or [Flex PayGo](https://cloud.google.com/vertex-ai/generative-ai/docs/flex-paygo)
+(`-t flex`). Priority costs **1.8x** Standard PayGo per token across all token buckets (`text_input`,
+`image_input`, `cached_text_input`, `cached_image_input`, and `output` + `thinking_tokens`) and aims
+for lower, steadier latency; Flex costs **0.5x** per token in exchange for longer, less predictable
+latency and more throttling, which suits batch shelf processing (nobody waits on a market-share
+report per photo). No setup is needed beyond the request headers (`X-Vertex-AI-LLM-Request-Type: shared`,
+`X-Vertex-AI-LLM-Shared-Request-Type: priority`), which `llm.py` sends automatically by default.
+Both work on the global endpoint only.
 
 ```bash
 shelf-bench cloud-run -a shelf_detect_retrieve shelf_detect_tiered -m gemini-3.5-flash-lite \
-                      -t standard flex              # 4 runs; flex runs end in -flex
+                      -t priority flex              # 4 runs; priority is default (-t priority)
 ```
 
 Vertex can downgrade a priority or flex request to standard when capacity is short. Each call's
-`trafficType` is recorded, and downgraded calls are billed at standard rates. The run summary's
-`priority_served` / `flex_served` field is the share of calls actually served at that tier.
+`trafficType` is recorded, and downgraded calls (`ON_DEMAND`) are billed at 1.0x standard rates.
+When a dedicated Priority SKU is absent from the Cloud Billing Catalog (or for custom/tuned
+endpoints), `pricing.py` derives `priority/<kind>` at `1.8x` the `standard/<kind>` rate
+(`PRIORITY_MULTIPLIER = 1.8`). The run summary's `priority_served` / `flex_served` field is the
+share of calls actually served at that tier.
 
 ## Retrieval with a vector database (AlloyDB)
 

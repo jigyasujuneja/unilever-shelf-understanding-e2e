@@ -79,9 +79,10 @@ def test_tiered_hybrid_escalation_takes_gemini_choice_and_none_means_none(
         llm=llm,
         log=lambda *_: None,
     )
+    assert s["tier"] == "priority"
     assert s["accuracy"] == pytest.approx(1 / 3, abs=1e-4) and s["precision"] == 1.0
     # Thresholds were tuned for multimodalembedding@001, so tiered keeps it as its shortlist.
-    assert s["architecture"].endswith("[gemini-t + multimodalembedding@001]")
+    assert s["architecture"].endswith("[gemini-t + multimodalembedding@001, priority]")
     assert colour_embeddings == ["multimodalembedding@001"]
     _, rows = runner.load_run(s["run_id"], tmp_path)
     assert [lab["pred"] and lab["pred"]["sku_id"] for lab in rows[0]["labels"]] == [1, None, None]
@@ -305,6 +306,8 @@ def test_djev_logprob_entropy_calibration_and_openjev_systemone_client(
         )
         assert len(systemone_requests) == 1
         assert "questions" in systemone_requests[0] and "images" in systemone_requests[0]
+        assert s_oj["tier"] == "priority" and s_oj["traffic"] == {"priority": 1}
+        assert s_oj["tokens"]["buckets"] == {"priority/text_input": 310}
         assert s_oj["accuracy"] >= 2 / 3
     finally:
         server.shutdown()

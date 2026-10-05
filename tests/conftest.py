@@ -23,6 +23,7 @@ from PIL import Image
 import runner
 from utils import dataset, pricing, telemetry
 from utils.llm import LLMResult, Usage
+from utils.pricing import TIER_MULTIPLIERS
 
 W, H = 400, 300
 GT = [(10, 10, 60, 90), (70, 10, 120, 90), (200, 150, 260, 280), (300, 20, 390, 100)]
@@ -46,7 +47,7 @@ RPC_GT = [
 
 def fake_sheet(models, promotions=()):
     table = {}
-    for tier, mult in (("standard", 1.0), ("priority", 1.8), ("flex", 0.5)):
+    for tier, mult in TIER_MULTIPLIERS.items():
         for kind, usd in (
             ("text_input", 0.3),
             ("image_input", 0.3),
@@ -82,14 +83,14 @@ def no_cloud_telemetry(monkeypatch):
     telemetry.reset()
 
 
-def usage(inp=1000, out=250):
+def usage(inp=1000, out=250, tier="priority"):
     return Usage(
         inp,
         out,
         0,
         1,
-        {"standard": 1},
-        {"standard/image_input": inp, "standard/output": out},
+        {tier: 1},
+        {f"{tier}/image_input": inp, f"{tier}/output": out},
     )
 
 

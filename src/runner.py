@@ -64,15 +64,17 @@ def set_compute(summary: dict, seconds: float, source: str) -> dict:
 
 def combos(names: list[str], tiers: list[str], models: list[str],
            log: Callable[[str], None] = print) -> list[tuple[str, str, str]]:
-    """(approach, tier, model) runs to do, skipping models an approach doesn't call (and the
-    priority tier for non-Gemini approaches). Raises on unknown approaches, before any spend."""
+    """(approach, tier, model) runs to do, skipping models an approach doesn't call (and falling
+    back to the standard tier once for non-Gemini approaches). Raises on unknown approaches,
+    before any spend."""
     out = []
+    non_gemini_tier = "standard" if "standard" in tiers else (tiers[0] if tiers else "standard")
     for n in names:
         appr = approaches.get(n)
         for t in tiers:
             for m in models:
-                if appr.accepts(m) and (appr.uses_gemini or t == "standard"):
-                    out.append((n, t, m))
+                if appr.accepts(m) and (appr.uses_gemini or t == non_gemini_tier):
+                    out.append((n, t if appr.uses_gemini else "standard", m))
                 else:
                     runs = ", ".join(appr.models) if appr.models else "Gemini models"
                     log(f"skip {n} x {m} x {t}: {n} runs {runs}"
@@ -92,13 +94,15 @@ def run(
     data_root: str = dataset.DEFAULT_ROOT,
     llm: Callable[..., LLMResult] | None = None,
     log: Callable[[str], None] = print,
-    tier: str = "standard",
+    tier: str = "priority",
     prices: dict | None = None,
 ) -> dict:
     appr = approaches.get(approach)
     if not appr.accepts(model):
         raise ValueError(f"{approach} doesn't run {model}; it runs "
                          f"{', '.join(appr.models) if appr.models else 'Vertex Gemini models'}")
+    if not appr.uses_gemini:
+        tier = "standard"
     config = load_config()
     env = environment(config)
     # Live list prices from the Cloud Billing Catalog API (fails fast if a SKU is missing).
