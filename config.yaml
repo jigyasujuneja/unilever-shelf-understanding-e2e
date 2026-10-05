@@ -41,7 +41,7 @@ telemetry:
 
 # Models offered by `shelf-bench list`. Any Vertex Gemini model id works with -m.
 models:
-  - gemini-3.5-flash
+  - gemini-3.8-flash
   - gemini-3.5-flash-lite
 
 # Vertex AI Supervised Fine-Tuning (LoRA) endpoints (`shelf-bench tune`).

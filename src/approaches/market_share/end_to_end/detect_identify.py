@@ -131,14 +131,14 @@ DetectCoarseJevGemini = compose(
     dataset="rpc",
     architecture=(
         f"Gemini detects boxes -> Stage A Coarse JEV family triage ({MODEL} + 1-H(p)/ln(N) gate) "
-        f"-> Stage B Gemini 3.5 batched top-{K} contact sheets"
+        f"-> Stage B Gemini batched top-{K} contact sheets"
     ),
     steps=[
         "Setup (once per run, reported apart from cost/img): embed reference photos, CIELAB zones & SKU family centroids",
         "One Gemini call on the photo returns every product box",
         f"Stage A: Coarse JEV family triage; accept when distinct-family margin >= {COARSE_DISTINCT_MARGIN} "
         f"(or sister margin >= {SISTER_FAMILY_MARGIN})",
-        f"Stage B: Cluster uncertain crops (cos >= {CLUSTER_COSINE}) and verify medoids in batched top-{K} Gemini 3.5 contact sheets",
+        f"Stage B: Cluster uncertain crops (cos >= {CLUSTER_COSINE}) and verify medoids in batched top-{K} Gemini contact sheets",
     ],
 )
 
@@ -200,14 +200,14 @@ ShelfCoarseJevGemini = compose(
     dataset="shelves",
     architecture=(
         f"single_pass_dedup boxes -> Stage A Coarse JEV family triage ({MODEL} + 1-H(p)/ln(N) gate) "
-        f"-> Stage B Gemini 3.5 batched top-{K} contact sheets & row smoothing"
+        f"-> Stage B Gemini batched top-{K} contact sheets & row smoothing"
     ),
     steps=[
         "Setup (once per run, reported apart from cost/img): embed reference crops, CIELAB zones & SKU family centroids",
         "single_pass_dedup: one Gemini call + container, NMS and depth-ghost filters",
         f"Stage A: Coarse JEV family triage; accept when distinct-family margin >= {COARSE_DISTINCT_MARGIN} "
         f"(or sister margin >= {SISTER_FAMILY_MARGIN})",
-        f"Stage B: Cluster uncertain facings (cos >= {CLUSTER_COSINE}) and verify medoids in batched top-{K} Gemini 3.5 contact sheets",
+        f"Stage B: Cluster uncertain facings (cos >= {CLUSTER_COSINE}) and verify medoids in batched top-{K} Gemini contact sheets",
         f"Visually-gated 1D shelf-row smoothing ([P, None/?, P] -> P when neighbour cos >= {SMOOTH_COSINE})",
     ],
 )

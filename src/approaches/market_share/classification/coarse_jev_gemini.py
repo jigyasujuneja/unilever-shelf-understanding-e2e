@@ -1,8 +1,8 @@
-"""Two-Stage Hybrid Classification: Stage A Coarse JEV Triage + Stage B Gemini 3.5 Sister-SKU Verification.
+"""Two-Stage Hybrid Classification: Stage A Coarse JEV Triage + Stage B Gemini Sister-SKU Verification.
 
 Combines System-1 Coarse JEV Multi-Attribute Triage (`coarse_jev_triage` / `OpenJevClient`) for
 fast coarse attribute classification (`category`, `brand`, and intra-brand family) with System-2
-Gemini 3.5 fine-print verification on sister SKUs:
+Gemini fine-print verification on sister SKUs:
 
 1. **Stage A — Coarse JEV Multi-Attribute Triage:**
    - Applies photometric glare restoration (`restore_photometry`) for the embedding vector lookup
@@ -11,7 +11,7 @@ Gemini 3.5 fine-print verification on sister SKUs:
      hierarchical slots (`category`, `brand`, and `sku_id`) via `coarse_jev_triage`.
    - Fast-path accepts `top_id` (0 VLM calls) whenever the coarse brand has 1 SKU, the top-2
      matches belong to different brands, or the intra-brand sister margin is `>= 0.025`.
-2. **Stage B — Gemini 3.5 Fine-Grained Sister-Variant Disambiguation:**
+2. **Stage B — Gemini Fine-Grained Sister-Variant Disambiguation:**
    - Triggered only when sister SKUs of the same coarse brand compete within `< 0.025` cosine.
    - Uses the crisp un-inpainted original `image` so specular inpainting never blurs white
      printed grammage/ml text (such as `"130ml"` on dark bottles), reads the pack size, and
@@ -48,13 +48,13 @@ class CoarseJevGemini(DjevClassify):
     min_jev_confidence = MIN_JEV_CONFIDENCE
     architecture = (
         f"Stage A Coarse JEV multi-attribute triage ({SHORTLIST_MODEL} + 1-H(p)/ln(N) gate) -> "
-        "Stage B Gemini 3.5 crisp-image size & sister-variant verification"
+        "Stage B Gemini crisp-image size & sister-variant verification"
     )
     steps = [
         "Setup (once per run, reported apart from cost/img): embed each catalog product's text",
         f"Stage A: Photometric de-glare + Coarse JEV triage ({SHORTLIST_MODEL}) over (category, brand, sku_id)",
         f"Accept Stage A immediately when brand is unique, top-2 brands differ, or intra-brand margin >= {SISTER_MARGIN}",
-        "Stage B: Crisp-image Gemini 3.5 pack-size read + logprob-calibrated sister-SKU verification",
+        "Stage B: Crisp-image Gemini pack-size read + logprob-calibrated sister-SKU verification",
     ]
 
     def setup(self, config: dict, ctx: Context) -> None:
@@ -125,7 +125,7 @@ class CoarseJevGemini(DjevClassify):
             )
             return top_id
 
-        # Stage B: Crisp-image Gemini 3.5 fine-print disambiguation within the coarse brand cluster
+        # Stage B: Crisp-image Gemini fine-print disambiguation within the coarse brand cluster
         by_brand = {
             i: p
             for i, p in pool.items()
@@ -149,7 +149,7 @@ class CoarseJevGemini(DjevClassify):
             if len(sized) == 1:
                 ans = next(iter(sized))
                 ctx.trace.step(
-                    "Stage B Gemini 3.5 size match",
+                    "Stage B Gemini size match",
                     f"brand {top_brand}, size {size} -> unique id {ans}: {sized[ans]['product']}",
                     info={
                         **candidates_info(top_brand, size, sized),
@@ -199,7 +199,7 @@ class CoarseJevGemini(DjevClassify):
                 str(k): round(v, 4) for k, v in (slot.get("probabilities") or {}).items()
             }
         ctx.trace.step(
-            f"Stage B Gemini 3.5 picks from {len(cands)} {top_brand} sister SKUs",
+            f"Stage B Gemini picks from {len(cands)} {top_brand} sister SKUs",
             f"id {sku}: {p['product']} (jev_conf {conf:.2f})" if p else f"id {sku}: none of them",
             info=step_info,
         )
