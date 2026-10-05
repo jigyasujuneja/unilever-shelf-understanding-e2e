@@ -1,7 +1,7 @@
-"""Two-Stage Hybrid Retrieval: Stage A Coarse JEV Family Triage + Stage B Gemini 3.5 Dense Contact Sheets.
+"""Two-Stage Hybrid Retrieval: Stage A Coarse JEV Family Triage + Stage B Gemini Dense Contact Sheets.
 
 Combines System-1 Coarse JEV visual family triage (`jev_entropy_confidence` + reference centroid
-family clustering) with System-2 Gemini 3.5 dense multi-crop contact sheets:
+family clustering) with System-2 Gemini dense multi-crop contact sheets:
 
 1. **Stage A — Coarse JEV Visual Family Triage & Entropy Gate:**
    - Computes `jev + CIELAB` similarity over the 4-view gallery and checks whether the top-2
@@ -12,10 +12,10 @@ family clustering) with System-2 Gemini 3.5 dense multi-crop contact sheets:
      the crop immediately with **0 Gemini VLM calls**.
    - When top-1 and top-2 are **sister variants in the same coarse family** (`centroid_cos >= 0.80`),
      Stage A enforces a stricter sister-SKU margin (`>= 0.036`) and routes ambiguous sister
-     variants to Stage B (`Gemini 3.5`).
-2. **Stage B — Gemini 3.5 Dense Multi-Crop Contact-Sheet Disambiguation + Row Smoothing:**
+     variants to Stage B (`Gemini`).
+2. **Stage B — Gemini Dense Multi-Crop Contact-Sheet Disambiguation + Row Smoothing:**
    - Clusters duplicate uncertain facings (`cluster_uncertain_crops`), packs up to 4 uncertain
-     medoids into a single `2x2` Contact Sheet for Gemini 3.5 with `response_logprobs=True`,
+     medoids into a single `2x2` Contact Sheet for Gemini with `response_logprobs=True`,
      calibrates token logprobs via `resolve_jev_choice`, and applies `smooth_shelf_rows`.
 """
 
@@ -52,14 +52,14 @@ class CoarseJevLaya(JevLayaHybrid):
     name = "coarse_jev_laya"
     architecture = (
         f"Stage A Coarse JEV family triage ({SHORTLIST_MODEL} + 1-H(p)/ln(N) gate: distinct family "
-        f">={COARSE_DISTINCT_MARGIN} vs sister SKU >={SISTER_FAMILY_MARGIN}) -> Stage B Gemini 3.5 "
+        f">={COARSE_DISTINCT_MARGIN} vs sister SKU >={SISTER_FAMILY_MARGIN}) -> Stage B Gemini "
         f"batched top-{K} contact sheets & row smoothing"
     )
     steps = [
         "Setup (once per run, reported apart from cost/img): embed reference photos, CIELAB zones & SKU family centroids",
         f"Stage A: Photometric de-glare + {SHORTLIST_MODEL} + Coarse JEV family triage (distinct family vs sister SKU)",
         f"Accept Stage A when distinct-family margin >= {COARSE_DISTINCT_MARGIN} (or sister margin >= {SISTER_FAMILY_MARGIN})",
-        f"Stage B: Cluster uncertain facings (cos >= {CLUSTER_COSINE}) and verify medoids in batched top-{K} Gemini 3.5 contact sheets",
+        f"Stage B: Cluster uncertain facings (cos >= {CLUSTER_COSINE}) and verify medoids in batched top-{K} Gemini contact sheets",
         f"Visually-gated 1D shelf-row smoothing ([P, None/?, P] -> P when neighbour cosine >= {SMOOTH_COSINE})",
     ]
 
@@ -130,7 +130,7 @@ class CoarseJevLaya(JevLayaHybrid):
             return pid
         choice, conf, jev_meta = self.pick_with_confidence(restored, ranked[:K], ctx)
         ctx.trace.step(
-            "Stage B Gemini 3.5 tier",
+            "Stage B Gemini tier",
             f"escalated (cos {s1:.3f}, margin {s1 - s2:.3f}, jev_conf {conf:.2f}) -> "
             + (f"#{choice}" if choice is not None else "none"),
             info={**info, **jev_meta, "answer": choice},
@@ -212,7 +212,7 @@ class CoarseJevLaya(JevLayaHybrid):
                 s2 = max((s for s, _, _ in ranked_lists[med][1:]), default=-1.0)
                 twins = f" (+{len(cl) - 1} cluster twins)" if len(cl) > 1 else ""
                 ctx.trace.step(
-                    "Stage B Gemini 3.5 tier",
+                    "Stage B Gemini tier",
                     f"box {med + 1}{twins}: escalated (cos {s1:.3f}, margin {s1 - s2:.3f}, "
                     f"jev_conf {conf:.2f}) -> " + (f"#{ans}" if ans is not None else "none"),
                     info={

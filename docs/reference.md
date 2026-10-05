@@ -148,7 +148,7 @@ Approaches get all of this for free through `ctx.ask` and `ctx.trace.step`. Writ
 ```mermaid
 flowchart LR
   subgraph CFG["1. Global Routing (llm.py + embeddings.py)"]
-    G["Gemini 3.5 Flash / Flash Lite"] --> GL["locations/global<br/>aiplatform.googleapis.com"]
+    G["Gemini 3.8 Flash / 3.5 Flash Lite"] --> GL["locations/global<br/>aiplatform.googleapis.com"]
     E["gemini-embedding-2 (768-D)<br/>multimodalembedding@001 (512-D)"] --> GL
   end
   subgraph BILL["2. Global SKU Pricing (pricing.py)"]
@@ -183,7 +183,7 @@ flowchart LR
   PHOT --> EMB["Stage 1: gemini-embedding-2 (global)<br/>Cosine Rank vs Catalog Text"]
   EMB --> GATE{"Unique Brand or<br/>Margin >= 0.025?"}
   GATE -- "YES (Fast Path)" --> OUT["Return Top-1 SKU<br/>(0 Gemini Calls)"]
-  GATE -- "NO (Same-Brand Sister Variants)" --> GEM["Stage 2: Gemini 3.5 Size + Variant Check<br/>Filter by Brand + Printed Pack Size"]
+  GATE -- "NO (Same-Brand Sister Variants)" --> GEM["Stage 2: Gemini Size + Variant Check<br/>Filter by Brand + Printed Pack Size"]
   GEM --> OUT
 ```
 
@@ -195,7 +195,7 @@ flowchart LR
 ### 2. How `djev_classify` Identifies Brand, Variant, and SKU ([`src/approaches/market_share/classification/djev_classify.py`](../src/approaches/market_share/classification/djev_classify.py))
 * **Step 1 (Global Embedding Shortlist):** Embed the restored crop with `gemini-embedding-2` (`global` endpoint) and rank all catalog items by cosine similarity.
 * **Step 2 (Fast-Path Gate):** Accept the top-1 SKU immediately (with **zero Gemini calls**) when the brand has only one product in the catalog, when rank-1 and rank-2 belong to different brands, or when the cosine margin is `>= 0.025`.
-* **Step 3 (Sister-Variant Verification):** When rank-1 and rank-2 belong to the same brand within `< 0.025` margin, filter the catalog to that brand, read the printed pack size (`10g`, `130ml`, `1kg`) with Gemini 3.5, and select the exact SKU.
+* **Step 3 (Sister-Variant Verification):** When rank-1 and rank-2 belong to the same brand within `< 0.025` margin, filter the catalog to that brand, read the printed pack size (`10g`, `130ml`, `1kg`) with Gemini, and select the exact SKU.
 
 ## `jev_laya_hybrid` Visual Retrieval & Contact-Sheet Verifier
 
@@ -205,7 +205,7 @@ flowchart LR
   JEV --> GATE{"Cos >= 0.80 &<br/>Margin >= 0.034?"}
   GATE -- "YES (Fast Path)" --> MATCH["Accept Top-1 SKU<br/>(0 Gemini Calls)"]
   GATE -- "NO (Ambiguous / Competitor)" --> LAYA["Stage 2: Laya Contact Sheet<br/>Tile [Query | Ref 1 | Ref 2 | Ref 3 | Ref 4]"]
-  LAYA --> CHOICE{"Gemini 3.5 Choice"}
+  LAYA --> CHOICE{"Gemini Choice"}
   CHOICE -- "1..4" --> MATCH
   CHOICE -- "0 (Competitor)" --> REJ["Reject from HUL Numerator<br/>Keep in Shelf Denominator"]
 ```
@@ -213,7 +213,7 @@ flowchart LR
 ### 1. How `jev_laya_hybrid` Differs from Public OpenJEV & Laya ([`src/approaches/market_share/retrieval/jev_laya_hybrid.py`](../src/approaches/market_share/retrieval/jev_laya_hybrid.py))
 * **Public Baseline Limitation:** Public OpenJEV returns the top-1 cosine neighbor for every crop, and public Laya calls Gemini on every crop.
 * **Our Hybrid Step 1 (Embedding + CIELAB Margin Gate):** Rank the reference gallery with `gemini-embedding-2` (`global`) plus CIELAB chromatic histograms. Accept the top-1 SKU immediately when `cos >= 0.80` and `margin >= 0.034` (or `cos >= 0.90` and `margin >= 0.020`).
-* **Our Hybrid Step 2 (Laya `K=4` Contact Sheet):** For ambiguous crops, tile the query crop next to its top-4 gallery photos (`[1]..[4]`) in one composite image (up to `8` crops batched per Gemini 3.5 call).
+* **Our Hybrid Step 2 (Laya `K=4` Contact Sheet):** For ambiguous crops, tile the query crop next to its top-4 gallery photos (`[1]..[4]`) in one composite image (up to `8` crops batched per Gemini call).
 * **Our Hybrid Step 3 (`choice = 0` Competitor Rejection):** If the crop is a non-HUL competitor product, Gemini returns `{"choice": 0}` and rejects the false match.
 
 ## End-to-End Share-of-Shelf Composition (`detect_jev_laya` & `shelf_jev_laya`)
@@ -233,14 +233,14 @@ flowchart LR
 * **Stage 3 (Competitor Middle Bottle Rule):** When a middle bottle is a non-HUL competitor product, Gemini returns `0` (`None`). The facing remains in the total shelf denominator and is excluded from the HUL numerator.
 * **Stage 4 (Visually Gated Row Smoothing):** Fill an abstained interior facing `[P, None, P] -> [P, P, P]` only when its embedding cosine with both flanking neighbors is `>= 0.86`.
 
-## Two-Stage Coarse JEV Triage + Dense Gemini 3.5 (`coarse_jev_gemini`, `coarse_jev_laya`, `detect_coarse_jev_gemini`)
+## Two-Stage Coarse JEV Triage + Dense Gemini (`coarse_jev_gemini`, `coarse_jev_laya`, `detect_coarse_jev_gemini`)
 
 ```mermaid
 flowchart LR
   CROP["Normalized Shelf Crop<br/>(Photometry Stage 0)"] --> JEV["Stage 1: Coarse JEV Triage (openjev.py)<br/>0.75 * cos(gemini-embedding-2) + 0.25 * cos(112-D JEV)<br/>+ Brand / Category Centroid Gate"]
   JEV --> GATE{"Score >= 0.90 &<br/>Margin >= 0.04?"}
   GATE -- "YES (~65% Easy Crops)" --> FAST["Auto-Accept Top-1 SKU<br/>(0 Gemini LLM Calls)"]
-  GATE -- "NO (~35% Hard / Competitor Crops)" --> DENSE["Stage 2: Dense Gemini 3.5 + Laya Sheet<br/>Verify Variant / Pack Size or Reject (choice=0)"]
+  GATE -- "NO (~35% Hard / Competitor Crops)" --> DENSE["Stage 2: Dense Gemini + Laya Sheet<br/>Verify Variant / Pack Size or Reject (choice=0)"]
   DENSE --> OUT["Final SKU or Competitor Rejection"]
   FAST --> OUT
 ```
@@ -249,7 +249,7 @@ flowchart LR
 * **Problem on 40-SKU Shelves:** Calling a generative LLM on all 40 shelf crops takes over `25 seconds` per image, while pure embedding search confuses sister sizes (`10g` vs. `60g`) and competitor bottles.
 * **Stage 1 (`coarse_jev_triage`):** Combine the `768-dim` `gemini-embedding-2` vector (`global` endpoint) with our `112-dim` JEV visual descriptor (`64-dim` `8x8` spatial Gram matrix + `48-dim` RGB/LAB color histogram and edge sharpness) and narrow the catalog by brand/category centroid similarity.
 * **Fast-Path Gate:** When top-1 combined similarity is `>= 0.90` and the margin over rank-2 is `>= 0.04`, assign the SKU immediately with **zero Gemini calls** (`~65%` of shelf crops).
-* **Stage 2 (Dense Gemini 3.5 Escalation):** Send only the remaining `~35%` ambiguous, occluded, sister-size, or competitor crops to `gemini-3.5-flash-lite` (`coarse_jev_gemini`, `coarse_jev_laya`, `detect_coarse_jev_gemini`).
+* **Stage 2 (Dense Gemini Escalation):** Send only the remaining `~35%` ambiguous, occluded, sister-size, or competitor crops to `gemini-3.5-flash-lite` (`coarse_jev_gemini`, `coarse_jev_laya`, `detect_coarse_jev_gemini`).
 * **Benchmark Result (`ul-fs-s-sandbx-16-prj`):** `detect_coarse_jev_gemini` reaches **`0.871` End-to-End F2** at **`5.3s` p95 latency** (`₹0.215/img`), and `coarse_jev_laya` reaches **`0.900` Retrieval F2** at **`3.0s` p95 latency**.
 
 
