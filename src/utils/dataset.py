@@ -109,17 +109,21 @@ def download(root: str = LOCAL_ROOT, keep_archive: bool = False) -> Path:
     return root
 
 
-def upload(local_root: str, gcs_root: str, workers: int = 32) -> None:
-    """Copy the extracted dataset to GCS. Resumable: files already there are skipped."""
+def upload(local_root: str, gcs_root: str, workers: int = 32, overwrite: bool = False) -> None:
+    """Copy the extracted dataset to GCS. Resumable: files already there are skipped unless overwrite=True."""
     from google.cloud.storage import transfer_manager
 
     local_root = Path(local_root)
     bucket_name, prefix = _split_gs(gcs_root.rstrip("/"))
     bucket = _gcs().bucket(bucket_name)
-    existing = {b.name for b in _gcs().list_blobs(bucket_name, prefix=prefix + "/")}
     files = [str(p.relative_to(local_root)) for p in local_root.rglob("*") if p.is_file()]
-    todo = [f for f in files if f"{prefix}/{f}" not in existing]
-    print(f"{len(files)} files, {len(files) - len(todo)} already in {gcs_root}, uploading {len(todo)}")
+    if overwrite:
+        todo = list(files)
+        print(f"Overwriting {len(todo)} files in {gcs_root}")
+    else:
+        existing = {b.name for b in _gcs().list_blobs(bucket_name, prefix=prefix + "/")}
+        todo = [f for f in files if f"{prefix}/{f}" not in existing]
+        print(f"{len(files)} files, {len(files) - len(todo)} already in {gcs_root}, uploading {len(todo)}")
     for i in range(0, len(todo), 500):
         chunk = todo[i:i + 500]
         results = transfer_manager.upload_many_from_filenames(

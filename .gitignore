@@ -11,6 +11,9 @@ dist/
 # Datasets. SKU-110K: `make data` (~12 GB). The small labelled products set is committed.
 data/*
 !data/labeled_retail_benchmarks/
+pack_data/
+brand_data/
+input_data/
 
 # Credentials
 .env
