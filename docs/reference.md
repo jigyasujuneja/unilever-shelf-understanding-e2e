@@ -252,7 +252,7 @@ flowchart LR
 * **Stage 2 (Dense Gemini 3.5 Escalation):** Send only the remaining `~35%` ambiguous, occluded, sister-size, or competitor crops to `gemini-3.5-flash-lite` (`coarse_jev_gemini`, `coarse_jev_laya`, `detect_coarse_jev_gemini`).
 * **Benchmark Result (`ul-fs-s-sandbx-16-prj`):** `detect_coarse_jev_gemini` reaches **`0.871` End-to-End F2** at **`5.3s` p95 latency** (`₹0.215/img`), and `coarse_jev_laya` reaches **`0.900` Retrieval F2** at **`3.0s` p95 latency**.
 
-## `gs://marketshare-datasets` Supervised Fine-Tuning (SFT) JSONL Methodology ([`src/utils/tuning.py`](../src/utils/tuning.py), [`src/utils/hul_taxonomy.py`](../src/utils/hul_taxonomy.py))
+## `gs://marketshare-datasets` Supervised Fine-Tuning (SFT) JSONL Methodology ([`src/utils/tuning.py`](../src/utils/tuning.py))
 
 All three hierarchical classification datasets in `gs://marketshare-datasets` (`pack_data`, `brand_data`, and `input_data`) are prepared using **GCS object metadata only** (`list_gcs_image_blobs()` / `list_gcs_image_uris()` — never downloading or modifying image bytes) and formatted in Vertex AI Gemini Supervised Fine-Tuning `GenerateContent` JSONL schema:
 

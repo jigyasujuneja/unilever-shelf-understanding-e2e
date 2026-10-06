@@ -34,7 +34,6 @@ from PIL import Image
 from approaches.base import crop
 from approaches.market_share.retrieval.tiered_hybrid import PROMPT, K, sheet
 from utils import dataset
-from utils.hul_taxonomy import is_copy_or_synthetic, parse_variant_folder
 from utils.llm import load_config
 
 SUPPORTED_SFT_BASE_MODELS = (
@@ -102,6 +101,16 @@ MIME_BY_EXT = {
     ".png": "image/png",
 }
 
+STRIP_PROMO_ART_SUFFIX_RE = re.compile(
+    r"(?:_(?:New|Old|\d*Old_Pack|Square|PO[2-9]|B[1-9]G[1-9]|Pack_Of_\d+|Free_[A-Za-z0-9_]+|Rs_?\d+)(?:_\d+)?)+$",
+    re.I,
+)
+COPY_FILE_RE = re.compile(
+    r"(?:^copy[\s_-]*\d*\.(?:jpe?g|png)$|\s-\s*Copy(?:\s*\(\d+\))?|\(copy\)\.(?:jpe?g|png)$|^DA_(?:TBC_)?|(?:^|_)\d+\s+\(\d+\)\.(?:jpe?g|png)$)",
+    re.I,
+)
+
+
 
 def _sft_example(gcs_image_uri: str, prompt: str, response_dict: dict) -> dict:
     """One Vertex AI Gemini SFT JSONL line with a GCS image URI and structured JSON target."""
@@ -142,9 +151,15 @@ def clean_brand_name(folder: str) -> str:
 
 
 def clean_variant_name(raw_variant: str) -> str:
-    """Normalize stray spaces/underscores and strip promo/price/artwork suffixes via `parse_variant_folder`."""
+    """Normalize stray spaces/underscores and strip promo/price/artwork suffixes (`_Rs_10`, `_B3G1`, `_PO3`, `_New`, `_Old`)."""
     cleaned = re.sub(r"_+", "_", raw_variant.replace(" ", "_")).strip("_")
-    return parse_variant_folder("variant_gen", f"Brand__{cleaned}")["base_variant"]
+    return STRIP_PROMO_ART_SUFFIX_RE.sub("", cleaned) or cleaned
+
+
+def is_copy_or_synthetic(uri_or_filename: str) -> bool:
+    """True when the image filename is a duplicate copy (`copy*.jpg`, `- Copy`, `(copy)`) or synthetic `DA_TBC_*` crop."""
+    name = uri_or_filename.rsplit("/", 1)[-1]
+    return bool(COPY_FILE_RE.search(name))
 
 
 def is_copy_uri(uri: str) -> bool:
