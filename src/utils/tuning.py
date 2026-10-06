@@ -34,6 +34,7 @@ from PIL import Image
 from approaches.base import crop
 from approaches.market_share.retrieval.tiered_hybrid import PROMPT, K, sheet
 from utils import dataset
+from utils.hul_taxonomy import is_copy_or_synthetic, parse_variant_folder
 from utils.llm import load_config
 
 SUPPORTED_SFT_BASE_MODELS = (
@@ -90,8 +91,9 @@ VARIANT_PROMPT_BRAND = (
     'Return ONLY JSON like {"brand":"Clear"}.'
 )
 VARIANT_PROMPT_ONLY = (
-    "Classify the retail product shown in the image by its variant. "
-    'Return ONLY JSON like {"variant":"Active_Care_Shampoo"}.'
+    "Classify the retail product shown in the image by its brand and variant. "
+    f"Valid brands: {', '.join(VARIANT_BRANDS)}. "
+    'Return ONLY JSON like {"brand":"Clear","variant":"Active_Care_Shampoo"}.'
 )
 
 MIME_BY_EXT = {
@@ -140,34 +142,127 @@ def clean_brand_name(folder: str) -> str:
 
 
 def clean_variant_name(raw_variant: str) -> str:
-    """Normalize stray spaces and repeated underscores in Brand__Variant folder suffixes."""
-    return re.sub(r"_+", "_", raw_variant.replace(" ", "_")).strip("_")
+    """Normalize stray spaces/underscores and strip promo/price/artwork suffixes via `parse_variant_folder`."""
+    cleaned = re.sub(r"_+", "_", raw_variant.replace(" ", "_")).strip("_")
+    return parse_variant_folder("variant_gen", f"Brand__{cleaned}")["base_variant"]
 
 
 def is_copy_uri(uri: str) -> bool:
-    """True when the image filename is an augmented/duplicated `copy*.jpg` file."""
-    return uri.rsplit("/", 1)[-1].lower().startswith("copy")
+    """True when the image filename is a duplicate copy (`copy*.jpg`, `- Copy`, `(copy)`) or synthetic `DA_TBC_*` crop."""
+    return is_copy_or_synthetic(uri)
+
+
+def list_gcs_image_blobs(gcs_prefix: str) -> dict[str, str]:
+    """Return `{gcs_uri: md5_hash}` under `gcs_prefix` using GCS blob metadata only (never reads bytes)."""
+    bucket_name, prefix = dataset._split_gs(gcs_prefix.rstrip("/"))
+    blobs = dataset._gcs().list_blobs(bucket_name, prefix=prefix + "/")
+    out: dict[str, str] = {}
+    for b in blobs:
+        if Path(b.name).suffix.lower() in MIME_BY_EXT and "/jsonl/" not in f"/{b.name}":
+            uri = f"gs://{bucket_name}/{b.name}"
+            out[uri] = b.md5_hash or uri
+    return out
 
 
 def list_gcs_image_uris(gcs_prefix: str) -> list[str]:
     """List image object URIs under `gcs_prefix` using GCS blob metadata only (never reads bytes)."""
-    bucket_name, prefix = dataset._split_gs(gcs_prefix.rstrip("/"))
-    blobs = dataset._gcs().list_blobs(bucket_name, prefix=prefix + "/")
-    return sorted(
-        f"gs://{bucket_name}/{b.name}"
-        for b in blobs
-        if Path(b.name).suffix.lower() in MIME_BY_EXT and "/jsonl/" not in f"/{b.name}"
-    )
+    return sorted(list_gcs_image_blobs(gcs_prefix))
 
 
-def _prioritize_originals(uris: list[str], rng: random.Random) -> list[str]:
-    """Shuffle original (non-`copy*`) URIs ahead of `copy*` duplicates for SFT sampling."""
-    unique = list(dict.fromkeys(uris))
-    orig = [u for u in unique if not is_copy_uri(u)]
-    copies = [u for u in unique if is_copy_uri(u)]
+def _dedup_uris(
+    uris: list[str],
+    md5_by_uri: dict[str, str] | None = None,
+) -> list[str]:
+    """Deduplicate URIs on `b.md5_hash` (falling back to URI when offline), preferring original filenames over copies."""
+    ordered = [u for u in uris if not is_copy_or_synthetic(u)] + [
+        u for u in uris if is_copy_or_synthetic(u)
+    ]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for u in ordered:
+        key = (md5_by_uri.get(u) if md5_by_uri else None) or u
+        if key not in seen:
+            seen.add(key)
+            unique.append(u)
+    return unique
+
+
+def _find_conflicted_md5s(
+    by_class: dict[Any, list[str]],
+    md5_by_uri: dict[str, str] | None = None,
+) -> set[str]:
+    """Identify `md5_hash` values that appear in more than one distinct class folder."""
+    if not md5_by_uri:
+        return set()
+    md5_to_classes: dict[str, set[Any]] = defaultdict(set)
+    for cls_key, uris in by_class.items():
+        for u in uris:
+            h = md5_by_uri.get(u)
+            if h:
+                md5_to_classes[h].add(cls_key)
+    return {h for h, cls_set in md5_to_classes.items() if len(cls_set) > 1}
+
+
+def _prioritize_originals(
+    uris: list[str],
+    rng: random.Random,
+    md5_by_uri: dict[str, str] | None = None,
+    exclude_md5s: set[str] | None = None,
+) -> list[str]:
+    """Deduplicate on `b.md5_hash`, drop cross-folder MD5 conflicts, and shuffle originals ahead of copy/synthetic files."""
+    unique = _dedup_uris(uris, md5_by_uri)
+    if exclude_md5s and md5_by_uri:
+        unique = [u for u in unique if md5_by_uri.get(u, u) not in exclude_md5s]
+    orig = [u for u in unique if not is_copy_or_synthetic(u)]
+    copies = [u for u in unique if is_copy_or_synthetic(u)]
     rng.shuffle(orig)
     rng.shuffle(copies)
     return orig + copies
+
+
+def _filter_out_val_records(
+    all_records: list[str],
+    val_records: list[str],
+    md5_by_uri: dict[str, str] | None = None,
+) -> list[str]:
+    """Exclude any validation `fileUri` (and any matching `b.md5_hash`) from `train.jsonl`."""
+    val_uris = {_extract_uri(r) for r in val_records}
+    val_md5s = {
+        md5_by_uri[u] for u in val_uris if md5_by_uri and u in md5_by_uri
+    }
+    out: list[str] = []
+    for r in all_records:
+        u = _extract_uri(r)
+        if u in val_uris:
+            continue
+        if md5_by_uri and md5_by_uri.get(u) in val_md5s:
+            continue
+        out.append(r)
+    return out
+
+
+def _assert_disjoint_train_val(
+    split_name: str,
+    train_records: list[str],
+    val_records: list[str],
+    md5_by_uri: dict[str, str] | None = None,
+) -> None:
+    tr_uris = {_extract_uri(x) for x in train_records}
+    vl_uris = {_extract_uri(x) for x in val_records}
+    if tr_uris & vl_uris:
+        raise RuntimeError(f"URI overlap detected in {split_name}")
+    if md5_by_uri:
+        tr_md5 = {md5_by_uri.get(u, u) for u in tr_uris}
+        vl_md5 = {md5_by_uri.get(u, u) for u in vl_uris}
+        if tr_md5 & vl_md5:
+            raise RuntimeError(f"MD5 overlap detected in {split_name}")
+
+
+def _upload_sft_dir(local_dir: str | Path, gcs_dest: str) -> None:
+    try:
+        dataset.upload(str(local_dir), gcs_dest, overwrite=True)
+    except TypeError:
+        dataset.upload(str(local_dir), gcs_dest)
 
 
 def build_marketshare_pack_jsonl(
@@ -180,11 +275,18 @@ def build_marketshare_pack_jsonl(
     max_train_per_class: int = 120,
     upload: bool = True,
     uris: list[str] | None = None,
+    md5_by_uri: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build per-folder, full, and stratified SFT JSONL files for `pack_data/pack/train`."""
     train_prefix = f"{gcs_bucket.rstrip('/')}/pack_data/pack/train/"
     gcs_dest = f"{gcs_bucket.rstrip('/')}/pack_data/pack/jsonl"
-    raw_uris = sorted(uris if uris is not None else list_gcs_image_uris(train_prefix))
+    if uris is None:
+        blobs_map = list_gcs_image_blobs(train_prefix)
+        raw_uris = sorted(blobs_map)
+        md5_map = md5_by_uri if md5_by_uri is not None else blobs_map
+    else:
+        raw_uris = sorted(uris)
+        md5_map = md5_by_uri
 
     out_p = Path(out_dir)
     out_p.mkdir(parents=True, exist_ok=True)
@@ -197,6 +299,7 @@ def build_marketshare_pack_jsonl(
         if len(parts) == 2 and parts[1] and parts[0] != "jsonl" and "__" in parts[0]:
             by_folder[parts[0]].append(uri)
 
+    conflicted_md5s = _find_conflicted_md5s(by_folder, md5_map)
     rng = random.Random(seed)
     all_records: list[str] = []
     train_stratified: list[str] = []
@@ -205,35 +308,44 @@ def build_marketshare_pack_jsonl(
     for folder, f_uris in sorted(by_folder.items()):
         category, pack_type = folder.split("__", 1)
         target = {"category": category, "pack_type": pack_type}
-        unique_uris = list(dict.fromkeys(f_uris))
+        unique_uris = _dedup_uris(f_uris, md5_map)
         records = [_sft_line(u, PACK_PROMPT, target) for u in unique_uris]
         (out_p / f"{folder}.jsonl").write_text("\n".join(records) + "\n", encoding="utf-8")
         all_records.extend(records)
 
-        shuffled = list(records)
-        rng.shuffle(shuffled)
-        n_val = min(max_val_per_class, max(min_val_per_class, int(len(shuffled) * val_fraction)))
-        val_stratified.extend(shuffled[:n_val])
-        train_stratified.extend(shuffled[n_val : n_val + max_train_per_class])
+        prioritized_uris = _prioritize_originals(unique_uris, rng, md5_map, conflicted_md5s)
+        orig_only = [u for u in prioritized_uris if not is_copy_or_synthetic(u)]
+        val_pool = orig_only if len(orig_only) >= min_val_per_class else prioritized_uris
+        n_val = min(max_val_per_class, max(min_val_per_class, int(len(val_pool) * val_fraction)))
+        v_uris = val_pool[:n_val]
+        v_set = set(v_uris)
+        t_pool = [u for u in prioritized_uris if u not in v_set]
+        t_uris = t_pool[:max_train_per_class]
+        val_stratified.extend(_sft_line(u, PACK_PROMPT, target) for u in v_uris)
+        train_stratified.extend(_sft_line(u, PACK_PROMPT, target) for u in t_uris)
 
     rng.shuffle(train_stratified)
     rng.shuffle(val_stratified)
-    if {_extract_uri(x) for x in train_stratified} & {_extract_uri(x) for x in val_stratified}:
-        raise RuntimeError("Overlap detected between pack train_stratified and val_stratified")
+    _assert_disjoint_train_val("pack stratified", train_stratified, val_stratified, md5_map)
 
-    (out_p / "train.jsonl").write_text("\n".join(all_records) + ("\n" if all_records else ""), encoding="utf-8")
+    full_train_records = _filter_out_val_records(all_records, val_stratified, md5_map)
+    _assert_disjoint_train_val("pack full train", full_train_records, val_stratified, md5_map)
+
+    (out_p / "train.jsonl").write_text(
+        "\n".join(full_train_records) + ("\n" if full_train_records else ""), encoding="utf-8"
+    )
     train_f = out_p / "train_stratified.jsonl"
     val_f = out_p / "val_stratified.jsonl"
     train_f.write_text("\n".join(train_stratified) + ("\n" if train_stratified else ""), encoding="utf-8")
     val_f.write_text("\n".join(val_stratified) + ("\n" if val_stratified else ""), encoding="utf-8")
 
     if upload:
-        dataset.upload(str(out_p), gcs_dest)
+        _upload_sft_dir(out_p, gcs_dest)
     return {
         "out_dir": out_p,
         "train_jsonl": train_f,
         "val_jsonl": val_f,
-        "full_train_count": len(all_records),
+        "full_train_count": len(full_train_records),
         "train_count": len(train_stratified),
         "val_count": len(val_stratified),
         "class_count": len(by_folder),
@@ -251,11 +363,18 @@ def build_marketshare_brand_jsonl(
     train_per_brand: int = 10,
     upload: bool = True,
     uris: list[str] | None = None,
+    md5_by_uri: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build per-brand, full, and stratified SFT JSONL files for `brand_data/brand/brand_data`."""
     train_prefix = f"{gcs_bucket.rstrip('/')}/brand_data/brand/brand_data/"
     gcs_dest = f"{gcs_bucket.rstrip('/')}/brand_data/brand/jsonl"
-    raw_uris = sorted(uris if uris is not None else list_gcs_image_uris(train_prefix))
+    if uris is None:
+        blobs_map = list_gcs_image_blobs(train_prefix)
+        raw_uris = sorted(blobs_map)
+        md5_map = md5_by_uri if md5_by_uri is not None else blobs_map
+    else:
+        raw_uris = sorted(uris)
+        md5_map = md5_by_uri
 
     out_p = Path(out_dir)
     out_p.mkdir(parents=True, exist_ok=True)
@@ -268,42 +387,51 @@ def build_marketshare_brand_jsonl(
         if len(parts) == 2 and parts[1] and parts[0] != "jsonl":
             by_brand[clean_brand_name(parts[0])].append(uri)
 
+    conflicted_md5s = _find_conflicted_md5s(by_brand, md5_map)
     rng = random.Random(seed)
     all_records: list[str] = []
     train_stratified: list[str] = []
     val_stratified: list[str] = []
 
     for brand, b_uris in sorted(by_brand.items()):
-        unique_uris = list(dict.fromkeys(b_uris))
+        unique_uris = _dedup_uris(b_uris, md5_map)
         target = {"brand": brand}
         records = [_sft_line(u, BRAND_PROMPT, target) for u in unique_uris]
         (out_p / f"{brand}.jsonl").write_text("\n".join(records) + "\n", encoding="utf-8")
         all_records.extend(records)
 
-        prioritized_uris = _prioritize_originals(unique_uris, rng)
-        v_uris = prioritized_uris[:val_per_brand]
-        t_uris = prioritized_uris[val_per_brand : val_per_brand + train_per_brand]
+        prioritized_uris = _prioritize_originals(unique_uris, rng, md5_map, conflicted_md5s)
+        orig_only = [u for u in prioritized_uris if not is_copy_or_synthetic(u)]
+        val_pool = orig_only if len(orig_only) >= val_per_brand else prioritized_uris
+        v_uris = val_pool[:val_per_brand]
+        v_set = set(v_uris)
+        t_pool = [u for u in prioritized_uris if u not in v_set]
+        t_uris = t_pool[:train_per_brand]
         val_stratified.extend(_sft_line(u, BRAND_PROMPT, target) for u in v_uris)
         train_stratified.extend(_sft_line(u, BRAND_PROMPT, target) for u in t_uris)
 
     rng.shuffle(train_stratified)
     rng.shuffle(val_stratified)
-    if {_extract_uri(x) for x in train_stratified} & {_extract_uri(x) for x in val_stratified}:
-        raise RuntimeError("Overlap detected between brand train_stratified and val_stratified")
+    _assert_disjoint_train_val("brand stratified", train_stratified, val_stratified, md5_map)
 
-    (out_p / "train.jsonl").write_text("\n".join(all_records) + ("\n" if all_records else ""), encoding="utf-8")
+    full_train_records = _filter_out_val_records(all_records, val_stratified, md5_map)
+    _assert_disjoint_train_val("brand full train", full_train_records, val_stratified, md5_map)
+
+    (out_p / "train.jsonl").write_text(
+        "\n".join(full_train_records) + ("\n" if full_train_records else ""), encoding="utf-8"
+    )
     train_f = out_p / "train_stratified.jsonl"
     val_f = out_p / "val_stratified.jsonl"
     train_f.write_text("\n".join(train_stratified) + ("\n" if train_stratified else ""), encoding="utf-8")
     val_f.write_text("\n".join(val_stratified) + ("\n" if val_stratified else ""), encoding="utf-8")
 
     if upload:
-        dataset.upload(str(out_p), gcs_dest)
+        _upload_sft_dir(out_p, gcs_dest)
     return {
         "out_dir": out_p,
         "train_jsonl": train_f,
         "val_jsonl": val_f,
-        "full_train_count": len(all_records),
+        "full_train_count": len(full_train_records),
         "train_count": len(train_stratified),
         "val_count": len(val_stratified),
         "class_count": len(by_brand),
@@ -322,17 +450,20 @@ def build_marketshare_variant_jsonl(
     task: str = "all3",
     upload: bool = True,
     uris: list[str] | None = None,
+    md5_by_uri: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build per-folder, full, and multi-task stratified SFT JSONL files for `input_data/variant_*`."""
     input_prefix = f"{gcs_bucket.rstrip('/')}/input_data/"
     gcs_dest = f"{gcs_bucket.rstrip('/')}/input_data/jsonl"
     if uris is None:
-        raw_uris: list[str] = []
+        blobs_map: dict[str, str] = {}
         for cat in VARIANT_CATEGORIES:
-            raw_uris.extend(list_gcs_image_uris(f"{input_prefix}variant_{cat}/train"))
-        raw_uris.sort()
+            blobs_map.update(list_gcs_image_blobs(f"{input_prefix}variant_{cat}/train"))
+        raw_uris = sorted(blobs_map)
+        md5_map = md5_by_uri if md5_by_uri is not None else blobs_map
     else:
         raw_uris = sorted(uris)
+        md5_map = md5_by_uri
 
     out_p = Path(out_dir)
     out_p.mkdir(parents=True, exist_ok=True)
@@ -349,6 +480,7 @@ def build_marketshare_variant_jsonl(
                 brand, raw_var = folder.split("__", 1)
                 by_key[(cat, brand, clean_variant_name(raw_var))].append(uri)
 
+    conflicted_md5s = _find_conflicted_md5s(by_key, md5_map)
     rng = random.Random(seed)
     all_records: list[str] = []
     train_all3, val_all3 = [], []
@@ -358,24 +490,29 @@ def build_marketshare_variant_jsonl(
     brand_val_pool: dict[str, list[str]] = defaultdict(list)
 
     for (cat, brand, variant), f_uris in sorted(by_key.items()):
-        unique_uris = list(dict.fromkeys(f_uris))
+        unique_uris = _dedup_uris(f_uris, md5_map)
         target_all3 = {"category": cat, "brand": brand, "variant": variant}
+        target_var = {"brand": brand, "variant": variant}
         records = [_sft_line(u, VARIANT_PROMPT_ALL3, target_all3) for u in unique_uris]
         (out_p / f"{cat}__{brand}__{variant}.jsonl").write_text(
             "\n".join(records) + "\n", encoding="utf-8"
         )
         all_records.extend(records)
 
-        prioritized = _prioritize_originals(unique_uris, rng)
-        v_uris = prioritized[:val_per_folder]
-        t_uris = prioritized[val_per_folder : val_per_folder + train_per_folder]
+        prioritized = _prioritize_originals(unique_uris, rng, md5_map, conflicted_md5s)
+        orig_only = [u for u in prioritized if not is_copy_or_synthetic(u)]
+        val_pool = orig_only if len(orig_only) >= val_per_folder else prioritized
+        v_uris = val_pool[:val_per_folder]
+        v_set = set(v_uris)
+        t_pool = [u for u in prioritized if u not in v_set]
+        t_uris = t_pool[:train_per_folder]
 
         for u in v_uris:
             val_all3.append(_sft_line(u, VARIANT_PROMPT_ALL3, target_all3))
-            val_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, {"variant": variant}))
+            val_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, target_var))
         for u in t_uris:
             train_all3.append(_sft_line(u, VARIANT_PROMPT_ALL3, target_all3))
-            train_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, {"variant": variant}))
+            train_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, target_var))
 
         for u in v_uris[:1]:
             val_cat.append(_sft_line(u, VARIANT_PROMPT_CATEGORY, {"category": cat}))
@@ -383,12 +520,16 @@ def build_marketshare_variant_jsonl(
             train_cat.append(_sft_line(u, VARIANT_PROMPT_CATEGORY, {"category": cat}))
 
         brand_val_pool[brand].extend(v_uris)
-        brand_train_pool[brand].extend(prioritized[val_per_folder:])
+        brand_train_pool[brand].extend(t_pool)
 
     train_brand, val_brand = [], []
     for brand in sorted(brand_train_pool):
-        v_pool = list(brand_val_pool[brand])
-        t_pool = list(brand_train_pool[brand])
+        v_pool = _dedup_uris(brand_val_pool[brand], md5_map)
+        v_keys = {(md5_map.get(u) if md5_map else None) or u for u in v_pool}
+        t_pool = [
+            u for u in _dedup_uris(brand_train_pool[brand], md5_map)
+            if ((md5_map.get(u) if md5_map else None) or u) not in v_keys
+        ]
         rng.shuffle(v_pool)
         rng.shuffle(t_pool)
         val_brand.extend(_sft_line(u, VARIANT_PROMPT_BRAND, {"brand": brand}) for u in v_pool[:10])
@@ -403,10 +544,15 @@ def build_marketshare_variant_jsonl(
         ("brand", train_brand, val_brand),
         ("variant", train_var, val_var),
     ):
-        if {_extract_uri(x) for x in tr} & {_extract_uri(x) for x in vl}:
-            raise RuntimeError(f"Overlap detected in variant {name} split")
+        _assert_disjoint_train_val(f"variant {name}", tr, vl, md5_map)
 
-    (out_p / "train.jsonl").write_text("\n".join(all_records) + ("\n" if all_records else ""), encoding="utf-8")
+    all_val_records = val_all3 + val_cat + val_brand + val_var
+    full_train_records = _filter_out_val_records(all_records, all_val_records, md5_map)
+    _assert_disjoint_train_val("variant full train", full_train_records, all_val_records, md5_map)
+
+    (out_p / "train.jsonl").write_text(
+        "\n".join(full_train_records) + ("\n" if full_train_records else ""), encoding="utf-8"
+    )
     files_by_task = {
         "all3": ("train_stratified.jsonl", "val_stratified.jsonl", train_all3, val_all3),
         "category": ("train_category_stratified.jsonl", "val_category_stratified.jsonl", train_cat, val_cat),
@@ -418,14 +564,14 @@ def build_marketshare_variant_jsonl(
         (out_p / v_name).write_text("\n".join(vl) + ("\n" if vl else ""), encoding="utf-8")
 
     if upload:
-        dataset.upload(str(out_p), gcs_dest)
+        _upload_sft_dir(out_p, gcs_dest)
 
     sel_train_name, sel_val_name, sel_tr, sel_vl = files_by_task.get(task, files_by_task["all3"])
     return {
         "out_dir": out_p,
         "train_jsonl": out_p / sel_train_name,
         "val_jsonl": out_p / sel_val_name,
-        "full_train_count": len(all_records),
+        "full_train_count": len(full_train_records),
         "train_count": len(sel_tr),
         "val_count": len(sel_vl),
         "class_count": len(by_key),
