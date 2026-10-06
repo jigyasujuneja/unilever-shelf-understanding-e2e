@@ -252,7 +252,47 @@ flowchart LR
 * **Stage 2 (Dense Gemini 3.5 Escalation):** Send only the remaining `~35%` ambiguous, occluded, sister-size, or competitor crops to `gemini-3.5-flash-lite` (`coarse_jev_gemini`, `coarse_jev_laya`, `detect_coarse_jev_gemini`).
 * **Benchmark Result (`ul-fs-s-sandbx-16-prj`):** `detect_coarse_jev_gemini` reaches **`0.871` End-to-End F2** at **`5.3s` p95 latency** (`₹0.215/img`), and `coarse_jev_laya` reaches **`0.900` Retrieval F2** at **`3.0s` p95 latency**.
 
+## `gs://marketshare-datasets` Supervised Fine-Tuning (SFT) JSONL Methodology ([`src/utils/tuning.py`](../src/utils/tuning.py))
 
+All three hierarchical classification datasets in `gs://marketshare-datasets` (`pack_data`, `brand_data`, and `input_data`) are prepared using **GCS object metadata only** (`list_gcs_image_uris()` — never downloading or modifying image bytes) and formatted in Vertex AI Gemini Supervised Fine-Tuning `GenerateContent` JSONL schema:
 
+```mermaid
+flowchart LR
+  GCS["gs://marketshare-datasets<br/>(Metadata-Only Blob Listing)"] --> NORM["Label Normalization & Deduplication<br/>+ Prioritize Originals over copy*.jpg"]
+  NORM --> PER["Per-Class JSONLs + Full train.jsonl"]
+  NORM --> STRAT["Zero-Leakage Stratified Train/Val Splits<br/>(Shuffled, Disjoint fileUri Sets)"]
+```
 
+### 1. Pack Classification (`pack_data/pack/train/` → `pack_data/pack/jsonl/`)
+* **Source Structure:** 46 `<Category>__<PackType>` directories (`98,488` images across 10 categories and 14 pack types).
+* **Target JSON:** `{"category": "<Category>", "pack_type": "<PackType>"}` (`PACK_PROMPT`).
+* **Outputs (`build_marketshare_pack_jsonl`):**
+  * 46 per-folder `<Category>__<PackType>.jsonl` files + full `train.jsonl` (`98,488` examples).
+  * `val_stratified.jsonl` (`447` examples: 10% per class bounded to `5–10` examples) and `train_stratified.jsonl` (`5,311` examples: up to `120` non-overlapping examples per class), both shuffled with `seed=42`.
 
+### 2. Brand Classification (`brand_data/brand/brand_data/` → `brand_data/brand/jsonl/`)
+* **Source Structure:** 941 raw directories (`522,102` images, ~555 images/folder with `copy*.jpg` augmentations).
+* **Label Cleaning (`clean_brand_name`):** Strips artificial leading `A` / `A_` alphabetical sort prefixes on 222 folders (`ADove` → `Dove`, `A_3_roses` → `3_roses`), merging 7 duplicate folder pairs (`ADr_Wash`/`Dr_Wash`, `AGenteel`/`Genteel`, `AMr_Muscle`/`Mr_Muscle`, `AMysore_Sandal`/`Mysore_Sandal`, `ARevive`/`Revive`, `ASafe_Wash`/`Safe_Wash`, `AVanish`/`Vanish`) into **934 canonical brand classes**.
+* **Original-First Sampling (`_prioritize_originals`):** Partitions each brand's URIs so non-`copy*` originals are sampled ahead of `copy*.jpg` duplicates.
+* **Target JSON:** `{"brand": "<Brand>"}` (`BRAND_PROMPT`).
+* **Outputs (`build_marketshare_brand_jsonl`):**
+  * 934 per-brand `<Brand>.jsonl` files + full `train.jsonl` (`522,102` examples).
+  * `val_stratified.jsonl` (`1,868` examples: `2` per brand) and `train_stratified.jsonl` (`9,340` examples: `10` per brand), zero URI overlap, shuffled with `seed=42`.
+
+### 3. Category / Brand / Variant Classification (`input_data/variant_[category]/train/` → `input_data/jsonl/`)
+* **Source Structure:** 5 category trees (`variant_gen`, `variant_oral`, `variant_p5`, `variant_skin`, `variant_wash`) containing `1,104` `<Brand>__<Variant>` folders (`381,619` images across 5 categories and 57 brands).
+* **Label Cleaning (`clean_variant_name`):** Normalizes stray spaces (`_ ` → `_`) and extra double underscores (`__` → `_`) in the `<Variant>` suffix after splitting on the first `__`.
+* **Multi-Task Stratified Outputs (`build_marketshare_variant_jsonl`):**
+  * 1,104 per-class `<category>__<Brand>__<Variant>.jsonl` files + full `train.jsonl` (`381,619` examples).
+  * **Joint All-3 (`--task all3`):** `train_stratified.jsonl` (`8,832` lines, `8`/folder) & `val_stratified.jsonl` (`2,208` lines, `2`/folder) → `{"category": "...", "brand": "...", "variant": "..."}`.
+  * **Category-Only (`--task category`):** `train_category_stratified.jsonl` (`5,520` lines, `5`/folder) & `val_category_stratified.jsonl` (`1,104` lines, `1`/folder) → `{"category": "..."}`.
+  * **Brand-Only (`--task brand`):** `train_brand_stratified.jsonl` (`5,594` lines, up to `100`/brand) & `val_brand_stratified.jsonl` (`486` lines, up to `10`/brand) → `{"brand": "..."}`.
+  * **Variant-Only (`--task variant`):** `train_variant_stratified.jsonl` (`8,832` lines, `8`/folder) & `val_variant_stratified.jsonl` (`2,208` lines, `2`/folder) → `{"variant": "..."}`.
+
+### 4. Rebuilding via CLI
+```bash
+# Build local + upload GCS SFT JSONLs for pack, brand, or variant datasets:
+shelf-bench tune --dataset pack --build-only
+shelf-bench tune --dataset brand --build-only
+shelf-bench tune --dataset variant --task all3 --build-only
+```

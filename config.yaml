@@ -9,6 +9,7 @@ gcp:
   rpc: gs://ul-fs-s-sandbx-16-prj-shelf-images/RPC                # checkout photos + reference gallery (shelf-bench rpc)
   shelves: gs://ul-fs-s-sandbx-16-prj-shelf-images/shelves        # HoloSelecta shelves + gallery (shelf-bench shelves)
   tuning: gs://ul-fs-s-sandbx-16-prj-shelf-images/tuning          # SFT training/val jsonl + sheets (shelf-bench tune)
+  marketshare: gs://marketshare-datasets                          # pack_data, brand_data, input_data SFT datasets
   results: gs://ul-fs-s-sandbx-16-prj-shelf-images/results        # run outputs from Cloud Run
 
 # Cloud Run job that executes benchmark runs (shelf-bench cloud-run). One task per

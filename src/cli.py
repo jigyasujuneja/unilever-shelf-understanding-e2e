@@ -96,7 +96,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("bootstrap", help="prepare a new GCP project (APIs, bucket, registry, data)")
 
     s = sub.add_parser("tune", help="build zero-leakage SFT JSONL data and launch/list Vertex AI LoRA tuning jobs")
-    s.add_argument("--dataset", default="shelves", choices=("shelves", "rpc"))
+    s.add_argument("--dataset", default="shelves", choices=("shelves", "rpc", "pack", "brand", "variant"))
+    s.add_argument("--task", default="all3", choices=("all3", "category", "brand", "variant"),
+                   help="target task when --dataset=variant")
     s.add_argument("--base-model", default="gemini-3.5-flash-lite")
     s.add_argument("--display-name", default="shelf-bench-jev-laya-sft")
     s.add_argument("--epochs", type=int, default=4)
@@ -175,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
             for j in tuning.list_sft_jobs(cfg):
                 print(f"  {j['name']}  state={j['state']}  base={j['base_model']}  endpoint={j['endpoint']}")
             return 0
-        built = tuning.build_sft_jsonl(a.dataset, a.out_dir, upload=not a.build_only)
+        built = tuning.build_sft_jsonl(a.dataset, a.out_dir, upload=not a.build_only, task=a.task)
         print(f"Built {built['train_count']} train / {built['val_count']} val examples in {built['out_dir']}")
         if a.build_only:
             return 0

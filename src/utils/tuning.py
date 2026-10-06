@@ -24,6 +24,8 @@ import io
 import json
 import os
 import random
+import re
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -39,15 +41,76 @@ SUPPORTED_SFT_BASE_MODELS = (
     "gemini-3.5-flash",
 )
 
+MARKETSHARE_BUCKET = "gs://marketshare-datasets"
+
+PACK_CATEGORIES = (
+    "Beverages", "DMT", "Foods", "HFD", "HHC",
+    "Hair", "Laundry", "Oral_Care", "PW", "Skin",
+)
+PACK_TYPES = (
+    "Bar", "Bottle", "Box", "Can", "Carton", "Jar", "Pouch",
+    "Pump", "Sachet", "Tetrapack", "Tin", "Tub", "Tube", "Wrapper",
+)
+PACK_PROMPT = (
+    "Classify the retail product shown in the image by its category and pack_type. "
+    f"Valid categories: {', '.join(PACK_CATEGORIES)}. "
+    f"Valid pack_types: {', '.join(PACK_TYPES)}. "
+    'Return ONLY JSON like {"category":"Beverages","pack_type":"Carton"}.'
+)
+
+BRAND_PROMPT = (
+    'Classify the retail product shown in the image by its brand. '
+    'Return ONLY JSON like {"brand":"Dove"}.'
+)
+
+VARIANT_CATEGORIES = ("gen", "oral", "p5", "skin", "wash")
+VARIANT_BRANDS = (
+    "3_Roses", "Annapurna", "Ayush", "Boost", "Brown_And_Polson", "Bru", "CIF", "Clear",
+    "Clinic_Plus", "Closeup", "Comfort", "Domex", "Dove", "Elle18", "Freshwrapp",
+    "Glow_And_Lovely", "Hamam", "Hellmans", "Horlicks", "Indulekha", "Kissan", "Knorr",
+    "Lakme", "Lbp", "Lifebuoy", "Lipton", "Liril", "Lux", "Maltova", "Moti",
+    "Nature_Protect", "Novology", "Oralb", "Pears", "Pepsodent", "Ponds", "Pukka",
+    "Red_Label", "Rex", "Rexona", "Rin", "Ruby", "Simple", "St_Ives", "Sun",
+    "Sunlight", "Sunsilk", "Surf_Excel", "Taaza", "Taj_Mahal", "Tresemme", "V_Wash",
+    "Vaseline", "Vim", "Viva", "Wellbeing_Nutrition", "Wheel",
+)
+VARIANT_PROMPT_ALL3 = (
+    "Classify the retail product shown in the image by its category, brand, and variant. "
+    f"Valid categories: {', '.join(VARIANT_CATEGORIES)}. "
+    'Return ONLY JSON like {"category":"gen","brand":"Clear","variant":"Active_Care_Shampoo"}.'
+)
+VARIANT_PROMPT_CATEGORY = (
+    "Classify the retail product shown in the image by its category. "
+    f"Valid categories: {', '.join(VARIANT_CATEGORIES)}. "
+    'Return ONLY JSON like {"category":"gen"}.'
+)
+VARIANT_PROMPT_BRAND = (
+    "Classify the retail product shown in the image by its brand. "
+    f"Valid brands: {', '.join(VARIANT_BRANDS)}. "
+    'Return ONLY JSON like {"brand":"Clear"}.'
+)
+VARIANT_PROMPT_ONLY = (
+    "Classify the retail product shown in the image by its variant. "
+    'Return ONLY JSON like {"variant":"Active_Care_Shampoo"}.'
+)
+
+MIME_BY_EXT = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+}
+
 
 def _sft_example(gcs_image_uri: str, prompt: str, response_dict: dict) -> dict:
     """One Vertex AI Gemini SFT JSONL line with a GCS image URI and structured JSON target."""
+    ext = Path(gcs_image_uri).suffix.lower()
+    mime_type = MIME_BY_EXT.get(ext, "image/jpeg")
     return {
         "contents": [
             {
                 "role": "user",
                 "parts": [
-                    {"fileData": {"mimeType": "image/jpeg", "fileUri": gcs_image_uri}},
+                    {"fileData": {"mimeType": mime_type, "fileUri": gcs_image_uri}},
                     {"text": prompt},
                 ],
             },
@@ -59,6 +122,319 @@ def _sft_example(gcs_image_uri: str, prompt: str, response_dict: dict) -> dict:
     }
 
 
+def _sft_line(gcs_image_uri: str, prompt: str, response_dict: dict) -> str:
+    return json.dumps(_sft_example(gcs_image_uri, prompt, response_dict), separators=(",", ":"))
+
+
+def _extract_uri(line: str) -> str:
+    return json.loads(line)["contents"][0]["parts"][0]["fileData"]["fileUri"]
+
+
+def clean_brand_name(folder: str) -> str:
+    """Strip artificial leading 'A' / 'A_' sort prefixes (e.g. ADove -> Dove, A_3_roses -> 3_roses)."""
+    if folder == "A_3_roses":
+        return "3_roses"
+    if len(folder) > 1 and folder[0] == "A" and folder[1].isupper():
+        return folder[1:]
+    return folder
+
+
+def clean_variant_name(raw_variant: str) -> str:
+    """Normalize stray spaces and repeated underscores in Brand__Variant folder suffixes."""
+    return re.sub(r"_+", "_", raw_variant.replace(" ", "_")).strip("_")
+
+
+def is_copy_uri(uri: str) -> bool:
+    """True when the image filename is an augmented/duplicated `copy*.jpg` file."""
+    return uri.rsplit("/", 1)[-1].lower().startswith("copy")
+
+
+def list_gcs_image_uris(gcs_prefix: str) -> list[str]:
+    """List image object URIs under `gcs_prefix` using GCS blob metadata only (never reads bytes)."""
+    bucket_name, prefix = dataset._split_gs(gcs_prefix.rstrip("/"))
+    blobs = dataset._gcs().list_blobs(bucket_name, prefix=prefix + "/")
+    return sorted(
+        f"gs://{bucket_name}/{b.name}"
+        for b in blobs
+        if Path(b.name).suffix.lower() in MIME_BY_EXT and "/jsonl/" not in f"/{b.name}"
+    )
+
+
+def _prioritize_originals(uris: list[str], rng: random.Random) -> list[str]:
+    """Shuffle original (non-`copy*`) URIs ahead of `copy*` duplicates for SFT sampling."""
+    unique = list(dict.fromkeys(uris))
+    orig = [u for u in unique if not is_copy_uri(u)]
+    copies = [u for u in unique if is_copy_uri(u)]
+    rng.shuffle(orig)
+    rng.shuffle(copies)
+    return orig + copies
+
+
+def build_marketshare_pack_jsonl(
+    gcs_bucket: str = MARKETSHARE_BUCKET,
+    out_dir: str | Path = "pack_data/pack/jsonl",
+    seed: int = 42,
+    val_fraction: float = 0.10,
+    min_val_per_class: int = 5,
+    max_val_per_class: int = 10,
+    max_train_per_class: int = 120,
+    upload: bool = True,
+    uris: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build per-folder, full, and stratified SFT JSONL files for `pack_data/pack/train`."""
+    train_prefix = f"{gcs_bucket.rstrip('/')}/pack_data/pack/train/"
+    gcs_dest = f"{gcs_bucket.rstrip('/')}/pack_data/pack/jsonl"
+    raw_uris = sorted(uris if uris is not None else list_gcs_image_uris(train_prefix))
+
+    out_p = Path(out_dir)
+    out_p.mkdir(parents=True, exist_ok=True)
+
+    by_folder: dict[str, list[str]] = defaultdict(list)
+    for uri in raw_uris:
+        if not uri.startswith(train_prefix):
+            continue
+        parts = uri[len(train_prefix) :].split("/")
+        if len(parts) == 2 and parts[1] and parts[0] != "jsonl" and "__" in parts[0]:
+            by_folder[parts[0]].append(uri)
+
+    rng = random.Random(seed)
+    all_records: list[str] = []
+    train_stratified: list[str] = []
+    val_stratified: list[str] = []
+
+    for folder, f_uris in sorted(by_folder.items()):
+        category, pack_type = folder.split("__", 1)
+        target = {"category": category, "pack_type": pack_type}
+        unique_uris = list(dict.fromkeys(f_uris))
+        records = [_sft_line(u, PACK_PROMPT, target) for u in unique_uris]
+        (out_p / f"{folder}.jsonl").write_text("\n".join(records) + "\n", encoding="utf-8")
+        all_records.extend(records)
+
+        shuffled = list(records)
+        rng.shuffle(shuffled)
+        n_val = min(max_val_per_class, max(min_val_per_class, int(len(shuffled) * val_fraction)))
+        val_stratified.extend(shuffled[:n_val])
+        train_stratified.extend(shuffled[n_val : n_val + max_train_per_class])
+
+    rng.shuffle(train_stratified)
+    rng.shuffle(val_stratified)
+    if {_extract_uri(x) for x in train_stratified} & {_extract_uri(x) for x in val_stratified}:
+        raise RuntimeError("Overlap detected between pack train_stratified and val_stratified")
+
+    (out_p / "train.jsonl").write_text("\n".join(all_records) + ("\n" if all_records else ""), encoding="utf-8")
+    train_f = out_p / "train_stratified.jsonl"
+    val_f = out_p / "val_stratified.jsonl"
+    train_f.write_text("\n".join(train_stratified) + ("\n" if train_stratified else ""), encoding="utf-8")
+    val_f.write_text("\n".join(val_stratified) + ("\n" if val_stratified else ""), encoding="utf-8")
+
+    if upload:
+        dataset.upload(str(out_p), gcs_dest)
+    return {
+        "out_dir": out_p,
+        "train_jsonl": train_f,
+        "val_jsonl": val_f,
+        "full_train_count": len(all_records),
+        "train_count": len(train_stratified),
+        "val_count": len(val_stratified),
+        "class_count": len(by_folder),
+        "gcs_prefix": gcs_dest,
+        "train_uri": f"{gcs_dest}/train_stratified.jsonl",
+        "val_uri": f"{gcs_dest}/val_stratified.jsonl",
+    }
+
+
+def build_marketshare_brand_jsonl(
+    gcs_bucket: str = MARKETSHARE_BUCKET,
+    out_dir: str | Path = "brand_data/brand/jsonl",
+    seed: int = 42,
+    val_per_brand: int = 2,
+    train_per_brand: int = 10,
+    upload: bool = True,
+    uris: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build per-brand, full, and stratified SFT JSONL files for `brand_data/brand/brand_data`."""
+    train_prefix = f"{gcs_bucket.rstrip('/')}/brand_data/brand/brand_data/"
+    gcs_dest = f"{gcs_bucket.rstrip('/')}/brand_data/brand/jsonl"
+    raw_uris = sorted(uris if uris is not None else list_gcs_image_uris(train_prefix))
+
+    out_p = Path(out_dir)
+    out_p.mkdir(parents=True, exist_ok=True)
+
+    by_brand: dict[str, list[str]] = defaultdict(list)
+    for uri in raw_uris:
+        if not uri.startswith(train_prefix):
+            continue
+        parts = uri[len(train_prefix) :].split("/")
+        if len(parts) == 2 and parts[1] and parts[0] != "jsonl":
+            by_brand[clean_brand_name(parts[0])].append(uri)
+
+    rng = random.Random(seed)
+    all_records: list[str] = []
+    train_stratified: list[str] = []
+    val_stratified: list[str] = []
+
+    for brand, b_uris in sorted(by_brand.items()):
+        unique_uris = list(dict.fromkeys(b_uris))
+        target = {"brand": brand}
+        records = [_sft_line(u, BRAND_PROMPT, target) for u in unique_uris]
+        (out_p / f"{brand}.jsonl").write_text("\n".join(records) + "\n", encoding="utf-8")
+        all_records.extend(records)
+
+        prioritized_uris = _prioritize_originals(unique_uris, rng)
+        v_uris = prioritized_uris[:val_per_brand]
+        t_uris = prioritized_uris[val_per_brand : val_per_brand + train_per_brand]
+        val_stratified.extend(_sft_line(u, BRAND_PROMPT, target) for u in v_uris)
+        train_stratified.extend(_sft_line(u, BRAND_PROMPT, target) for u in t_uris)
+
+    rng.shuffle(train_stratified)
+    rng.shuffle(val_stratified)
+    if {_extract_uri(x) for x in train_stratified} & {_extract_uri(x) for x in val_stratified}:
+        raise RuntimeError("Overlap detected between brand train_stratified and val_stratified")
+
+    (out_p / "train.jsonl").write_text("\n".join(all_records) + ("\n" if all_records else ""), encoding="utf-8")
+    train_f = out_p / "train_stratified.jsonl"
+    val_f = out_p / "val_stratified.jsonl"
+    train_f.write_text("\n".join(train_stratified) + ("\n" if train_stratified else ""), encoding="utf-8")
+    val_f.write_text("\n".join(val_stratified) + ("\n" if val_stratified else ""), encoding="utf-8")
+
+    if upload:
+        dataset.upload(str(out_p), gcs_dest)
+    return {
+        "out_dir": out_p,
+        "train_jsonl": train_f,
+        "val_jsonl": val_f,
+        "full_train_count": len(all_records),
+        "train_count": len(train_stratified),
+        "val_count": len(val_stratified),
+        "class_count": len(by_brand),
+        "gcs_prefix": gcs_dest,
+        "train_uri": f"{gcs_dest}/train_stratified.jsonl",
+        "val_uri": f"{gcs_dest}/val_stratified.jsonl",
+    }
+
+
+def build_marketshare_variant_jsonl(
+    gcs_bucket: str = MARKETSHARE_BUCKET,
+    out_dir: str | Path = "input_data/jsonl",
+    seed: int = 42,
+    val_per_folder: int = 2,
+    train_per_folder: int = 8,
+    task: str = "all3",
+    upload: bool = True,
+    uris: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build per-folder, full, and multi-task stratified SFT JSONL files for `input_data/variant_*`."""
+    input_prefix = f"{gcs_bucket.rstrip('/')}/input_data/"
+    gcs_dest = f"{gcs_bucket.rstrip('/')}/input_data/jsonl"
+    if uris is None:
+        raw_uris: list[str] = []
+        for cat in VARIANT_CATEGORIES:
+            raw_uris.extend(list_gcs_image_uris(f"{input_prefix}variant_{cat}/train"))
+        raw_uris.sort()
+    else:
+        raw_uris = sorted(uris)
+
+    out_p = Path(out_dir)
+    out_p.mkdir(parents=True, exist_ok=True)
+
+    by_key: dict[tuple[str, str, str], list[str]] = defaultdict(list)
+    for uri in raw_uris:
+        if not uri.startswith(input_prefix):
+            continue
+        parts = uri[len(input_prefix) :].split("/")
+        if len(parts) == 4 and parts[0].startswith("variant_") and parts[1] == "train" and parts[3]:
+            cat = parts[0][len("variant_") :]
+            folder = parts[2]
+            if "__" in folder:
+                brand, raw_var = folder.split("__", 1)
+                by_key[(cat, brand, clean_variant_name(raw_var))].append(uri)
+
+    rng = random.Random(seed)
+    all_records: list[str] = []
+    train_all3, val_all3 = [], []
+    train_cat, val_cat = [], []
+    train_var, val_var = [], []
+    brand_train_pool: dict[str, list[str]] = defaultdict(list)
+    brand_val_pool: dict[str, list[str]] = defaultdict(list)
+
+    for (cat, brand, variant), f_uris in sorted(by_key.items()):
+        unique_uris = list(dict.fromkeys(f_uris))
+        target_all3 = {"category": cat, "brand": brand, "variant": variant}
+        records = [_sft_line(u, VARIANT_PROMPT_ALL3, target_all3) for u in unique_uris]
+        (out_p / f"{cat}__{brand}__{variant}.jsonl").write_text(
+            "\n".join(records) + "\n", encoding="utf-8"
+        )
+        all_records.extend(records)
+
+        prioritized = _prioritize_originals(unique_uris, rng)
+        v_uris = prioritized[:val_per_folder]
+        t_uris = prioritized[val_per_folder : val_per_folder + train_per_folder]
+
+        for u in v_uris:
+            val_all3.append(_sft_line(u, VARIANT_PROMPT_ALL3, target_all3))
+            val_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, {"variant": variant}))
+        for u in t_uris:
+            train_all3.append(_sft_line(u, VARIANT_PROMPT_ALL3, target_all3))
+            train_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, {"variant": variant}))
+
+        for u in v_uris[:1]:
+            val_cat.append(_sft_line(u, VARIANT_PROMPT_CATEGORY, {"category": cat}))
+        for u in t_uris[:5]:
+            train_cat.append(_sft_line(u, VARIANT_PROMPT_CATEGORY, {"category": cat}))
+
+        brand_val_pool[brand].extend(v_uris)
+        brand_train_pool[brand].extend(prioritized[val_per_folder:])
+
+    train_brand, val_brand = [], []
+    for brand in sorted(brand_train_pool):
+        v_pool = list(brand_val_pool[brand])
+        t_pool = list(brand_train_pool[brand])
+        rng.shuffle(v_pool)
+        rng.shuffle(t_pool)
+        val_brand.extend(_sft_line(u, VARIANT_PROMPT_BRAND, {"brand": brand}) for u in v_pool[:10])
+        train_brand.extend(_sft_line(u, VARIANT_PROMPT_BRAND, {"brand": brand}) for u in t_pool[:100])
+
+    for lst in (train_all3, val_all3, train_cat, val_cat, train_brand, val_brand, train_var, val_var):
+        rng.shuffle(lst)
+
+    for name, tr, vl in (
+        ("all3", train_all3, val_all3),
+        ("category", train_cat, val_cat),
+        ("brand", train_brand, val_brand),
+        ("variant", train_var, val_var),
+    ):
+        if {_extract_uri(x) for x in tr} & {_extract_uri(x) for x in vl}:
+            raise RuntimeError(f"Overlap detected in variant {name} split")
+
+    (out_p / "train.jsonl").write_text("\n".join(all_records) + ("\n" if all_records else ""), encoding="utf-8")
+    files_by_task = {
+        "all3": ("train_stratified.jsonl", "val_stratified.jsonl", train_all3, val_all3),
+        "category": ("train_category_stratified.jsonl", "val_category_stratified.jsonl", train_cat, val_cat),
+        "brand": ("train_brand_stratified.jsonl", "val_brand_stratified.jsonl", train_brand, val_brand),
+        "variant": ("train_variant_stratified.jsonl", "val_variant_stratified.jsonl", train_var, val_var),
+    }
+    for t_name, v_name, tr, vl in files_by_task.values():
+        (out_p / t_name).write_text("\n".join(tr) + ("\n" if tr else ""), encoding="utf-8")
+        (out_p / v_name).write_text("\n".join(vl) + ("\n" if vl else ""), encoding="utf-8")
+
+    if upload:
+        dataset.upload(str(out_p), gcs_dest)
+
+    sel_train_name, sel_val_name, sel_tr, sel_vl = files_by_task.get(task, files_by_task["all3"])
+    return {
+        "out_dir": out_p,
+        "train_jsonl": out_p / sel_train_name,
+        "val_jsonl": out_p / sel_val_name,
+        "full_train_count": len(all_records),
+        "train_count": len(sel_tr),
+        "val_count": len(sel_vl),
+        "class_count": len(by_key),
+        "gcs_prefix": gcs_dest,
+        "train_uri": f"{gcs_dest}/{sel_train_name}",
+        "val_uri": f"{gcs_dest}/{sel_val_name}",
+    }
+
+
 def build_sft_jsonl(
     dataset_name: str = "shelves",
     out_dir: str | Path = "data/tuning",
@@ -66,16 +442,33 @@ def build_sft_jsonl(
     seed: int = 0,
     max_val_images: int = 20,
     upload: bool = True,
+    task: str = "all3",
 ) -> dict[str, Any]:
     """Build zero-leakage ``train.jsonl`` and ``val.jsonl`` from non-test data only.
 
-    For ``shelves`` or ``rpc``:
-      - ``train`` examples are built from ``gallery`` crops paired against hard-negative reference
-        panels (different angles of the same product vs same-category/brand distractors).
-      - ``val`` examples are built from the dataset's ``val`` split boxes (never ``test``).
+    Supports benchmark datasets (``shelves``, ``rpc``) and metadata-only marketshare datasets
+    (``pack``, ``brand``, ``variant``).
     """
+    if dataset_name == "pack":
+        return build_marketshare_pack_jsonl(
+            out_dir="pack_data/pack/jsonl" if out_dir == "data/tuning" else out_dir,
+            upload=upload,
+        )
+    if dataset_name == "brand":
+        return build_marketshare_brand_jsonl(
+            out_dir="brand_data/brand/jsonl" if out_dir == "data/tuning" else out_dir,
+            upload=upload,
+        )
+    if dataset_name == "variant":
+        return build_marketshare_variant_jsonl(
+            out_dir="input_data/jsonl" if out_dir == "data/tuning" else out_dir,
+            task=task,
+            upload=upload,
+        )
     if dataset_name not in ("shelves", "rpc"):
-        raise ValueError(f"dataset_name must be 'shelves' or 'rpc', got {dataset_name!r}")
+        raise ValueError(
+            f"dataset_name must be one of ('shelves', 'rpc', 'pack', 'brand', 'variant'), got {dataset_name!r}"
+        )
 
     cfg = load_config()
     tuning_root = cfg.get("gcp", {}).get("tuning", "gs://ul-fs-s-sandbx-16-prj-shelf-images/tuning")
