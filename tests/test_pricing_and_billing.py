@@ -296,6 +296,46 @@ def test_alloydb_helper_runs_sql_on_a_per_thread_connection():
     assert seen["connect"][1]["enable_iam_auth"] is True
 
 
+def test_cloudsql_helper_runs_sql_and_enforces_parameterized_queries():
+    """Tests CloudSQL helper per-thread connection, IAM auth, execute/query, and parameter validation."""
+    from utils.cloudsql import HYBRID_RRF_SQL, CloudSQL, pgvector
+
+    seen = {}
+
+    class Cur:
+        rowcount = 1
+
+        def execute(self, sql, params):
+            seen["q"] = (sql, params)
+
+        def fetchall(self):
+            return [("sku-42", 0.96, 0.032)]
+
+    with pytest.raises(ValueError, match="project:region:instance"):
+        CloudSQL(instance="invalid-instance-name", user="u")
+
+    db = CloudSQL.__new__(CloudSQL)
+    db.instance = "ul-fs-s-sandbx-16-prj:us-central1:shelf-bench-pg"
+    db.database, db.user, db.ip_type = "postgres", "u", "PUBLIC"
+    db.connector = NS(
+        connect=lambda *a, **k: seen.setdefault("connect", (a, k))
+        and NS(cursor=Cur, commit=lambda: seen.setdefault("committed", True))
+    )
+    db._local = threading.local()
+    v = pgvector([0.3, 0.4])
+    assert db.execute("INSERT INTO products (id, name, embedding) VALUES (%s, %s, %s::vector)", ("1", "Dove", v)) == 1
+    assert seen.get("committed") is True
+    rows = db.query(
+        HYBRID_RRF_SQL,
+        (v, v, "Oral Care", "Oral Care", "Tube/Carton", "Tube/Carton", v, "100g", "100g", "100g", 1),
+    )
+    assert rows == [("sku-42", 0.96, 0.032)]
+    assert seen["connect"][1]["enable_iam_auth"] is True
+    with pytest.raises(TypeError, match="tuple or list"):
+        db.query("SELECT * FROM products WHERE id = %s", "not-a-tuple")  # type: ignore[arg-type]
+
+
+
 def test_sft_jsonl_builder_and_tuned_endpoint_resolution(rpc_root, tmp_path, monkeypatch):
     from PIL import Image
 

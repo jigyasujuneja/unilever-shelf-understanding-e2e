@@ -2,8 +2,9 @@
 
 gcp:
   project: ul-fs-s-sandbx-16-prj
-  location: global                 # Vertex AI Gemini endpoint
-  region: us-central1              # Cloud Run + Cloud Build + bucket region
+  location: global                 # Default Vertex AI Gemini endpoint (auto-falls back to region when regional API is required)
+  region: us-central1              # Cloud Run + Cloud Build + BigQuery + SFT tuning fallback region
+  bigquery_dataset: hul_golden_catalog  # Serverless BigQuery Golden Catalog dataset
   data: gs://ul-fs-s-sandbx-16-prj-shelf-images/SKU110K_fixed     # dataset (shelf-bench upload)
   products: gs://ul-fs-s-sandbx-16-prj-shelf-images/HUL_labeled_benchmarks  # labelled products (utils/dataset.py)
   rpc: gs://ul-fs-s-sandbx-16-prj-shelf-images/RPC                # checkout photos + reference gallery (shelf-bench rpc)
@@ -43,11 +44,13 @@ telemetry:
 # Models offered by `shelf-bench list`. Any Vertex Gemini model id works with -m.
 models:
   - gemini-3.8-flash
+  - gemini-3.5-flash
   - gemini-3.5-flash-lite
 
 # Vertex AI Supervised Fine-Tuning (LoRA) endpoints (`shelf-bench tune`).
-# When `endpoint` is set (or via $SHELF_BENCH_SFT_ENDPOINT), `Gemini(model)` routes calls to that
-# live Vertex AI endpoint in `location` while pricing tokens at `base_model`'s Billing Catalog SKU.
+# Base publisher models (`gemini-3.5-flash-lite`, `gemini-3.5-flash`, `gemini-3.8-flash`) are served
+# from `location: global`, while tuned LoRA endpoints (`projects/.../locations/us-central1/endpoints/...`)
+# automatically route to their regional endpoint (`us-central1`) and price tokens at `base_model`'s SKU.
 tuned_models:
   gemini-3.5-flash-lite-sft:
     base_model: gemini-3.5-flash-lite
@@ -65,6 +68,14 @@ alloydb:
   database: postgres
   ip_type: PRIVATE       # PRIVATE (needs cloud_run.network) | PUBLIC | PSC
   # user: defaults to the IAM user of the current credentials
+
+# Cloud SQL for PostgreSQL (pgvector HNSW + Hybrid RRF, stoppable between runs at $0/hr idle):
+cloudsql:
+  instance: ul-fs-s-sandbx-16-prj:us-central1:shelf-bench-pg
+  database: postgres
+  ip_type: PUBLIC
+  # user: defaults to the IAM user of the current credentials
+
 
 # Optional OpenJEV / djev (/v1/systemone) server (https://github.com/mmastrac/djev,
 # https://github.com/razorback16/openjev). Leave base_url empty to run djev single-step
