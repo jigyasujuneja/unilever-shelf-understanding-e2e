@@ -280,7 +280,7 @@ flowchart LR
 
 ### 2. Brand Classification (`brand_data/brand/brand_data/` → `brand_data/brand/jsonl/`)
 * **Source Structure:** 941 raw directories (`522,102` raw images, ~555 images/folder with `copy*.jpg` and `- Copy.jpg` augmentations).
-* **Label Cleaning (`clean_brand_name`):** Strips artificial leading `A` / `A_` alphabetical sort prefixes on 222 folders (`ADove` → `Dove`, `A_3_roses` → `3_roses`), merging 7 duplicate folder pairs (`ADr_Wash`/`Dr_Wash`, `AGenteel`/`Genteel`, `AMr_Muscle`/`Mr_Muscle`, `AMysore_Sandal`/`Mysore_Sandal`, `ARevive`/`Revive`, `ASafe_Wash`/`Safe_Wash`, `AVanish`/`Vanish`) into **934 canonical brand classes**.
+* **Label Cleaning (`clean_brand_name`):** Strips artificial leading `A` / `A_` alphabetical sort prefixes on 220 folders (`ADove` → `Dove`) and aligns the 5 cross-dataset spelling/casing aliases (`A_3_roses` → `3_Roses`, `ABrown&Polson` → `Brown_And_Polson`, `ACif` → `CIF`, `AClinic` → `Clinic_Plus`, `AHellmanns` → `Hellmans`), while merging 7 duplicate folder pairs (`ADr_Wash`/`Dr_Wash`, `AGenteel`/`Genteel`, `AMr_Muscle`/`Mr_Muscle`, `AMysore_Sandal`/`Mysore_Sandal`, `ARevive`/`Revive`, `ASafe_Wash`/`Safe_Wash`, `AVanish`/`Vanish`) into **934 canonical brand classes**.
 * **Original-First & MD5 Deduplication (`_prioritize_originals`):** Deduplicates on GCS `b.md5_hash` metadata and partitions each brand's URIs so non-copy originals are sampled ahead of `copy*` / `- Copy` duplicates.
 * **Target JSON:** `{"brand": "<Brand>"}` (`BRAND_PROMPT`).
 * **Outputs (`build_marketshare_brand_jsonl`):**
