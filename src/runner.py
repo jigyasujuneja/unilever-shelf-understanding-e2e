@@ -96,8 +96,11 @@ def run(
     log: Callable[[str], None] = print,
     tier: str = "priority",
     prices: dict | None = None,
+    dataset_override: str | None = None,
 ) -> dict:
-    appr = approaches.get(approach)
+    appr = type(approaches.get(approach))()
+    if dataset_override:
+        appr.dataset = dataset_override
     if not appr.accepts(model):
         raise ValueError(f"{approach} doesn't run {model}; it runs "
                          f"{', '.join(appr.models) if appr.models else 'Vertex Gemini models'}")
@@ -113,7 +116,7 @@ def run(
     task = appr.task
     if appr.dataset != "sku110k":  # --root is SKU-110K's; the other sets have their own location
         data_root = dataset.data_root(appr.dataset)
-    fields = {"rpc": dataset.RPC_FIELDS, "shelves": dataset.SHELF_FIELDS}.get(
+    fields = {"rpc": dataset.RPC_FIELDS, "shelves": dataset.SHELF_FIELDS, **dataset.HUL_FIELDS}.get(
         appr.dataset, dataset.PRODUCT_FIELDS)
     catalog = dataset.catalog(str(data_root), appr.dataset) if task != "detection" else {}
     samples = dataset.sample_images(split, limit, seed, str(data_root), appr.dataset)
@@ -121,7 +124,9 @@ def run(
         raise RuntimeError(f"No images found for split={split!r} under {data_root}")
 
     started = datetime.now(timezone.utc)
-    run_id = f"{started:%m%d-%H%M%S}-{approach}-{model}" + ("" if tier == "standard" else f"-{tier}")
+    ds_suffix = f"-{appr.dataset}" if dataset_override else ""
+    run_id = (f"{started:%m%d-%H%M%S}-{approach}-{model}"
+              + ("" if tier == "standard" else f"-{tier}") + ds_suffix)
     log(f"[{run_id}] {len(samples)} images from {appr.dataset} {split} (seed {seed}) on {env['platform']}")
 
     def price(u: Usage) -> dict:
@@ -191,7 +196,7 @@ def run(
             if task == "classification":  # the photo is the product
                 ids = [appr.identify(image, ctx)]
                 preds = list(sample.boxes)
-            elif task == "retrieval":  # the ground-truth boxes are given
+            elif task in ("retrieval", "promo_detection", "planogram_compliance"):  # ground-truth boxes given
                 preds = list(sample.boxes)
                 ids = identify_all(image, preds, ctx)
             elif task == "end_to_end":
@@ -211,7 +216,32 @@ def run(
         elif task == "end_to_end":  # right box (IoU >= 0.5) and right product
             gt_ids = [g["sku_id"] for g in sample.labels]
             m = metrics.match_identified(preds, ids, sample.boxes, gt_ids)
+            box_m = metrics.match(preds, sample.boxes)
+            # Count fast-gated boxes in box units (rather than step count) so
+            # stage2a_zero_vlm_gate_pct divides boxes by pred_sum.
+            fast_gate_steps = [
+                s for s in trace.steps
+                if "Stage A" in s["name"]
+                or "Embedding tier" in s["name"]
+                or "CLM InfoNCE" in s["name"]
+                or any(k in (s.get("name", "") + " " + s.get("detail", "")).lower()
+                       for k in ("fast-gate", "fast_gate", "zero-vlm", "margin>=", "clm-jev-o"))
+            ]
+            if fast_gate_steps:
+                fast_gated = min(
+                    len(preds),
+                    sum(int((s.get("info") or {}).get("fast_gated_boxes", 1)) for s in fast_gate_steps),
+                )
+            elif not appr.uses_gemini and trace.usage.calls == 0:
+                fast_gated = len(preds)
+            else:
+                fast_gated = 0
             extra["found"] = m["found"]
+            extra["box_metrics"] = {
+                "tp": box_m["tp"], "fp": box_m["fp"], "fn": box_m["fn"],
+                **{k: round(v, 4) for k, v in metrics.scores(box_m["tp"], box_m["fp"], box_m["fn"]).items()},
+            }
+            extra["stage2_fast_gate_count"] = fast_gated
             extra["labels"] = [
                 {"box": [round(v, 1) for v in b], "pred": catalog.get(i),
                  "gt": sample.labels[m["pairs"][k]] if k in m["pairs"] else None,
@@ -273,7 +303,8 @@ def run(
                 flag = f"  ERROR {row['error']}" if row["error"] else ""
                 what = (f"{'✓' if row['tp'] else '✗'} {(row['labels'][0]['pred'] or {}).get('product', '-')}"
                         if task == "classification" else
-                        f"{row['tp']:>3} / {row['gt_count']:>3} identified" if task == "retrieval" else
+                        f"{row['tp']:>3} / {row['gt_count']:>3} identified"
+                        if task in ("retrieval", "promo_detection", "planogram_compliance") else
                         f"{row['pred_count']:>4} pred / {row['gt_count']:>4} gt  F2 {row['f2']:.2f}")
                 log(f"  {i:>3}/{len(samples)} {row['image_id']:<16} {what}  "
                     f"{row['latency_s']:.1f}s{flag}")
@@ -281,15 +312,59 @@ def run(
 
         summary = summarize(rows)
         n = len(rows)
-        if task in ("classification", "retrieval"):  # accuracy = exact product, over all products
-            boxes = [lab for r in rows for lab in r["labels"]]
-            summary["field_accuracy"] = {
-                f: round(sum(bool(lab["correct"][f]) for lab in boxes) / max(1, len(boxes)), 4)
-                for f in fields}
-            summary["accuracy"] = summary["field_accuracy"]["product"]
+        if task in ("classification", "retrieval", "promo_detection", "planogram_compliance", "end_to_end"):
+            boxes = [lab for r in rows for lab in r.get("labels", [])]
+            if boxes:
+                summary["field_accuracy"] = {
+                    f: round(sum(bool(lab["correct"].get(f)) for lab in boxes) / max(1, len(boxes)), 4)
+                    for f in fields}
+                if task in ("classification", "retrieval", "promo_detection", "planogram_compliance"):
+                    summary["accuracy"] = summary["field_accuracy"]["product"]
+            # HUL Share-of-Shelf (facing SOS & bounding-box area SOS)
+            # Ground-truth SOS is computed directly from `samples` so all GT boxes (including
+            # false negatives in end_to_end mode) and true GT box areas are accounted for.
+            all_gt = [(b, gt) for s in samples for b, gt in zip(s.boxes, s.labels, strict=True)]
+            if any("is_hul" in gt for _, gt in all_gt):
+                def _area(b: list[float] | tuple[float, ...]) -> float:
+                    return max(0.0, float(b[2]) - float(b[0])) * max(0.0, float(b[3]) - float(b[1]))
+
+                pred_boxes = [lab for r in rows for lab in r.get("labels", []) if lab.get("pred") is not None]
+                gt_hul_n = sum(1 for _, gt in all_gt if gt.get("is_hul"))
+                pred_hul_n = sum(1 for lab in pred_boxes if (lab["pred"] or {}).get("is_hul"))
+                gt_f_sos = round(gt_hul_n / max(1, len(all_gt)), 4)
+                pr_f_sos = round(pred_hul_n / max(1, len(pred_boxes)), 4) if pred_boxes else 0.0
+
+                gt_tot_a = sum(_area(b) for b, _ in all_gt) or 1.0
+                pr_tot_a = sum(_area(lab["box"]) for lab in pred_boxes) or 1.0
+                gt_hul_a = sum(_area(b) for b, gt in all_gt if gt.get("is_hul"))
+                pr_hul_a = sum(_area(lab["box"]) for lab in pred_boxes if (lab["pred"] or {}).get("is_hul"))
+                gt_a_sos = round(gt_hul_a / gt_tot_a, 4)
+                pr_a_sos = round(pr_hul_a / pr_tot_a, 4) if pred_boxes else 0.0
+                summary["sos_metrics"] = {
+                    "gt_facing_sos": gt_f_sos,
+                    "pred_facing_sos": pr_f_sos,
+                    "facing_sos_abs_error": round(abs(pr_f_sos - gt_f_sos), 4),
+                    "gt_area_sos": gt_a_sos,
+                    "pred_area_sos": pr_a_sos,
+                    "area_sos_abs_error": round(abs(pr_a_sos - gt_a_sos), 4),
+                }
         if task == "end_to_end":  # share of products boxed at all, whatever the identity
-            summary["found_recall"] = round(sum(r["found"] for r in rows)
-                                            / max(1, sum(r["gt_count"] for r in rows)), 4)
+            found_sum = sum(r["found"] for r in rows)
+            gt_sum = sum(r["gt_count"] for r in rows)
+            pred_sum = sum(r["pred_count"] for r in rows)
+            summary["found_recall"] = round(found_sum / max(1, gt_sum), 4)
+            b_tp = sum(r.get("box_metrics", {}).get("tp", 0) for r in rows)
+            b_fp = sum(r.get("box_metrics", {}).get("fp", 0) for r in rows)
+            b_fn = sum(r.get("box_metrics", {}).get("fn", 0) for r in rows)
+            b_sc = {k: round(v, 4) for k, v in metrics.scores(b_tp, b_fp, b_fn).items()}
+            fast_sum = sum(r.get("stage2_fast_gate_count", 0) for r in rows)
+            summary["stage_metrics"] = {
+                "stage1_detection_f2": b_sc["f2"],
+                "stage1_detection_precision": b_sc["precision"],
+                "stage1_detection_recall": b_sc["recall"],
+                "stage2_id_acc_on_matched_boxes": round(summary["tp"] / max(1, found_sum), 4),
+                "stage2a_zero_vlm_gate_pct": round(fast_sum / max(1, pred_sum), 4),
+            }
         usage = Usage(**summary["tokens"])
         g = pricing.gemini_cost(model, usage.buckets, sheet, started.date())
         on_gcs = str(data_root).startswith("gs://")
@@ -349,6 +424,19 @@ def run(
                                        "shelf_bench.traffic": json.dumps(usage.traffic)})
         telemetry.log(run_span, "run_finished", {
             **run_attrs, **final, "tokens": summary["tokens"], "cost": summary["cost"]})
+        if os.environ.get("SHELF_BENCH_VERTEX_EXPERIMENTS") == "1" or (
+            env["platform"] == "cloud-run" and os.environ.get("SHELF_BENCH_VERTEX_EXPERIMENTS", "1") != "0"
+        ):
+            try:
+                from utils import vertex_experiments
+
+                exp_id = os.environ.get("SHELF_BENCH_EXPERIMENT_ID", vertex_experiments.DEFAULT_EXPERIMENT)
+                dest_uri = f"{str(results_dir).rstrip('/')}/{run_id}" if str(results_dir).startswith("gs://") else ""
+                summary["vertex_experiment"] = vertex_experiments.log_experiment_run(
+                    summary, results_uri=dest_uri, experiment_id=exp_id
+                )
+            except Exception as exp_err:
+                log(f"[{run_id}] Vertex AI Experiment log warning: {exp_err}")
         where = _write(Path(tempfile.mkdtemp()) if str(results_dir).startswith("gs://") else
                        Path(results_dir), run_id, summary, rows, str(results_dir))
     except Exception as e:
@@ -365,6 +453,8 @@ def run(
         f"traffic {usage.traffic}  -> {where}")
     if summary["telemetry"]:
         log(f"[{run_id}] trace: {summary['telemetry']['trace_url']}")
+    if summary.get("vertex_experiment"):
+        log(f"[{run_id}] vertex experiment: {summary['vertex_experiment']['console_url']}")
     return summary
 
 
@@ -417,6 +507,16 @@ def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] =
                 log(f"  {run_id}: compute stays provisional ({e})")
                 continue
             set_compute(summary, seconds, "Cloud Run task start->completion (Admin API)")
+            if os.environ.get("SHELF_BENCH_VERTEX_EXPERIMENTS", "1") != "0":
+                try:
+                    from utils import vertex_experiments
+
+                    exp_id = os.environ.get("SHELF_BENCH_EXPERIMENT_ID", vertex_experiments.DEFAULT_EXPERIMENT)
+                    summary["vertex_experiment"] = vertex_experiments.log_experiment_run(
+                        summary, results_uri=f"{src.rstrip('/')}/{run_id}", experiment_id=exp_id
+                    )
+                except Exception as exp_err:
+                    log(f"  {run_id}: Vertex AI Experiment update warning ({exp_err})")
             (dest / "summary.json").write_text(json.dumps(summary, indent=2))
             gcs.blob(blob.name).upload_from_filename(str(dest / "summary.json"))
     return n

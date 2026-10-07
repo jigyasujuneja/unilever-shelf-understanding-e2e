@@ -82,6 +82,8 @@ def read_bytes(path: str) -> bytes:
 
 
 def join(root: str, *parts: str) -> str:
+    if parts and str(parts[-1]).startswith("gs://"):
+        return str(parts[-1])
     return "/".join([str(root).rstrip("/"), *parts]) if str(root).startswith("gs://") \
         else str(Path(root, *parts))
 
@@ -163,6 +165,17 @@ def load_split(split: str, root: str = DEFAULT_ROOT) -> dict[str, Sample]:
     return samples
 
 
+RPC_FORMAT_SETS = ("rpc", "shelves", "hul_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos", "hul_sessions")
+HUL_FIELDS: dict[str, tuple[str, ...]] = {
+    "hul_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "hul_variants": ("product", "brand", "category", "packaging_type"),
+    "hul_brands": ("product", "brand", "category", "is_hul"),
+    "hul_packs": ("product", "category", "packaging_type"),
+    "hul_promos": ("product", "brand", "base_variant", "promo_type"),
+    "hul_sessions": ("product", "brand", "category", "is_hul"),
+}
+
+
 def sample_images(
     split: str = "test", limit: int = 25, seed: int = 0, root: str = DEFAULT_ROOT,
     name: str = "sku110k",
@@ -170,16 +183,17 @@ def sample_images(
     """A deterministic subset of a split (``limit <= 0`` means the whole split).
 
     Same (split, limit, seed) -> same images, so runs are directly comparable, whether the
-    data is read locally or from GCS. ``name`` is the dataset: ``sku110k``, ``products``, ``rpc``
-    or ``shelves`` (same layout as ``rpc``).
+    data is read locally or from GCS. ``name`` is the dataset: ``sku110k``, ``products``, ``rpc``,
+    ``shelves``, or client HUL sets (``hul_golden``, ``hul_variants``, ``hul_brands``, ``hul_packs``,
+    ``hul_promos``, ``hul_sessions``).
     """
     if name == "products" and split != "test":
         raise ValueError("the products dataset only has a test split")
     loaded = (load_products(str(root)) if name == "products" else
-              load_rpc(split, str(root)) if name in ("rpc", "shelves") else load_split(split, str(root)))
+              load_rpc(split, str(root)) if name in RPC_FORMAT_SETS else load_split(split, str(root)))
     all_samples = sorted(loaded.values(), key=lambda s: s.image_id)
     if not str(root).startswith("gs://"):
-        all_samples = [s for s in all_samples if Path(s.path).exists()]
+        all_samples = [s for s in all_samples if str(s.path).startswith("gs://") or Path(s.path).exists()]
     if limit <= 0 or limit >= len(all_samples):
         return all_samples
     return random.Random(seed).sample(all_samples, limit)
@@ -226,7 +240,7 @@ def _product(row: dict) -> dict:
 
 def catalog(root: str | None = None, name: str = "products") -> dict[int, dict]:
     """The closed product catalog approaches choose from: ``{sku_id: product}``."""
-    if name in ("rpc", "shelves"):
+    if name in RPC_FORMAT_SETS:
         return rpc_catalog(str(root or data_root(name)))
     rows = _products_json(str(root or products_root()))["full_labeled_fmcg_catalog"]
     return {r["id"]: _product(r) for r in rows}
@@ -277,7 +291,7 @@ def data_root(name: str) -> str:
         return DEFAULT_ROOT
     if name == "products":
         return products_root()
-    local = SHELVES_LOCAL if name == "shelves" else RPC_LOCAL
+    local = SHELVES_LOCAL if name == "shelves" else (f"data/{name}" if name.startswith("hul_") else RPC_LOCAL)
     if os.environ.get(f"SHELF_BENCH_{name.upper()}"):
         return os.environ[f"SHELF_BENCH_{name.upper()}"]
     if Path(local, RPC_JSON).exists():
@@ -311,7 +325,9 @@ def load_rpc(split: str, root: str) -> dict[str, Sample]:
     if split not in RPC_SUBSETS:
         raise ValueError(f"the rpc dataset has splits {tuple(RPC_SUBSETS)}, got {split!r}")
     cat = rpc_catalog(root)
-    return {r["image"]: Sample(r["image"], join(root, "images", r["image"]), r["width"], r["height"],
+    return {r["image"]: Sample(r["image"],
+                               join(root, r["uri"]) if r.get("uri") else join(root, "images", r["image"]),
+                               r["width"], r["height"],
                                boxes=[tuple(b) for b in r["boxes"]],
                                labels=[cat[c] for c in r["products"]])
             for r in _rpc_json(root)["splits"][split]}
