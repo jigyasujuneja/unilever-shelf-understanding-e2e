@@ -24,6 +24,29 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+SCHEMA_SQL_ALLOYDB = """
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS alloydb_scann;
+CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT DEFAULT '',
+    brand TEXT DEFAULT '',
+    pack_form TEXT DEFAULT '',
+    size TEXT DEFAULT '',
+    variant TEXT DEFAULT '',
+    is_unilever BOOLEAN DEFAULT FALSE,
+    embedding vector(768),
+    lab_vec vector(13),
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS products_embedding_scann_idx
+    ON products USING scann (embedding cosine)
+    WITH (num_leaves = 100);
+CREATE INDEX IF NOT EXISTS products_category_pack_idx
+    ON products (category, pack_form);
+"""
+
 
 class AlloyDB:
     """``AlloyDB(**config["alloydb"]).query(sql, params)`` -> list of row tuples. Thread-safe."""
@@ -38,14 +61,28 @@ class AlloyDB:
         self.connector = Connector(refresh_strategy="lazy")
         self._local = threading.local()  # pg8000 connections aren't thread-safe: one per worker
 
-    def query(self, sql: str, params: tuple | list = ()) -> list[tuple]:
+    def _conn(self):
         if getattr(self._local, "conn", None) is None:
             self._local.conn = self.connector.connect(
                 self.instance, "pg8000", user=self.user, db=self.database,
                 enable_iam_auth=True, ip_type=self.ip_type)
-        cur = self._local.conn.cursor()
+        return self._local.conn
+
+    def query(self, sql: str, params: tuple | list = ()) -> list[tuple]:
+        if not isinstance(params, (tuple, list)):
+            raise TypeError("SQL parameters must be passed as a tuple or list")
+        cur = self._conn().cursor()
         cur.execute(sql, params)
         return cur.fetchall()
+
+    def execute(self, sql: str, params: tuple | list = ()) -> int:
+        if not isinstance(params, (tuple, list)):
+            raise TypeError("SQL parameters must be passed as a tuple or list")
+        conn = self._conn()
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        conn.commit()
+        return getattr(cur, "rowcount", 0)
 
 
 def pgvector(vector: list[float]) -> str:

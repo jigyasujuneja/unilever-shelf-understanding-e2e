@@ -31,3 +31,6 @@ application_default_credentials.json
 
 # Benchmark results live in GCS (gs://ul-fs-s-sandbx-16-prj-shelf-images/results) and are pulled on demand.
 results/
+results_experiments/
+*.pt
+
