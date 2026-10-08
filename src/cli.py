@@ -58,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("-m", "--model", nargs="+", required=True)
     s.add_argument("-t", "--tier", nargs="+", choices=TIERS, default=d.get("tier", ["priority"]),
                    help="Gemini PayGo tier(s): priority (1.8x, default), standard and/or flex (0.5x)")
+    s.add_argument("-d", "--dataset", default=None,
+                   choices=("sku110k", "products", *dataset.RPC_FORMAT_SETS),
+                   help="override dataset for approaches (e.g. hul_golden, hul_variants, hul_brands, hul_packs, hul_promos)")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
@@ -96,7 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("bootstrap", help="prepare a new GCP project (APIs, bucket, registry, data)")
 
     s = sub.add_parser("tune", help="build zero-leakage SFT JSONL data and launch/list Vertex AI LoRA tuning jobs")
-    s.add_argument("--dataset", default="shelves", choices=("shelves", "rpc", "pack", "brand", "variant"))
+    s.add_argument("--dataset", default="shelves",
+                   choices=("shelves", "rpc", "pack", "brand", "variant", "hul_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos"))
     s.add_argument("--task", default="all3", choices=("all3", "category", "brand", "variant"),
                    help="target task when --dataset=variant")
     s.add_argument("--base-model", default="gemini-3.5-flash-lite")
@@ -138,7 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         for name, tier, model in combos:
             try:
                 runner.run(name, model, a.split, a.limit, a.seed, a.workers, a.owner,
-                           results_dir=a.results, data_root=a.root, tier=tier)
+                           results_dir=a.results, data_root=a.root, tier=tier,
+                           dataset_override=a.dataset)
             except Exception as e:
                 failed += 1
                 print(f"[{name} x {model} x {tier}] FAILED: {e}", file=sys.stderr)
@@ -208,7 +213,12 @@ def print_leaderboard(rows: list[dict]) -> None:
             print(f"\n=== {use_case.replace('_', ' ').title()} ===")
         if (r["task"], r["dataset"]) != task:
             task = (r["task"], r["dataset"])
-            label = f"shelves_{r['task']}" if r["dataset"] == "shelves" else r["task"]
+            if r["dataset"] == "shelves":
+                label = f"shelves_{r['task']}"
+            elif r["dataset"].startswith("hul_"):
+                label = f"{r['dataset']}_{r['task']}"
+            else:
+                label = r["task"]
             by = "ranked by F2" if r["task"] in ("detection", "end_to_end") else "ranked by exact product accuracy"
             print(f"\n{label} ({by})")
             print(hdr)

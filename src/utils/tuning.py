@@ -41,6 +41,19 @@ SUPPORTED_SFT_BASE_MODELS = (
     "gemini-3.5-flash",
 )
 
+TUNABLE_DATASETS = (
+    "shelves",
+    "rpc",
+    "pack",
+    "brand",
+    "variant",
+    "hul_golden",
+    "hul_variants",
+    "hul_brands",
+    "hul_packs",
+    "hul_promos",
+)
+
 MARKETSHARE_BUCKET = "gs://marketshare-datasets"
 
 PACK_CATEGORIES = (
@@ -642,9 +655,9 @@ def build_sft_jsonl(
             task=task,
             upload=upload,
         )
-    if dataset_name not in ("shelves", "rpc"):
+    if dataset_name not in TUNABLE_DATASETS:
         raise ValueError(
-            f"dataset_name must be one of ('shelves', 'rpc', 'pack', 'brand', 'variant'), got {dataset_name!r}"
+            f"dataset_name must be one of {TUNABLE_DATASETS}, got {dataset_name!r}"
         )
 
     cfg = load_config()

@@ -137,12 +137,15 @@ TIER_HEADERS = {
 def resolve_model(model: str, config: dict | None = None) -> tuple[str, str, str]:
     """Resolve ``model`` -> ``(target_model_or_endpoint, billing_base_model, location)``.
 
-    Uses ``global`` for all standard and fallback models for lower latency and cost; only uses a
-    regional location when calling a live deployed Vertex AI ``/endpoints/`` resource.
+    Uses ``global`` as the default Vertex AI location for standard publisher models
+    (``gemini-3.5-flash-lite``, ``gemini-3.5-flash``, ``gemini-3.8-flash``), and automatically
+    falls back to the regional location (``us-central1``) when calling a deployed Vertex AI
+    ``/endpoints/`` resource.
     """
     cfg = config or load_config()
     gcp = cfg.get("gcp", {})
     default_loc = gcp.get("location", "global")
+    fallback_region = gcp.get("region", "us-central1")
     tuned = cfg.get("tuned_models", {}).get(model)
     if isinstance(tuned, dict):
         base = tuned.get("base_model", model.removesuffix("-sft"))
@@ -153,13 +156,14 @@ def resolve_model(model: str, config: dict | None = None) -> tuple[str, str, str
         if "endpoints/" in str(endpoint):
             parts = str(endpoint).split("/")
             ep_loc = parts[parts.index("locations") + 1] if "locations" in parts else None
-            loc = tuned.get("location") or ep_loc or default_loc
+            tuned_loc = tuned.get("location")
+            loc = ep_loc or (tuned_loc if tuned_loc and tuned_loc != "global" else fallback_region)
         else:
             loc = default_loc
         return str(endpoint), str(base), str(loc)
     if model.startswith("projects/") and "/endpoints/" in model:
         parts = model.split("/")
-        loc = parts[parts.index("locations") + 1] if "locations" in parts else default_loc
+        loc = parts[parts.index("locations") + 1] if "locations" in parts else fallback_region
         base = os.environ.get("SHELF_BENCH_SFT_BASE_MODEL", "gemini-3.5-flash-lite")
         return model, base, loc
     return model, model, default_loc
@@ -185,12 +189,18 @@ class Gemini:
         self.model = model
         self.target_model = target
         self.base_model = base_model
+        self.project = cfg.get("project")
+        self.location = loc
+        self.fallback_region = cfg.get("region", "us-central1")
         self.thinking_level = thinking_level if base_model.startswith("gemini-3") else None
         self.tier = tier
         self._logprobs_unsupported = False
+        self._http_options = (
+            types.HttpOptions(headers=TIER_HEADERS[tier]) if tier in TIER_HEADERS else None
+        )
         self.client = genai.Client(
-            vertexai=True, project=cfg.get("project"), location=loc,
-            http_options=types.HttpOptions(headers=TIER_HEADERS[tier]) if tier in TIER_HEADERS else None,
+            vertexai=True, project=self.project, location=self.location,
+            http_options=self._http_options,
         )
 
     def __call__(
@@ -202,6 +212,7 @@ class Gemini:
         retries: int = 6,
         logprobs: int | None = None,
     ) -> LLMResult:
+        from google import genai
         from google.genai import types
 
         from utils.openjev import serialize_logprobs
@@ -229,11 +240,24 @@ class Gemini:
                 )
                 seconds = time.perf_counter() - t0
                 break
-            except Exception as e:  # 429 / 5xx / transient network / logprobs unsupported
-                if cfg.response_logprobs and "logprob" in str(e).lower():
+            except Exception as e:  # 429 / 5xx / transient network / logprobs unsupported / global fallback
+                err_lower = str(e).lower()
+                if cfg.response_logprobs and "logprob" in err_lower:
                     self._logprobs_unsupported = True
                     cfg.response_logprobs = None
                     cfg.logprobs = None
+                    continue
+                if (
+                    self.location == "global"
+                    and self.fallback_region
+                    and self.fallback_region != "global"
+                    and any(k in err_lower for k in ("not found", "404", "location", "region", "unsupported"))
+                ):
+                    self.location = self.fallback_region
+                    self.client = genai.Client(
+                        vertexai=True, project=self.project, location=self.location,
+                        http_options=self._http_options,
+                    )
                     continue
                 if attempt == retries - 1 or not _retryable(e):
                     raise
