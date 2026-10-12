@@ -65,17 +65,127 @@ def match_identified(preds: Sequence[Box], pred_ids: Sequence, gts: Sequence[Box
             "pairs": m["pairs"], "found": m["tp"]}
 
 
+def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
+    """Granularity-aware and multi-modal packaging-aware field matcher."""
+    if pred is None:
+        return False
+    p_val = pred.get(field)
+    g_val = gt.get(field)
+    if p_val == g_val:
+        return True
+    if field == "packaging_type":
+        allowed = gt.get("allowed_packaging_types") or []
+        if p_val and p_val != "Unknown" and p_val in allowed:
+            return True
+    if field in ("base_variant", "variant", "product"):
+        # If ground truth is a brand-only competitor record or catch-all `<Brand>__Others`
+        # and the model predicts a specific variant of the exact same brand & category, credit it.
+        gt_bv = str(gt.get("base_variant") or "")
+        gt_brand = str(gt.get("brand") or "")
+        pred_brand = str(pred.get("brand") or "")
+        if (
+            gt_brand
+            and pred_brand
+            and gt_brand.lower() == pred_brand.lower()
+            and pred.get("category") == gt.get("category")
+            and (
+                gt_bv in ("Non_HUL_Competitor", "Brand_Level", f"{gt_brand}__Brand_Level_Only")
+                or bool(gt.get("is_catchall_variant"))
+            )
+        ):
+            return True
+    return False
+
+
 def match_product(pred: dict | None, gt: dict, fields: Sequence[str]) -> dict:
     """Score one identified product photo (the labelled products set).
 
-    ``correct`` says per field (product, brand, category) whether the prediction agrees with the
-    ground truth. The exact product is the hit: TP if right; a wrong product is FP + FN; no
+    ``correct`` says per field (product, brand, category, ...) whether the prediction agrees with the
+    ground truth (supporting multi-modal ``allowed_packaging_types`` and brand-only competitor GT).
+    The exact product is the hit: TP if right; a wrong product is FP + FN; no
     answer is FN. So precision = right / answered, recall = right / all photos.
     """
-    correct = {f: pred is not None and pred.get(f) == gt.get(f) for f in fields}
+    correct = {f: _field_matches(pred, gt, f) for f in fields}
     tp = int(correct[fields[0]])
     return {"tp": tp, "fp": int(pred is not None) - tp, "fn": 1 - tp,
             "matched": [0] if tp else [], "correct": correct}
+
+
+def hierarchical_field_scores(labels: Sequence[dict]) -> dict[str, float]:
+    """Compute 5-level hierarchical taxonomy accuracy and tree-consistent credit across evaluated boxes."""
+    if not labels:
+        return {
+            "level1_is_hul": 0.0,
+            "level2_category": 0.0,
+            "level3_brand": 0.0,
+            "level4_base_variant": 0.0,
+            "level5_packaging_type": 0.0,
+            "hierarchical_tree_score": 0.0,
+        }
+    n = len(labels)
+    l1 = l2 = l3 = l4 = l5 = 0
+    tree_sum = 0.0
+    for item in labels:
+        pred = item.get("pred")
+        gt = item.get("gt") or {}
+        if pred is None:
+            continue
+        ok1 = bool(pred.get("is_hul")) == bool(gt.get("is_hul"))
+        ok2 = _field_matches(pred, gt, "category")
+        ok3 = _field_matches(pred, gt, "brand")
+        ok4 = _field_matches(pred, gt, "base_variant") if "base_variant" in gt else _field_matches(pred, gt, "product")
+        ok5 = _field_matches(pred, gt, "packaging_type")
+        l1 += int(ok1)
+        l2 += int(ok2)
+        l3 += int(ok3)
+        l4 += int(ok4)
+        l5 += int(ok5)
+        # Tree-consistent credit: prefix depth along (is_hul -> category -> brand -> base_variant -> packaging_type)
+        c1 = 1.0 if ok1 else 0.0
+        c2 = 1.0 if (ok1 and ok2) else 0.0
+        c3 = 1.0 if (ok1 and ok2 and ok3) else 0.0
+        c4 = 1.0 if (ok1 and ok2 and ok3 and ok4) else 0.0
+        c5 = 1.0 if (ok1 and ok2 and ok3 and ok4 and ok5) else 0.0
+        tree_sum += 0.15 * c1 + 0.20 * c2 + 0.30 * c3 + 0.25 * c4 + 0.10 * c5
+    return {
+        "level1_is_hul": round(l1 / n, 4),
+        "level2_category": round(l2 / n, 4),
+        "level3_brand": round(l3 / n, 4),
+        "level4_base_variant": round(l4 / n, 4),
+        "level5_packaging_type": round(l5 / n, 4),
+        "hierarchical_tree_score": round(tree_sum / n, 4),
+    }
+
+
+def bootstrap_ci95(values: Sequence[float], n_boot: int = 500, seed: int = 42) -> dict[str, float]:
+    """Deterministic paired bootstrap 95% confidence interval [low, high, half_width] over image/session scores."""
+    import random
+
+    if not values:
+        return {"mean": 0.0, "ci95_low": 0.0, "ci95_high": 0.0, "ci95_half_width": 0.0}
+    vals = [float(v) for v in values]
+    n = len(vals)
+    mean_v = sum(vals) / n
+    if n == 1:
+        return {
+            "mean": round(mean_v, 4),
+            "ci95_low": round(mean_v, 4),
+            "ci95_high": round(mean_v, 4),
+            "ci95_half_width": 0.0,
+        }
+    rng = random.Random(seed)
+    means = sorted(
+        sum(vals[rng.randrange(n)] for _ in range(n)) / n
+        for _ in range(max(50, n_boot))
+    )
+    lo = means[max(0, int(0.025 * len(means)))]
+    hi = means[min(len(means) - 1, int(0.975 * len(means)))]
+    return {
+        "mean": round(mean_v, 4),
+        "ci95_low": round(lo, 4),
+        "ci95_high": round(hi, 4),
+        "ci95_half_width": round((hi - lo) / 2.0, 4),
+    }
 
 
 def scores(tp: int, fp: int, fn: int) -> dict:

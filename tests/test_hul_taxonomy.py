@@ -28,7 +28,7 @@ def test_normalize_brand_folder_strips_keras_prefixes_aliases_and_preserves_shor
         "raw_folder": "AColgate",
         "brand": "Colgate",
         "is_hul": False,
-        "category": "Unknown",
+        "category": "Oral_Care",
         "legacy_tier": "priority_a_prefix",
     }
 
@@ -65,6 +65,7 @@ def test_parse_variant_and_pack_folders_extract_w2_to_w9_and_backfill_rules():
         "base_variant": "Blue_Morning_Fresh_Bottle",
         "packaging_type": "Bottle",
         "is_hul": True,
+        "is_catchall_variant": False,
         "has_promo": False,
         "promo_type": None,
         "has_price_tag": False,
@@ -135,10 +136,22 @@ def test_parse_variant_and_pack_folders_extract_w2_to_w9_and_backfill_rules():
 
 def test_parse_crop_filename_handles_all_five_gcs_patterns():
     f1 = parse_crop_filename("3401195_34.jpg")
-    assert f1 == {"session_id": "3401195", "crop_idx": 34, "bbox": None, "is_synthetic_copy": False}
+    assert f1 == {
+        "session_id": "3401195",
+        "crop_idx": 34,
+        "bbox": None,
+        "is_synthetic_copy": False,
+        "is_augmented_copy": False,
+    }
 
     f2 = parse_crop_filename("processed_3514704_47.jpg")
-    assert f2 == {"session_id": "3514704", "crop_idx": 47, "bbox": None, "is_synthetic_copy": False}
+    assert f2 == {
+        "session_id": "3514704",
+        "crop_idx": 47,
+        "bbox": None,
+        "is_synthetic_copy": False,
+        "is_augmented_copy": False,
+    }
 
     f3 = parse_crop_filename("852414836922296320_852414836922296320_7__605_421_691_454.jpg")
     assert f3 == {
@@ -146,6 +159,7 @@ def test_parse_crop_filename_handles_all_five_gcs_patterns():
         "crop_idx": 7,
         "bbox": (605, 421, 691, 454),
         "is_synthetic_copy": False,
+        "is_augmented_copy": False,
     }
 
     f4 = parse_crop_filename("copy12.jpg")
@@ -154,15 +168,43 @@ def test_parse_crop_filename_handles_all_five_gcs_patterns():
     f5 = parse_crop_filename("3401195_34 - Copy (2).jpg")
     assert f5["session_id"] == "3401195" and f5["crop_idx"] == 34 and f5["is_synthetic_copy"] is True
 
-    # Newly discovered pack_data patterns: DA_TBC_ data augmentation, (copy), GT1_PCLW_, and class-prefixed crops
+    # Newly discovered pack_data & NH patterns: DA_TBC_ / DA_ data augmentation, (copy), GT1_PCLW_, and space/bracket session IDs
     f_da = parse_crop_filename("DA_TBC_100_10.jpg")
-    assert f_da == {"session_id": "100", "crop_idx": 10, "bbox": None, "is_synthetic_copy": True}
+    assert f_da == {
+        "session_id": "100",
+        "crop_idx": 10,
+        "bbox": None,
+        "is_synthetic_copy": True,
+        "is_augmented_copy": True,
+    }
+
+    f_da_nh = parse_crop_filename("DA_4501_9.jpg")
+    assert f_da_nh["session_id"] == "4501" and f_da_nh["is_augmented_copy"] is True
+
+    f_space_sess = parse_crop_filename("11548 (2)_3.jpg")
+    assert (
+        f_space_sess["session_id"] == "11548"
+        and f_space_sess["crop_idx"] == 3
+        and f_space_sess["is_synthetic_copy"] is False
+    )
 
     f_gt = parse_crop_filename("GT1_PCLW_112_66.jpg")
-    assert f_gt == {"session_id": "112", "crop_idx": 66, "bbox": None, "is_synthetic_copy": False}
+    assert f_gt == {
+        "session_id": "112",
+        "crop_idx": 66,
+        "bbox": None,
+        "is_synthetic_copy": False,
+        "is_augmented_copy": False,
+    }
 
     f_cls = parse_crop_filename("50_1317_53.jpg")
-    assert f_cls == {"session_id": "1317", "crop_idx": 53, "bbox": None, "is_synthetic_copy": False}
+    assert f_cls == {
+        "session_id": "1317",
+        "crop_idx": 53,
+        "bbox": None,
+        "is_synthetic_copy": False,
+        "is_augmented_copy": False,
+    }
 
     f_paren = parse_crop_filename("2343_58 (copy).jpg")
     assert f_paren["session_id"] == "2343" and f_paren["crop_idx"] == 58 and f_paren["is_synthetic_copy"] is True
@@ -573,6 +615,442 @@ def test_bigquery_catalog_ddl_and_query_client() -> None:
     assert sample_row["variant_uri"] == "gs://b/v/1.jpg"
     assert sample_row["pack_data_uri"] == "gs://b/p/1.jpg"
     assert sample_row["basepack_id"] == "Red_Label__Natural_Care_Poly__Pouch"
+    assert sample_row["allowed_packaging_types"] == []
+    assert sample_row["is_catchall_variant"] is False
+
+
+def test_de_pr5_non_hul_taxonomy_compound_splitter_and_ownership_fixes() -> None:
+    """Verify Non-HUL variant_NH_gen & variant_NH_P6 taxonomy, ownership corrections, compound splitter, and typo matcher."""
+    from utils.hul_taxonomy import (
+        normalize_brand_folder,
+        normalize_variant_tokens,
+        parse_variant_folder,
+    )
+
+    # Ownership corrections: Oral_B (P&G) and Freshwrapp (Aditya Birla) are Non-HUL; Oziva is HUL (HFD)
+    oralb = parse_variant_folder("variant_NH_gen", "Oral_B__Pro_Health_Toothbrushes")
+    assert oralb["is_hul"] is False and oralb["category"] == "Oral_Care"
+    assert "tooth_brushes" in normalize_variant_tokens("Pro_Health_Toothbrushes")
+
+    freshwrapp = normalize_brand_folder("Freshwrapp")
+    assert freshwrapp is not None and freshwrapp["is_hul"] is False and freshwrapp["category"] == "HHC"
+
+    oziva = parse_variant_folder("variant_NH_P6", "Oziva__Plant_Based_Collagen_Builder")
+    assert oziva["is_hul"] is True and oziva["category"] == "HFD"
+
+    # Cross-silo spelling aliases: Tetely -> Tetley, Yipee -> Yippee
+    tetley = parse_variant_folder("variant_NH_P6", "Tetely__Green_Tea_Immune")
+    assert tetley["brand"] == "Tetley" and tetley["is_hul"] is False and tetley["category"] == "Beverages"
+
+    yippee = parse_variant_folder("variant_NH_P6", "Yipee__Magic_Masala_Noodles")
+    assert yippee["brand"] == "Yippee" and yippee["is_hul"] is False and yippee["category"] == "Foods"
+
+    # Multi-category brand profiles: Tata (Foods vs Beverages), Nivea (Deo vs PW vs Skin), Dettol (PW vs HHC)
+    tata_spice = parse_variant_folder("variant_NH_P6", "Tata__Sampann_Chilli_Powder")
+    assert tata_spice["category"] == "Foods"
+    tata_tea = parse_variant_folder("variant_NH_P6", "Tata__Agni_Leaf_Tea")
+    assert tata_tea["category"] == "Beverages"
+
+    nivea_deo = parse_variant_folder("variant_NH_gen", "Nivea__Pearl_And_Beauty_Roll_On")
+    assert nivea_deo["category"] == "DMT" and nivea_deo["packaging_type"] == "Roll_On"
+    nivea_pw = parse_variant_folder("variant_NH_gen", "Nivea__Waterlily_And_Oil_Shower_Gel")
+    assert nivea_pw["category"] == "PW"
+    nivea_skin = parse_variant_folder("variant_NH_gen", "Nivea__Nourishing_Body_Milk")
+    assert nivea_skin["category"] == "Skin"
+
+    dettol_pw = parse_variant_folder("variant_NH_gen", "Dettol__Skincare_Liquid_Handwash")
+    assert dettol_pw["category"] == "PW"
+    dettol_hhc = parse_variant_folder("variant_NH_gen", "Dettol__Antiseptic_Disinfectant_Liquid")
+    assert dettol_hhc["category"] == "HHC"
+
+    # Damerau-Levenshtein <= 1 typo resilience (shmapoo -> Hair_Care)
+    typo_shampoo = parse_variant_folder("variant_NH_gen", "Chick__Egg_Protein_Shmapoo")
+    assert typo_shampoo["category"] == "Hair_Care"
+
+    # Catch-all detection (<Brand>__Others and <Brand>__<Brand>)
+    catchall_others = parse_variant_folder("variant_NH_gen", "Colgate__Others")
+    assert catchall_others["is_catchall_variant"] is True
+    catchall_self = parse_variant_folder("variant_p5", "Boost__Boost")
+    assert catchall_self["is_catchall_variant"] is True
+
+
+def test_de_pr5_4tier_multimodal_packaging_and_4tier_catchall_enrichment() -> None:
+    """Verify 4-Tier (<80%) multimodal packaging resolution and 4-Tier <Brand>__Others enrichment."""
+    from utils.hul_builder import (
+        build_golden_json_payload,
+        validate_golden_data_contract,
+    )
+
+    records = [
+        # --- 1. Unimodal (>=80%) packaging propagation: 4 Pouch crops + 1 unjoined crop ---
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_wash/train/Surf_Excel__Easy_Wash/1001_1.jpg",
+            "md5": "md5_se_1",
+        },
+        {
+            "uri": "gs://marketshare-datasets/pack_data/pack/train/Laundry__Pouch/1001_1.jpg",
+            "md5": "md5_se_1",
+        },
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_wash/train/Surf_Excel__Easy_Wash/1002_1.jpg",
+            "md5": "md5_se_2",
+        },
+        {
+            "uri": "gs://marketshare-datasets/pack_data/pack/train/Laundry__Pouch/1002_1.jpg",
+            "md5": "md5_se_2",
+        },
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_wash/train/Surf_Excel__Easy_Wash/1003_1.jpg",
+            "md5": "md5_se_unjoined",
+        },
+        # --- 2. Multimodal (<80%) packaging resolution: 50% Bottle (tall) vs 50% Box (wide) ---
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_NH_gen/train/Godrej__Expert_Rich_Crème/2001_1.jpg",
+            "md5": "md5_godrej_bottle",
+            "width": 100,
+            "height": 300,
+            "embedding": [1.0, 0.0, 0.0],
+        },
+        {
+            "uri": "gs://marketshare-datasets/pack_data/pack/train/Hair__Bottle/2001_1.jpg",
+            "md5": "md5_godrej_bottle",
+        },
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_NH_gen/train/Godrej__Expert_Rich_Crème/2002_1.jpg",
+            "md5": "md5_godrej_box",
+            "width": 250,
+            "height": 150,
+            "embedding": [0.0, 1.0, 0.0],
+        },
+        {
+            "uri": "gs://marketshare-datasets/pack_data/pack/train/Hair__Box/2002_1.jpg",
+            "md5": "md5_godrej_box",
+        },
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_NH_gen/train/Godrej__Expert_Rich_Crème/2003_1.jpg",
+            "md5": "md5_godrej_unjoined_tall",
+            "width": 95,
+            "height": 290,
+            "embedding": [0.99, 0.01, 0.0],
+        },
+        # --- 3. 4-Tier Catch-All Enrichment (<Brand>__Others & <Brand>__<Brand>) ---
+        # Tier-1 MD5 Twin Promotion: same MD5 in Vaseline__Others and Vaseline__Deep_Restore
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_skin/train/Vaseline__Others/3001_1.jpg",
+            "md5": "md5_vas_tier1",
+        },
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_skin/train/Vaseline__Deep_Restore/3001_1.jpg",
+            "md5": "md5_vas_tier1",
+            "embedding": [0.0, 0.0, 1.0],
+        },
+        # Tier-2 Session-Sibling Promotion: session 3002 has ONLY Vaseline__Deep_Restore + Vaseline__Others crop
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_skin/train/Vaseline__Deep_Restore/3002_1.jpg",
+            "md5": "md5_vas_sess_sibling_named",
+            "embedding": [0.0, 0.02, 0.98],
+        },
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_skin/train/Vaseline__Others/3002_2.jpg",
+            "md5": "md5_vas_tier2_sess",
+        },
+        # Tier-3 Visual Prototype Promotion: session 3003 has Vaseline__Others crop matching Deep_Restore prototype
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_skin/train/Vaseline__Others/3003_1.jpg",
+            "md5": "md5_vas_tier3_proto",
+            "embedding": [0.0, 0.01, 0.99],
+        },
+        # Tier-4 Open-Set Tail Preservation: orthogonal embedding in Vaseline__Others stays Vaseline__Others
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_skin/train/Vaseline__Others/3004_1.jpg",
+            "md5": "md5_vas_tier4_tail",
+            "embedding": [1.0, 0.0, 0.0],
+        },
+    ]
+
+    payload = build_golden_json_payload(records)
+    by_md5 = {it["md5"]: it for it in payload["items"]}
+
+    # Unimodal >=80% consensus
+    se_unjoined = by_md5["md5_se_unjoined"]
+    assert se_unjoined["labels"]["packaging_type"] == "Pouch"
+    assert se_unjoined["labels"]["packaging_type_source"] == "pack_folder_consensus"
+    assert se_unjoined["labels"]["allowed_packaging_types"] == ["Pouch"]
+
+    # Multimodal <80% subcluster assignment + allowed_packaging_types
+    godrej_tall = by_md5["md5_godrej_unjoined_tall"]
+    assert godrej_tall["labels"]["packaging_type"] == "Bottle"
+    assert godrej_tall["labels"]["packaging_type_source"] == "multimodal_subcluster"
+    assert set(godrej_tall["labels"]["allowed_packaging_types"]) == {"Bottle", "Box"}
+
+    # Tier-1 MD5 catch-all promotion
+    vas_t1 = by_md5["md5_vas_tier1"]
+    assert vas_t1["labels"]["base_variant"] == "Deep_Restore"
+    assert vas_t1["labels"]["is_catchall_variant"] is False
+    assert vas_t1["labels"]["variant_enrichment_source"] == "md5_specific_sibling"
+
+    # Tier-2 Session-sibling catch-all promotion
+    vas_t2 = by_md5["md5_vas_tier2_sess"]
+    assert vas_t2["labels"]["base_variant"] == "Deep_Restore"
+    assert vas_t2["labels"]["is_catchall_variant"] is False
+    assert vas_t2["labels"]["variant_enrichment_source"] == "session_specific_sibling"
+
+    # Tier-3 Prototype promotion vs Tier-4 Open-Set Tail preservation
+    assert payload["stats"]["catchall_promoted_by_prototype"] == 1
+    assert by_md5["md5_vas_tier3_proto"]["labels"]["base_variant"] == "Deep_Restore"
+    assert by_md5["md5_vas_tier3_proto"]["labels"]["variant_enrichment_source"] == "sibling_prototype_cluster"
+    assert by_md5["md5_vas_tier4_tail"]["labels"]["is_catchall_variant"] is True
+    assert by_md5["md5_vas_tier4_tail"]["labels"]["variant_enrichment_source"] == "open_set_catchall"
+
+    # Validate Golden Data Contract passes cleanly
+    contract = validate_golden_data_contract(payload, strict=True)
+    assert contract["valid"] is True
+
+
+def test_de_pr5_metrics_open_rgb_normalized_and_cloudsql_rrf_params(tmp_path) -> None:
+    """Verify open_rgb_normalized, granularity-aware match_product, bootstrap_ci95, and 15-param build_hybrid_rrf_params."""
+    from PIL import Image
+
+    from utils import dataset, metrics
+    from utils.cloudsql import HYBRID_RRF_SQL, build_hybrid_rrf_params
+
+    # 1. Verify open_rgb_normalized composites RGBA transparency onto neutral (240, 240, 240) instead of black (0, 0, 0)
+    rgba_path = tmp_path / "transparent_crop.png"
+    rgba_img = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+    rgba_img.save(rgba_path)
+    rgb_out = dataset.open_rgb_normalized(rgba_path)
+    assert rgb_out.mode == "RGB"
+    assert rgb_out.getpixel((5, 5)) == (240, 240, 240)
+
+    # 2. Verify granularity-aware metrics.match_product (allowed_packaging_types + Non_HUL_Competitor / catchall)
+    gt_multimodal = {
+        "brand": "Godrej",
+        "category": "Hair_Care",
+        "base_variant": "Expert_Rich_Crème",
+        "packaging_type": "Bottle",
+        "allowed_packaging_types": ["Bottle", "Box"],
+        "is_hul": False,
+    }
+    pred_box = {
+        "brand": "Godrej",
+        "category": "Hair_Care",
+        "base_variant": "Expert_Rich_Crème",
+        "packaging_type": "Box",
+        "is_hul": False,
+    }
+    assert metrics.match_product(
+        pred_box,
+        gt_multimodal,
+        fields=("brand", "category", "base_variant", "packaging_type", "is_hul"),
+    )
+
+    gt_brand_only = {
+        "brand": "Colgate",
+        "category": "Oral_Care",
+        "base_variant": "Non_HUL_Competitor",
+        "packaging_type": "Tube",
+        "is_hul": False,
+    }
+    pred_specific_colgate = {
+        "brand": "Colgate",
+        "category": "Oral_Care",
+        "base_variant": "Strong_Teeth",
+        "packaging_type": "Tube",
+        "is_hul": False,
+    }
+    assert metrics.match_product(
+        pred_specific_colgate,
+        gt_brand_only,
+        fields=("brand", "category", "base_variant", "packaging_type", "is_hul"),
+    )
+
+    h_scores = metrics.hierarchical_field_scores([{"pred": pred_box, "gt": gt_multimodal}])
+    assert h_scores["level5_packaging_type"] == 1.0 and h_scores["level3_brand"] == 1.0
+
+    ci = metrics.bootstrap_ci95([1.0, 1.0, 0.8, 0.9, 1.0], n_boot=200, seed=42)
+    assert 0.8 <= ci["mean"] <= 1.0 and ci["ci95_low"] <= ci["mean"] <= ci["ci95_high"]
+
+    # 3. Verify CloudSQL build_hybrid_rrf_params produces exact 15 parameters matching HYBRID_RRF_SQL %s placeholders
+    params = build_hybrid_rrf_params(
+        "[0.1,0.2,0.3]",
+        kw_query="Colgate Strong Teeth",
+        category="Oral_Care",
+        pack_form="Tube",
+        limit=10,
+    )
+    assert len(params) == 15
+    assert HYBRID_RRF_SQL.count("%s") == 15
+
+
+def test_de_pr6_gtmerch_audit_split_and_cross_bucket_linker(tmp_path) -> None:
+    """Verify parse_gtmerch_filename, audit_and_split_gtmerch_dataset, link_gtmerch_shelves_to_golden_crops, and gtmerch_golden."""
+    import json
+
+    from utils import dataset
+    from utils.bigquery_catalog import BigQueryCatalogClient
+    from utils.hul_builder import (
+        audit_and_split_gtmerch_dataset,
+        build_golden_json_payload,
+        link_gtmerch_shelves_to_golden_crops,
+    )
+    from utils.hul_taxonomy import parse_gtmerch_filename
+
+    # 1. Filename parser: U-* / IN* outlet + asset + date + ts, numeric session ID, and artifact files
+    m_u = parse_gtmerch_filename("U-105232550_A-3522429_2025-07-02_1751453692219.jpg")
+    assert (
+        m_u["outlet_id"] == "U-105232550"
+        and m_u["asset_id"] == "A-3522429"
+        and m_u["capture_date"] == "2025-07-02"
+        and m_u["timestamp_ms"] == 1751453692219
+        and m_u["session_id"] == "U-105232550"
+        and m_u["is_artifact_file"] is False
+    )
+
+    m_in = parse_gtmerch_filename("IN5008777715_A-1589707_2025-07-02_1751452105528 (1).jpg")
+    assert (
+        m_in["outlet_id"] == "IN5008777715"
+        and m_in["asset_id"] == "A-1589707"
+        and m_in["is_copy_variant"] is True
+    )
+
+    m_num = parse_gtmerch_filename("3514704.jpg")
+    assert m_num["session_id"] == "3514704" and m_num["outlet_id"] == "STORE_3514704"
+
+    m_art = parse_gtmerch_filename(".amlignore.amltmp")
+    assert m_art["is_artifact_file"] is True
+
+    # 2. Audit & split gtmerch dataset: artifacts, orphans, train<->test MD5 leak with Class-0 box-splitting,
+    #    intra-train duplicates, double-clicked IoU>0.92 boxes, and Class-1 inside Class-0 containment
+    gt_records = [
+        {"uri": "gs://gtmerch-marketshare/train/images/.amlignore", "md5": "md5_art"},
+        {
+            "uri": "gs://gtmerch-marketshare/train/images/U-999999_A-111_2025-07-01_1751000000000.jpg",
+            "md5": "md5_orphan",
+            "has_label_file": False,
+        },
+        # Train<->Test MD5 leak with Class-0 box-splitting: train has 1 coarse Class-0 bay, test has 2 split Class-0 bays
+        {
+            "uri": "gs://gtmerch-marketshare/train/images/U-105232550_A-3522429_2025-07-02_1751453692219 (1).jpg",
+            "md5": "md5_leak_box_split",
+            "split": "train",
+            "width": 1000,
+            "height": 1000,
+            "boxes": [
+                {"class_id": 0, "bbox": [50, 50, 950, 950]},
+                {"class_id": 1, "bbox": [100, 100, 200, 250]},
+            ],
+        },
+        {
+            "uri": "gs://gtmerch-marketshare/test/images/U-105232550_A-3522429_2025-07-02_1751453692219.jpg",
+            "md5": "md5_leak_box_split",
+            "split": "test",
+            "width": 1000,
+            "height": 1000,
+            "boxes": [
+                {"class_id": 0, "bbox": [50, 50, 950, 480]},
+                {"class_id": 0, "bbox": [50, 500, 950, 950]},
+                {"class_id": 1, "bbox": [100, 100, 200, 250]},
+                # Double-clicked duplicate box (IoU > 0.92 with [100, 100, 200, 250])
+                {"class_id": 1, "bbox": [101, 101, 200, 250]},
+            ],
+        },
+        # Numeric session shelf in test (session_id="3514704") to test cross-bucket linker with marketshare-datasets
+        {
+            "uri": "gs://gtmerch-marketshare/test/images/3514704.jpg",
+            "md5": "md5_shelf_3514704",
+            "split": "test",
+            "width": 1000,
+            "height": 1000,
+            "boxes": [
+                {"class_id": 0, "bbox": [20, 20, 980, 980]},
+                {"class_id": 1, "bbox": [600, 420, 690, 455]},
+            ],
+        },
+    ]
+
+    gt_manifest = audit_and_split_gtmerch_dataset(gt_records)
+    st = gt_manifest["stats"]
+    assert st["dropped_artifact_files"] == 1
+    assert st["quarantined_orphan_images"] == 1
+    assert st["train_test_md5_leaks_resolved"] == 1
+    assert st["renamed_md5_duplicates"] == 1
+    assert st["class0_box_split_edits_resolved"] == 1
+    assert st["deduped_double_click_boxes"] == 1
+    assert st["clean_shelf_images"] == 2
+    assert st["class1_inside_class0_count"] == 2
+
+    by_md5 = {it["md5"]: it for it in gt_manifest["items"]}
+    resolved_leak = by_md5["md5_leak_box_split"]
+    assert resolved_leak["split"] == "test"
+    assert len(resolved_leak["asset_boxes"]) == 2
+    assert len(resolved_leak["product_boxes"]) == 1
+    assert resolved_leak["product_boxes"][0]["is_inside_asset"] is True
+    assert resolved_leak["product_boxes"][0]["inside_asset_idx"] == 0
+
+    # 3. Cross-Bucket Session & BBox Linker (FDE-A): synchronize split & attach SKU labels onto gtmerch shelf boxes
+    crop_records = [
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_wash/train/Comfort__Blue_Bottle/3514704_3514704_1__605_421_691_454.jpg",
+            "md5": "md5_crop_3514704_1",
+        },
+        # Second session so Comfort__Blue_Bottle also has a gallery anchor
+        {
+            "uri": "gs://marketshare-datasets/input_data/variant_wash/train/Comfort__Blue_Bottle/9990001_1.jpg",
+            "md5": "md5_crop_9990001_1",
+        },
+    ]
+    golden_payload = build_golden_json_payload(crop_records)
+    # Force crop 3514704 into gallery initially to verify cross-bucket linker moves it to 'test'
+    for it in golden_payload["items"]:
+        if it["session_id"] == "3514704":
+            it["split"] = "gallery"
+
+    link_res = link_gtmerch_shelves_to_golden_crops(gt_manifest, golden_payload)
+    assert link_res["synchronized_cross_bucket_sessions"] == 1
+    assert link_res["synchronized_crop_splits"] == 1
+    assert link_res["linked_product_boxes_to_golden_crops"] == 1
+
+    crop_3514704 = next(it for it in golden_payload["items"] if it["session_id"] == "3514704")
+    assert crop_3514704["split"] == "test"
+
+    shelf_3514704 = by_md5["md5_shelf_3514704"]
+    pb0 = shelf_3514704["product_boxes"][0]
+    assert pb0["linked_crop_md5"] == "md5_crop_3514704_1"
+    assert pb0["link_mode"] == "bbox_iou"
+    assert pb0["labels"]["brand"] == "Comfort" and pb0["labels"]["packaging_type"] == "Bottle"
+
+    # 4. Verify dataset.sample_images loads gtmerch_golden with asset_boxes
+    gt_dir = tmp_path / "gtmerch_golden"
+    gt_dir.mkdir()
+    rpc_gt = {
+        "classes": {"1": pb0["labels"]},
+        "gallery": {"1": ["gs://marketshare-datasets/input_data/variant_wash/train/Comfort__Blue_Bottle/9990001_1.jpg"]},
+        "splits": {
+            "test": [
+                {
+                    "image": "3514704.jpg",
+                    "uri": shelf_3514704["uri"],
+                    "width": 1000,
+                    "height": 1000,
+                    "boxes": [pb0["bbox"]],
+                    "products": [1],
+                    "asset_boxes": [ab["bbox"] for ab in shelf_3514704["asset_boxes"]],
+                }
+            ],
+            "val": [],
+        },
+    }
+    (gt_dir / "rpc.json").write_text(json.dumps(rpc_gt))
+    samples = dataset.sample_images("test", limit=5, seed=0, root=str(gt_dir), name="gtmerch_golden")
+    assert len(samples) == 1
+    assert len(samples[0].asset_boxes) == 1 and samples[0].asset_boxes[0] == (20, 20, 980, 980)
+
+    # 5. Verify BigQuery gtmerch_detections_ddl and Object Table URI
+    ddls = BigQueryCatalogClient().render_ddls()
+    assert "gtmerch_shelf_detections" in ddls["gtmerch_detections_ddl"]
+    assert "gs://gtmerch-marketshare/**" in ddls["object_table_and_models_ddl"]
+
+
 
 
 
