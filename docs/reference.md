@@ -229,14 +229,14 @@ flowchart LR
 flowchart LR
   IMG["Store Shelf Photo<br/>(40+ SKUs, Glare, Competitor Packs)"] --> DET["Stage 1: SinglePassDedup<br/>Detect All Category Facings<br/>(HUL + Competitor Denominator)"]
   DET --> CROPS["N Bounding Boxes"]
-  CROPS --> RET["Stage 2: JevLayaHybrid.identify_boxes()<br/>Photometry + Global Embedding + Medoid Batch"]
+  CROPS --> RET["Stage 2: JevLayaHybrid.identify_boxes()<br/>Photometry + Global Embedding + Grouped Pack Batch"]
   RET --> SMOOTH["Stage 3: 1D Shelf-Row Smoothing<br/>[P, None, P] -> [P, P, P] if cos >= 0.86"]
   SMOOTH --> SOS["Share of Shelf KPI<br/>HUL Numerator / Total Category Denominator"]
 ```
 
 ### 1. End-to-End Operation ([`src/approaches/market_share/end_to_end/detect_identify.py`](../src/approaches/market_share/end_to_end/detect_identify.py))
 * **Stage 1 (Category-Agnostic Detection):** `SinglePassDedup` detects every visible bottle, box, or pouch on the shelf (`HUL` and competitor packs) so the **Total Category Denominator** is complete.
-* **Stage 2 (Batched Identification):** `JevLayaHybrid.identify_boxes()` normalizes each crop, resolves high-margin crops via `gemini-embedding-2` (`global`), clusters adjacent identical uncertain crops (`cos >= 0.92`), and verifies medoids in batched `4-row` Laya contact sheets.
+* **Stage 2 (Batched Identification):** `JevLayaHybrid.identify_boxes()` normalizes each crop, resolves high-margin crops via `gemini-embedding-2` (`global`), groups adjacent identical uncertain crops (`cos >= 0.92`), and verifies one sharpest representative crop per group in batched `4-row` Laya contact sheets.
 * **Stage 3 (Competitor Middle Bottle Rule):** When a middle bottle is a non-HUL competitor product, Gemini returns `0` (`None`). The facing remains in the total shelf denominator and is excluded from the HUL numerator.
 * **Stage 4 (Visually Gated Row Smoothing):** Fill an abstained interior facing `[P, None, P] -> [P, P, P]` only when its embedding cosine with both flanking neighbors is `>= 0.86`.
 
@@ -280,7 +280,7 @@ flowchart LR
 
 ### 2. Brand Classification (`brand_data/brand/brand_data/` → `brand_data/brand/jsonl/`)
 * **Source Structure:** 941 raw directories (`522,102` raw images, ~555 images/folder with `copy*.jpg` and `- Copy.jpg` augmentations).
-* **Label Cleaning (`clean_brand_name`):** Strips artificial leading `A` / `A_` alphabetical sort prefixes on 220 folders (`ADove` → `Dove`) and aligns the 5 cross-dataset spelling/casing aliases (`A_3_roses` → `3_Roses`, `ABrown&Polson` → `Brown_And_Polson`, `ACif` → `CIF`, `AClinic` → `Clinic_Plus`, `AHellmanns` → `Hellmans`), while merging 7 duplicate folder pairs (`ADr_Wash`/`Dr_Wash`, `AGenteel`/`Genteel`, `AMr_Muscle`/`Mr_Muscle`, `AMysore_Sandal`/`Mysore_Sandal`, `ARevive`/`Revive`, `ASafe_Wash`/`Safe_Wash`, `AVanish`/`Vanish`) into **934 canonical brand classes**.
+* **Label Cleaning (`clean_brand_name`):** Strips artificial leading `A` / `A_` alphabetical sort prefixes on 222 folders (`ADove` → `Dove`, `A_3_roses` → `3_roses`), merging 7 duplicate folder pairs (`ADr_Wash`/`Dr_Wash`, `AGenteel`/`Genteel`, `AMr_Muscle`/`Mr_Muscle`, `AMysore_Sandal`/`Mysore_Sandal`, `ARevive`/`Revive`, `ASafe_Wash`/`Safe_Wash`, `AVanish`/`Vanish`) into **934 canonical brand classes**.
 * **Original-First & MD5 Deduplication (`_prioritize_originals`):** Deduplicates on GCS `b.md5_hash` metadata and partitions each brand's URIs so non-copy originals are sampled ahead of `copy*` / `- Copy` duplicates.
 * **Target JSON:** `{"brand": "<Brand>"}` (`BRAND_PROMPT`).
 * **Outputs (`build_marketshare_brand_jsonl`):**
