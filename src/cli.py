@@ -243,10 +243,20 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "leaderboard":
         print_leaderboard(runner.leaderboard(a.results))
     elif a.cmd == "serve":
+        import threading
+
         from utils.server import serve
 
         if a.pull:
-            print(f"Pulled {runner.pull(cfg['gcp']['results'], a.results)} new run(s) into {a.results}/")
+            def _bg_initial_pull() -> None:
+                try:
+                    n = runner.pull(cfg["gcp"]["results"], a.results)
+                    if n:
+                        print(f"Pulled {n} new run(s) into {a.results}/")
+                except Exception:
+                    pass
+
+            threading.Thread(target=_bg_initial_pull, daemon=True).start()
         serve(a.host, a.port, a.results, a.root, pull_src=cfg["gcp"]["results"] if a.pull else None, mode=a.mode)
     elif a.cmd == "serve-cloud":
         from utils import cloud

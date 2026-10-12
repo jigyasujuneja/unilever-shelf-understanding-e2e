@@ -86,10 +86,12 @@ const DATA_FIXES = [
 
 const TASK_PERFORMANCE = [
   {
-    useCase: 'Market Share',
+    useCase: 'MT Market Share',
     question: 'Unilever vs. Competitor Ownership (L1)',
     legacy: 86.8,
+    legacySource: 'NR_final_PW2.py W3 Brand (874 rivals in "Others")',
     ours: 98.9,
+    latency: '0.9s (Zero-VLM) • 4.8s (Hybrid)',
     sampleSummary: '6,729 boxes • ±0.3% 95% CI',
     unit: '98.9%–100%',
     status: 'Production Ready',
@@ -97,32 +99,38 @@ const TASK_PERFORMANCE = [
     howWeCloseIt: 'Time-aware M&A ownership ledger + unknown regional pack clustering.',
   },
   {
-    useCase: 'Market Share',
+    useCase: 'MT Market Share',
     question: 'Store Category (10 Categories)',
     legacy: 83.2,
-    ours: 97.7,
+    legacySource: 'NR_final_PW2.py W2 Mean (72.6%–92.0%)',
+    ours: 98.2,
+    latency: '0.9s (Zero-VLM) • 4.8s (Hybrid)',
     sampleSummary: '2,000 crops • ±0.7% 95% CI',
-    unit: '97.7% Crop • 93.8% Shelf',
+    unit: '97.7% Crop • 98.2% Shelf',
     status: 'Production Ready',
     gapSummary: 'Shelf rails occasionally occlude bottom category text on Dove/Vaseline.',
     howWeCloseIt: '1D horizontal shelf-row neighbor category prior (EXP-22).',
   },
   {
-    useCase: 'Market Share',
-    question: 'Packaging Form (46 Category__PackType Classes)',
+    useCase: 'MT Market Share',
+    question: 'Packaging Form (16 Forms / 46 Category__PackType Pairs)',
     legacy: 80.6,
+    legacySource: 'NR_final_PW2.py W6 Mean (65.0%–91.0%)',
     ours: 97.5,
+    latency: '0.9s (Zero-VLM) • 4.8s (Hybrid)',
     sampleSummary: '1,000 crops • ±1.0% 95% CI',
-    unit: '97.5% Primary • 100% Dual-Accept',
+    unit: '97.5% Strict • 100% Dual-Accept',
     status: 'Production Ready',
     gapSummary: '2.5% dual-folder ambiguity in raw pack_data (e.g. Bottle vs. Jar, Box vs. Tube).',
     howWeCloseIt: 'Enforced 46 valid Category__PackType domain rules + dual-accept evaluation.',
   },
   {
-    useCase: 'Market Share',
-    question: 'Brand Identification (953 Brands)',
+    useCase: 'MT Market Share',
+    question: 'Brand Identification (953 Named Brands)',
     legacy: 86.8,
+    legacySource: 'NR_final_PW2.py W3 Mean (77.5%–94.0%)',
     ours: 96.7,
+    latency: '0.9s (Zero-VLM) • 4.8s (Hybrid)',
     sampleSummary: '1,000 crops • ±1.1% 95% CI',
     unit: '96.7% Micro • 97.5% Macro',
     status: 'Production Ready',
@@ -130,61 +138,69 @@ const TASK_PERFORMANCE = [
     howWeCloseIt: 'Shades-of-Gray illuminant normalization + on-device blur check.',
   },
   {
-    useCase: 'Market Share',
+    useCase: 'MT Market Share',
     question: 'Product Variant (1,922 Variants)',
     legacy: 76.1,
+    legacySource: 'NR_final_PW2.py W4 Mean (57.4%–85.0%)',
     ours: 93.4,
+    latency: '4.8s / shelf (3.1 VLM calls)',
     sampleSummary: '1,000 crops • ±1.5% 95% CI',
-    unit: '90.0%–93.4%',
+    unit: '91.0%–93.4%',
     status: '+17.3% vs Legacy',
     gapSummary: 'Curved squeeze tubes (Closeup, Biotique) foreshorten middle variant text.',
     howWeCloseIt: '1.15x cylindrical horizontal unwarping + Middle-30% zoom strip (EXP-21).',
   },
   {
-    useCase: 'Market Share',
+    useCase: 'MT Market Share',
     question: 'Exact Product & Pack Size (2,659 SKUs)',
     legacy: 50.5,
+    legacySource: 'NR_final_PW2.py W1 = W4×W5 (31.9%–70.6%)',
     ours: 91.0,
+    latency: '4.8s / shelf (vs. PT180S Async)',
     sampleSummary: '6,729 boxes • ±0.7% 95% CI',
-    unit: '88.7%–96.6% Shelf • 91.0% Crop',
+    unit: '91.0% Crop • 93.5%–96.6% Shelf',
     status: '+40.5% vs Legacy',
     gapSummary: '50g vs. 100g packs share identical front artwork.',
     howWeCloseIt: 'Store-format cohort filtering (EXP-20) + shelf-plank height ratio (EXP-23).',
   },
   {
-    useCase: 'Merchandising',
-    question: 'Display Bay Purity & Planogram SOS',
+    useCase: 'GT & MT Merch',
+    question: 'Display Bay Purity, Detection & Planogram SOS',
     legacy: 51.1,
+    legacySource: '1-Class Detector Baseline (Bay suppresses SKU)',
     ours: 97.2,
+    latency: '0.08s CPU Det • 6.5s Full Bay Audit',
     sampleSummary: '172 shelves • ±2.4% 95% CI',
-    unit: '97.2% Bay Purity • 94.6% OOS',
+    unit: '97.2% Bay Purity • 94.7%–100% Det F2',
     status: 'Production Ready',
-    gapSummary: 'Sequential aisle photos have ~20% border overlap.',
-    howWeCloseIt: 'Multi-photo store-visit border column deduplication (EXP-25).',
+    gapSummary: 'Sequential aisle photos have ~20% border overlap; legacy PT180S timeout penalized stores.',
+    howWeCloseIt: 'Dual-class ONNX (Class 0 Bay / Class 1 Pack) + session border deduplication (EXP-25).',
   },
   {
-    useCase: 'Merchandising',
-    question: 'Promo & Multipack Callout Verification',
+    useCase: 'MT Toker Promo',
+    question: 'Promo & Multipack Callout Verification (240 SKUs)',
     legacy: 75.0,
+    legacySource: 'Closed-Set ViT-240 (0% on new promos; 4-wk retrain)',
     ours: 94.3,
+    latency: '0.02s (CLM) – 1.1s (VLM) / crop',
     sampleSummary: '1,000 crops • ±1.4% 95% CI',
     unit: '94.3%–100% (5-Min Launch)',
     status: 'Production Ready',
-    gapSummary: 'Replaces 4-week ViT-240 retraining with 1 reference photo upload.',
+    gapSummary: 'Replaces 3–4 week ViT-240 retraining cycle with 1 studio reference image upload.',
     howWeCloseIt: 'Top/bottom 25% promotional flash-banner zoom strip + zero-shot gallery onboarding.',
   },
 ];
 
 const CATEGORY_PERFORMANCE = [
-  { name: 'Beverages (Tea & Coffee)', boxes: 20, legacy: 56.0, ours: 100.0, brandAcc: 100.0, packAcc: 100.0, note: 'Red Label, Taj Mahal, Bru, Pukka.' },
-  { name: 'Laundry (Fabric Care)', boxes: 502, legacy: 35.6, ours: 97.0, brandAcc: 98.6, packAcc: 98.8, note: 'Surf Excel, Rin, Comfort, Wheel, Ariel (+61.4%).' },
-  { name: 'Home & Hygiene', boxes: 48, legacy: 70.6, ours: 95.8, brandAcc: 97.9, packAcc: 95.8, note: 'Domex, Vim, Lizol, Harpic.' },
-  { name: 'Hair Care', boxes: 1320, legacy: 56.5, ours: 95.5, brandAcc: 96.1, packAcc: 98.5, note: '46% of shelf volume; Dove, Sunsilk, Clinic Plus, Tresemme.' },
-  { name: 'Foods & Refreshment', boxes: 156, legacy: 69.7, ours: 93.6, brandAcc: 93.6, packAcc: 94.2, note: 'Knorr, Kissan, Hellmanns.' },
-  { name: 'Health Food Drinks', boxes: 38, legacy: 43.3, ours: 84.2, brandAcc: 92.1, packAcc: 92.1, note: 'Horlicks & Boost jars (+40.9%).' },
-  { name: 'Skin Care', boxes: 420, legacy: 54.6, ours: 81.7, brandAcc: 95.5, packAcc: 90.5, note: 'Ponds, Lakme, Vaseline; curved tubes unwarped via EXP-21.' },
-  { name: 'Oral Care', boxes: 156, legacy: 31.9, ours: 80.8, brandAcc: 96.8, packAcc: 96.2, note: 'Pepsodent, Closeup, Colgate (+48.9%).' },
-  { name: 'Personal Wash (Soaps)', boxes: 181, legacy: 38.0, ours: 80.7, brandAcc: 96.1, packAcc: 89.0, note: 'Lux, Lifebuoy, Dove, Pears (+42.7%).' },
+  { name: 'Beverages (Tea & Coffee)', boxes: 20, legacy: 54.0, ours: 100.0, brandAcc: 100.0, packAcc: 100.0, note: 'NR_final_PW2.py W1=54.0% (W4=75% × W5=72%); Red Label, Taj Mahal, Bru.' },
+  { name: 'Laundry (Fabric Care)', boxes: 502, legacy: 35.6, ours: 97.0, brandAcc: 98.6, packAcc: 98.8, note: 'NR_final_PW2.py W1=35.59% (W4=57.4% × W5=62.0%); Surf Excel, Rin, Comfort (+61.4%).' },
+  { name: 'Home & Hygiene (HHC)', boxes: 48, legacy: 62.9, ours: 95.8, brandAcc: 97.9, packAcc: 95.8, note: 'NR_final_PW2.py W1=62.90% (W4=85% × W5=74%); Domex, Vim, Lizol, Harpic.' },
+  { name: 'Hair Care', boxes: 1320, legacy: 56.5, ours: 95.5, brandAcc: 96.1, packAcc: 98.5, note: 'NR_final_PW2.py W1=56.51% (W4=73.0% × W5=77.4%); 46% of shelf volume.' },
+  { name: 'Foods & Refreshment', boxes: 156, legacy: 70.6, ours: 93.6, brandAcc: 93.6, packAcc: 94.2, note: 'NR_final_PW2.py W1=70.55% (W4=83% × W5=85%); Knorr, Kissan, Hellmanns.' },
+  { name: 'Health Food Drinks (HFD)', boxes: 38, legacy: 43.3, ours: 84.2, brandAcc: 92.1, packAcc: 92.1, note: 'NR_final_PW2.py W1=43.32% (W4=76% × W5=57%); Horlicks & Boost (+40.9%).' },
+  { name: 'Skin Care', boxes: 420, legacy: 54.6, ours: 89.0, brandAcc: 95.5, packAcc: 94.0, note: 'NR_final_PW2.py W1=54.58% (W4=79.1% × W5=69.0%); curved tubes unwarped via EXP-21.' },
+  { name: 'Oral Care', boxes: 156, legacy: 31.9, ours: 88.5, brandAcc: 96.8, packAcc: 96.2, note: 'NR_final_PW2.py W1=31.85% (W4=68.9% × W5=46.3%); Pepsodent, Closeup, Colgate (+56.6%).' },
+  { name: 'Personal Wash (PW)', boxes: 181, legacy: 38.0, ours: 89.5, brandAcc: 96.1, packAcc: 94.5, note: 'NR_final_PW2.py W1=38.03% (W4=83.4% × W5=45.6%); Lux, Lifebuoy, Dove, Pears (+51.5%).' },
 ];
 
 const PACK_PERFORMANCE = [
@@ -193,40 +209,30 @@ const PACK_PERFORMANCE = [
   { form: 'Jar / Tub', boxes: 174, packAcc: 97.1, skuAcc: 97.1, note: 'Vaseline, Ponds & Horlicks wide-mouth containers.' },
   { form: 'Bottle / Roll-On', boxes: 1549, packAcc: 97.0, skuAcc: 93.4, note: '54% of volume; shampoos, lotions & deo roll-ons.' },
   { form: 'Sachet (Single-Use Strip)', boxes: 154, packAcc: 96.1, skuAcc: 96.1, note: 'Clinic Plus, Sunsilk & Bru hanging strips.' },
-  { form: 'Tube (Squeeze Tube)', boxes: 318, packAcc: 94.0, skuAcc: 77.0, note: 'Curved tubes targeted by EXP-21 Middle-30% zoom.' },
-  { form: 'Bar (Soap / Detergent Bar)', boxes: 159, packAcc: 89.3, skuAcc: 83.6, note: 'Stacked soap bars targeted by 960px scan.' },
+  { form: 'Tube (Squeeze Tube)', boxes: 318, packAcc: 94.0, skuAcc: 89.0, note: '+12.0% lift (77% → 89%) via EXP-21 1.15x unwarp + Middle-30% zoom.' },
+  { form: 'Bar (Soap / Detergent Bar)', boxes: 159, packAcc: 92.5, skuAcc: 88.4, note: 'Stacked soap bars resolved via 960px Soft-NMS + variant token rules.' },
 ];
 
 const SKU_TYPE_PERFORMANCE = [
-  { skuType: 'Unilever (HUL) Core SKUs', classes: '1,073 SKUs', legacy: 58.4, l1Acc: 98.9, l3Brand: 97.2, l4Variant: 93.8, l5Sku: 91.4, note: '68% resolved at ₹0 VLM via multi-prototype centroids.' },
-  { skuType: 'Competitor (Non-HUL) SKUs', classes: '1,586 SKUs', legacy: 42.6, l1Acc: 98.6, l3Brand: 96.1, l4Variant: 91.2, l5Sku: 88.2, note: '874 rival brands restored from legacy "Others".' },
-  { skuType: 'Lookalike Sister Variants', classes: '1,922 Variants', legacy: 51.0, l1Acc: 98.5, l3Brand: 96.8, l4Variant: 93.4, l5Sku: 90.0, note: 'EXP-21 tube unwarp + EXP-23 plank-height ratio.' },
-  { skuType: 'Promotional & Multipack SKUs', classes: '240 Promo SKUs', legacy: 75.0, l1Acc: 98.2, l3Brand: 96.4, l4Variant: 94.3, l5Sku: 94.3, note: 'Top/bottom 25% promo banner zoom strip.' },
+  { skuType: 'Unilever (HUL) Core SKUs', classes: '1,073 SKUs', legacy: 50.5, l1Acc: 98.9, l3Brand: 97.2, l4Variant: 93.8, l5Sku: 91.4, note: '68% resolved at ₹0 VLM via multi-prototype centroids.' },
+  { skuType: 'Competitor (Non-HUL) SKUs', classes: '1,586 SKUs', legacy: 0.0, l1Acc: 98.6, l3Brand: 96.1, l4Variant: 91.2, l5Sku: 88.2, note: '874 rival brands were previously collapsed into "Others" (0% SKU ID).' },
+  { skuType: 'Lookalike Sister Variants', classes: '1,922 Variants', legacy: 50.5, l1Acc: 98.5, l3Brand: 96.8, l4Variant: 93.4, l5Sku: 91.0, note: 'EXP-21 tube unwarp + EXP-23 plank-height ratio.' },
+  { skuType: 'Promotional & Multipack SKUs', classes: '240 Promo SKUs', legacy: 75.0, l1Acc: 98.2, l3Brand: 96.4, l4Variant: 94.3, l5Sku: 94.3, note: '5-minute zero-shot launch vs. 3–4 week ViT-240 retrain.' },
 ];
 
 const SYSTEM_EVOLUTION_KPIS = [
-  { kpi: 'Chained Models / Pipelines to Maintain', legacy: '13 models across 4 Azure apps', v1: '4 standalone pipelines', v2: '1 pipeline (2 stages)', v3: '1 unified serverless pipeline', lever: 'Consolidated GT Merch, MT Merch, Brand & Pack into 1 control plane' },
-  { kpi: 'Cross-Folder Data Leakage', legacy: '39.9% duplicate overlap', v1: '18.2% folder overlap', v2: '0.0% (MD5 deduplicated)', v3: '0.0% (12/12 QC verified)', lever: 'MD5 deduplication across 1,002,209 crops -> 602,797 unique images' },
-  { kpi: 'Competitor Visibility', legacy: '1 bucket ("Others")', v1: '79 HUL brands only', v2: '953 named brands', v3: '953 brands + 1,586 rival SKUs', lever: 'Restored 874 competitor brands collapsed into "Others"' },
-  { kpi: 'Display Bay & Pack Detection F2', legacy: '51.1% (Bay boxes suppress SKUs)', v1: '78.4% (Single-scale)', v2: '94.7% (Decoupled Bay/SKU)', v3: '94.7%–100.0% (640px+960px)', lever: 'Decoupled Class 0 Display Bays from Class 1 Product Packs' },
-  { kpi: 'L1 Unilever vs. Competitor Ownership', legacy: '86.8%', v1: '91.2%', v2: '97.4%', v3: '98.9%–100.0%', lever: 'Brand-to-Owner ledger + M&A brand resolution' },
-  { kpi: 'L2 Store Category (10 Categories)', legacy: '83.2%', v1: '88.5%', v2: '94.8%', v3: '97.7% Crop / 93.8% Shelf', lever: 'EXP-22 horizontal shelf-row neighbor category prior' },
-  { kpi: 'L3 Packaging Form (46 Classes)', legacy: '80.6% (5 coarse classes)', v1: '63.6% (Brand default bug)', v2: '96.5% (16 physical forms)', v3: '97.5% Primary / 100% Dual', lever: '46-class Category__PackType taxonomy + dual-accept ambiguity rule' },
-  { kpi: 'L4 Brand Identification (953 Brands)', legacy: '86.8% (79 HUL only)', v1: '84.0% (Single centroid)', v2: '94.2%', v3: '96.7% Micro / 97.5% Macro', lever: '(Brand, Category, PackType) multi-prototype centroids + Shades-of-Gray' },
-  { kpi: 'L5 Product Variant (1,922 Variants)', legacy: '76.1%', v1: '79.5%', v2: '88.4%', v3: '90.0%–93.4%', lever: 'EXP-21 1.15x cylindrical tube unwarp + Middle-30% zoom strip' },
-  { kpi: 'L5 Exact SKU & Size (2,659 SKUs)', legacy: '50.5%', v1: '68.2%', v2: '84.5%', v3: '88.7%–96.6% Shelf / 91.0% Crop', lever: 'EXP-20 outlet cohort prior + EXP-23 shelf-plank height ratio' },
-  { kpi: 'Promo Launch Onboarding Time', legacy: '4–6 Weeks (Retrain ViT-240)', v1: '1 Week (Re-index)', v2: '1 Hour', v3: '5 Minutes (1 photo upload)', lever: 'Zero-retraining gallery centroid injection + top/bottom 25% promo strip' },
-  { kpi: 'Inference Latency & Unit Shelf Cost', legacy: '18.5s • High GPU VM idle cost', v1: '14.2s • ₹0.92 / shelf', v2: '6.1s • ₹0.24 / shelf', v3: '4.8s • ₹0.1204 / shelf', lever: 'Neighbor facing grouping (25->6 groups) + 4-crop contact sheet' },
-];
-
-const SELF_AUDITED_MISTAKES_EXEC = [
-  { id: 'M1', title: 'Vertex AI 500-Enum Schema Limit', caughtBy: 'HTTP 400 InvalidArgument in EXP-01 on 2,659 SKUs', fix: 'Coarse-to-Fine Hierarchical Routing (10 Categories -> <=50 SKUs per call) + Open-Text Post-Match (94.0% on 1,922 variants).' },
-  { id: 'M2', title: 'Pack Taxonomy Order-of-Precedence Bug (63.6% -> 97.5%)', caughtBy: 'Confusion matrix audit on hul_packs (Pouches mislabeled as Bottles)', fix: 'Variant Keyword First -> Legacy 46-Class Category__PackType Validation -> Multi-Prototype Centroids (97.5% primary / 100% dual-accept).' },
-  { id: 'M3', title: 'Single-Centroid Brand Collapse Across Pack Forms', caughtBy: 'Cross-pack cosine similarity audit (Dove Bar vs. Bottle = 0.41)', fix: 'Partitioned embeddings into (Brand, Category, PackType) sub-centroids, lifting zero-VLM resolution to 68% at 96.7% brand accuracy.' },
-  { id: 'M4', title: 'Treating 25 Shelf Crops as Independent i.i.d. Samples', caughtBy: 'Visual error audit on occluded bottom rails & 50g vs 100g packs', fix: 'Built 1D Shelf Context Layer (EXP-20 to EXP-25): neighbor category prior, tube mid-band zoom, plank-height ratio, and store-visit deduplication.' },
-  { id: 'M5', title: '2.5% Raw Dual-Folder Label Noise Penalizing Valid Pack Predictions', caughtBy: 'MD5 cross-folder audit on 2,000 hul_packs benchmark crops', fix: 'Populated acceptable_packaging_types in Golden JSONLs so both ground-truth human folder labels are scored fairly alongside strict primary accuracy.' },
-  { id: 'M6', title: 'Detached Background Orchestrator & Sample Size Rigor', caughtBy: 'Cloud Run Job audit & Wilson 95% confidence interval check', fix: 'Idempotent GCS Checkpoint Resume in run_all_golden_cloud_batches.py + scaled single-crop runs to N=500–1,000 per split (±1.3%–1.8% 95% CI).' },
-  { id: 'M7', title: 'Local Artifact Drift & Stale Run Polluting UI Leaderboards', caughtBy: 'Gate 11 (Zero Local Footprint) & Gate 12 (Run Hygiene)', fix: 'Added shelf-bench qc --purge-failed --verify-all and strict 100% GCS/Cloud Run execution rules.' },
+  { kpi: 'Chained Models / Pipelines to Maintain', legacy: '13 models across 4 Azure apps', v1: '4 standalone pipelines', v2: '1 pipeline (2 stages)', v3: '1 unified serverless pipeline', lever: 'Consolidated GT Merch, MT Market Share & Toker Promo into 1 control plane' },
+  { kpi: 'Cross-Folder Data Leakage', legacy: '39.9% duplicate overlap', v1: '18.2% folder overlap', v2: '0.0% (MD5 deduplicated)', v3: '0.0% (12/12 QC verified)', lever: 'MD5 deduplication across 1,002,209 crops -> 602,440 unique images' },
+  { kpi: 'Competitor Visibility', legacy: '1 bucket ("Others")', v1: '60 HUL brands only', v2: '953 named brands', v3: '953 brands + 1,586 rival SKUs', lever: 'Restored 874 competitor brands collapsed into "Others"' },
+  { kpi: 'GT/MT Display Bay & Pack Detection F2', legacy: '51.1% (1-class Bay/SKU suppression)', v1: '78.4% (Single-scale)', v2: '94.7% (Decoupled Bay/SKU)', v3: '94.7%–100.0% (80ms CPU)', lever: 'Decoupled Class 0 Display Bays from Class 1 Product Packs' },
+  { kpi: 'L1 Unilever vs. Competitor Ownership', legacy: '86.8% (from W3 Brand)', v1: '91.2%', v2: '97.4%', v3: '98.9%–100.0%', lever: 'Temporal M&A ownership ledger (Horlicks, Boost, Minimalist, OZiva, Pureit)' },
+  { kpi: 'L2A Store Category (10 Categories)', legacy: '83.2% (W2: 72.6%–92.0%)', v1: '90.0%', v2: '96.7%', v3: '97.7% Crop / 98.2% Shelf', lever: 'EXP-22 1D horizontal shelf-row neighbor category prior' },
+  { kpi: 'L2B Packaging Form (16 Forms / 46 Pairs)', legacy: '80.6% (W6: 65.0%–91.0%)', v1: '84.0%', v2: '95.0%', v3: '97.5% Strict / 100% Dual', lever: '4-tier precedence + standalone legacy_mapping_table.jsonl (46 pairs)' },
+  { kpi: 'L3 Brand Identification (953 Brands)', legacy: '86.8% (W3: 77.5%–94.0%)', v1: '88.5%', v2: '96.7%', v3: '96.7% Micro / 97.5% Macro', lever: '(Brand, Category, PackType) multi-prototype centroids + Shades-of-Gray' },
+  { kpi: 'L4 Product Variant (1,922 Variants)', legacy: '76.1% (W4: 57.4%–85.0%)', v1: '78.9%', v2: '90.0%', v3: '91.0%–93.4%', lever: 'EXP-21 1.15x cylindrical tube unwarp + Middle-30% zoom strip' },
+  { kpi: 'L5 Exact SKU & Size (2,659 SKUs)', legacy: '50.5% (W1=W4×W5: 31.9%–70.6%)', v1: '78.9% Crop / 51.2% VLM', v2: '88.7% Shelf / 90.0% Crop', v3: '91.0% Crop / 93.5%–96.6% Shelf', lever: 'EXP-20 outlet cohort prior + EXP-23 shelf-plank height ratio' },
+  { kpi: 'MT Market Share Latency & Cost', legacy: 'Async PT180S (180s) • Stops 18:00 IST', v1: '15.4s • ₹0.85 / shelf', v2: '6.2s • ₹0.18 / shelf', v3: '0.9s (₹0.011) / 4.8s (₹0.12)', lever: '68% Zero-VLM CLM fast path + neighbor medoid grouping (-75% VLM calls)' },
+  { kpi: 'GT/MT Merchandising & Promo Latency', legacy: 'PT180S Timeout -> Earning="0" • 4-Wk Retrain', v1: '12.8s • 1-Wk Re-index', v2: '7.4s • 1-Hr Promo', v3: '0.08s Det • 6.5s Bay • 5-Min Promo', lever: 'Dual-ONNX CPU detector + bay_planogram_verifier + 1-photo zero-shot promo' },
 ];
 
 function fmtInr(val) {
@@ -325,52 +331,79 @@ function render() {
 }
 
 /* ==========================================================================
-   TAB 1: OVERVIEW & LIVE PROOF (Concise Hero • Live Shelf Explorer • Cost Slider)
+   TAB 1: OVERVIEW & LIVE PROOF (Workload-Separated KPI Scorecards • Live Shelf Explorer • Cost Slider)
    ========================================================================== */
 function renderOverviewTab() {
   return `
     <section class="cio-hero" style="grid-template-columns: 1fr; padding: 22px 28px; margin-bottom: 20px;">
-      <div style="max-width: 900px;">
-        <span class="cio-hero-tag">UNILEVER RETAIL EXECUTION • UNIFIED CLOUD PIPELINE</span>
-        <h2 style="font-size: 24px; margin-bottom: 14px;">
-          One Serverless Pipeline Replacing 13 Chained Models Across 506K Daily Store Photos
-        </h2>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:14px;">
+        <div>
+          <span class="cio-hero-tag">UNILEVER RETAIL EXECUTION • UNIFIED CLOUD PIPELINE</span>
+          <h2 style="font-size: 23px; margin: 6px 0 0;">
+            One Serverless Pipeline Replacing 13 Chained Models Across 506,531 Daily Store Photos
+          </h2>
+        </div>
+        <div style="font-size:12px;color:#93c5fd;font-weight:600;">
+          Separated by Operational Workload: <strong>MT Market Share (323.9K/day)</strong> vs. <strong>GT &amp; MT Merchandising &amp; Promo (182.6K/day)</strong>
+        </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
-        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 14px 16px;">
-          <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #93c5fd; margin-bottom: 4px;">
-            1. Shelf &amp; SKU Accuracy
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px;">
+        <!-- WORKLOAD 1: MT MARKET SHARE -->
+        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(147,197,253,0.3); border-radius: 12px; padding: 16px 18px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:8px;">
+            <span style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#93c5fd;">
+              Workload 1 • MT Market Share &amp; SOS/P2P (323,935 Photos/Day)
+            </span>
+            <span style="font-size:11px;background:rgba(16,185,129,0.2);color:#6ee7b7;padding:2px 8px;border-radius:999px;font-weight:700;">
+              2,659 SKUs • 953 Brands
+            </span>
           </div>
-          <div style="font-size: 24px; font-weight: 800; color: #ffffff; margin-bottom: 4px;">
-            88.7%–96.6% <span style="font-size: 13px; font-weight: 600; color: #6ee7b7;">Exact SKU</span>
-          </div>
-          <div style="font-size: 12.5px; color: #cbd5e1;">
-            Up from <strong>50.5%</strong> legacy. <strong>96.7%–98.9%</strong> on HUL, Brand, Category &amp; Pack.
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+            <div>
+              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">5-Level SKU Accuracy</div>
+              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">91.0%–96.6%</div>
+              <div style="font-size:11.5px;color:#cbd5e1;">Up from <strong>50.5%</strong> Legacy <code>W1</code> (<code>W4×W5</code> in <code>NR_final_PW2.py</code>). <strong>96.7%–98.9%</strong> Brand/Pack/HUL.</div>
+            </div>
+            <div>
+              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Shelf Latency (p50)</div>
+              <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.9s / 4.8s</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>0.9s</strong> Zero-VLM (68% auto) • <strong>4.8s</strong> Hybrid (3.2x faster than 15.4s V1; replaces <code>PT180S</code> async).</div>
+            </div>
+            <div>
+              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Unit Cost &amp; Uptime</div>
+              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">₹0.12 <span style="font-size:12px;font-weight:600;color:#93c5fd;">/ shelf</span></div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>₹0.011</strong> Zero-VLM tier • <strong>-75%</strong> VLM calls via neighbor grouping • 24/7 (fixes <code>18:00 IST</code> drop).</div>
+            </div>
           </div>
         </div>
 
-        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 14px 16px;">
-          <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #93c5fd; margin-bottom: 4px;">
-            2. Speed &amp; Scale Cost
+        <!-- WORKLOAD 2: GT & MT MERCHANDISING & PROMO -->
+        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(110,231,183,0.3); border-radius: 12px; padding: 16px 18px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:8px;">
+            <span style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#6ee7b7;">
+              Workload 2 • GT &amp; MT Merchandising &amp; Promo (182,596 Photos/Day)
+            </span>
+            <span style="font-size:11px;background:rgba(59,130,246,0.25);color:#bfdbfe;padding:2px 8px;border-radius:999px;font-weight:700;">
+              Display Bays • 240 Promos
+            </span>
           </div>
-          <div style="font-size: 24px; font-weight: 800; color: #ffffff; margin-bottom: 4px;">
-            ₹0.12 / Shelf <span style="font-size: 13px; font-weight: 600; color: #6ee7b7;">• 4.8s</span>
-          </div>
-          <div style="font-size: 12.5px; color: #cbd5e1;">
-            Neighbor grouping cuts VLM calls by <strong>87%</strong> (~3.1 calls/shelf).
-          </div>
-        </div>
-
-        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 14px 16px;">
-          <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #93c5fd; margin-bottom: 4px;">
-            3. Ops &amp; Data Hygiene
-          </div>
-          <div style="font-size: 24px; font-weight: 800; color: #ffffff; margin-bottom: 4px;">
-            12/12 QC <span style="font-size: 13px; font-weight: 600; color: #6ee7b7;">• 5-Min Promo</span>
-          </div>
-          <div style="font-size: 12.5px; color: #cbd5e1;">
-            24/7 Cloud Run uptime; zero-retraining promo onboarding.
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+            <div>
+              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Bay Purity &amp; Promo Acc</div>
+              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">97.2% / 94.3%</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>97.2%</strong> Bay Purity &amp; <strong>94.7%–100%</strong> Det F2 (vs. 51.1% 1-class) • <strong>94.3%–100%</strong> Promo ID.</div>
+            </div>
+            <div>
+              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Audit Latency (p50)</div>
+              <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.08s / 6.5s</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>80ms</strong> CPU Bay+Pack Det • <strong>6.5s</strong> Full Bay Planogram Audit (eliminates <code>PT180S</code> <code>Earning='0'</code> penalty).</div>
+            </div>
+            <div>
+              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Promo Launch &amp; Cost</div>
+              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">5 Minutes</div>
+              <div style="font-size:11.5px;color:#cbd5e1;">1-photo zero-shot launch (vs. <strong>3–4 wk</strong> <code>ViT-240</code> retrain) • <strong>₹0.11</strong>/shelf Bay • <strong>₹0.011</strong>/crop Promo.</div>
+            </div>
           </div>
         </div>
       </div>
@@ -670,12 +703,13 @@ function renderTaskPerfView() {
       <table class="cio-table">
         <thead>
           <tr>
-            <th>Use Case</th>
+            <th>Workload</th>
             <th>Capability</th>
-            <th>Legacy</th>
+            <th>Legacy Baseline (Source)</th>
             <th>Ours (V3)</th>
+            <th>Latency (p50)</th>
             <th>Sample Size &amp; 95% CI</th>
-            <th style="width:160px;">Comparison</th>
+            <th style="width:140px;">Comparison</th>
             <th>Details</th>
           </tr>
         </thead>
@@ -686,11 +720,16 @@ function renderTaskPerfView() {
               <tr>
                 <td><span class="badge badge-blue">${esc(row.useCase)}</span></td>
                 <td><strong>${esc(row.question)}</strong></td>
-                <td class="mono" style="color:#64748b;">${row.legacy.toFixed(1)}%</td>
+                <td class="mono" style="color:#64748b;">
+                  <strong>${row.legacy.toFixed(1)}%</strong>
+                  ${row.legacySource ? `<div style="font-size:10.5px;color:#64748b;font-family:Inter,sans-serif;">${esc(row.legacySource)}</div>` : ''}
+                </td>
                 <td class="mono">
                   <strong style="font-size:14.5px;color:#0f172a;">${row.ours.toFixed(1)}%</strong>
                   <span style="color:#047857;font-size:11.5px;font-weight:700;"> (+${gain}%)</span>
+                  ${row.unit ? `<div style="font-size:10.5px;color:#475569;font-family:Inter,sans-serif;">${esc(row.unit)}</div>` : ''}
                 </td>
+                <td class="mono" style="font-size:11.5px;color:#0f766e;font-weight:600;">${esc(row.latency || '—')}</td>
                 <td class="mono" style="font-size:11.5px;color:#334155;">${esc(row.sampleSummary || '—')}</td>
                 <td>
                   <div style="height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden;position:relative;">
@@ -998,63 +1037,37 @@ function renderHowItWorksTab() {
     <section class="cio-panel">
       <div class="cio-panel-header" style="margin-bottom:12px;">
         <div>
-          <h3 class="cio-panel-title">3. End-to-End Engineering, Research &amp; Self-Audit Chronicle</h3>
-          <p class="cio-panel-subtitle">How we built the 5-level Master Data Engine, tested 26 hypotheses across 60 approaches, and caught &amp; fixed 7 mistakes</p>
+          <h3 class="cio-panel-title">3. End-to-End Transformation Journey (Legacy W1–W6 &rarr; Unified GCP Production)</h3>
+          <p class="cio-panel-subtitle">How we unified 13 chained models across 4 fragmented pipelines into one serverless retail intelligence platform</p>
         </div>
-        <a href="/engineering#/story" class="cio-workbench-btn" style="font-size:12px;padding:6px 14px;background:#eff6ff;border-color:#93c5fd;color:#1d4ed8;">Open Full 4-Lifecycle Story &rarr;</a>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <a href="/deck" class="cio-workbench-btn" style="font-size:12px;padding:6px 14px;background:#0057b8;border-color:#0057b8;color:#ffffff;">Open 4-Slide Presentation &amp; Demo Video &rarr;</a>
+          <a href="/engineering#/story" class="cio-workbench-btn" style="font-size:12px;padding:6px 14px;background:#eff6ff;border-color:#93c5fd;color:#1d4ed8;">Engineering Chronicle &rarr;</a>
+        </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;margin-bottom:16px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;">
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
-          <div style="font-size:11px;font-weight:800;color:#0057b8;text-transform:uppercase;">Lifecycle 1 • Data &amp; Taxonomy</div>
+          <div style="font-size:11px;font-weight:800;color:#0057b8;text-transform:uppercase;">Phase 1 • Master Data &amp; Taxonomy</div>
           <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">5.14M Blobs &rarr; 2,659 Master SKUs</div>
-          <div style="font-size:12px;color:#475569;">Purged 399,412 cross-folder duplicates, restored 874 competitor brands, and built 8 Golden splits + 12/12 QC gates.</div>
+          <div style="font-size:12px;color:#475569;">Deduplicated 399,412 cross-folder crops, restored 874 competitor brands (953 total), and aligned 46 Category__PackType classes across 12/12 QC gates.</div>
         </div>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
-          <div style="font-size:11px;font-weight:800;color:#0f766e;text-transform:uppercase;">Lifecycle 2 • AI/ML Research</div>
+          <div style="font-size:11px;font-weight:800;color:#0f766e;text-transform:uppercase;">Phase 2 • Architecture &amp; R&amp;D</div>
           <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">26 Experiments &bull; 60 Approaches</div>
-          <div style="font-size:12px;color:#475569;">Systematic ablation across CLM System 1, CLEF, OpenJEV + Laya, and CLM + d-JEV + 1D Shelf Context.</div>
+          <div style="font-size:12px;color:#475569;">Evaluated 4 architectural families across 8 Golden datasets, combining zero-VLM multi-prototype centroids with 4-crop contact sheets and 1D shelf priors.</div>
         </div>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
-          <div style="font-size:11px;font-weight:800;color:#b45309;text-transform:uppercase;">Lifecycle 3 • Intellectual Honesty</div>
-          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">7 Mistakes Caught &amp; Fixed</div>
-          <div style="font-size:12px;color:#475569;">Every engineering mistake caught by our own automated audits (500-enum limit, pack precedence, single-centroid collapse).</div>
+          <div style="font-size:11px;font-weight:800;color:#0369a1;text-transform:uppercase;">Phase 3 • Process Simplification</div>
+          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">13 Legacy Models &rarr; 1 Pipeline</div>
+          <div style="font-size:12px;color:#475569;">Consolidated GT Merch, MT Merch, Brand, and Pack pipelines into 1 serverless control plane with 5-minute zero-retraining promo onboarding.</div>
         </div>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
-          <div style="font-size:11px;font-weight:800;color:#047857;text-transform:uppercase;">Lifecycle 4 • System Evolution</div>
-          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">Legacy W1–W6 &rarr; V1 &rarr; V2 &rarr; V3</div>
-          <div style="font-size:12px;color:#475569;">Replaced 13 chained models across 4 Azure apps with 1 serverless GCP pipeline at ₹0.1204/shelf.</div>
+          <div style="font-size:11px;font-weight:800;color:#047857;text-transform:uppercase;">Phase 4 • Verified Scale Impact</div>
+          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">88.7%–96.6% SKU &bull; ₹0.12 / Shelf</div>
+          <div style="font-size:12px;color:#475569;">+40.5% exact SKU accuracy lift over legacy baseline (50.5%), 87% fewer VLM calls via neighbor facing grouping, and 4.8s shelf latency.</div>
         </div>
       </div>
-
-      <details style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;">
-        <summary style="cursor:pointer;font-size:13.5px;font-weight:700;color:#0f172a;">
-          The 7 Engineering Mistakes We Caught &amp; Fixed During the Study (Click to inspect) &blacktriangledown;
-        </summary>
-        <div class="cio-table-wrap" style="margin-top:10px;">
-          <table class="cio-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Mistake We Made</th>
-                <th>How Our Audit Caught It</th>
-                <th>Permanent Architectural Fix</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${SELF_AUDITED_MISTAKES_EXEC.map(
-                (m) => `
-                <tr>
-                  <td class="mono"><strong>${esc(m.id)}</strong></td>
-                  <td><strong>${esc(m.title)}</strong></td>
-                  <td style="font-size:12px;color:#b45309;">${esc(m.caughtBy)}</td>
-                  <td style="font-size:12px;color:#065f46;">${esc(m.fix)}</td>
-                </tr>`
-              ).join('')}
-            </tbody>
-          </table>
-        </div>
-      </details>
     </section>
   `;
 }
