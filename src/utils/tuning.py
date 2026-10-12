@@ -154,28 +154,12 @@ def _extract_uri(line: str) -> str:
     return json.loads(line)["contents"][0]["parts"][0]["fileData"]["fileUri"]
 
 
-BRAND_ALIAS_MAP = {
-    "a_3_roses": "3_Roses",
-    "3_roses": "3_Roses",
-    "abrown&polson": "Brown_And_Polson",
-    "brown&polson": "Brown_And_Polson",
-    "acif": "CIF",
-    "cif": "CIF",
-    "aclinic": "Clinic_Plus",
-    "clinic": "Clinic_Plus",
-    "ahellmanns": "Hellmans",
-    "hellmanns": "Hellmans",
-}
-
-
 def clean_brand_name(folder: str) -> str:
-    """Strip artificial leading 'A' / 'A_' sort prefixes and align brand aliases across brand_data and input_data."""
-    low = folder.lower()
-    if low in BRAND_ALIAS_MAP:
-        return BRAND_ALIAS_MAP[low]
+    """Strip artificial leading 'A' / 'A_' sort prefixes (e.g. ADove -> Dove, A_3_roses -> 3_roses)."""
+    if folder == "A_3_roses":
+        return "3_roses"
     if len(folder) > 1 and folder[0] == "A" and folder[1].isupper():
-        stripped = folder[1:]
-        return BRAND_ALIAS_MAP.get(stripped.lower(), stripped)
+        return folder[1:]
     return folder
 
 
@@ -521,8 +505,8 @@ def build_marketshare_variant_jsonl(
             cat = parts[0][len("variant_") :]
             folder = parts[2]
             if "__" in folder:
-                raw_brand, raw_var = folder.split("__", 1)
-                by_key[(cat, clean_brand_name(raw_brand), clean_variant_name(raw_var))].append(uri)
+                brand, raw_var = folder.split("__", 1)
+                by_key[(cat, brand, clean_variant_name(raw_var))].append(uri)
 
     conflicted_md5s = _find_conflicted_md5s(by_key, md5_map)
     rng = random.Random(seed)

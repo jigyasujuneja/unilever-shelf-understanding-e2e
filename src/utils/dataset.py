@@ -32,14 +32,15 @@ LOCAL_ROOT = "data/SKU110K_fixed"
 
 
 def _default_root() -> str:
-    """$SHELF_BENCH_DATA, else a local download if present, else the shared GCS copy."""
+    """$SHELF_BENCH_DATA, else the shared GCS copy in config.yaml, else local fallback."""
     if os.environ.get("SHELF_BENCH_DATA"):
         return os.environ["SHELF_BENCH_DATA"]
-    if Path(LOCAL_ROOT, "annotations").is_dir():
-        return LOCAL_ROOT
     from utils.llm import load_config
 
-    return load_config().get("gcp", {}).get("data") or LOCAL_ROOT
+    gcp_data = load_config().get("gcp", {}).get("data")
+    if gcp_data:
+        return gcp_data
+    return LOCAL_ROOT
 
 
 # Local folder or gs:// URI. Cloud Run jobs set SHELF_BENCH_DATA=gs://<bucket>/SKU110K_fixed.
@@ -58,6 +59,7 @@ class Sample:
     height: int
     boxes: list[Box] = field(default_factory=list)
     labels: list[dict] = field(default_factory=list)  # per box; empty for SKU-110K ("object")
+    asset_boxes: list[Box] = field(default_factory=list)  # Class 0 display-bay / cooler boxes (gtmerch)
 
 
 # ---- storage: local paths and gs:// URIs behave the same ----------------------------------------
@@ -66,6 +68,9 @@ class Sample:
 def _gcs():
     from google.cloud import storage
 
+    from utils.llm import ensure_gcloud_auth_fallback
+
+    ensure_gcloud_auth_fallback()
     return storage.Client()
 
 
@@ -86,6 +91,28 @@ def join(root: str, *parts: str) -> str:
         return str(parts[-1])
     return "/".join([str(root).rstrip("/"), *parts]) if str(root).startswith("gs://") \
         else str(Path(root, *parts))
+
+
+def open_rgb_normalized(
+    raw_bytes_or_path: bytes | str | Path,
+    bg_color: tuple[int, int, int] = (240, 240, 240),
+):
+    """Decode image bytes or path/URI, apply EXIF orientation transpose, and composite RGBA/LA/P onto neutral shelf background."""
+    from PIL import Image, ImageOps
+
+    raw_bytes = (
+        raw_bytes_or_path
+        if isinstance(raw_bytes_or_path, (bytes, bytearray))
+        else read_bytes(str(raw_bytes_or_path))
+    )
+    with Image.open(io.BytesIO(raw_bytes)) as im:
+        im = ImageOps.exif_transpose(im)
+        if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+            rgba = im.convert("RGBA")
+            canvas = Image.new("RGB", rgba.size, bg_color)
+            canvas.paste(rgba, mask=rgba.split()[3])
+            return canvas
+        return im.convert("RGB")
 
 
 # ---- dataset ------------------------------------------------------------------------------------
@@ -165,14 +192,27 @@ def load_split(split: str, root: str = DEFAULT_ROOT) -> dict[str, Sample]:
     return samples
 
 
-RPC_FORMAT_SETS = ("rpc", "shelves", "hul_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos", "hul_sessions")
+RPC_FORMAT_SETS = (
+    "rpc",
+    "shelves",
+    "hul_golden",
+    "gtmerch_golden",
+    "ms_json_golden",
+    "hul_variants",
+    "hul_brands",
+    "hul_packs",
+    "hul_promos",
+    "hul_sessions",
+)
 HUL_FIELDS: dict[str, tuple[str, ...]] = {
     "hul_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
-    "hul_variants": ("product", "brand", "category", "packaging_type"),
-    "hul_brands": ("product", "brand", "category", "is_hul"),
-    "hul_packs": ("product", "category", "packaging_type"),
-    "hul_promos": ("product", "brand", "base_variant", "promo_type"),
-    "hul_sessions": ("product", "brand", "category", "is_hul"),
+    "gtmerch_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "ms_json_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "hul_variants": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "hul_brands": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "hul_packs": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "hul_promos": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul", "promo_type"),
+    "hul_sessions": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
 }
 
 
@@ -184,8 +224,8 @@ def sample_images(
 
     Same (split, limit, seed) -> same images, so runs are directly comparable, whether the
     data is read locally or from GCS. ``name`` is the dataset: ``sku110k``, ``products``, ``rpc``,
-    ``shelves``, or client HUL sets (``hul_golden``, ``hul_variants``, ``hul_brands``, ``hul_packs``,
-    ``hul_promos``, ``hul_sessions``).
+    ``shelves``, or client HUL sets (``hul_golden``, ``gtmerch_golden``, ``ms_json_golden``,
+    ``hul_variants``, ``hul_brands``, ``hul_packs``, ``hul_promos``, ``hul_sessions``).
     """
     if name == "products" and split != "test":
         raise ValueError("the products dataset only has a test split")
@@ -196,7 +236,25 @@ def sample_images(
         all_samples = [s for s in all_samples if str(s.path).startswith("gs://") or Path(s.path).exists()]
     if limit <= 0 or limit >= len(all_samples):
         return all_samples
-    return random.Random(seed).sample(all_samples, limit)
+    rng = random.Random(seed)
+    if name in ("hul_golden", "hul_variants", "hul_packs", "hul_promos", "hul_brands"):
+        hul_pool = [s for s in all_samples if s.labels and s.labels[0].get("is_hul") is True]
+        nh_pool = [s for s in all_samples if s.labels and s.labels[0].get("is_hul") is False]
+        if hul_pool and nh_pool:
+            n_hul = min(len(hul_pool), (limit + 1) // 2)
+            n_nh = min(len(nh_pool), limit - n_hul)
+            if n_hul + n_nh < limit:
+                n_hul = min(len(hul_pool), limit - n_nh)
+            picked_hul = rng.sample(hul_pool, n_hul)
+            picked_nh = rng.sample(nh_pool, n_nh)
+            interleaved: list[Sample] = []
+            for i in range(max(len(picked_hul), len(picked_nh))):
+                if i < len(picked_hul):
+                    interleaved.append(picked_hul[i])
+                if i < len(picked_nh):
+                    interleaved.append(picked_nh[i])
+            return interleaved[:limit]
+    return rng.sample(all_samples, limit)
 
 
 # ---- labelled products: product photos with brand / product / category labels ------------------
@@ -281,34 +339,55 @@ RPC_LOCAL = "data/rpc"
 RPC_JSON = "rpc.json"
 RPC_HF = "benjamintli/retail-product-checkout"
 RPC_FIELDS = ("product", "category")
-RPC_SUBSETS = {"test": ("test", 100), "val": ("validation", 20)}  # our split -> (HF split, n)
+RPC_SUBSETS = {"train": ("train", 800), "test": ("test", 100), "val": ("validation", 20)}  # our split -> (HF split, n)
 REFS_PER_PRODUCT = 4
 
 
 def data_root(name: str) -> str:
-    """Where a dataset lives: $SHELF_BENCH_<NAME>, else a local copy, else its GCS copy."""
+    """Where a dataset lives: $SHELF_BENCH_<NAME>, else its GCS URI in config.yaml, else local fallback."""
     if name == "sku110k":
         return DEFAULT_ROOT
     if name == "products":
         return products_root()
-    local = SHELVES_LOCAL if name == "shelves" else (f"data/{name}" if name.startswith("hul_") else RPC_LOCAL)
     if os.environ.get(f"SHELF_BENCH_{name.upper()}"):
         return os.environ[f"SHELF_BENCH_{name.upper()}"]
-    if Path(local, RPC_JSON).exists():
-        return local
     from utils.llm import load_config
 
-    return load_config().get("gcp", {}).get(name) or local
+    gcp_cfg = load_config().get("gcp", {})
+    if gcp_cfg.get(name):
+        return gcp_cfg[name]
+    local = (
+        SHELVES_LOCAL
+        if name == "shelves"
+        else (f"data/{name}" if name.startswith(("hul_", "gtmerch", "ms_json")) else RPC_LOCAL)
+    )
+    return local
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=16)
 def _rpc_json(root: str) -> dict:
     import json
 
+    is_gcs = str(root).startswith("gs://")
+    ds_leaf = str(root).rstrip("/").rsplit("/", 1)[-1]
+    local_mirror = Path("data") / ds_leaf / RPC_JSON
+    if not is_gcs:
+        direct_path = Path(join(root, RPC_JSON))
+        if direct_path.exists():
+            return json.loads(direct_path.read_bytes())
+        if local_mirror.exists():
+            return json.loads(local_mirror.read_bytes())
     try:
-        return json.loads(read_bytes(join(root, RPC_JSON)))
+        raw = read_bytes(join(root, RPC_JSON))
+        return json.loads(raw)
     except FileNotFoundError:
-        raise FileNotFoundError(f"{join(root, RPC_JSON)} not found. Run `shelf-bench rpc` first.") from None
+        if local_mirror.exists():
+            return json.loads(local_mirror.read_bytes())
+        raise FileNotFoundError(f"{join(root, RPC_JSON)} not found in GCS.") from None
+    except Exception:
+        if local_mirror.exists():
+            return json.loads(local_mirror.read_bytes())
+        raise
 
 
 def rpc_catalog(root: str) -> dict[int, dict]:
@@ -320,17 +399,34 @@ def rpc_gallery(root: str) -> dict[int, list[str]]:
     return {int(k): [join(root, f) for f in v] for k, v in _rpc_json(root)["gallery"].items()}
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=16)
 def load_rpc(split: str, root: str) -> dict[str, Sample]:
     if split not in RPC_SUBSETS:
         raise ValueError(f"the rpc dataset has splits {tuple(RPC_SUBSETS)}, got {split!r}")
     cat = rpc_catalog(root)
-    return {r["image"]: Sample(r["image"],
-                               join(root, r["uri"]) if r.get("uri") else join(root, "images", r["image"]),
-                               r["width"], r["height"],
-                               boxes=[tuple(b) for b in r["boxes"]],
-                               labels=[cat[c] for c in r["products"]])
-            for r in _rpc_json(root)["splits"][split]}
+    out: dict[str, Sample] = {}
+    for r in _rpc_json(root).get("splits", {}).get(split, []):
+        prods = [int(c) for c in r.get("products", [])]
+        raw_labels = r.get("labels") or []
+        labels: list[dict] = []
+        for idx_p, pid in enumerate(prods):
+            base_lbl = dict(cat[pid]) if pid in cat else {}
+            if idx_p < len(raw_labels) and isinstance(raw_labels[idx_p], dict):
+                # Catalog is authoritative for taxonomy fields; preserve any extra box-specific keys
+                merged = {**raw_labels[idx_p], **base_lbl}
+                labels.append(merged)
+            elif base_lbl:
+                labels.append(base_lbl)
+        out[r["image"]] = Sample(
+            r["image"],
+            join(root, r["uri"]) if r.get("uri") else join(root, "images", r["image"]),
+            r["width"],
+            r["height"],
+            boxes=[tuple(b) for b in r["boxes"]],
+            labels=labels,
+            asset_boxes=[tuple(b) for b in r.get("asset_boxes", [])],
+        )
+    return out
 
 
 RPC_CACHE = Path("data/rpc_cache")  # API pages, so an interrupted `shelf-bench rpc` resumes
@@ -446,6 +542,8 @@ def prepare_rpc(out: str = RPC_LOCAL, seed: int = 0, log=print) -> Path:
     # Checkout photos: a seeded subset of each split, boxes scaled with the image.
     splits: dict[str, list[dict]] = {}
     for ours, (hf_split, n) in RPC_SUBSETS.items():
+        if ours not in ("test", "val"):
+            continue
         size = _hf(hf_split, 0, 1)["num_rows_total"]
         offsets = sorted(random.Random(seed).sample(range(size), n))
 

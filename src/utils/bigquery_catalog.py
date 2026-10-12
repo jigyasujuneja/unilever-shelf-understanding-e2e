@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.golden_crops` (
   basepack_id STRING,
   packaging_type STRING,
   packaging_type_source STRING,
+  allowed_packaging_types ARRAY<STRING>,
+  is_catchall_variant BOOL,
+  variant_enrichment_source STRING,
   has_promo BOOL,
   promo_type STRING,
   has_price_tag BOOL,
@@ -101,15 +104,52 @@ WHERE join_mode = '3way_brand_variant_pack'
 LIMIT 100;
 """.strip()
 
+BIGQUERY_GTMERCH_DETECTIONS_DDL = """
+CREATE TABLE IF NOT EXISTS `{project}.{dataset}.gtmerch_shelf_detections` (
+  md5 STRING NOT NULL,
+  uri STRING NOT NULL,
+  status STRING NOT NULL,
+  split STRING NOT NULL,
+  outlet_id STRING NOT NULL,
+  asset_id STRING,
+  capture_date STRING,
+  timestamp_ms INT64,
+  session_id STRING NOT NULL,
+  width INT64,
+  height INT64,
+  asset_box_count INT64,
+  product_box_count INT64,
+  inside_asset_product_count INT64,
+  asset_boxes ARRAY<STRUCT<bbox ARRAY<INT64>>>,
+  product_boxes ARRAY<STRUCT<
+    product_idx INT64,
+    bbox ARRAY<INT64>,
+    inside_asset_idx INT64,
+    asset_containment_ratio FLOAT64,
+    is_inside_asset BOOL,
+    linked_crop_md5 STRING,
+    linked_crop_uri STRING,
+    brand STRING,
+    base_variant STRING,
+    basepack_id STRING,
+    category STRING,
+    packaging_type STRING,
+    is_hul BOOL
+  >>
+)
+CLUSTER BY split, outlet_id, session_id;
+""".strip()
+
 BIGQUERY_OBJECT_TABLE_DDL = """
--- 1. Create Object Table over gs://marketshare-datasets for unstructured AI analysis
+-- 1. Create Object Table over gs://marketshare-datasets and gs://gtmerch-marketshare for unstructured AI analysis
 CREATE EXTERNAL TABLE IF NOT EXISTS `{project}.{dataset}.gcs_shelf_objects`
 WITH CONNECTION `{project}.{location}.vertex_ai_conn`
 OPTIONS (
   object_metadata = 'SIMPLE',
   uris = ['gs://marketshare-datasets/brand_data/**',
           'gs://marketshare-datasets/input_data/**',
-          'gs://marketshare-datasets/pack_data/**']
+          'gs://marketshare-datasets/pack_data/**',
+          'gs://gtmerch-marketshare/**']
 );
 
 -- 2. Register Remote Gemini Embedding 2, Gemini 3.5 Flash-Lite, and Gemini 3.8 Flash Models in BigQuery ML
@@ -168,6 +208,40 @@ FROM VECTOR_SEARCH(
 """.strip()
 
 
+BIGQUERY_BRAND_SKU_REGISTRY_DDL = """
+CREATE TABLE IF NOT EXISTS `{project}.{dataset}.brand_sku_registry` (
+  canonical_brand STRING NOT NULL,
+  is_hul BOOL NOT NULL,
+  parent_company STRING NOT NULL,
+  category STRING NOT NULL,
+  dual_umbrella BOOL NOT NULL,
+  valid_from DATE,
+  valid_to DATE,
+  verification_source STRING NOT NULL,
+  confidence FLOAT64 NOT NULL,
+  sku_count INT64 NOT NULL,
+  aliases ARRAY<STRING>,
+  sample_variants ARRAY<STRING>
+)
+CLUSTER BY is_hul, parent_company, category;
+""".strip()
+
+PARENT_COMPANY_SOS_SQL = """
+-- Competitor Conglomerate Share-of-Shelf (SOS) Roll-up (HUL vs P&G vs ITC vs Dabur vs Godrej vs Marico)
+SELECT
+  COALESCE(r.parent_company, IF(g.is_hul, 'Hindustan Unilever Limited (HUL)', 'Regional / Other Competitor FMCG')) AS parent_company,
+  g.category,
+  COUNT(*) AS facing_count,
+  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (PARTITION BY g.category), 2) AS category_facing_sos_pct
+FROM `{project}.{dataset}.golden_crops` AS g
+LEFT JOIN `{project}.{dataset}.brand_sku_registry` AS r
+  ON LOWER(g.brand) = LOWER(r.canonical_brand)
+WHERE g.status = 'clean'
+GROUP BY parent_company, g.category
+ORDER BY g.category, facing_count DESC;
+""".strip()
+
+
 def golden_item_to_bq_row(item: dict[str, Any]) -> dict[str, Any]:
     """Flatten a ``golden_payload['items']`` record into a row matching ``BIGQUERY_GOLDEN_CROPS_DDL``."""
     lab = item.get("labels", {})
@@ -199,6 +273,9 @@ def golden_item_to_bq_row(item: dict[str, Any]) -> dict[str, Any]:
         "basepack_id": lab.get("basepack_id"),
         "packaging_type": str(lab.get("packaging_type") or "Unknown"),
         "packaging_type_source": str(lab.get("packaging_type_source") or "unknown"),
+        "allowed_packaging_types": list(lab.get("allowed_packaging_types") or []),
+        "is_catchall_variant": bool(lab.get("is_catchall_variant", False)),
+        "variant_enrichment_source": str(lab.get("variant_enrichment_source") or "variant_folder"),
         "has_promo": bool(lab.get("has_promo", False)),
         "promo_type": lab.get("promo_type"),
         "has_price_tag": bool(lab.get("has_price_tag", False)),
@@ -254,6 +331,9 @@ class BigQueryCatalogClient:
         fmt = {"project": self.project, "dataset": self.dataset, "location": self.location}
         return {
             "golden_crops_ddl": BIGQUERY_GOLDEN_CROPS_DDL.format(**fmt),
+            "gtmerch_detections_ddl": BIGQUERY_GTMERCH_DETECTIONS_DDL.format(**fmt),
+            "brand_sku_registry_ddl": BIGQUERY_BRAND_SKU_REGISTRY_DDL.format(**fmt),
+            "parent_company_sos_sql": PARENT_COMPANY_SOS_SQL.format(**fmt),
             "join_validation_sql": BIGQUERY_JOIN_VALIDATION_SQL.format(**fmt),
             "object_table_and_models_ddl": BIGQUERY_OBJECT_TABLE_DDL.format(**fmt),
             "ai_unstructured_audit_sql": BIGQUERY_AI_UNSTRUCTURED_AUDIT_SQL.format(**fmt),
