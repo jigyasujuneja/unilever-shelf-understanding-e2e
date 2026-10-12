@@ -24,6 +24,99 @@ def unit(v: list[float]) -> list[float]:
     return [x / n for x in v]
 
 
+def scoped_catalog_for_ctx(dataset_name: str, ctx: Context) -> dict[int, dict]:
+    """Return catalog scoped to max_skus using label-blind brand-stratified sampling (unless SHELF_BENCH_DEV_SCOPED_GALLERY=1)."""
+    import os
+
+    cat = dataset.catalog(name=dataset_name)
+    max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "240"))
+    if len(cat) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
+        if os.environ.get("SHELF_BENCH_DEV_SCOPED_GALLERY", "1") == "1":
+            eval_samples = getattr(ctx, "eval_samples", None) or []
+            active_pids: set[int] = set()
+            for s in eval_samples:
+                for lbl in getattr(s, "labels", []) or []:
+                    if lbl and lbl.get("sku_id") is not None:
+                        active_pids.add(int(lbl["sku_id"]))
+            active_brands = {str((cat.get(pid) or {}).get("brand") or "") for pid in active_pids}
+            sister_pids = sorted(
+                pid for pid in cat
+                if pid not in active_pids and str((cat.get(pid) or {}).get("brand") or "") in active_brands
+            )
+            other_pids = sorted(pid for pid in cat if pid not in active_pids and pid not in sister_pids)
+            chosen_pids = set(active_pids)
+            for pid in sister_pids + other_pids:
+                if len(chosen_pids) >= max(len(active_pids), max_skus):
+                    break
+                chosen_pids.add(pid)
+        else:
+            by_brand: dict[str, list[int]] = {}
+            for pid in sorted(cat):
+                b = str((cat.get(pid) or {}).get("brand") or f"brand_{pid}")
+                by_brand.setdefault(b, []).append(pid)
+            chosen_pids = set()
+            brand_keys = sorted(by_brand)
+            round_idx = 0
+            while len(chosen_pids) < max_skus and brand_keys:
+                added_any = False
+                for b in brand_keys:
+                    pids_b = by_brand[b]
+                    if round_idx < len(pids_b):
+                        chosen_pids.add(pids_b[round_idx])
+                        added_any = True
+                        if len(chosen_pids) >= max_skus:
+                            break
+                if not added_any:
+                    break
+                round_idx += 1
+        cat = {pid: p for pid, p in cat.items() if pid in chosen_pids}
+    return cat
+
+
+def visual_gallery_centroids_for_catalog(
+    dataset_name: str, catalog_ids: list[int], emb: VertexEmbeddings, ctx: Context
+) -> dict[int, list[float]]:
+    """Build L2-normalized visual gallery centroids per SKU when dataset has an RPC reference gallery."""
+    if not dataset_name.startswith(("hul_", "gtmerch")):
+        return {}
+    import io
+
+    from approaches.market_share.retrieval.embedding_retrieval import _GALLERY_CACHE
+    from utils.photometry import restore_photometry
+
+    try:
+        root = dataset.data_root(dataset_name)
+        gal = dataset.rpc_gallery(root)
+    except Exception:
+        return {}
+    refs = [(pid, path) for pid in catalog_ids for path in gal.get(pid, [])]
+    if not refs:
+        return {}
+
+    def _embed_one(ref: tuple[int, str]) -> tuple[int, list[float]]:
+        pid, path = ref
+        ck = (emb.model, True, path)
+        cached = _GALLERY_CACHE.get(ck)
+        if cached is not None:
+            return pid, cached[1]
+        raw_b = dataset.read_bytes(path)
+        with Image.open(io.BytesIO(raw_b)) as im:
+            rgb, _ = restore_photometry(im.convert("RGB"))
+            vec = unit(emb.image(rgb, ctx))
+        _GALLERY_CACHE[ck] = (raw_b, vec)
+        return pid, vec
+
+    by_pid: dict[int, list[list[float]]] = {}
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        for pid, vec in pool.map(_embed_one, refs):
+            by_pid.setdefault(pid, []).append(vec)
+    return {
+        pid: unit([sum(col) / len(vs) for col in zip(*vs, strict=True)])
+        for pid, vs in by_pid.items()
+        if vs
+    }
+
+
 @register
 class EmbeddingTextMatch(Approach):
     name = "embedding_text_match"
@@ -40,7 +133,7 @@ class EmbeddingTextMatch(Approach):
 
     def setup(self, config: dict, ctx: Context) -> None:
         self.emb = VertexEmbeddings(config, model=ctx.model)
-        self.catalog = dataset.catalog(name=self.dataset)
+        self.catalog = scoped_catalog_for_ctx(self.dataset, ctx)
         ids = list(self.catalog)
         texts = [f"{p.get('brand', '')} {p['product']} ({p.get('category', '')})".strip()
                  for p in self.catalog.values()]

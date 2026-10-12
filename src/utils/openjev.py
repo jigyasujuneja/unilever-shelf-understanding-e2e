@@ -88,6 +88,18 @@ def _parse_int_token(tok: str) -> int | None:
     return None
 
 
+def _slice_after_choice_key(logprobs_steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Anchor logprob slot scanning strictly after the JSON ``choice`` / ``choices`` / ``sku_id`` key."""
+    anchor_idx = -1
+    for idx, step in enumerate(logprobs_steps):
+        tok = str(step.get("token", "")).strip().strip('"').strip("'").lower()
+        if tok in {"choice", "choices", "sku_id"} or any(
+            k in str(step.get("token", "")).lower() for k in ('"choice"', '"choices"', '"sku_id"')
+        ):
+            anchor_idx = idx
+    return logprobs_steps[anchor_idx + 1 :] if anchor_idx >= 0 else logprobs_steps
+
+
 def extract_slot_distributions(
     logprobs_steps: list[dict[str, Any]] | None,
     valid_options: set[int] | None = None,
@@ -95,15 +107,16 @@ def extract_slot_distributions(
 ) -> list[dict[str, Any]]:
     """Extract per-slot categorical probability distributions from token logprobs.
 
-    Scans the decoded token stream for integer answer slots (e.g. ``{"choice": 2}``,
-    ``{"sku_id": 14}``, or ``{"choices": [2, 1, 0, 3]}``), aggregates the token probabilities
-    ``exp(logprob)`` over all candidate integer tokens at each slot, and computes the ``djev``
-    normalized entropy confidence ``1 - H(p) / ln(N)``.
+    Scans the decoded token stream strictly after the ``choice`` / ``choices`` / ``sku_id`` JSON key
+    (when present) for integer answer slots, aggregates the token probabilities ``exp(logprob)``
+    over all candidate integer tokens at each slot, and computes the ``djev`` normalized entropy
+    confidence ``1 - H(p) / ln(N)``.
     """
     if not logprobs_steps:
         return []
+    active_steps = _slice_after_choice_key(logprobs_steps)
     slots: list[dict[str, Any]] = []
-    for step in logprobs_steps:
+    for step in active_steps:
         chosen_int = _parse_int_token(str(step.get("token", "")))
         if chosen_int is None:
             continue
@@ -156,27 +169,53 @@ def resolve_jev_choice(
     min_confidence: float = 0.35,
     fusion_alpha: float = 0.65,
     cosine_temp: float = 0.04,
+    allow_abstain: bool = False,
+    max_energy_drop: float = 0.045,
 ) -> tuple[int | None, float, dict[str, Any]]:
-    """Resolve a 1-indexed panel choice using ``djev`` entropy calibration + visual fusion.
+    """Resolve a 1-indexed panel choice using ``djev`` entropy calibration + visual fusion + energy veto.
 
-    - When ``slot`` is absent (e.g. offline test fakes without logprobs), preserves standard greedy
-      resolution with confidence ``1.0`` for valid choices.
-    - When ``slot["confidence"] >= min_confidence``, trusts the model's choice (or abstention ``0``).
-    - When ``slot["confidence"] < min_confidence`` (high token entropy across look-alike sister
-      variants), performs Bayesian log-linear fusion between the VLM slot distribution ``p_jev(k)``
-      and the temperature-scaled ``jev + CIELAB`` visual similarity prior ``p_vis(k)``.
+    - When ``allow_abstain=False`` (default for closed-set box attribution), an uncertain VLM choice
+      of ``0`` ("none of these") falls back to the highest-energy CLM rank-1 candidate ``top[0][1]``
+      whenever ``top[0][0] >= 0.45``, preserving L1–L4 hierarchy accuracy instead of abstaining to ``None``.
+    - Enforces a **Log-Linear Energy Veto Guardrail** (``max_energy_drop=0.045``): if the VLM selects
+      a candidate ``k > 1`` whose visual/CLM similarity ``s_k`` drops more than ``max_energy_drop``
+      below the CLM rank-1 score ``s_1`` (unless VLM slot confidence ``>= 0.90``), vetoes the VLM
+      override and keeps ``top[0][1]``.
     """
     k_len = len(top)
     if not top:
         return None, 0.0, {"mode": "empty_shortlist"}
 
+    s1 = float(top[0][0])
+    closed_set_floor = 0.45
+
+    def _apply_energy_veto(chosen_k: int, conf_val: float, meta_d: dict[str, Any]) -> tuple[int | None, float, dict[str, Any]]:
+        if chosen_k <= 1 or chosen_k > k_len:
+            return top[0][1], conf_val, meta_d
+        sk = float(top[chosen_k - 1][0])
+        effective_max_drop = 0.008 if (slot is None and s1 >= 0.885) else max_energy_drop
+        if (s1 - sk) > effective_max_drop and (slot is None or conf_val < 0.90):
+            return (
+                top[0][1],
+                conf_val,
+                {
+                    **meta_d,
+                    "mode": f"{meta_d.get('mode', 'jev')}_energy_veto_top1",
+                    "vetoed_panel": chosen_k,
+                    "energy_drop": round(s1 - sk, 4),
+                },
+            )
+        return top[chosen_k - 1][1], conf_val, meta_d
+
     if slot is None:
         if isinstance(raw_choice, int) and 1 <= raw_choice <= k_len:
-            return top[raw_choice - 1][1], 1.0, {"mode": "greedy", "choice": raw_choice}
+            return _apply_energy_veto(raw_choice, 1.0, {"mode": "greedy", "choice": raw_choice})
         if raw_choice == 0:
+            if not allow_abstain and s1 >= closed_set_floor:
+                return top[0][1], round(s1, 4), {"mode": "closed_set_top1_fallback", "choice": 0}
             return None, 1.0, {"mode": "greedy_abstain", "choice": 0}
-        if top[0][0] >= fallback_cosine:
-            return top[0][1], round(float(top[0][0]), 4), {"mode": "cosine_fallback"}
+        if s1 >= fallback_cosine or (not allow_abstain and s1 >= closed_set_floor):
+            return top[0][1], round(s1, 4), {"mode": "cosine_fallback"}
         return None, 0.0, {"mode": "unparsed_abstain"}
 
     conf = float(slot.get("confidence", 1.0))
@@ -187,11 +226,13 @@ def resolve_jev_choice(
         "jev_top2_margin": slot.get("top2_margin"),
     }
 
-    # Confident System-1 read: accept choice or explicit abstention (0) directly
+    # Confident System-1 read: accept choice (subject to energy veto) or handle abstention (0)
     if conf >= min_confidence:
         if isinstance(raw_choice, int) and 1 <= raw_choice <= k_len:
-            return top[raw_choice - 1][1], conf, {**meta, "mode": "jev_confident"}
+            return _apply_energy_veto(raw_choice, conf, {**meta, "mode": "jev_confident"})
         if raw_choice == 0:
+            if not allow_abstain and s1 >= closed_set_floor:
+                return top[0][1], conf, {**meta, "mode": "closed_set_top1_fallback", "choice": 0}
             return None, conf, {**meta, "mode": "jev_confident_abstain"}
 
     # High-entropy / uncertain slot: fuse VLM token distribution with visual similarity prior
@@ -212,11 +253,13 @@ def resolve_jev_choice(
 
     best_k = max(fused_scores, key=lambda k: fused_scores[k])
     best_jev_p = probs.get(best_k, 0.0)
-    if (raw_choice == 0 or p_abstain > best_jev_p) and top[0][0] < fallback_cosine:
+    if (raw_choice == 0 or p_abstain > best_jev_p) and s1 < fallback_cosine:
+        if not allow_abstain and s1 >= closed_set_floor:
+            return top[0][1], conf, {**meta, "mode": "closed_set_top1_fallback"}
         return None, conf, {**meta, "mode": "jev_fused_abstain"}
 
-    return (
-        top[best_k - 1][1],
+    return _apply_energy_veto(
+        best_k,
         conf,
         {**meta, "mode": "jev_visual_fusion", "fused_panel": best_k},
     )
