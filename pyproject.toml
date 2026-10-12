@@ -14,6 +14,7 @@ dependencies = [
     "google-cloud-storage>=2.14.0",
     "google-genai>=1.5.0",
     "numpy>=1.26",
+    "onnxruntime>=1.23.2",
     "opentelemetry-exporter-gcp-trace>=1.9.0",
     "opentelemetry-sdk>=1.30.0",
     "pillow>=10.2.0",
