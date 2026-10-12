@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unilever Shelf Intelligence | Overview &amp; Live Proof</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/cio.css">
+</head>
+<body>
+  <header class="cio-topbar">
+    <div class="cio-topbar-inner">
+      <div class="cio-brand">
+        <div class="cio-brand-mark">UL</div>
+        <div>
+          <div class="cio-brand-eyebrow">UNILEVER INDIA &bull; RETAIL EXECUTION AI</div>
+          <h1 class="cio-brand-title">Shelf Intelligence</h1>
+        </div>
+      </div>
+
+      <nav class="cio-nav" id="cio-nav">
+        <a href="#/overview" class="cio-nav-link active" data-tab="overview">Overview</a>
+        <a href="#/how-it-works" class="cio-nav-link" data-tab="how-it-works">How It Works</a>
+        <a href="#/performance" class="cio-nav-link" data-tab="performance">Performance &amp; Roadmap</a>
+      </nav>
+
+      <div class="cio-actions">
+        <span class="cio-status-pill" id="cio-live-pill">
+          <span class="cio-dot"></span> 2,745 Products &bull; ₹0.12 / Shelf
+        </span>
+        <a href="/engineering" class="cio-workbench-btn" title="Open Engineering Leaderboard &amp; Per-Image Debugger">
+          Engineering Workbench &rarr;
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="cio-container" id="cio-main">
+    <div class="cio-loading">Loading live v2.2 benchmark telemetry, 12-Gate QC report, and Vertex AI Registry...</div>
+  </main>
+
+  <div class="cio-modal-backdrop hidden" id="cio-modal-backdrop">
+    <div class="cio-modal" id="cio-modal">
+      <div class="cio-modal-header">
+        <h3 id="cio-modal-title">Experiment Drill-Down</h3>
+        <button class="cio-modal-close" id="cio-modal-close">&times;</button>
+      </div>
+      <div class="cio-modal-body" id="cio-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/static/cio.js" defer></script>
+</body>
+</html>
