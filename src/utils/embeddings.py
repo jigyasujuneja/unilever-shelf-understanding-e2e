@@ -56,38 +56,48 @@ def _ensure_disk_cache_loaded() -> None:
     if _DISK_CACHE_LOADED:
         return
     _DISK_CACHE_LOADED = True
+    import os
     import pickle
 
     cp = _disk_cache_path()
-    if not cp.exists():
-        try:
-            from utils import dataset
-
-            raw = dataset.read_bytes(GCS_EMB_CACHE_URI)
-            cp.write_bytes(raw)
-        except Exception:
-            pass
     if cp.exists():
         try:
             data = pickle.loads(cp.read_bytes())
             if isinstance(data, dict):
                 _EMB_RESPONSE_CACHE.update(data)
+            if os.environ.get("CLOUD_RUN_JOB"):
+                cp.unlink(missing_ok=True)
+            return
         except Exception:
             pass
+    try:
+        from utils import dataset
+
+        raw = dataset.read_bytes(GCS_EMB_CACHE_URI)
+        data = pickle.loads(raw)
+        if isinstance(data, dict):
+            _EMB_RESPONSE_CACHE.update(data)
+        if not os.environ.get("CLOUD_RUN_JOB"):
+            cp.write_bytes(raw)
+    except Exception:
+        pass
 
 
 def flush_embedding_disk_cache() -> None:
     global _DISK_CACHE_DIRTY
     if _DISK_CACHE_DIRTY <= 0:
         return
+    import os
     import pickle
 
     cp = _disk_cache_path()
     tmp = cp.with_suffix(".pkl.tmp")
     try:
         payload = pickle.dumps(dict(_EMB_RESPONSE_CACHE))
-        tmp.write_bytes(payload)
-        tmp.replace(cp)
+        if not os.environ.get("CLOUD_RUN_JOB"):
+            cp.unlink(missing_ok=True)
+            tmp.write_bytes(payload)
+            tmp.replace(cp)
         _DISK_CACHE_DIRTY = 0
         try:
             from utils import dataset

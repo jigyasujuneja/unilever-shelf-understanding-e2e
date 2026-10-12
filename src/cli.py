@@ -78,11 +78,17 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("-m", "--model", nargs="+", required=True)
     s.add_argument("-t", "--tier", nargs="+", choices=TIERS, default=d.get("tier", ["priority"]),
                    help="Gemini PayGo tier(s): priority (1.8x, default), standard and/or flex (0.5x)")
+    s.add_argument("-d", "--dataset", default=None,
+                   choices=("sku110k", "products", *dataset.RPC_FORMAT_SETS),
+                   help="override dataset for approaches (e.g. hul_golden, gtmerch_golden, hul_variants, hul_brands, hul_packs, hul_promos)")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
     s.add_argument("--workers", type=int, default=d.get("workers", 4))
     s.add_argument("--owner", default=None, help="defaults to $USER")
+    s.add_argument("--image", default=None, help="reuse pre-built Artifact Registry image URI instead of rebuilding")
+    s.add_argument("--pull", action="store_true", help="pull finished runs into local results/ (default: finalize directly on GCS with zero local files)")
+    s.add_argument("--no-pull", action="store_true", help="keep results 100% on GCS without pulling to local results/")
 
     sub.add_parser("pull", help="copy finished Cloud Run results from GCS into results/")
 
@@ -123,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--lr-multiplier", type=float, default=1.0)
     s.add_argument("--out-dir", default="data/tuning")
     s.add_argument("--build-only", action="store_true", help="only build local train/val JSONL files")
+    s.add_argument("--upload-only", action="store_true", help="build and upload SFT JSONL files to GCS without launching a tuning job")
+    s.add_argument("--clean-local", action="store_true", help="remove local JSONL output dir after uploading to GCS")
     s.add_argument("--status", action="store_true", help="list Vertex AI tuning jobs and endpoints")
 
     s = sub.add_parser("sync-brands", help="crawl and update the live HUL vs Non-HUL Brand & SKU registry JSON")
@@ -214,8 +222,13 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "cloud-run":
         from utils import cloud
 
-        return cloud.run_on_cloud(a.approach, a.model, a.tier, a.split, a.limit, a.seed, a.workers,
-                                  a.owner or getpass.getuser())
+        return cloud.run_on_cloud(
+            a.approach, a.model, a.tier, a.split, a.limit, a.seed, a.workers,
+            a.owner or getpass.getuser(),
+            dataset_override=a.dataset,
+            image=a.image,
+            pull_local=bool(a.pull and not a.no_pull),
+        )
     elif a.cmd == "pull":
         print(f"Pulled {runner.pull(cfg['gcp']['results'])} new run(s) into results/")
     elif a.cmd == "push":
@@ -254,9 +267,15 @@ def main(argv: list[str] | None = None) -> int:
             for j in tuning.list_sft_jobs(cfg):
                 print(f"  {j['name']}  state={j['state']}  base={j['base_model']}  endpoint={j['endpoint']}")
             return 0
-        built = tuning.build_sft_jsonl(a.dataset, a.out_dir, upload=not a.build_only, task=a.task)
+        built = tuning.build_sft_jsonl(
+            a.dataset,
+            a.out_dir,
+            upload=not a.build_only,
+            task=a.task,
+            clean_local=a.clean_local,
+        )
         print(f"Built {built['train_count']} train / {built['val_count']} val examples in {built['out_dir']}")
-        if a.build_only:
+        if a.build_only or a.upload_only:
             return 0
         job = tuning.launch_sft_job(
             built["train_uri"],

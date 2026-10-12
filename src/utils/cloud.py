@@ -26,7 +26,7 @@ from utils import dataset
 from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "src"]
+SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "src", "experiments"]
 
 
 def _session() -> AuthorizedSession:
@@ -134,32 +134,50 @@ def deploy_job(s, project, region, image, args, tasks, cfg) -> str:
             },
         },
     }
-    exists = s.get(f"{base}/{job}").status_code == 200
-    op = _ok(s.patch(f"{base}/{job}", json=body) if exists
-             else s.post(f"{base}?jobId={job}", json=body))
+    exists = s.get(f"{base}/{job}", timeout=30).status_code == 200
+    op = _ok(s.patch(f"{base}/{job}", json=body, timeout=60) if exists
+             else s.post(f"{base}?jobId={job}", json=body, timeout=60))
     _wait_op(s, op["name"])
     return f"{base}/{job}"
 
 
 def _wait_op(s, name: str, log=None, every: int = 5) -> dict:
     while True:
-        op = _ok(s.get(f"https://run.googleapis.com/v2/{name}"))
-        if log:
-            md = op.get("metadata", {})
-            exec_name = md.get("name", "")
-            if "/executions/" in exec_name and not any(k in md for k in ("succeededCount", "runningCount", "failedCount")):
-                md = _ok(s.get(f"https://run.googleapis.com/v2/{exec_name}"))
-            log(f"  tasks: {md.get('succeededCount', 0)} succeeded, "
-                f"{md.get('failedCount', 0)} failed, {md.get('runningCount', 0)} running")
-        if op.get("done"):
-            if "error" in op:
-                raise RuntimeError(f"Cloud Run: {op['error']}")
-            return op
+        try:
+            op = _ok(s.get(f"https://run.googleapis.com/v2/{name}", timeout=30))
+            if log:
+                md = op.get("metadata", {})
+                exec_name = md.get("name", "")
+                if "/executions/" in exec_name and not any(k in md for k in ("succeededCount", "runningCount", "failedCount")):
+                    md = _ok(s.get(f"https://run.googleapis.com/v2/{exec_name}", timeout=30))
+                log(f"  tasks: {md.get('succeededCount', 0)} succeeded, "
+                    f"{md.get('failedCount', 0)} failed, {md.get('runningCount', 0)} running")
+            if op.get("done"):
+                if "error" in op:
+                    raise RuntimeError(f"Cloud Run: {op['error']}")
+                return op
+        except RuntimeError:
+            raise
+        except Exception as poll_err:
+            if log:
+                log(f"  (poll retry after {poll_err})")
         time.sleep(every)
 
 
-def run_on_cloud(approaches: list[str], models: list[str], tiers: list[str], split: str, limit: int, seed: int,
-                 workers: int, owner: str, log=print) -> int:
+def run_on_cloud(
+    approaches: list[str],
+    models: list[str],
+    tiers: list[str],
+    split: str,
+    limit: int,
+    seed: int,
+    workers: int,
+    owner: str,
+    dataset_override: str | None = None,
+    image: str | None = None,
+    pull_local: bool = False,
+    log=print,
+) -> int:
     cfg = load_config()
     gcp = cfg["gcp"]
     project, region = gcp["project"], gcp["region"]
@@ -167,10 +185,14 @@ def run_on_cloud(approaches: list[str], models: list[str], tiers: list[str], spl
     if not tasks:
         raise SystemExit("Nothing to run: no approach runs any of the given models")
     s = _session()
-    image = build_image(s, project, region, log)
-    args = ["run", "-a", *approaches, "-m", *models, "-t", *tiers, "--split", split, "--limit", str(limit),
-            "--seed", str(seed), "--workers", str(workers), "--owner", owner,
-            "--root", gcp["data"], "--results", gcp["results"]]
+    image = image or build_image(s, project, region, log)
+    args = [
+        "run", "-a", *approaches, "-m", *models, "-t", *tiers,
+        *(["-d", dataset_override] if dataset_override else []),
+        "--split", split, "--limit", str(limit),
+        "--seed", str(seed), "--workers", str(workers), "--owner", owner,
+        "--root", gcp["data"], "--results", gcp["results"],
+    ]
     cfg.setdefault("cloud_run", {}).setdefault("parallelism", len(models))
     job_url = deploy_job(s, project, region, image, args, tasks, cfg)
     log(f"Executing {tasks} tasks on Cloud Run job {job_url.rsplit('/', 1)[-1]} ({region}) ...")
@@ -180,9 +202,42 @@ def run_on_cloud(approaches: list[str], models: list[str], tiers: list[str], spl
     try:
         _wait_op(s, op["name"], log=log, every=20)
     finally:
-        n = runner.pull(gcp["results"])
-        log(f"Pulled {n} new run(s) into results/")
+        if pull_local:
+            n = runner.pull(gcp["results"])
+            log(f"Pulled {n} new run(s) into results/")
+        else:
+            updated = runner.finalize_remote_compute(gcp["results"], log=log)
+            log(f"Finalized compute on {updated} remote run(s) directly in {gcp['results']} (zero local pull)")
     return 0
+
+
+def run_cli_on_cloud(
+    cli_args: list[str],
+    image: str | None = None,
+    tasks: int = 1,
+    cpu: int = 4,
+    memory_gib: int = 8,
+    log=print,
+) -> str:
+    """Execute any ``shelf-bench`` subcommand on Cloud Run Jobs in ``us-central1`` with zero local execution."""
+    cfg = load_config()
+    gcp = cfg["gcp"]
+    project, region = gcp["project"], gcp["region"]
+    s = _session()
+    image = image or build_image(s, project, region, log)
+    job_cfg = dict(cfg)
+    cr = dict(job_cfg.get("cloud_run", {}))
+    cr["cpu"] = cpu
+    cr["memory_gib"] = memory_gib
+    cr["parallelism"] = tasks
+    job_cfg["cloud_run"] = cr
+    job_url = deploy_job(s, project, region, image, cli_args, tasks, job_cfg)
+    log(f"Executing `shelf-bench {' '.join(cli_args)}` on Cloud Run job {job_url.rsplit('/', 1)[-1]} ({region}) ...")
+    op = _ok(s.post(f"{job_url}:run", json={}))
+    log(f"  execution: https://console.cloud.google.com/run/jobs/executions/details/{region}/"
+        f"{op.get('metadata', {}).get('name', '').rsplit('/', 1)[-1]}?project={project}")
+    _wait_op(s, op["name"], log=log, every=15)
+    return image
 
 
 # ---- one-time project setup and the UI service ---------------------------------------------------
@@ -225,7 +280,7 @@ def bootstrap(log=print) -> None:
     log("Next: make data && .venv/bin/shelf-bench upload   (SKU-110K, only needed for detection)")
 
 
-def deploy_ui(log=print) -> str:
+def deploy_ui(image: str | None = None, log=print) -> str:
     """Deploy the leaderboard UI as a private Cloud Run service (``cloud_run.service``).
     On start it pulls every finished run from ``gcp.results``; nobody can call it without the
     Cloud Run Invoker role (open it with ``shelf-bench proxy``)."""
@@ -237,17 +292,17 @@ def deploy_ui(log=print) -> str:
         pushed = runner.push(gcp["results"], overwrite=True, prune_remote=False)
         log(f"Pushed {pushed} local run(s) + experiments_registry.json + qc_audit_report.json to {gcp['results']}")
     s = _session()
-    image = build_image(s, project, region, log)
+    image = image or build_image(s, project, region, log)
     base = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services"
     body = {"template": {"containers": [{
         "image": image,
         "args": ["serve", "--pull", "--host", "0.0.0.0", "--port", "8080"],
         "ports": [{"containerPort": 8080}],
-        "resources": {"limits": {"cpu": "1", "memory": "2Gi"}},
+        "resources": {"limits": {"cpu": "2", "memory": "4Gi"}},
     }]}}
-    exists = s.get(f"{base}/{name}").status_code == 200
-    op = _ok(s.patch(f"{base}/{name}?updateMask=template", json=body) if exists
-             else s.post(f"{base}?serviceId={name}", json=body))
+    exists = s.get(f"{base}/{name}", timeout=30).status_code == 200
+    op = _ok(s.patch(f"{base}/{name}?updateMask=template", json=body, timeout=60) if exists
+             else s.post(f"{base}?serviceId={name}", json=body, timeout=60))
     uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
     log(f"Deployed {name}: {uri} (Direct IAP enabled)")
     return uri

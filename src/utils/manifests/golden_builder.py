@@ -223,7 +223,6 @@ def sanitize_and_decollide_catalog(
                 bv_low in ("others", "other", "na", "unknown", "non_hul_competitor", br.lower(), "standard")
                 or bv_canon_brand == br.lower()
                 or "brand_level_only" in bv_low
-                or "others" in bv_low.split("_")
                 or (bv_low.endswith("_classic") and bv_low == f"{br.lower()}_classic")
             )
         )
@@ -429,14 +428,77 @@ def publish_clean_golden_manifests_to_gcs(
         )
         for sp_key in ("train", "val", "test"):
             rows = (manifest_dict.get("splits") or {}).get(sp_key) or []
+            jsonl_str = format_split_jsonl(rows)
             bucket_obj.blob(f"{ds_prefix}/{sp_key}.jsonl").upload_from_string(
-                format_split_jsonl(rows), content_type="application/jsonl"
+                jsonl_str, content_type="application/jsonl"
             )
+            if ds_prefix == "derived_manifests/hul_golden":
+                bucket_obj.blob(f"{ds_prefix}/{sp_key}_clean.jsonl").upload_from_string(
+                    jsonl_str, content_type="application/jsonl"
+                )
+
+    for stale_blob_name in (
+        "train_3way.jsonl",
+        "val_3way.jsonl",
+        "test_3way.jsonl",
+        "train_full.jsonl",
+        "val_full.jsonl",
+        "test_full.jsonl",
+    ):
+        try:
+            b_ms.blob(f"derived_manifests/hul_golden/{stale_blob_name}").delete()
+        except Exception:
+            pass
 
     _upload_manifest_with_jsonl(b_ms, "derived_manifests/hul_golden", hul_golden_manifest)
     b_ms.blob("derived_manifests/hul_golden/legacy_mapping_table.jsonl").upload_from_string(
         format_legacy_mapping_table_jsonl(v2_classes), content_type="application/jsonl"
     )
+
+    sft_prompt = (
+        "Classify this retail shelf crop into its canonical Unilever hierarchy JSON: "
+        "is_hul, category, brand, base_variant, basepack_id, packaging_type, has_promo, promo_type."
+    )
+    for sp_sft, sft_fname in (("train", "sft_multitask_train.jsonl"), ("val", "sft_multitask_val.jsonl")):
+        sft_lines = []
+        for r in hul_splits.get(sp_sft, []):
+            uri_s = str(r.get("uri") or "")
+            if not uri_s:
+                continue
+            cm_s = v2_classes.get(str((r.get("products") or [0])[0])) or {}
+            target_s = {
+                "is_hul": cm_s.get("is_hul"),
+                "category": cm_s.get("category"),
+                "brand": cm_s.get("brand"),
+                "base_variant": cm_s.get("base_variant"),
+                "basepack_id": cm_s.get("basepack_id"),
+                "packaging_type": cm_s.get("packaging_type"),
+                "has_promo": cm_s.get("has_promo"),
+                "promo_type": cm_s.get("promo_type"),
+            }
+            sft_lines.append(
+                json.dumps(
+                    {
+                        "contents": [
+                            {
+                                "role": "user",
+                                "parts": [
+                                    {"fileData": {"mimeType": "image/jpeg", "fileUri": uri_s}},
+                                    {"text": sft_prompt},
+                                ],
+                            },
+                            {
+                                "role": "model",
+                                "parts": [{"text": json.dumps(target_s, separators=(",", ":"))}],
+                            },
+                        ]
+                    },
+                    separators=(",", ":"),
+                )
+            )
+        b_ms.blob(f"derived_manifests/hul_golden/sft/{sft_fname}").upload_from_string(
+            "\n".join(sft_lines) + ("\n" if sft_lines else ""), content_type="application/jsonl"
+        )
 
     # --- 2. Publish hul_variants/rpc.json (pure Brand__Variant classes only, 0 brand-only or __Others) ---
     var_classes = {

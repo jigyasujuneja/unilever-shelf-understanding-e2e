@@ -25,6 +25,7 @@ import json
 import os
 import random
 import re
+import shutil
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ from approaches.base import crop
 from approaches.market_share.retrieval.tiered_hybrid import PROMPT, K, sheet
 from utils import dataset
 from utils.llm import load_config
+from utils.taxonomy.brands import NOISE_BRAND_FOLDERS, canonicalize_brand_name
 
 SUPPORTED_SFT_BASE_MODELS = (
     "gemini-3.5-flash-lite",
@@ -58,11 +60,11 @@ MARKETSHARE_BUCKET = "gs://marketshare-datasets"
 
 PACK_CATEGORIES = (
     "Beverages", "DMT", "Foods", "HFD", "HHC",
-    "Hair", "Laundry", "Oral_Care", "PW", "Skin",
+    "Hair", "Hair_Care", "Laundry", "Oral_Care", "PW", "Skin",
 )
 PACK_TYPES = (
     "Bar", "Bottle", "Box", "Can", "Carton", "Jar", "Pouch",
-    "Pump", "Sachet", "Tetrapack", "Tin", "Tub", "Tube", "Wrapper",
+    "Pump", "Roll_On", "Sachet", "Spray", "Tetrapack", "Tin", "Tub", "Tube", "Wrapper",
 )
 PACK_PROMPT = (
     "Classify the retail product shown in the image by its category and pack_type. "
@@ -123,6 +125,7 @@ COPY_FILE_RE = re.compile(
     re.I,
 )
 
+_SKIP_NOISE_BRANDS = {b.lower() for b in NOISE_BRAND_FOLDERS}
 
 
 def _sft_example(gcs_image_uri: str, prompt: str, response_dict: dict) -> dict:
@@ -155,12 +158,8 @@ def _extract_uri(line: str) -> str:
 
 
 def clean_brand_name(folder: str) -> str:
-    """Strip artificial leading 'A' / 'A_' sort prefixes (e.g. ADove -> Dove, A_3_roses -> 3_roses)."""
-    if folder == "A_3_roses":
-        return "3_roses"
-    if len(folder) > 1 and folder[0] == "A" and folder[1].isupper():
-        return folder[1:]
-    return folder
+    """Strip artificial leading 'A' / 'A_' sort prefixes and apply canonical brand aliases."""
+    return canonicalize_brand_name(folder)
 
 
 def clean_variant_name(raw_variant: str) -> str:
@@ -293,6 +292,22 @@ def _upload_sft_dir(local_dir: str | Path, gcs_dest: str) -> None:
         dataset.upload(str(local_dir), gcs_dest)
 
 
+def _delete_stale_gcs_blobs(gcs_prefix: str, stale_names: set[str] | None = None) -> int:
+    """Remove obsolete or typo-named JSONL blobs under `gcs_prefix`."""
+    bucket_name, prefix = dataset._split_gs(gcs_prefix.rstrip("/"))
+    bkt = dataset._gcs().bucket(bucket_name)
+    deleted = 0
+    for b in dataset._gcs().list_blobs(bucket_name, prefix=prefix + "/"):
+        fname = b.name.rsplit("/", 1)[-1]
+        if stale_names and fname in stale_names:
+            try:
+                bkt.blob(b.name).delete()
+                deleted += 1
+            except Exception:
+                pass
+    return deleted
+
+
 def build_marketshare_pack_jsonl(
     gcs_bucket: str = MARKETSHARE_BUCKET,
     out_dir: str | Path = "pack_data/pack/jsonl",
@@ -304,8 +319,10 @@ def build_marketshare_pack_jsonl(
     upload: bool = True,
     uris: list[str] | None = None,
     md5_by_uri: dict[str, str] | None = None,
+    clean_local: bool = False,
 ) -> dict[str, Any]:
     """Build per-folder, full, and stratified SFT JSONL files for `pack_data/pack/train`."""
+
     train_prefix = f"{gcs_bucket.rstrip('/')}/pack_data/pack/train/"
     gcs_dest = f"{gcs_bucket.rstrip('/')}/pack_data/pack/jsonl"
     if uris is None:
@@ -369,6 +386,8 @@ def build_marketshare_pack_jsonl(
 
     if upload:
         _upload_sft_dir(out_p, gcs_dest)
+        if clean_local:
+            shutil.rmtree(out_p, ignore_errors=True)
     return {
         "out_dir": out_p,
         "train_jsonl": train_f,
@@ -392,8 +411,10 @@ def build_marketshare_brand_jsonl(
     upload: bool = True,
     uris: list[str] | None = None,
     md5_by_uri: dict[str, str] | None = None,
+    clean_local: bool = False,
 ) -> dict[str, Any]:
     """Build per-brand, full, and stratified SFT JSONL files for `brand_data/brand/brand_data`."""
+
     train_prefix = f"{gcs_bucket.rstrip('/')}/brand_data/brand/brand_data/"
     gcs_dest = f"{gcs_bucket.rstrip('/')}/brand_data/brand/jsonl"
     if uris is None:
@@ -413,7 +434,13 @@ def build_marketshare_brand_jsonl(
             continue
         parts = uri[len(train_prefix) :].split("/")
         if len(parts) == 2 and parts[1] and parts[0] != "jsonl":
-            by_brand[clean_brand_name(parts[0])].append(uri)
+            raw_folder = parts[0].strip()
+            if raw_folder.lower() in _SKIP_NOISE_BRANDS:
+                continue
+            canon_b = clean_brand_name(raw_folder)
+            if canon_b.lower() in _SKIP_NOISE_BRANDS:
+                continue
+            by_brand[canon_b].append(uri)
 
     conflicted_md5s = _find_conflicted_md5s(by_brand, md5_map)
     rng = random.Random(seed)
@@ -454,7 +481,20 @@ def build_marketshare_brand_jsonl(
     val_f.write_text("\n".join(val_stratified) + ("\n" if val_stratified else ""), encoding="utf-8")
 
     if upload:
+        _delete_stale_gcs_blobs(
+            gcs_dest,
+            stale_names={
+                "Others3.jsonl",
+                "Hair_Care.jsonl",
+                "Twinnings.jsonl",
+                "3_roses.jsonl",
+                "temp_train_stratified_100.jsonl",
+                "temp_val_stratified_10.jsonl",
+            },
+        )
         _upload_sft_dir(out_p, gcs_dest)
+        if clean_local:
+            shutil.rmtree(out_p, ignore_errors=True)
     return {
         "out_dir": out_p,
         "train_jsonl": train_f,
@@ -479,8 +519,10 @@ def build_marketshare_variant_jsonl(
     upload: bool = True,
     uris: list[str] | None = None,
     md5_by_uri: dict[str, str] | None = None,
+    clean_local: bool = False,
 ) -> dict[str, Any]:
     """Build per-folder, full, and multi-task stratified SFT JSONL files for `input_data/variant_*`."""
+
     input_prefix = f"{gcs_bucket.rstrip('/')}/input_data/"
     gcs_dest = f"{gcs_bucket.rstrip('/')}/input_data/jsonl"
     if uris is None:
@@ -505,7 +547,10 @@ def build_marketshare_variant_jsonl(
             cat = parts[0][len("variant_") :]
             folder = parts[2]
             if "__" in folder:
-                brand, raw_var = folder.split("__", 1)
+                raw_brand, raw_var = folder.split("__", 1)
+                brand = clean_brand_name(raw_brand)
+                if brand.lower() in _SKIP_NOISE_BRANDS:
+                    continue
                 by_key[(cat, brand, clean_variant_name(raw_var))].append(uri)
 
     conflicted_md5s = _find_conflicted_md5s(by_key, md5_map)
@@ -519,13 +564,15 @@ def build_marketshare_variant_jsonl(
 
     for (cat, brand, variant), f_uris in sorted(by_key.items()):
         unique_uris = _dedup_uris(f_uris, md5_map)
+        is_generic_others_variant = variant.lower() in ("others", "other")
         target_all3 = {"category": cat, "brand": brand, "variant": variant}
         target_var = {"brand": brand, "variant": variant}
-        records = [_sft_line(u, VARIANT_PROMPT_ALL3, target_all3) for u in unique_uris]
-        (out_p / f"{cat}__{brand}__{variant}.jsonl").write_text(
-            "\n".join(records) + "\n", encoding="utf-8"
-        )
-        all_records.extend(records)
+        if not is_generic_others_variant:
+            records = [_sft_line(u, VARIANT_PROMPT_ALL3, target_all3) for u in unique_uris]
+            (out_p / f"{cat}__{brand}__{variant}.jsonl").write_text(
+                "\n".join(records) + "\n", encoding="utf-8"
+            )
+            all_records.extend(records)
 
         prioritized = _prioritize_originals(unique_uris, rng, md5_map, conflicted_md5s)
         orig_only = [u for u in prioritized if not is_copy_or_synthetic(u)]
@@ -535,13 +582,15 @@ def build_marketshare_variant_jsonl(
         t_pool = [u for u in prioritized if u not in v_set]
         t_uris = t_pool[:train_per_folder]
 
-        for u in v_uris:
-            val_all3.append(_sft_line(u, VARIANT_PROMPT_ALL3, target_all3))
-            val_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, target_var))
-        for u in t_uris:
-            train_all3.append(_sft_line(u, VARIANT_PROMPT_ALL3, target_all3))
-            train_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, target_var))
+        if not is_generic_others_variant:
+            for u in v_uris:
+                val_all3.append(_sft_line(u, VARIANT_PROMPT_ALL3, target_all3))
+                val_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, target_var))
+            for u in t_uris:
+                train_all3.append(_sft_line(u, VARIANT_PROMPT_ALL3, target_all3))
+                train_var.append(_sft_line(u, VARIANT_PROMPT_ONLY, target_var))
 
+        # Keep <Brand>__Others in category and brand SFT pools where category and brand are 100% verified
         for u in v_uris[:1]:
             val_cat.append(_sft_line(u, VARIANT_PROMPT_CATEGORY, {"category": cat}))
         for u in t_uris[:5]:
@@ -593,6 +642,8 @@ def build_marketshare_variant_jsonl(
 
     if upload:
         _upload_sft_dir(out_p, gcs_dest)
+        if clean_local:
+            shutil.rmtree(out_p, ignore_errors=True)
 
     sel_train_name, sel_val_name, sel_tr, sel_vl = files_by_task.get(task, files_by_task["all3"])
     return {
@@ -617,27 +668,32 @@ def build_sft_jsonl(
     max_val_images: int = 20,
     upload: bool = True,
     task: str = "all3",
+    clean_local: bool = False,
 ) -> dict[str, Any]:
     """Build zero-leakage ``train.jsonl`` and ``val.jsonl`` from non-test data only.
 
     Supports benchmark datasets (``shelves``, ``rpc``) and metadata-only marketshare datasets
     (``pack``, ``brand``, ``variant``).
     """
+
     if dataset_name == "pack":
         return build_marketshare_pack_jsonl(
             out_dir="pack_data/pack/jsonl" if out_dir == "data/tuning" else out_dir,
             upload=upload,
+            clean_local=clean_local,
         )
     if dataset_name == "brand":
         return build_marketshare_brand_jsonl(
             out_dir="brand_data/brand/jsonl" if out_dir == "data/tuning" else out_dir,
             upload=upload,
+            clean_local=clean_local,
         )
     if dataset_name == "variant":
         return build_marketshare_variant_jsonl(
             out_dir="input_data/jsonl" if out_dir == "data/tuning" else out_dir,
             task=task,
             upload=upload,
+            clean_local=clean_local,
         )
     if dataset_name not in TUNABLE_DATASETS:
         raise ValueError(
@@ -743,6 +799,8 @@ def build_sft_jsonl(
     }
     if upload:
         result.update(upload_sft_dataset(out_p, gcs_prefix))
+    if clean_local and out_p.exists():
+        shutil.rmtree(out_p, ignore_errors=True)
     return result
 
 

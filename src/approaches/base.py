@@ -465,14 +465,15 @@ def _discover() -> None:
             setattr(pkg, leaf, mod)
 
     if os.environ.get("SHELF_BENCH_INCLUDE_EXPERIMENTS", "1") != "0":
-        repo_root = Path(__file__).resolve().parents[2]
-        abl_dir = repo_root / "experiments" / "ablations"
-        if abl_dir.is_dir():
-            if str(repo_root) not in sys.path:
-                sys.path.insert(0, str(repo_root))
-            for info in pkgutil.walk_packages([str(abl_dir)], prefix="experiments.ablations."):
-                if not info.name.rsplit(".", 1)[-1].startswith("_"):
-                    importlib.import_module(info.name)
+        for cand_root in (Path(__file__).resolve().parents[2], Path.cwd(), Path("/app")):
+            abl_dir = cand_root / "experiments" / "ablations"
+            if abl_dir.is_dir():
+                if str(cand_root) not in sys.path:
+                    sys.path.insert(0, str(cand_root))
+                for info in pkgutil.walk_packages([str(abl_dir)], prefix="experiments.ablations."):
+                    if not info.name.rsplit(".", 1)[-1].startswith("_"):
+                        importlib.import_module(info.name)
+                break
 
 
 

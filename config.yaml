@@ -27,9 +27,9 @@ gcp:
 cloud_run:
   job: shelf-bench
   service: perfect-store-control-plane   # leaderboard UI (shelf-bench serve-cloud), private
-  cpu: 2
-  memory_gib: 4
-  parallelism: 6    # tasks at once - concurrent tasks alternate across models
+  cpu: 4
+  memory_gib: 16
+  parallelism: 100  # tasks at once - concurrent tasks alternate across models
   # Direct VPC egress, needed to reach a private-IP AlloyDB instance. Leave unset otherwise.
   # network: default
   # subnet: default

@@ -29,7 +29,7 @@ def scoped_catalog_for_ctx(dataset_name: str, ctx: Context) -> dict[int, dict]:
     import os
 
     cat = dataset.catalog(name=dataset_name)
-    max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "0"))
+    max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "400"))
     if max_skus > 0 and len(cat) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
         by_brand: dict[str, list[int]] = {}
         for pid in sorted(cat):
@@ -84,11 +84,11 @@ def visual_gallery_centroids_for_catalog(
         with Image.open(io.BytesIO(raw_b)) as im:
             rgb, _ = restore_photometry(im.convert("RGB"))
             vec = unit(emb.image(rgb, ctx))
-        _GALLERY_CACHE[ck] = (raw_b, vec)
+        _GALLERY_CACHE[ck] = (b"", vec)
         return pid, vec
 
     by_pid: dict[int, list[list[float]]] = {}
-    with ThreadPoolExecutor(max_workers=16) as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         for pid, vec in pool.map(_embed_one, refs):
             by_pid.setdefault(pid, []).append(vec)
     return {

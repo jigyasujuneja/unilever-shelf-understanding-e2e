@@ -67,10 +67,14 @@ class HierarchyClassify(Approach):
     def setup(self, config: dict, ctx: Context) -> None:
         self.catalog = dataset.catalog(name=self.dataset)
         self.brands = sorted({p.get("brand") or p.get("category", "") for p in self.catalog.values() if p.get("brand") or p.get("category")})
+        brand_prop: dict = (
+            {"type": "string", "enum": [*self.brands, NOT_LISTED]}
+            if len(self.brands) <= 250
+            else {"type": "string"}
+        )
         self.brand_schema = {
             "type": "object",
-            "properties": {"brand": {"type": "string", "enum": [*self.brands, NOT_LISTED]},
-                           "size": {"type": "string"}},
+            "properties": {"brand": brand_prop, "size": {"type": "string"}},
             "required": ["brand", "size"],
         }
         self.brand_prompt = BRAND_PROMPT.format(brands=", ".join(self.brands))

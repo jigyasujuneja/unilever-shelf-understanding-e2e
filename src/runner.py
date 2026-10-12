@@ -691,6 +691,46 @@ def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] =
     return n
 
 
+def finalize_remote_compute(src: str, log=print) -> int:
+    """Finalize provisional Cloud Run task compute costs directly on GCS ``summary.json`` blobs without downloading to local disk."""
+    bucket, prefix = dataset._split_gs(src.rstrip("/"))
+    gcs = dataset._gcs().bucket(bucket)
+    updated = 0
+    for blob in dataset._gcs().list_blobs(bucket, prefix=prefix + "/"):
+        if not blob.name.endswith("/summary.json"):
+            continue
+        run_id = blob.name.split("/")[-2]
+        try:
+            summary = json.loads(blob.download_as_text())
+        except Exception:
+            continue
+        if "provisional" not in summary.get("cost", {}).get("compute_source", ""):
+            continue
+        from utils import cloud
+
+        try:
+            seconds = cloud.task_seconds(summary["environment"])
+        except Exception as e:
+            log(f"  {run_id}: compute stays provisional ({e})")
+            continue
+        set_compute(summary, seconds, "Cloud Run task start->completion (Admin API)")
+        if os.environ.get("SHELF_BENCH_VERTEX_EXPERIMENTS", "1") != "0":
+            try:
+                from utils import vertex_experiments
+
+                exp_id = os.environ.get("SHELF_BENCH_EXPERIMENT_ID", vertex_experiments.DEFAULT_EXPERIMENT)
+                summary["vertex_experiment"] = vertex_experiments.log_experiment_run(
+                    summary, results_uri=f"{src.rstrip('/')}/{run_id}", experiment_id=exp_id
+                )
+            except Exception as exp_err:
+                log(f"  {run_id}: Vertex AI Experiment update warning ({exp_err})")
+        gcs.blob(blob.name).upload_from_string(
+            json.dumps(summary, indent=2), content_type="application/json"
+        )
+        updated += 1
+    return updated
+
+
 def push(
     dest: str,
     results_dir: Path = RESULTS_DIR,

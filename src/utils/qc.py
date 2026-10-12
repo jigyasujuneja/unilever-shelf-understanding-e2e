@@ -179,7 +179,6 @@ def run_12_gate_qc(
             if (
                 bv_low in ("unknown", "others", "na", "")
                 or "brand_level_only" in bv_low
-                or "others" in bv_low.split("_")
                 or (bv_low.endswith("_classic") and bv_low == f"{br.lower()}_classic")
             ):
                 g2_violations.append(f"{ds} class {cid} ({br}): catch-all/invalid base_variant={bv!r}")

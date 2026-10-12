@@ -31,6 +31,24 @@ MODEL = GEMINI_EMBEDDING  # the fixed embedder of the Gemini pipelines built on 
 _GALLERY_CACHE: dict[tuple[str, bool, str], tuple[bytes, list[float]]] = {}
 
 
+class _LazyJpegDict(dict):
+    """On-demand JPEG byte loader for contact-sheet rerankers so 10,000+ gallery images are not held in RAM."""
+
+    def __getitem__(self, key: str) -> bytes:
+        if key in self:
+            return super().__getitem__(key)
+        raw_b = dataset.read_bytes(key)
+        if len(self) < 256:
+            self[key] = raw_b
+        return raw_b
+
+    def get(self, key: str, default: bytes | None = None) -> bytes | None:  # type: ignore[override]
+        try:
+            return self[key]
+        except Exception:
+            return default
+
+
 @register
 class EmbeddingRetrieval(Approach):
     name = "embedding_retrieval"
@@ -53,7 +71,7 @@ class EmbeddingRetrieval(Approach):
         self.emb = VertexEmbeddings(config, model=emb_model)
         root = dataset.data_root(self.dataset)
         gallery = dataset.rpc_gallery(root)
-        max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "0"))
+        max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "400"))
         if max_skus > 0 and len(gallery) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
             cat = dataset.catalog(root, self.dataset)
             # Label-blind stratified gallery selection across all catalog brands (zero eval_samples access)
@@ -79,7 +97,7 @@ class EmbeddingRetrieval(Approach):
             gallery = {pid: paths for pid, paths in gallery.items() if pid in chosen_pids}
 
         refs = [(pid, path) for pid, paths in gallery.items() for path in paths]
-        self.jpeg: dict[str, bytes] = {}  # reference photos, for the rerank contact sheet
+        self.jpeg: dict[str, bytes] = _LazyJpegDict()  # lazy reference photos for rerank contact sheets
         is_real_shelf_gallery = self.dataset.startswith("hul") or self.dataset.startswith("gtmerch")
 
         def embed(ref: tuple[int, str]) -> tuple[int, str, list[float]]:
@@ -87,20 +105,18 @@ class EmbeddingRetrieval(Approach):
             cache_key = (emb_model, is_real_shelf_gallery, path)
             cached = _GALLERY_CACHE.get(cache_key)
             if cached is not None:
-                raw_bytes, vec = cached
-                self.jpeg[path] = raw_bytes
+                _, vec = cached
                 return pid, path, vec
             raw_bytes = dataset.read_bytes(path)
-            self.jpeg[path] = raw_bytes
             with Image.open(io.BytesIO(raw_bytes)) as im:
                 rgb = im.convert("RGB")
                 if is_real_shelf_gallery:
                     rgb, _ = restore_photometry(rgb)
                 vec = unit(self.emb.image(rgb, ctx))
-            _GALLERY_CACHE[cache_key] = (raw_bytes, vec)
+            _GALLERY_CACHE[cache_key] = (b"", vec)
             return pid, path, vec
 
-        with ThreadPoolExecutor(max_workers=16) as pool:
+        with ThreadPoolExecutor(max_workers=8) as pool:
             self.index = list(pool.map(embed, refs))
 
         from utils.embeddings import flush_embedding_disk_cache
