@@ -658,15 +658,17 @@ def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] =
             continue
         run_id = blob.name.split("/")[-2]
         dest = Path(results_dir) / run_id
-        if not (dest / "summary.json").exists():
+        local_sum = dest / "summary.json"
+        need_dl = not local_sum.exists() or (blob.size is not None and local_sum.stat().st_size != blob.size)
+        if need_dl:
             img_blob = gcs.blob(f"{prefix}/{run_id}/images.jsonl")
             if not img_blob.exists():
                 continue
             dest.mkdir(parents=True, exist_ok=True)
             img_blob.download_to_filename(str(dest / "images.jsonl"))
-            blob.download_to_filename(str(dest / "summary.json"))
+            blob.download_to_filename(str(local_sum))
             n += 1
-        summary = json.loads((dest / "summary.json").read_text())
+        summary = json.loads(local_sum.read_text())
         if "provisional" in summary.get("cost", {}).get("compute_source", ""):
             from utils import cloud
 
@@ -894,10 +896,12 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
         is_shelf = ds in ("gtmerch_golden", "ms_json_golden", "hul_sessions", "shelves", "sku110k")
         n_imgs = max(1, int(s.get("images", 1) or 1))
         tp_fn = int(s.get("tp", 0) or 0) + int(s.get("fn", 0) or 0)
-        tot_boxes = tp_fn if tp_fn > n_imgs else (n_imgs * 25 if is_shelf else n_imgs)
+        tot_boxes = int(s.get("total_gt_boxes") or (tp_fn if tp_fn > n_imgs else (n_imgs * 25 if is_shelf else n_imgs)))
         boxes_per_img = round(max(1.0, tot_boxes / n_imgs), 1)
         raw_inr = float(s.get("cost_per_image_inr") or 0.0)
         s["is_golden_dataset"] = is_golden
+        s["total_gt_boxes"] = tot_boxes
+        s["eval_samples"] = int(s.get("eval_samples") or tot_boxes)
         s["cost_unit"] = "shelf" if is_shelf else "crop"
         s["boxes_per_image"] = boxes_per_img
         s["cost_per_crop_inr"] = round(raw_inr / boxes_per_img, 5) if is_shelf else round(raw_inr, 4)

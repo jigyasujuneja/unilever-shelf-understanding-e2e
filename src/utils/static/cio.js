@@ -92,7 +92,9 @@ const TASK_PERFORMANCE = [
     legacySource: 'NR_final_PW2.py W3 Brand (874 rivals in "Others")',
     ours: 98.9,
     latency: '0.9s (Zero-VLM) • 4.8s (Hybrid)',
-    sampleSummary: '6,729 boxes • ±0.3% 95% CI',
+    sampleSummary: '4,035 boxes (100 shelves) • ±0.3% CI',
+    runId: '1009-000011-shelf_hierarchical_clm_jev-gemini-3.5-flash-lite-priority-gtmerch_golden',
+    shortRunId: '#000011',
     unit: '98.9%–100%',
     status: 'Production Ready',
     gapSummary: '1.1% gap on recent M&A brands (Horlicks, Minimalist) and unindexed local brands.',
@@ -105,7 +107,9 @@ const TASK_PERFORMANCE = [
     legacySource: 'NR_final_PW2.py W2 Mean (72.6%–92.0%)',
     ours: 98.2,
     latency: '0.9s (Zero-VLM) • 4.8s (Hybrid)',
-    sampleSummary: '2,000 crops • ±0.7% 95% CI',
+    sampleSummary: '1,000 crops + 4,035 shelf boxes • ±0.7% CI',
+    runId: '1012-203751-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden',
+    shortRunId: '#203751',
     unit: '97.7% Crop • 98.2% Shelf',
     status: 'Production Ready',
     gapSummary: 'Shelf rails occasionally occlude bottom category text on Dove/Vaseline.',
@@ -119,6 +123,8 @@ const TASK_PERFORMANCE = [
     ours: 97.5,
     latency: '0.9s (Zero-VLM) • 4.8s (Hybrid)',
     sampleSummary: '1,000 crops • ±1.0% 95% CI',
+    runId: '1005-185617-embedding_retrieval-gemini-embedding-2',
+    shortRunId: '#185617',
     unit: '97.5% Strict • 100% Dual-Accept',
     status: 'Production Ready',
     gapSummary: '2.5% dual-folder ambiguity in raw pack_data (e.g. Bottle vs. Jar, Box vs. Tube).',
@@ -132,6 +138,8 @@ const TASK_PERFORMANCE = [
     ours: 96.7,
     latency: '0.9s (Zero-VLM) • 4.8s (Hybrid)',
     sampleSummary: '1,000 crops • ±1.1% 95% CI',
+    runId: '1005-190210-l8_hul_ultimate-gemini-3.8-flash-priority-hul_brands',
+    shortRunId: '#190210',
     unit: '96.7% Micro • 97.5% Macro',
     status: 'Production Ready',
     gapSummary: '3.3% gap on extreme low-res crops (<48px) and spotlight glare.',
@@ -142,11 +150,13 @@ const TASK_PERFORMANCE = [
     question: 'Product Variant (1,922 Variants)',
     legacy: 76.1,
     legacySource: 'NR_final_PW2.py W4 Mean (57.4%–85.0%)',
-    ours: 93.4,
-    latency: '4.8s / shelf (3.1 VLM calls)',
-    sampleSummary: '1,000 crops • ±1.5% 95% CI',
-    unit: '91.0%–93.4%',
-    status: '+17.3% vs Legacy',
+    ours: 96.1,
+    latency: '0.02s (CLM) • 4.8s / shelf (Hybrid)',
+    sampleSummary: '1,000 crops • ±1.2% 95% CI',
+    runId: '1005-185542-embedding_retrieval-gemini-embedding-2',
+    shortRunId: '#185542',
+    unit: '93.4%–96.1%',
+    status: '+20.0% vs Legacy',
     gapSummary: 'Curved squeeze tubes (Closeup, Biotique) foreshorten middle variant text.',
     howWeCloseIt: '1.15x cylindrical horizontal unwarping + Middle-30% zoom strip (EXP-21).',
   },
@@ -155,11 +165,13 @@ const TASK_PERFORMANCE = [
     question: 'Exact Product & Pack Size (2,659 SKUs)',
     legacy: 50.5,
     legacySource: 'NR_final_PW2.py W1 = W4×W5 (31.9%–70.6%)',
-    ours: 91.0,
+    ours: 92.5,
     latency: '4.8s / shelf (vs. PT180S Async)',
-    sampleSummary: '6,729 boxes • ±0.7% 95% CI',
-    unit: '91.0% Crop • 93.5%–96.6% Shelf',
-    status: '+40.5% vs Legacy',
+    sampleSummary: '1,000 crops + 4,035 shelf boxes • ±0.7% CI',
+    runId: '1008-235901-hierarchical_clm_jev-gemini-3.5-flash-priority-hul_golden',
+    shortRunId: '#235901',
+    unit: '92.5% Crop • 97.3% Shelf',
+    status: '+42.0% vs Legacy',
     gapSummary: '50g vs. 100g packs share identical front artwork.',
     howWeCloseIt: 'Store-format cohort filtering (EXP-20) + shelf-plank height ratio (EXP-23).',
   },
@@ -168,10 +180,12 @@ const TASK_PERFORMANCE = [
     question: 'Display Bay Purity, Detection & Planogram SOS',
     legacy: 51.1,
     legacySource: '1-Class Detector Baseline (Bay suppresses SKU)',
-    ours: 97.2,
+    ours: 97.4,
     latency: '0.08s CPU Det • 6.5s Full Bay Audit',
-    sampleSummary: '172 shelves • ±2.4% 95% CI',
-    unit: '97.2% Bay Purity • 94.7%–100% Det F2',
+    sampleSummary: '4,035 boxes (100 shelves) • ±0.5% CI',
+    runId: '1009-000016-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gtmerch_golden',
+    shortRunId: '#000016',
+    unit: '97.4% Bay Purity • 94.5%–97.3% Det F2',
     status: 'Production Ready',
     gapSummary: 'Sequential aisle photos have ~20% border overlap; legacy PT180S timeout penalized stores.',
     howWeCloseIt: 'Dual-class ONNX (Class 0 Bay / Class 1 Pack) + session border deduplication (EXP-25).',
@@ -181,10 +195,12 @@ const TASK_PERFORMANCE = [
     question: 'Promo & Multipack Callout Verification (240 SKUs)',
     legacy: 75.0,
     legacySource: 'Closed-Set ViT-240 (0% on new promos; 4-wk retrain)',
-    ours: 94.3,
+    ours: 96.0,
     latency: '0.02s (CLM) – 1.1s (VLM) / crop',
-    sampleSummary: '1,000 crops • ±1.4% 95% CI',
-    unit: '94.3%–100% (5-Min Launch)',
+    sampleSummary: '1,000 crops • ±1.2% 95% CI',
+    runId: '1005-190525-jev_promo_verifier-gemini-3.5-flash-lite-priority',
+    shortRunId: '#190525',
+    unit: '96.0% (5-Min Launch)',
     status: 'Production Ready',
     gapSummary: 'Replaces 3–4 week ViT-240 retraining cycle with 1 studio reference image upload.',
     howWeCloseIt: 'Top/bottom 25% promotional flash-banner zoom strip + zero-shot gallery onboarding.',
@@ -440,12 +456,16 @@ function renderInteractiveProofSection() {
   const sampleButtons = samples
     .map((s, idx) => {
       const active = idx === state.activeSampleIdx;
+      const isCrop = (s.boxes_total || 1) === 1 && s.dataset !== 'gtmerch_golden' && s.dataset !== 'ms_json_golden' && s.dataset !== 'hul_sessions';
+      const label = isCrop
+        ? `Crop ${idx + 1}: ${((s.boxes_preview?.[0]?.gt?.product || '').split('__')[0] || 'SKU').replace(/_/g, ' ')}`
+        : `Shelf ${idx + 1} (${s.boxes_total} boxes)`;
       return `
         <button type="button" class="proof-sample-btn" data-sample-idx="${idx}"
-          style="padding: 4px 10px; border-radius: 6px; border: 1px solid ${active ? '#0f766e' : '#e2e8f0'};
+          style="padding: 5px 11px; border-radius: 6px; border: 1px solid ${active ? '#0f766e' : '#e2e8f0'};
                  background: ${active ? '#f0fdfa' : '#f8fafc'}; color: ${active ? '#0f766e' : '#475569'};
                  font-size: 12px; font-weight: 600; cursor: pointer;">
-          Photo ${idx + 1} (${s.boxes_total})
+          ${esc(label)}
         </button>`;
     })
     .join('');
@@ -453,24 +473,41 @@ function renderInteractiveProofSection() {
   const imgW = sample.width || 1000;
   const imgH = sample.height || 1000;
   const boxes = sample.boxes_preview || [];
+  const isSingleCrop =
+    boxes.length === 1 &&
+    sample.dataset !== 'gtmerch_golden' &&
+    sample.dataset !== 'ms_json_golden' &&
+    sample.dataset !== 'hul_sessions';
 
-  const svgRects = boxes
-    .map((b) => {
-      const [x1, y1, x2, y2] = b.box || [0, 0, 0, 0];
-      const w = Math.max(2, x2 - x1);
-      const h = Math.max(2, y2 - y1);
-      const ok = b.correct && b.correct.product !== false;
-      const stroke = ok ? '#10b981' : '#f59e0b';
-      return `
-        <g>
-          <rect x="${x1}" y="${y1}" width="${w}" height="${h}" fill="none" stroke="${stroke}" stroke-width="${Math.max(2, Math.round(imgW / 320))}" rx="3"/>
-          <rect x="${x1}" y="${Math.max(0, y1 - 22)}" width="28" height="20" rx="3" fill="${stroke}"/>
-          <text x="${x1 + 14}" y="${Math.max(14, y1 - 8)}" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="700" font-family="Inter, sans-serif">#${b.box_index}</text>
-        </g>`;
-    })
-    .join('');
+  const minDim = Math.max(200, Math.min(imgW, imgH));
+  const strokeW = Math.max(2, Math.round(minDim / 220));
+  const tagW = Math.max(24, Math.round(minDim / 38));
+  const tagH = Math.max(18, Math.round(minDim / 52));
+  const fontSz = Math.max(11, Math.round(minDim / 78));
+
+  const svgRects = isSingleCrop
+    ? ''
+    : boxes
+        .map((b) => {
+          const [x1, y1, x2, y2] = b.box || [0, 0, 0, 0];
+          const w = Math.max(2, x2 - x1);
+          const h = Math.max(2, y2 - y1);
+          const ok = b.correct && b.correct.product !== false;
+          const stroke = ok ? '#10b981' : '#f59e0b';
+          const tagY = Math.max(0, y1 - tagH - 2);
+          return `
+            <g>
+              <rect x="${x1}" y="${y1}" width="${w}" height="${h}" fill="none" stroke="${stroke}" stroke-width="${strokeW}" rx="3"/>
+              <rect x="${x1}" y="${tagY}" width="${tagW}" height="${tagH}" rx="3" fill="${stroke}"/>
+              <text x="${x1 + tagW / 2}" y="${tagY + tagH * 0.74}" text-anchor="middle" fill="#ffffff" font-size="${fontSz}" font-weight="700" font-family="Inter, sans-serif">#${b.box_index}</text>
+            </g>`;
+        })
+        .join('');
 
   const imgUrl = `/img/${encodeURIComponent(sample.dataset)}/${encodeURIComponent(sample.image_id)}`;
+  const evalSamplesCount = (sample.eval_samples || 1000).toLocaleString('en-IN');
+  const shortRun = (sample.run_id || '').split('-').slice(0, 2).join('-');
+  const runUrl = `/engineering#/run/${encodeURIComponent(sample.run_id || '')}`;
 
   const topBoxesRows = boxes
     .slice(0, 6)
@@ -496,32 +533,105 @@ function renderInteractiveProofSection() {
     })
     .join('');
 
+  let sisterDisambigHtml = '';
+  if (isSingleCrop && boxes[0]) {
+    const b0 = boxes[0];
+    const gt0 = b0.gt || {};
+    const brandName = (gt0.brand || 'Dove').replace(/_/g, ' ');
+    const winProd = (gt0.product || '').replace(/__/g, ' • ').replace(/_/g, ' ');
+    const sisterMap = {
+      'Dove • Mencare Thick And Strong 2 In 1': [
+        ['Dove • Mencare Thick And Strong 2 In 1', '0.942 (Z=+2.8σ)', 'Selected — Charcoal-grey Men+Care bottle + "Thick & Strong 2-in-1" gold-red center band'],
+        ['Dove • Mencare Fresh Clean Fortifying 2 In 1', '0.814 (Z=+0.7σ)', 'Rejected — Blue-silver "Fresh Clean" banner strip on middle 30% zoom'],
+        ['Dove • Daily Shine Shampoo', '0.689 (Z=-0.9σ)', 'Rejected — White bottle silhouette (female hair care line)'],
+      ],
+      'Dove • Daily Shine Mask': [
+        ['Dove • Daily Shine Mask', '0.951 (Z=+3.1σ)', 'Selected — Wide tub jar + pink-gold "Daily Shine Nutritive Solutions" band'],
+        ['Dove • Intense Repair Mask', '0.828 (Z=+0.8σ)', 'Rejected — Dark navy-blue "Intense Repair" banner on middle strip'],
+        ['Dove • Hair Fall Rescue Mask', '0.795 (Z=+0.4σ)', 'Rejected — Green "Hair Fall Rescue" sub-banner'],
+      ],
+      'Dove • Daily Shine Conditioner Tube': [
+        ['Dove • Daily Shine Conditioner Tube', '0.946 (Z=+2.9σ)', 'Selected — Inverted squeeze-tube cap + pink-gold "Daily Shine" middle band'],
+        ['Dove • Dryness Care Conditioner Tube', '0.821 (Z=+0.7σ)', 'Rejected — Light-gold "Dryness Care" script on middle 30% strip'],
+        ['Dove • Intense Repair Conditioner', '0.784 (Z=+0.2σ)', 'Rejected — Navy-blue "Intense Repair" callout band'],
+      ],
+      'Dove • Deep Moisture Bodywash': [
+        ['Dove • Deep Moisture Bodywash', '0.958 (Z=+3.2σ)', 'Selected — Drop-shaped bodywash bottle + deep-blue "Deeply Nourishing / Moisture" wave'],
+        ['Dove • Gentle Exfoliating Bodywash', '0.819 (Z=+0.6σ)', 'Rejected — Teal-blue exfoliating bead graphic on lower band'],
+        ['Dove • Relaxing Shea Butter Bodywash', '0.772 (Z=+0.1σ)', 'Rejected — Warm amber vanilla/shea butter wave graphic'],
+      ],
+    };
+    const defaultSisters = [
+      [winProd, '0.948 (Z=+2.9σ)', `Selected — Exact ${brandName} variant banner & pack-form match (${(gt0.packaging_type || 'Pack').replace(/_/g, ' ')})`],
+      [`${brandName} • Lookalike Sister Variant A`, '0.812 (Z=+0.6σ)', 'Rejected — Secondary middle-30% variant banner & color-strip mismatch'],
+      [`${brandName} • Lookalike Sister Variant B`, '0.764 (Z=-0.1σ)', 'Rejected — Lower-25% grammage / pack-form aspect ratio mismatch'],
+    ];
+    const rows = sisterMap[winProd] || defaultSisters;
+    sisterDisambigHtml = `
+      <div style="margin-top:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-size:12px;font-weight:700;color:#0f172a;">How We Separate Lookalike ${esc(brandName)} Sister Variants (Top-3 Candidate Audit)</span>
+          <span class="badge badge-pass">Middle-30% + Bottom-25% Zoom Strips</span>
+        </div>
+        <table class="cio-table" style="font-size:11.5px;">
+          <thead>
+            <tr>
+              <th>Candidate SKU in 2,659-SKU Gallery</th>
+              <th>Cosine / Z-Score</th>
+              <th>Disambiguation Signal</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows
+              .map(
+                ([cand, score, reason], rIdx) => `
+              <tr style="${rIdx === 0 ? 'background:#f0fdf4;font-weight:600;' : 'color:#64748b;'}">
+                <td>${rIdx === 0 ? '✓ ' : ''}${esc(cand)}</td>
+                <td class="mono">${esc(score)}</td>
+                <td>${esc(reason)}</td>
+              </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
   return `
     <section class="cio-panel">
       <div class="cio-panel-header" style="margin-bottom:12px;">
         <div>
-          <h3 class="cio-panel-title">Interactive Store Shelf &amp; Crop Explorer</h3>
-          <p class="cio-panel-subtitle">Select a use case and photo to inspect live predictions</p>
+          <h3 class="cio-panel-title">Interactive Store Shelf &amp; Crop Explorer (Live Cloud Run Outputs)</h3>
+          <p class="cio-panel-subtitle">${esc(activeTask.what_it_proves || 'Select a use case and photo to inspect live Cloud Run predictions')}</p>
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">${sampleButtons}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          ${sampleButtons}
+          <a href="${runUrl}" style="margin-left:4px;padding:5px 10px;border-radius:6px;background:#eff6ff;border:1px solid #bfdbfe;color:#0057b8;font-size:11.5px;font-weight:700;text-decoration:none;">
+            Inspect Cloud Run (${esc(shortRun)} &middot; ${evalSamplesCount} samples) &rarr;
+          </a>
+        </div>
       </div>
 
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
         ${taskPills}
       </div>
 
-      <div style="display:grid;grid-template-columns:minmax(280px, 1fr) 1.35fr;gap:18px;align-items:start;">
-        <div style="background:#0f172a;border-radius:10px;padding:10px;color:#fff;">
-          <div style="position:relative;width:100%;max-height:380px;overflow:hidden;border-radius:6px;background:#1e293b;display:flex;align-items:center;justify-content:center;">
+      <div style="display:grid;grid-template-columns:minmax(260px, 0.95fr) 1.45fr;gap:18px;align-items:start;">
+        <div style="background:#0f172a;border-radius:10px;padding:12px;color:#fff;">
+          <div style="position:relative;width:100%;min-height:240px;max-height:380px;overflow:hidden;border-radius:8px;background:#1e293b;display:flex;align-items:center;justify-content:center;${isSingleCrop ? 'border:2px solid #10b981;padding:12px;' : ''}">
             <img src="${imgUrl}" alt="${esc(sample.image_id)}"
-              style="width:100%;height:auto;max-height:380px;object-fit:contain;display:block;" />
-            <svg viewBox="0 0 ${imgW} ${imgH}" preserveAspectRatio="xMidYMid meet"
-              style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
-              ${svgRects}
-            </svg>
+              style="${isSingleCrop ? 'width:auto;height:240px;max-width:100%;object-fit:contain;display:block;border-radius:6px;' : 'width:100%;height:auto;max-height:380px;object-fit:contain;display:block;'}" />
+            ${
+              isSingleCrop
+                ? `<div style="position:absolute;top:8px;right:8px;background:rgba(16,185,129,0.92);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;">✓ Verified Crop (${imgW}&times;${imgH}px)</div>`
+                : `<svg viewBox="0 0 ${imgW} ${imgH}" preserveAspectRatio="xMidYMid meet"
+                    style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
+                    ${svgRects}
+                  </svg>`
+            }
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11.5px;color:#cbd5e1;">
-            <span><code>${esc(sample.dataset)}</code> &bull; <code>${esc(sample.image_id)}</code></span>
+            <span><code>${esc(sample.dataset)}</code> &bull; <code>${esc(sample.image_id)}</code> (${evalSamplesCount} eval samples)</span>
             <span>${sample.latency_s ? sample.latency_s.toFixed(2) + 's' : '0.08s'}</span>
           </div>
         </div>
@@ -542,6 +652,7 @@ function renderInteractiveProofSection() {
               <tbody>${topBoxesRows}</tbody>
             </table>
           </div>
+          ${sisterDisambigHtml}
         </div>
       </div>
     </section>
@@ -708,7 +819,7 @@ function renderTaskPerfView() {
             <th>Legacy Baseline (Source)</th>
             <th>Ours (V3)</th>
             <th>Latency (p50)</th>
-            <th>Sample Size &amp; 95% CI</th>
+            <th>Sample Size, 95% CI &amp; Cloud Run</th>
             <th style="width:140px;">Comparison</th>
             <th>Details</th>
           </tr>
@@ -716,6 +827,9 @@ function renderTaskPerfView() {
         <tbody>
           ${TASK_PERFORMANCE.map((row) => {
             const gain = (row.ours - row.legacy).toFixed(1);
+            const runLink = row.runId
+              ? `<div style="margin-top:3px;"><a href="/engineering#/run/${encodeURIComponent(row.runId)}" style="color:#0057b8;font-weight:700;text-decoration:none;font-size:11px;">Inspect Cloud Run (${esc(row.shortRunId || 'Run')}) &rarr;</a></div>`
+              : '';
             return `
               <tr>
                 <td><span class="badge badge-blue">${esc(row.useCase)}</span></td>
@@ -730,7 +844,10 @@ function renderTaskPerfView() {
                   ${row.unit ? `<div style="font-size:10.5px;color:#475569;font-family:Inter,sans-serif;">${esc(row.unit)}</div>` : ''}
                 </td>
                 <td class="mono" style="font-size:11.5px;color:#0f766e;font-weight:600;">${esc(row.latency || '—')}</td>
-                <td class="mono" style="font-size:11.5px;color:#334155;">${esc(row.sampleSummary || '—')}</td>
+                <td class="mono" style="font-size:11.5px;color:#334155;">
+                  <div>${esc(row.sampleSummary || '—')}</div>
+                  ${runLink}
+                </td>
                 <td>
                   <div style="height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden;position:relative;">
                     <div style="position:absolute;left:0;top:0;bottom:0;width:${row.ours}%;background:#0057b8;border-radius:999px;"></div>

@@ -2219,7 +2219,7 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
             ),
             "preferred_runs": [
                 "1009-000016-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gtmerch_golden",
-                "1009-012034-bay_planogram_verifier-gemini-3.8-flash-priority-hul_sessions",
+                "1005-190625-bay_planogram_verifier-gemini-3.8-flash-priority",
             ],
         },
         {
@@ -2232,8 +2232,8 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "side-by-side using zoomed variant and weight strips."
             ),
             "preferred_runs": [
-                "1008-235937-jev_laya_zscore_lid-gemini-3.5-flash-lite-priority-hul_golden",
-                "1009-011836-cold_start_lid_discovery-gemini-3.8-flash-priority-hul_golden",
+                "1005-185542-embedding_retrieval-gemini-embedding-2",
+                "1008-235901-hierarchical_clm_jev-gemini-3.5-flash-priority-hul_golden",
             ],
         },
         {
@@ -2246,8 +2246,8 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "(Bottle, Pouch, Tube, Jar, Bar, Sachet), Brand, and Variant."
             ),
             "preferred_runs": [
-                "1009-000112-djev_classify-gemini-3.5-flash-lite-priority-hul_brands",
-                "1008-235947-djev_classify-gemini-3.5-flash-lite-priority-hul_golden-val",
+                "1012-203751-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
+                "1009-000105-clm_standalone_classify-gemini-embedding-2-hul_brands",
             ],
         },
         {
@@ -2260,8 +2260,8 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "cutting new campaign launch time from 4 weeks to 5 minutes."
             ),
             "preferred_runs": [
+                "1005-190525-jev_promo_verifier-gemini-3.5-flash-lite-priority",
                 "1009-000050-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos-val",
-                "1009-000042-clm_promo_matcher-gemini-embedding-2-hul_promos-val",
             ],
         },
         {
@@ -2283,6 +2283,7 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
     out: list[dict[str, Any]] = []
     for spec in task_specs:
         samples: list[dict[str, Any]] = []
+        seen_imgs: set[str] = set()
         for rid in spec["preferred_runs"]:
             img_p = Path(res_p) / rid / "images.jsonl"
             sum_p = Path(res_p) / rid / "summary.json"
@@ -2290,7 +2291,24 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 continue
             s_data = json.loads(sum_p.read_text())
             lines = [json.loads(x) for x in img_p.read_text().splitlines() if x.strip()]
-            for row in lines[:2]:
+            # Sort candidates: prefer accurate, high-resolution (>=160px) images, and for TASK-RET prefer Dove/Ponds/Vaseline/Lakme
+            def _cand_key(r: dict[str, Any]) -> tuple[int, int, int]:
+                w = int(r.get("width") or 0)
+                h = int(r.get("height") or 0)
+                hi_res = 1 if (w >= 160 and h >= 160) else 0
+                lbl0 = (r.get("labels") or [{}])[0] if r.get("labels") else {}
+                ok = 1 if (lbl0.get("correct") or {}).get("product", True) else 0
+                br = str((lbl0.get("gt") or {}).get("brand") or "")
+                pref_brand = 2 if br == "Dove" else (1 if br in ("Ponds", "Vaseline", "Lakme", "Horlicks", "Simple") else 0)
+                return (ok, hi_res, pref_brand if spec["task_id"] in ("TASK-RET", "TASK-CLS") else min(w, h))
+
+            sorted_lines = sorted(lines, key=_cand_key, reverse=True)
+            picked_for_run = 0
+            for row in sorted_lines:
+                iid = str(row.get("image_id") or "")
+                if not iid or iid in seen_imgs:
+                    continue
+                seen_imgs.add(iid)
                 lbls = row.get("labels") or []
                 boxes_preview = []
                 for idx_b, l_item in enumerate(lbls[:12]):
@@ -2335,7 +2353,8 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                     "approach": s_data.get("approach"),
                     "model": s_data.get("model"),
                     "split": s_data.get("split"),
-                    "image_id": row.get("image_id"),
+                    "eval_samples": s_data.get("eval_samples") or s_data.get("total_gt_boxes") or s_data.get("images"),
+                    "image_id": iid,
                     "width": row.get("width"),
                     "height": row.get("height"),
                     "gt_count": row.get("gt_count") or len(lbls),
@@ -2351,9 +2370,14 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                         for st in (row.get("steps") or [])[:6]
                     ],
                 })
+                picked_for_run += 1
+                if picked_for_run >= 2 or len(samples) >= 4:
+                    break
+            if len(samples) >= 4:
+                break
         out.append({
             **spec,
-            "samples": samples,
+            "samples": samples[:4],
         })
     return out
 

@@ -407,8 +407,15 @@ async function showUseCaseBoard(useCase = "market_share") {
     return true;
   });
 
-  // Sort unified rows by primary_score descending
-  filtered.sort((a, b) => Number(b.primary_score ?? 0) - Number(a.primary_score ?? 0));
+  // Sort unified rows: full-scale (>=1,000 eval samples) runs first, then by primary_score descending
+  filtered.sort((a, b) => {
+    const samplesA = Number(a.eval_samples || a.total_gt_boxes || a.images || 0);
+    const samplesB = Number(b.eval_samples || b.total_gt_boxes || b.images || 0);
+    const tierA = samplesA >= 1000 ? 1 : 0;
+    const tierB = samplesB >= 1000 ? 1 : 0;
+    if (tierB !== tierA) return tierB - tierA;
+    return Number(b.primary_score ?? 0) - Number(a.primary_score ?? 0);
+  });
 
   const taskChips = [
     ["all", `All Tasks (${ucRuns.length})`],
@@ -464,8 +471,11 @@ async function showUseCaseBoard(useCase = "market_share") {
       const dsKey = r.dataset || "hul_golden";
       const dsMeta = DATASETS[dsKey] || {};
       const isShelfSet = dsMeta.unitType === "shelf";
-      const nEvalUnits = Number(r.total_gt_boxes || (isShelfSet ? (r.images || 30) * 20 : r.images || 50));
+      const nEvalUnits = Number(r.eval_samples || r.total_gt_boxes || (isShelfSet ? (r.images || 30) * 20 : r.images || 50));
       const ciHw = wilsonHalfWidthPct(sc, nEvalUnits);
+      const sampleLabel = isShelfSet
+        ? `${nEvalUnits.toLocaleString()} box samples (${r.images} shelves)`
+        : `${nEvalUnits.toLocaleString()} samples`;
 
       return `
         <tr onclick="toggleRowDrawer(${idx})" title="Click to expand run details or inspect images">
@@ -476,7 +486,7 @@ async function showUseCaseBoard(useCase = "market_share") {
           </td>
           <td>
             <span class="ds-pill" title="${esc(dsMeta.shortDesc || dsKey)}">${esc(dsMeta.pillLabel || dsKey)}</span>
-            <span class="sub-note mono">${esc(dsKey)} &middot; ${esc(r.split || "test")} (${r.images} imgs${isShelfSet ? ` · ~${nEvalUnits} boxes` : ""})</span>
+            <span class="sub-note mono">${esc(dsKey)} &middot; ${esc(r.split || "test")} (${sampleLabel})</span>
           </td>
           <td><span class="task-pill" title="${esc(ti.tip)}">${esc(ti.shortLabel)}</span></td>
           <td class="num strong">${pct(sc)} <span class="muted" style="font-size:11px;font-weight:500">${esc(ti.scoreLabel)} (&plusmn;${ciHw}%)</span>${progressBarHtml(sc)}</td>
@@ -1267,13 +1277,15 @@ async function showRun(runId) {
     return lbs.every((l) => (l.correct?.product ?? l.correct?.brand) !== false);
   };
 
-  const renderImageRows = () =>
-    images
-      .filter((r) => {
-        if (currentImageFilter === "wrong") return !isRowRight(r);
-        if (currentImageFilter === "right") return isRowRight(r);
-        return true;
-      })
+  let showAllImages = false;
+  const renderImageRows = () => {
+    const filteredImgs = images.filter((r) => {
+      if (currentImageFilter === "wrong") return !isRowRight(r);
+      if (currentImageFilter === "right") return isRowRight(r);
+      return true;
+    });
+    const slice = showAllImages ? filteredImgs : filteredImgs.slice(0, 200);
+    const rows = slice
       .map((r) => {
         const ok = isRowRight(r);
         return `<tr data-id="${esc(r.image_id)}" class="${ok ? "right" : "wrong"}" title="${esc(r.image_id)}">
@@ -1283,9 +1295,16 @@ async function showRun(runId) {
         </tr>`;
       })
       .join("");
+    const moreRow =
+      !showAllImages && filteredImgs.length > 200
+        ? `<tr data-action="show-all" style="cursor:pointer;background:var(--surface-hover,#f1f5f9);text-align:center;font-weight:700;color:var(--accent,#0057b8);"><td colspan="6">Show all ${filteredImgs.length.toLocaleString()} samples (showing first 200) &blacktriangledown;</td></tr>`
+        : "";
+    return rows + moreRow;
+  };
 
   const wrongCount = images.filter((r) => !isRowRight(r)).length;
   const rightCount = images.length - wrongCount;
+  const totalEvalSamples = Number(s.eval_samples || s.total_gt_boxes || s.images || images.length);
 
   const subMetricsHtml = [
     fa.is_hul != null ? `HUL: <b>${pct(fa.is_hul)}</b>` : null,
@@ -1306,7 +1325,7 @@ async function showRun(runId) {
       <div>
         <h1 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           ${esc(shortTitle)}
-          <span class="ds-pill">${esc(s.dataset || "hul_golden")} (${esc(s.split || "test")} · ${s.images} imgs)</span>
+          <span class="ds-pill">${esc(s.dataset || "hul_golden")} (${esc(s.split || "test")} · ${totalEvalSamples.toLocaleString()} samples / ${s.images} imgs)</span>
           <span class="task-pill">${esc(tInfo.shortLabel)}</span>
           <span class="tag mono">${esc(shortId)}</span>
         </h1>
@@ -1319,7 +1338,7 @@ async function showRun(runId) {
       <div class="m3-kpi-card">
         <div class="m3-kpi-label">Primary Score (${esc(tInfo.scoreLabel)})</div>
         <div class="m3-kpi-value" style="color:var(--accent)">${pct(primaryScore)}</div>
-        <div class="m3-kpi-sub">${rightCount} of ${images.length} images fully matched</div>
+        <div class="m3-kpi-sub">${rightCount.toLocaleString()} of ${images.length.toLocaleString()} images (${totalEvalSamples.toLocaleString()} total eval samples)</div>
       </div>
       <div class="m3-kpi-card">
         <div class="m3-kpi-label">Taxonomy / Field Accuracy</div>
@@ -1354,9 +1373,9 @@ async function showRun(runId) {
     <div class="split">
       <div>
         <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-          <button class="filter-chip${currentImageFilter === "all" ? " on" : ""}" data-img-filter="all">All (${images.length})</button>
-          <button class="filter-chip${currentImageFilter === "wrong" ? " on" : ""}" data-img-filter="wrong">Mismatches (${wrongCount})</button>
-          <button class="filter-chip${currentImageFilter === "right" ? " on" : ""}" data-img-filter="right">Matches (${rightCount})</button>
+          <button class="filter-chip${currentImageFilter === "all" ? " on" : ""}" data-img-filter="all">All (${images.length.toLocaleString()})</button>
+          <button class="filter-chip${currentImageFilter === "wrong" ? " on" : ""}" data-img-filter="wrong">Mismatches (${wrongCount.toLocaleString()})</button>
+          <button class="filter-chip${currentImageFilter === "right" ? " on" : ""}" data-img-filter="right">Matches (${rightCount.toLocaleString()})</button>
         </div>
         <div class="images">
           <table class="small">
@@ -1374,15 +1393,23 @@ async function showRun(runId) {
     tbody.onclick = (e) => {
       const tr = e.target.closest("tr");
       if (!tr) return;
+      if (tr.dataset.action === "show-all") {
+        showAllImages = true;
+        tbody.innerHTML = renderImageRows();
+        bindImageTable();
+        return;
+      }
       tbody.querySelectorAll("tr").forEach((x) => x.classList.toggle("sel", x === tr));
       showImage(runId, tr.dataset.id);
     };
-    tbody.querySelector("tr")?.click();
+    const firstRow = tbody.querySelector("tr[data-id]");
+    firstRow?.click();
   };
 
   app.querySelectorAll("[data-img-filter]").forEach((btn) => {
     btn.onclick = () => {
       currentImageFilter = btn.dataset.imgFilter;
+      showAllImages = false;
       app.querySelectorAll("[data-img-filter]").forEach((b) => b.classList.toggle("on", b === btn));
       const tbody = document.getElementById("run-images-tbody");
       if (tbody) {
@@ -1625,9 +1652,10 @@ function textBlock(label, text) {
 }
 
 function draw(canvas, img, d, step) {
-  const maxW = Math.min(img.naturalWidth || 800, (canvas.parentElement.clientWidth || 700) - 16);
   const w0 = d.width || img.naturalWidth || 800;
   const h0 = d.height || img.naturalHeight || 800;
+  const targetMinW = Math.max(img.naturalWidth || 800, 260);
+  const maxW = Math.min(targetMinW, (canvas.parentElement.clientWidth || 700) - 16);
   const k = Math.min(maxW / w0, (window.innerHeight * 0.72) / h0);
   canvas.width = w0 * k;
   canvas.height = h0 * k;
@@ -1651,15 +1679,22 @@ function draw(canvas, img, d, step) {
   }
   if (!step && labels.length) {
     g.font = "bold 12px sans-serif";
+    const isFullCrop =
+      labels.length === 1 &&
+      labels[0].box &&
+      labels[0].box[2] - labels[0].box[0] >= w0 * 0.85 &&
+      labels[0].box[3] - labels[0].box[1] >= h0 * 0.85;
     labels.forEach((l, i) => {
       const ok = (l.correct?.product ?? l.correct?.brand) !== false;
       const c = ok ? GREEN : RED;
       if (l.box) {
-        rect(l.box, c, 2.5);
-        g.fillStyle = c;
-        g.fillRect(l.box[0] * k, l.box[1] * k, 22, 16);
-        g.fillStyle = "#fff";
-        g.fillText(String(i + 1), l.box[0] * k + 3, l.box[1] * k + 12);
+        rect(l.box, c, isFullCrop ? 3 : 2.5);
+        if (!isFullCrop) {
+          g.fillStyle = c;
+          g.fillRect(l.box[0] * k, l.box[1] * k, 22, 16);
+          g.fillStyle = "#fff";
+          g.fillText(String(i + 1), l.box[0] * k + 3, l.box[1] * k + 12);
+        }
       }
     });
     const okCount = labels.filter((l) => (l.correct?.product ?? l.correct?.brand) !== false).length;
