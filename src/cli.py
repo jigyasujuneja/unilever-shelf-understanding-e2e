@@ -102,8 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--results", type=Path, default=runner.RESULTS_DIR)
     s.add_argument("--root", default=dataset.DEFAULT_ROOT, help="local dir or gs:// URI")
     s.add_argument("--pull", action="store_true", help="first pull finished runs from GCS")
-    s.add_argument("--mode", choices=("engineering", "cio"), default="engineering",
-                   help="default landing portal ('engineering' serves index.html, 'cio' serves cio.html)")
+    s.add_argument("--mode", choices=("engineering", "cio", "exec"), default="engineering",
+                   help="default landing portal ('engineering' serves index.html, 'exec'/'cio' serves cio.html)")
 
     sub.add_parser("serve-cloud", help="deploy the leaderboard UI (with results/) to Cloud Run")
     s = sub.add_parser("proxy", help="open the private Cloud Run UI on localhost (authenticated)")

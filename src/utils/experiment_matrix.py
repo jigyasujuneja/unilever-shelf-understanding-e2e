@@ -204,6 +204,20 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
         ),
         "task_id": "TASK-CLS",
     },
+    "gemini_classify": {
+        "display_name": "Direct Gemini 5-Level Taxonomy Classifier (Single-Crop SFT / Zero-Shot)",
+        "intuition": (
+            "Directly predicts Category, Brand, Pack Type, and Variant from a single product crop using Gemini or a fine-tuned Vertex AI SFT endpoint."
+        ),
+        "task_id": "TASK-CLS",
+    },
+    "hierarchy_classify": {
+        "display_name": "Hierarchical Gemini 5-Level Taxonomy Classifier",
+        "intuition": (
+            "Stepwise Category → Brand → Variant taxonomy classification on a single product crop."
+        ),
+        "task_id": "TASK-CLS",
+    },
     "distilled_yolo_onnx": {
         "display_name": "Distilled YOLO11n Shelf & Bay Box Detector (CPU ONNX, Zero LLM)",
         "intuition": (
@@ -852,6 +866,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
             "clef_flash_classify",
             "clef_standalone_classify",
             "coarse_jev_gemini",
+            "gemini_classify",
+            "hierarchy_classify",
         ],
         "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-embedding-2"],
         "splits": ["val", "test"],

@@ -488,3 +488,39 @@ def test_telemetry_off_leaves_no_links(fake_root, tmp_path):
         log=lambda *_: None,
     )
     assert s["telemetry"] is None
+
+
+def test_leaderboard_normalization_and_qc_audits(tmp_path):
+    run_id = "1012-124906-gemini_classify-marketshare-hul-golden-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "summary.json").write_text(
+        json.dumps({
+            "run_id": run_id,
+            "approach": "gemini_classify",
+            "task": "hul_golden_classification",
+            "dataset": "hul_golden",
+            "model": "projects/1068808147561/locations/europe-west4/endpoints/6726259894726295552",
+            "split": "val",
+            "limit": 100,
+            "seed": 0,
+            "images": 100,
+            "accuracy": 0.89,
+            "recall": 0.89,
+            "f2": 0.89,
+            "cost_per_image_usd": 0.000044,
+            "environment": {"platform": "cloud-run"},
+        })
+    )
+    board = runner.leaderboard(tmp_path, {"defaults": {"split": "val", "limit": 100, "seed": 0}})
+    assert len(board) == 1
+    row = board[0]
+    assert row["task"] == "classification"
+    assert row["dataset"] == "hul_golden"
+    assert row["short_id"] == "#124906"
+    assert row["short_model"] == "gemini-3.5-flash-lite (SFT)"
+    assert row["primary_score"] == 0.89
+    assert row["exp_id"] == "EXP-17"
+
+
+
