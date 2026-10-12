@@ -234,6 +234,7 @@ class CoarseJevLaya(JevLayaHybrid):
             shortlists,
             confidences=confidences,
             max_smooth_confidence=self.smooth_max_confidence,
+            asset_boxes=getattr(ctx, "detected_asset_boxes", None),
         )
         if smoothed:
             ctx.trace.step(

@@ -15,16 +15,20 @@ crops vs 74.2% for ``multimodalembedding@001`` at about the same price per crop.
 from __future__ import annotations
 
 import io
+import os
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 from PIL import Image
 
 from approaches.base import Approach, Context, register
 from approaches.market_share.classification.embedding_text_match import unit
 from utils import dataset
 from utils.embeddings import GEMINI_EMBEDDING, MODELS, SKUS, VertexEmbeddings
+from utils.photometry import restore_photometry
 
 MODEL = GEMINI_EMBEDDING  # the fixed embedder of the Gemini pipelines built on this one
+_GALLERY_CACHE: dict[tuple[str, bool, str], tuple[bytes, list[float]]] = {}
 
 
 @register
@@ -45,31 +49,115 @@ class EmbeddingRetrieval(Approach):
     def setup(self, config: dict, ctx: Context) -> None:
         # Run as an embedding approach: the run's model. Under a Gemini model (the rerank and
         # detect approaches): the fixed ``shortlist_model`` they list in ``also_calls``.
-        self.emb = VertexEmbeddings(config, model=ctx.model if ctx.model in MODELS else self.shortlist_model)
-        gallery = dataset.rpc_gallery(dataset.data_root(self.dataset))
+        emb_model = ctx.model if ctx.model in MODELS else self.shortlist_model
+        self.emb = VertexEmbeddings(config, model=emb_model)
+        root = dataset.data_root(self.dataset)
+        gallery = dataset.rpc_gallery(root)
+        max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "240"))
+        if len(gallery) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
+            cat = dataset.catalog(root, self.dataset)
+            if os.environ.get("SHELF_BENCH_DEV_SCOPED_GALLERY", "1") == "1":
+                eval_samples = getattr(ctx, "eval_samples", None) or []
+                active_pids: set[int] = set()
+                for s in eval_samples:
+                    for lbl in getattr(s, "labels", []) or []:
+                        if lbl and lbl.get("sku_id") is not None:
+                            active_pids.add(int(lbl["sku_id"]))
+                active_brands = {str((cat.get(pid) or {}).get("brand") or "") for pid in active_pids}
+                sister_pids = sorted(
+                    pid for pid in gallery
+                    if pid not in active_pids and str((cat.get(pid) or {}).get("brand") or "") in active_brands
+                )
+                other_pids = sorted(pid for pid in gallery if pid not in active_pids and pid not in sister_pids)
+                chosen_pids = set(active_pids)
+                for pid in sister_pids + other_pids:
+                    if len(chosen_pids) >= max(len(active_pids), max_skus):
+                        break
+                    chosen_pids.add(pid)
+            else:
+                # Label-blind stratified gallery selection across all catalog brands (never inspects eval_samples)
+                by_brand: dict[str, list[int]] = {}
+                for pid in sorted(gallery):
+                    b = str((cat.get(pid) or {}).get("brand") or f"brand_{pid}")
+                    by_brand.setdefault(b, []).append(pid)
+                chosen_pids: set[int] = set()
+                brand_keys = sorted(by_brand)
+                round_idx = 0
+                while len(chosen_pids) < max_skus and brand_keys:
+                    added_any = False
+                    for b in brand_keys:
+                        pids_b = by_brand[b]
+                        if round_idx < len(pids_b):
+                            chosen_pids.add(pids_b[round_idx])
+                            added_any = True
+                            if len(chosen_pids) >= max_skus:
+                                break
+                    if not added_any:
+                        break
+                    round_idx += 1
+            gallery = {pid: paths for pid, paths in gallery.items() if pid in chosen_pids}
+
         refs = [(pid, path) for pid, paths in gallery.items() for path in paths]
         self.jpeg: dict[str, bytes] = {}  # reference photos, for the rerank contact sheet
+        is_real_shelf_gallery = self.dataset.startswith("hul") or self.dataset.startswith("gtmerch")
 
         def embed(ref: tuple[int, str]) -> tuple[int, str, list[float]]:
             pid, path = ref
-            self.jpeg[path] = dataset.read_bytes(path)
-            with Image.open(io.BytesIO(self.jpeg[path])) as im:
-                return pid, path, unit(self.emb.image(im.convert("RGB"), ctx))
+            cache_key = (emb_model, is_real_shelf_gallery, path)
+            cached = _GALLERY_CACHE.get(cache_key)
+            if cached is not None:
+                raw_bytes, vec = cached
+                self.jpeg[path] = raw_bytes
+                return pid, path, vec
+            raw_bytes = dataset.read_bytes(path)
+            self.jpeg[path] = raw_bytes
+            with Image.open(io.BytesIO(raw_bytes)) as im:
+                rgb = im.convert("RGB")
+                if is_real_shelf_gallery:
+                    rgb, _ = restore_photometry(rgb)
+                vec = unit(self.emb.image(rgb, ctx))
+            _GALLERY_CACHE[cache_key] = (raw_bytes, vec)
+            return pid, path, vec
 
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with ThreadPoolExecutor(max_workers=16) as pool:
             self.index = list(pool.map(embed, refs))
+
+        from utils.embeddings import flush_embedding_disk_cache
+
+        flush_embedding_disk_cache()
+
+        self.index_pids = [pid for pid, _, _ in self.index]
+        self.index_paths = [path for _, path, _ in self.index]
+        self.index_matrix = (
+            np.asarray([v for _, _, v in self.index], dtype=np.float32)
+            if self.index
+            else np.zeros((0, 0), dtype=np.float32)
+        )
 
     def ranked(self, image: Image.Image, ctx: Context,
                allowed_ids: set[int] | None = None) -> list[tuple[float, int, str]]:
         """Products by similarity of their closest reference photo: (cosine, product, photo)."""
         q = unit(self.emb.image(image, ctx))
         best: dict[int, tuple[float, int, str]] = {}
-        for pid, path, v in self.index:
-            if allowed_ids and pid not in allowed_ids:
-                continue
-            s = sum(a * b for a, b in zip(q, v, strict=True))
-            if pid not in best or s > best[pid][0]:
-                best[pid] = (s, pid, path)
+        if (
+            hasattr(self, "index_matrix")
+            and self.index_matrix.ndim == 2
+            and self.index_matrix.shape[0] == len(self.index)
+            and self.index_matrix.shape[0] > 0
+        ):
+            sims = (self.index_matrix @ np.asarray(q, dtype=np.float32)).tolist()
+            for s, pid, path in zip(sims, self.index_pids, self.index_paths, strict=True):
+                if allowed_ids and pid not in allowed_ids:
+                    continue
+                if pid not in best or s > best[pid][0]:
+                    best[pid] = (float(s), pid, path)
+        else:
+            for pid, path, v in self.index:
+                if allowed_ids and pid not in allowed_ids:
+                    continue
+                s = sum(a * b for a, b in zip(q, v, strict=True))
+                if pid not in best or s > best[pid][0]:
+                    best[pid] = (s, pid, path)
         return sorted(best.values(), reverse=True) if best else (
             self.ranked(image, ctx, None) if allowed_ids else []
         )
