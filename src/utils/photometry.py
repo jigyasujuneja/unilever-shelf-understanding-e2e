@@ -132,3 +132,62 @@ def lab_similarity(z1: list[float], z2: list[float]) -> float:
     dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(z1, z2, strict=True)) / (len(z1) / 3))
     # Delta E ~ 0 -> 1.0; Delta E ~ 25 -> 0.50; Delta E >= 75 -> ~0.12
     return math.exp(-dist / 36.0)
+
+
+def estimate_shelf_illuminant(shelf_image: Image.Image, p: float = 6.0) -> list[float]:
+    """Estimate ambient store illuminant once on the full shelf image via Shades-of-Gray (Minkowski p=6).
+
+    Across a full shelf photo (30-140 diverse products + metal shelf rails), the Shades-of-Gray
+    color-constancy assumption holds, whereas on an individual red/blue product crop it fails.
+    Excludes saturated specular pixels (>= 245) and clamps channel gains to [0.72, 1.38].
+    """
+    small = shelf_image.convert("RGB")
+    small.thumbnail((512, 512))
+    arr = np.asarray(small, dtype=np.float32)
+    valid = (arr.max(axis=-1) < 245.0) & (arr.min(axis=-1) > 12.0)
+    pixels = arr[valid] if int(valid.sum()) > 100 else arr.reshape(-1, 3)
+    norm_p = np.power(np.mean(np.power(pixels, p), axis=0), 1.0 / p) + 1e-5
+    gains = np.clip(float(norm_p.mean()) / norm_p, 0.72, 1.38)
+    return [round(float(g), 4) for g in gains]
+
+
+def apply_illuminant(image: Image.Image, gains: list[float] | tuple[float, ...] | None) -> Image.Image:
+    """Apply pre-estimated full-shelf RGB channel gains [r_gain, g_gain, b_gain] to a product crop."""
+    if not gains or len(gains) != 3:
+        return image.convert("RGB")
+    arr = np.asarray(image.convert("RGB"), dtype=np.float32)
+    g = np.array(gains, dtype=np.float32).reshape((1, 1, 3))
+    return Image.fromarray(np.clip(arr * g, 0.0, 255.0).astype(np.uint8), mode="RGB")
+
+
+def inner_lab_zones(image: Image.Image, zones: int = 3, trim_x: float = 0.10, trim_y: float = 0.10) -> list[float]:
+    """Foreground-centered 3-zone CIELAB + silhouette/promo descriptor.
+
+    Trims the outer ``trim_x`` / ``trim_y`` border of a shelf crop before computing CIELAB bands so
+    dark shelf backgrounds, adjacent product bleed, and bottom metal price rails do not corrupt
+    chromatic matching against clean studio packshots. Also appends shoulder-taper (bottle vs
+    pouch/sachet) and promo-header chroma cues.
+    """
+    rgb = image.convert("RGB")
+    w, h = max(1, rgb.width), max(1, rgb.height)
+    if w >= 16 and h >= 16:
+        x1, x2 = int(w * trim_x), max(int(w * trim_x) + 1, int(w * (1.0 - trim_x)))
+        y1, y2 = int(h * trim_y * 0.8), max(int(h * trim_y) + 1, int(h * (1.0 - trim_y * 1.2)))
+        core = rgb.crop((x1, y1, x2, y2))
+    else:
+        core = rgb
+    desc = lab_zones(core, zones=zones)
+    # Replace aspect ratio with full-crop aspect ratio + shoulder taper (bottle neck vs flat-top sachet/pouch)
+    desc[-1] = math.log(w / h) * 15.0
+    small_full = rgb.resize((24, 24), Image.Resampling.BILINEAR)
+    lab_full = _rgb_to_lab(np.asarray(small_full, dtype=np.float32))
+    # Top-25% corner-vs-center chromatic/luminance contrast (bottles have background corners at top neck)
+    top_band = lab_full[:6]
+    corners = np.concatenate([top_band[:, :6], top_band[:, 18:]], axis=1)
+    center = top_band[:, 6:18]
+    neck_taper = float(np.linalg.norm(corners.mean(axis=(0, 1)) - center.mean(axis=(0, 1)))) * 0.25
+    top_a_std = float(top_band[..., 1].std()) * 0.5
+    top_b_std = float(top_band[..., 2].std()) * 0.5
+    desc.extend([neck_taper, top_a_std, top_b_std])
+    return desc
+
