@@ -464,3 +464,91 @@ def parse_pack_folder(folder: str) -> dict:
         category = "Foods"
         pkg_type = normalize_packaging_type(raw, category=category)
     return {"raw_folder": raw, "category": category, "packaging_type": pkg_type}
+
+
+# Exact 46 valid (Category, PackType) combinations in gs://marketshare-datasets/pack_data/pack/train/
+VALID_CATEGORY_PACKAGING_TYPES: dict[str, tuple[str, ...]] = {
+    "Beverages": ("Carton", "Jar", "Pouch", "Tetrapack", "Tin"),
+    "DMT": ("Bottle", "Can", "Pump"),
+    "Foods": ("Bottle", "Carton", "Jar", "Pouch", "Tub"),
+    "HFD": ("Bottle", "Carton", "Jar", "Pouch", "Sachet", "Tetrapack", "Wrapper"),
+    "HHC": ("Bar", "Bottle", "Box", "Pouch"),
+    "Hair_Care": ("Bottle", "Jar", "Sachet", "Tube"),
+    "Laundry": ("Bar", "Bottle", "Can", "Carton", "Pouch", "Sachet"),
+    "Oral_Care": ("Bottle", "Can", "Sachet", "Tube"),
+    "PW": ("Bottle", "Can", "Pouch", "Wrapper"),
+    "Skin": ("Bottle", "Jar", "Sachet", "Tube"),
+}
+
+CATEGORY_PACK_PROJECTION_MAP: dict[tuple[str, str], str] = {
+    ("PW", "Bar"): "Wrapper",
+    ("PW", "Tube"): "Bottle",
+    ("PW", "Jar"): "Bottle",
+    ("PW", "Box"): "Wrapper",
+    ("PW", "Carton"): "Wrapper",
+    ("PW", "Sachet"): "Pouch",
+    ("DMT", "Roll_On"): "Bottle",
+    ("DMT", "Sachet"): "Bottle",
+    ("DMT", "Carton"): "Bottle",
+    ("Oral_Care", "Carton"): "Sachet",
+    ("Oral_Care", "Box"): "Sachet",
+    ("Oral_Care", "Wrapper"): "Sachet",
+    ("Oral_Care", "Pouch"): "Sachet",
+    ("Oral_Care", "Jar"): "Bottle",
+    ("Beverages", "Sachet"): "Pouch",
+    ("Beverages", "Bottle"): "Jar",
+    ("Beverages", "Wrapper"): "Pouch",
+    ("Beverages", "Tub"): "Jar",
+    ("Foods", "Wrapper"): "Pouch",
+    ("Foods", "Tube"): "Bottle",
+    ("Foods", "Sachet"): "Pouch",
+    ("Foods", "Can"): "Bottle",
+    ("Foods", "Tin"): "Jar",
+    ("Skin", "Pouch"): "Sachet",
+    ("Skin", "Pump"): "Bottle",
+    ("Skin", "Tub"): "Jar",
+    ("Skin", "Tin"): "Jar",
+    ("Skin", "Carton"): "Bottle",
+    ("Skin", "Box"): "Bottle",
+    ("Skin", "Bar"): "Jar",
+    ("Skin", "Wrapper"): "Sachet",
+    ("Skin", "Roll_On"): "Bottle",
+    ("HHC", "Tube"): "Bottle",
+    ("HHC", "Tub"): "Box",
+    ("HHC", "Can"): "Bottle",
+    ("HHC", "Wrapper"): "Pouch",
+    ("HHC", "Carton"): "Box",
+    ("HHC", "Jar"): "Bottle",
+    ("HHC", "Sachet"): "Pouch",
+    ("HFD", "Tub"): "Carton",
+    ("HFD", "Tin"): "Jar",
+    ("HFD", "Tube"): "Bottle",
+    ("Hair_Care", "Pouch"): "Sachet",
+    ("Hair_Care", "Carton"): "Bottle",
+    ("Hair_Care", "Box"): "Bottle",
+    ("Hair_Care", "Can"): "Bottle",
+    ("Hair_Care", "Pump"): "Bottle",
+    ("Hair_Care", "Tub"): "Jar",
+    ("Laundry", "Tub"): "Carton",
+    ("Laundry", "Box"): "Carton",
+    ("Laundry", "Wrapper"): "Bar",
+    ("Laundry", "Jar"): "Bottle",
+}
+
+
+def project_to_valid_category_pack(
+    category: str,
+    packaging_type: str,
+    crc_votes: dict[str, int] | None = None,
+) -> str:
+    """Project ``(category, packaging_type)`` onto the exact 46 ``Category__PackType`` domain from ``pack_data``."""
+    cat_canon = normalize_category_name(category)
+    valid_set = set(VALID_CATEGORY_PACKAGING_TYPES.get(cat_canon, ()))
+    if crc_votes:
+        valid_votes = {p: c for p, c in crc_votes.items() if p in valid_set and c > 0}
+        if valid_votes:
+            return sorted(valid_votes.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+    if not valid_set or packaging_type in valid_set:
+        return packaging_type
+    return CATEGORY_PACK_PROJECTION_MAP.get((cat_canon, packaging_type), VALID_CATEGORY_PACKAGING_TYPES[cat_canon][0])
+

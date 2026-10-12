@@ -65,6 +65,17 @@ def main() -> int:
         else:
             blob.reload()
             print(f"  [OK] Verified existing gs://marketshare-datasets/{blob_path} ({blob.size:,} bytes)")
+        for sp_name in ("train", "val", "test"):
+            local_jsonl = DATA_DIR / ds / f"{sp_name}.jsonl"
+            if local_jsonl.exists():
+                sp_blob = f"derived_manifests/{ds}/{sp_name}.jsonl"
+                b_ms.blob(sp_blob).upload_from_filename(str(local_jsonl))
+                print(f"  [OK] Uploaded gs://marketshare-datasets/{sp_blob} ({local_jsonl.stat().st_size:,} bytes)")
+
+    leg_tbl = DATA_DIR / "hul_golden" / "legacy_mapping_table.jsonl"
+    if leg_tbl.exists():
+        b_ms.blob("derived_manifests/hul_golden/legacy_mapping_table.jsonl").upload_from_filename(str(leg_tbl))
+        print(f"  [OK] Uploaded gs://marketshare-datasets/derived_manifests/hul_golden/legacy_mapping_table.jsonl ({leg_tbl.stat().st_size:,} bytes)")
 
     reg = DATA_DIR / "hul_golden" / "brand_sku_live_registry.json"
     if reg.exists():

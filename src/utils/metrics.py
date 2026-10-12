@@ -65,31 +65,144 @@ def match_identified(preds: Sequence[Box], pred_ids: Sequence, gts: Sequence[Box
             "pairs": m["pairs"], "found": m["tp"]}
 
 
+def _brand_matches(pred: dict, gt: dict) -> bool:
+    """Return True if ``pred`` brand matches ``gt["brand"]`` OR its legacy ``ABrand`` mapping."""
+    from utils.legacy_benchmark import resolve_legacy_brand_name
+    from utils.taxonomy.brands import canonicalize_brand_name
+
+    gt_b = str(gt.get("brand") or "").strip()
+    if not gt_b:
+        return False
+    gt_leg = str(
+        gt.get("legacy_brand_name")
+        or resolve_legacy_brand_name(gt_b, is_hul=gt.get("is_hul"))
+    ).strip()
+    gt_canon = canonicalize_brand_name(gt_b).lower()
+    valid_gt = {gt_b.lower(), gt_leg.lower(), gt_canon}
+
+    for k in ("brand", "legacy_brand_name", "product"):
+        raw_p = str(pred.get(k) or "").strip()
+        if not raw_p:
+            continue
+        # Only use `product` if it's a single brand token (no `__` separator unless `A_3_Roses`)
+        if k == "product" and "__" in raw_p:
+            raw_p = raw_p.split("__", 1)[0].strip()
+        if raw_p.lower() in valid_gt:
+            return True
+        if canonicalize_brand_name(raw_p).lower() in valid_gt:
+            return True
+    return False
+
+
 def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
-    """Granularity-aware and multi-modal packaging-aware field matcher."""
+    """Granularity-aware, legacy-alias-aware, and multi-modal packaging-aware field matcher."""
     if pred is None:
         return False
     p_val = pred.get(field)
     g_val = gt.get(field)
-    if p_val == g_val:
+    if p_val == g_val and p_val is not None:
         return True
+
+    if field == "brand":
+        return _brand_matches(pred, gt)
+
+    if field == "category":
+        from utils.legacy_benchmark import (
+            LEGACY_PACK_CATEGORY_TO_CANONICAL,
+            parse_legacy_pack_folder,
+        )
+        from utils.taxonomy.categories import PACK_CATEGORY_ALIAS, normalize_category_name
+
+        gt_cat = normalize_category_name(PACK_CATEGORY_ALIAS.get(str(g_val or ""), str(g_val or "")))
+        if p_val:
+            p_str = str(p_val).strip()
+            if "__" in p_str:
+                p_cat = parse_legacy_pack_folder(p_str)["category"]
+            else:
+                p_cat = LEGACY_PACK_CATEGORY_TO_CANONICAL.get(
+                    p_str.lower(), normalize_category_name(PACK_CATEGORY_ALIAS.get(p_str, p_str))
+                )
+            if p_cat == gt_cat:
+                return True
+        for k in ("legacy_pack_folder", "product"):
+            raw_lp = str(pred.get(k) or "").strip()
+            if "__" in raw_lp:
+                head = raw_lp.split("__", 1)[0]
+                if head.lower() in LEGACY_PACK_CATEGORY_TO_CANONICAL or head in PACK_CATEGORY_ALIAS:
+                    if parse_legacy_pack_folder(raw_lp)["category"] == gt_cat:
+                        return True
+        return False
+
     if field == "packaging_type":
-        allowed = gt.get("allowed_packaging_types") or []
-        if p_val and p_val != "Unknown" and p_val in allowed:
-            return True
+        from utils.legacy_benchmark import parse_legacy_pack_folder
+        from utils.taxonomy.packaging import (
+            normalize_packaging_type,
+            project_to_valid_category_pack,
+        )
+
+        gt_cat_str = str(gt.get("category") or "Foods")
+        allowed = set(gt.get("allowed_packaging_types") or [])
+        if g_val and g_val != "Unknown":
+            allowed.add(str(g_val))
+            allowed.add(project_to_valid_category_pack(gt_cat_str, str(g_val)))
+        candidates: list[str] = []
+        if p_val and p_val != "Unknown":
+            p_str = str(p_val).strip()
+            if "__" in p_str:
+                candidates.append(parse_legacy_pack_folder(p_str)["packaging_type"])
+            else:
+                candidates.append(p_str)
+                norm_p = normalize_packaging_type(p_str, category=gt_cat_str)
+                candidates.append(norm_p)
+                candidates.append(project_to_valid_category_pack(gt_cat_str, norm_p))
+        for k in ("legacy_pack_folder", "product"):
+            raw_lp = str(pred.get(k) or "").strip()
+            if "__" in raw_lp:
+                lp_pkg = parse_legacy_pack_folder(raw_lp)["packaging_type"]
+                candidates.append(lp_pkg)
+                candidates.append(project_to_valid_category_pack(gt_cat_str, lp_pkg))
+        return any(c != "Unknown" and c in allowed for c in candidates)
+
     if field in ("base_variant", "variant", "product"):
-        # If ground truth is a brand-only competitor record or catch-all `<Brand>__Others`
-        # and the model predicts a specific variant of the exact same brand & category, credit it.
+        from utils.legacy_benchmark import resolve_legacy_brand_name, resolve_legacy_pack_folder
+
         gt_bv = str(gt.get("base_variant") or "")
         gt_brand = str(gt.get("brand") or "")
-        pred_brand = str(pred.get("brand") or "")
+        gt_prod = str(gt.get("product") or "")
+        gt_leg = str(
+            gt.get("legacy_brand_name")
+            or (resolve_legacy_brand_name(gt_brand, is_hul=gt.get("is_hul")) if gt_brand else "")
+        )
+        # 1. Brand-level dataset (e.g. `hul_brands` where `product == brand` or `base_variant == brand`)
+        if gt_brand and g_val in (gt_brand, gt_leg) and _brand_matches(pred, gt):
+            return True
+        # 2. Pack-level dataset (e.g. `hul_packs` where `product` is `<Category>__<PackType>`)
+        gt_lpf = str(
+            gt.get("legacy_pack_folder")
+            or (
+                resolve_legacy_pack_folder(str(gt.get("category") or ""), str(gt.get("packaging_type") or ""))
+                if gt.get("category") and gt.get("packaging_type")
+                else ""
+            )
+        )
+        if gt_lpf and g_val == gt_lpf:
+            if _field_matches(pred, gt, "category") and _field_matches(pred, gt, "packaging_type"):
+                return True
+        # 3. Variant/Product string with legacy `ABrand__Variant` prefix
+        if p_val and g_val and "__" in str(p_val) and "__" in str(g_val):
+            p_b, p_v = str(p_val).split("__", 1)
+            g_b, g_v = str(g_val).split("__", 1)
+            if p_v.lower() == g_v.lower() and _brand_matches({"brand": p_b}, {"brand": g_b, "is_hul": gt.get("is_hul")}):
+                return True
+        # 4. If ground truth is a brand-only competitor record or catch-all `<Brand>__Others`
+        # and the model predicts a specific variant of the exact same brand & category, credit it.
         if (
             gt_brand
-            and pred_brand
-            and gt_brand.lower() == pred_brand.lower()
-            and pred.get("category") == gt.get("category")
+            and _brand_matches(pred, gt)
+            and _field_matches(pred, gt, "category")
             and (
                 gt_bv in ("Non_HUL_Competitor", "Brand_Level", f"{gt_brand}__Brand_Level_Only")
+                or gt_prod.endswith("__Brand_Level")
                 or bool(gt.get("is_catchall_variant"))
             )
         ):
@@ -101,7 +214,8 @@ def match_product(pred: dict | None, gt: dict, fields: Sequence[str]) -> dict:
     """Score one identified product photo (the labelled products set).
 
     ``correct`` says per field (product, brand, category, ...) whether the prediction agrees with the
-    ground truth (supporting multi-modal ``allowed_packaging_types`` and brand-only competitor GT).
+    ground truth (supporting ``legacy_brand_name``, ``legacy_pack_folder``, multi-modal
+    ``allowed_packaging_types``, and brand-only competitor GT).
     The exact product is the hit: TP if right; a wrong product is FP + FN; no
     answer is FN. So precision = right / answered, recall = right / all photos.
     """
@@ -112,7 +226,7 @@ def match_product(pred: dict | None, gt: dict, fields: Sequence[str]) -> dict:
 
 
 def hierarchical_field_scores(labels: Sequence[dict]) -> dict[str, float]:
-    """Compute 5-level hierarchical taxonomy accuracy and tree-consistent credit across evaluated boxes."""
+    """Compute 5-level hierarchical taxonomy accuracy, compound accuracy, and tree-consistent credit."""
     if not labels:
         return {
             "level1_is_hul": 0.0,
@@ -120,10 +234,13 @@ def hierarchical_field_scores(labels: Sequence[dict]) -> dict[str, float]:
             "level3_brand": 0.0,
             "level4_base_variant": 0.0,
             "level5_packaging_type": 0.0,
+            "compound_brand_category_pack": 0.0,
+            "compound_all_5_levels": 0.0,
             "hierarchical_tree_score": 0.0,
         }
     n = len(labels)
     l1 = l2 = l3 = l4 = l5 = 0
+    bcp = all5 = 0
     tree_sum = 0.0
     for item in labels:
         pred = item.get("pred")
@@ -140,6 +257,8 @@ def hierarchical_field_scores(labels: Sequence[dict]) -> dict[str, float]:
         l3 += int(ok3)
         l4 += int(ok4)
         l5 += int(ok5)
+        bcp += int(ok2 and ok3 and ok5)
+        all5 += int(ok1 and ok2 and ok3 and ok4 and ok5)
         # Tree-consistent credit: prefix depth along (is_hul -> category -> brand -> base_variant -> packaging_type)
         c1 = 1.0 if ok1 else 0.0
         c2 = 1.0 if (ok1 and ok2) else 0.0
@@ -153,6 +272,8 @@ def hierarchical_field_scores(labels: Sequence[dict]) -> dict[str, float]:
         "level3_brand": round(l3 / n, 4),
         "level4_base_variant": round(l4 / n, 4),
         "level5_packaging_type": round(l5 / n, 4),
+        "compound_brand_category_pack": round(bcp / n, 4),
+        "compound_all_5_levels": round(all5 / n, 4),
         "hierarchical_tree_score": round(tree_sum / n, 4),
     }
 

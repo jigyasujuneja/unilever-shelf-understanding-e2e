@@ -140,11 +140,13 @@ def sanitize_and_decollide_catalog(
     raw_classes: dict[str, dict[str, Any]],
     raw_gallery: dict[str, list[str]],
     raw_splits: dict[str, list[dict[str, Any]]],
+    pack_votes_by_cid: dict[str, dict[str, int]] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, list[str]], dict[str, list[dict[str, Any]]], dict[int, int]]:
     """Upgrade all catalog classes to 0 'Unknown' cat/pack and merge colliding brand-only umbrella IDs."""
     # 1. Identify all brands that have explicit Brand__Variant classes (excluding __Others and __Non_HUL_Competitor)
     brands_with_variants: dict[str, list[int]] = defaultdict(list)
     cleaned_meta: dict[int, dict[str, Any]] = {}
+    votes_map = pack_votes_by_cid or {}
 
     for cid_s, cm in sorted(raw_classes.items(), key=lambda kv: int(kv[0])):
         cid = int(cid_s)
@@ -152,9 +154,22 @@ def sanitize_and_decollide_catalog(
         br = str(cm.get("brand") or "")
         var = str(cm.get("variant") or br)
         bv = str(cm.get("base_variant") or var)
+        c_votes = votes_map.get(cid_s) or votes_map.get(str(cid))
 
-        if "__" in prod:
-            pv = parse_variant_folder("variant_gen", prod)
+        # Recover true raw GCS folder name when a previous build truncated `prod` (e.g. Himalaya__Oil)
+        g_uris = raw_gallery.get(cid_s, [])
+        src_tree = "variant_gen"
+        source_candidate = prod
+        if g_uris and "input_data/" in g_uris[0]:
+            u_parts = g_uris[0].split("/")
+            if any(p.startswith("variant") for p in u_parts) and len(u_parts) >= 2:
+                raw_folder = u_parts[-2]
+                src_tree = u_parts[-3] if u_parts[-3].startswith("variant") else u_parts[-4]
+                if "__" in raw_folder and not raw_folder.lower().endswith("__others"):
+                    source_candidate = raw_folder
+
+        if "__" in source_candidate:
+            pv = parse_variant_folder(src_tree, source_candidate, crc_votes=c_votes)
             br = pv["brand"]
             var = pv["variant"]
             bv = pv["base_variant"]
@@ -169,18 +184,27 @@ def sanitize_and_decollide_catalog(
             bv = br
             var = br
             cat = normalize_category_name(str(cm.get("category") or nb["category"]))
-            pkg = resolve_packaging_type(brand=br, variant=var, category=cat)
+            pkg = resolve_packaging_type(brand=br, variant=var, category=cat, crc_votes=c_votes)
             is_hul = bool(nb["is_hul"])
             has_promo = bool(cm.get("has_promo", False))
             promo_type = cm.get("promo_type")
 
         # Expand promo detection for Non-HUL multipacks/value packs/combos
-        if not has_promo and PROMO_TOKEN_RE.search(prod):
+        if not has_promo and PROMO_TOKEN_RE.search(source_candidate):
             has_promo = True
-            promo_type = PROMO_TOKEN_RE.search(prod).group(1).upper()
+            promo_type = PROMO_TOKEN_RE.search(source_candidate).group(1).upper()
 
         cat = normalize_category_name(cat)
-        pkg = normalize_packaging_type(None if pkg == "Unknown" else pkg, category=cat, brand=br, variant=var)
+        raw_visual_pkg = normalize_packaging_type(None if pkg == "Unknown" else pkg, category=cat, brand=br, variant=var)
+        from utils.taxonomy.packaging import project_to_valid_category_pack
+
+        pkg = project_to_valid_category_pack(cat, raw_visual_pkg, crc_votes=c_votes)
+        allowed_pkgs = sorted({
+            pkg,
+            raw_visual_pkg,
+            *(cm.get("allowed_packaging_types") or ()),
+            *(c_votes.keys() if c_votes else ()),
+        })
         is_catchall = bv.lower() in ("others", "other", "na", "unknown", "non_hul_competitor", br.lower(), "standard")
         if bv.lower() in ("others", "other", "na", "unknown"):
             bv = f"{br}_Classic"
@@ -196,12 +220,13 @@ def sanitize_and_decollide_catalog(
             "basepack_id": f"{cls_key}__{pkg}",
             "category": cat,
             "packaging_type": pkg,
+            "allowed_packaging_types": allowed_pkgs,
             "is_hul": is_hul,
             "has_promo": has_promo,
             "promo_type": promo_type,
             "_is_catchall": is_catchall,
         }
-        if "__" in cls_key and not is_catchall:
+        if "__" in cls_key and not is_catchall and br.lower() != "hdf":
             brands_with_variants[br.lower()].append(cid)
 
     # 2. Build remapping table: any brand-only, __Others catchall, or __Non_HUL_Competitor class whose brand
@@ -214,6 +239,9 @@ def sanitize_and_decollide_catalog(
         b_low = cm["brand"].lower()
         bv_low = cm["base_variant"].lower()
         cls_key = cm["product"]
+        if b_low == "hdf":
+            # Drop typo category-pack folder HDF__Carton (from pack_data/pack/train/HFD__Carton)
+            continue
         is_brand_only_or_synth = (
             (bv_low == b_low)
             or (bv_low == "non_hul_competitor")
@@ -222,10 +250,21 @@ def sanitize_and_decollide_catalog(
         if is_brand_only_or_synth and b_low in brands_with_variants:
             target_old = brands_with_variants[b_low][0]
             old_to_new_cid[cid] = target_old
+            merged_allowed = sorted({
+                *cleaned_meta[target_old].get("allowed_packaging_types", []),
+                *cm.get("allowed_packaging_types", []),
+            })
+            cleaned_meta[target_old]["allowed_packaging_types"] = merged_allowed
         elif bv_low == "non_hul_competitor":
             continue
         elif cls_key in seen_cls_key_to_cid:
-            old_to_new_cid[cid] = seen_cls_key_to_cid[cls_key]
+            target_old = seen_cls_key_to_cid[cls_key]
+            old_to_new_cid[cid] = target_old
+            merged_allowed = sorted({
+                *cleaned_meta[target_old].get("allowed_packaging_types", []),
+                *cm.get("allowed_packaging_types", []),
+            })
+            cleaned_meta[target_old]["allowed_packaging_types"] = merged_allowed
         else:
             seen_cls_key_to_cid[cls_key] = cid
             kept_old_cids.append(cid)
@@ -251,9 +290,15 @@ def sanitize_and_decollide_catalog(
     for old_cid, target_old in old_to_new_cid.items():
         if target_old in reindexed_map:
             final_cid_map[old_cid] = reindexed_map[target_old]
+            if old_cid != target_old:
+                new_idx_s = str(reindexed_map[target_old])
+                for u in raw_gallery.get(str(old_cid), []):
+                    if u not in new_gallery[new_idx_s]:
+                        new_gallery[new_idx_s].append(u)
 
     # 3. Filter and remap splits: exclude brand-only classes from val/test of hul_golden!
     new_splits: dict[str, list[dict[str, Any]]] = {"train": [], "val": [], "test": []}
+    train_uris_by_cid: dict[str, list[str]] = defaultdict(list)
     for sp_name, rows in raw_splits.items():
         for r in rows:
             prods = r.get("products") or []
@@ -268,11 +313,35 @@ def sanitize_and_decollide_catalog(
             # Never allow ambiguous catchall/brand-only items in evaluation splits (val/test)
             if sp_name in ("val", "test") and is_ambiguous:
                 continue
+            if sp_name == "train" and r.get("uri"):
+                train_uris_by_cid[str(new_p)].append(str(r["uri"]))
             new_splits[sp_name].append({
                 **r,
                 "products": [new_p],
                 "labels": [dict(cm)],
             })
+
+    # 4. Eliminate any gallery vs. val/test URI overlap while preserving >=1 gallery URI per class
+    eval_uris = {
+        str(r.get("uri") or "")
+        for sp_k in ("val", "test")
+        for r in new_splits.get(sp_k, [])
+        if r.get("uri")
+    }
+    for cid_s, g_list in list(new_gallery.items()):
+        non_eval = [u for u in g_list if u not in eval_uris]
+        if non_eval:
+            new_gallery[cid_s] = non_eval[:8]
+        else:
+            t_candidates = [u for u in train_uris_by_cid.get(cid_s, []) if u not in eval_uris]
+            if t_candidates:
+                new_gallery[cid_s] = t_candidates[:4]
+            else:
+                # Remove overlapping URI from val/test so gallery remains disjoint
+                keep_u = set(g_list[:1])
+                new_gallery[cid_s] = g_list[:1]
+                for sp_k in ("val", "test"):
+                    new_splits[sp_k] = [r for r in new_splits[sp_k] if str(r.get("uri") or "") not in keep_u]
 
     return new_classes, dict(new_gallery), new_splits, final_cid_map
 
@@ -336,8 +405,22 @@ def publish_clean_golden_manifests_to_gcs(
             "split_hashes": compute_split_hashes(hul_splits, v2_gallery),
         },
     }
-    b_ms.blob("derived_manifests/hul_golden/rpc.json").upload_from_string(
-        json.dumps(hul_golden_manifest, indent=2), content_type="application/json"
+    from utils.dataset import format_split_jsonl
+    from utils.legacy_benchmark import format_legacy_mapping_table_jsonl
+
+    def _upload_manifest_with_jsonl(bucket_obj: Any, ds_prefix: str, manifest_dict: dict[str, Any]) -> None:
+        bucket_obj.blob(f"{ds_prefix}/rpc.json").upload_from_string(
+            json.dumps(manifest_dict, indent=2), content_type="application/json"
+        )
+        for sp_key in ("train", "val", "test"):
+            rows = (manifest_dict.get("splits") or {}).get(sp_key) or []
+            bucket_obj.blob(f"{ds_prefix}/{sp_key}.jsonl").upload_from_string(
+                format_split_jsonl(rows), content_type="application/jsonl"
+            )
+
+    _upload_manifest_with_jsonl(b_ms, "derived_manifests/hul_golden", hul_golden_manifest)
+    b_ms.blob("derived_manifests/hul_golden/legacy_mapping_table.jsonl").upload_from_string(
+        format_legacy_mapping_table_jsonl(v2_classes), content_type="application/jsonl"
     )
 
     # --- 2. Publish hul_variants/rpc.json (pure Brand__Variant classes only, 0 brand-only or __Others) ---
@@ -365,9 +448,7 @@ def publish_clean_golden_manifests_to_gcs(
             "split_hashes": compute_split_hashes(var_splits, var_gallery),
         },
     }
-    b_ms.blob("derived_manifests/hul_variants/rpc.json").upload_from_string(
-        json.dumps(hul_variants_manifest, indent=2), content_type="application/json"
-    )
+    _upload_manifest_with_jsonl(b_ms, "derived_manifests/hul_variants", hul_variants_manifest)
 
     # --- 3. Publish hul_packs/rpc.json (packaging-focused stratified benchmark) ---
     pack_splits = {
@@ -391,9 +472,7 @@ def publish_clean_golden_manifests_to_gcs(
             "split_hashes": compute_split_hashes(pack_splits, v2_gallery),
         },
     }
-    b_ms.blob("derived_manifests/hul_packs/rpc.json").upload_from_string(
-        json.dumps(hul_packs_manifest, indent=2), content_type="application/json"
-    )
+    _upload_manifest_with_jsonl(b_ms, "derived_manifests/hul_packs", hul_packs_manifest)
 
     # --- 4. Publish hul_brands/rpc.json ---
     brands_splits = {
@@ -416,9 +495,7 @@ def publish_clean_golden_manifests_to_gcs(
             "split_hashes": compute_split_hashes(brands_splits, v2_gallery),
         },
     }
-    b_ms.blob("derived_manifests/hul_brands/rpc.json").upload_from_string(
-        json.dumps(hul_brands_manifest, indent=2), content_type="application/json"
-    )
+    _upload_manifest_with_jsonl(b_ms, "derived_manifests/hul_brands", hul_brands_manifest)
 
     # --- 5. Publish hul_promos/rpc.json with balanced HUL + Non-HUL rival representation ---
     raw_pr = json.loads(b_ms.blob("derived_manifests/hul_promos/rpc.json").download_as_bytes())
@@ -455,9 +532,7 @@ def publish_clean_golden_manifests_to_gcs(
             "split_hashes": compute_split_hashes(promo_splits, v2_gallery),
         },
     }
-    b_ms.blob("derived_manifests/hul_promos/rpc.json").upload_from_string(
-        json.dumps(hul_promos_manifest, indent=2), content_type="application/json"
-    )
+    _upload_manifest_with_jsonl(b_ms, "derived_manifests/hul_promos", hul_promos_manifest)
 
     # --- 6. Update hul_sessions/rpc.json with remapped, 0-Unknown catalog classes & labels ---
     raw_sess = json.loads(b_ms.blob("derived_manifests/hul_sessions/rpc.json").download_as_bytes())
@@ -487,13 +562,15 @@ def publish_clean_golden_manifests_to_gcs(
             "split_hashes": compute_split_hashes(sess_splits, v2_gallery),
         },
     }
-    b_ms.blob("derived_manifests/hul_sessions/rpc.json").upload_from_string(
-        json.dumps(hul_sessions_manifest, indent=2), content_type="application/json"
-    )
+    _upload_manifest_with_jsonl(b_ms, "derived_manifests/hul_sessions", hul_sessions_manifest)
 
     # --- 7. Rebuild gtmerch_golden/rpc.json with per-box verified labels (ZERO mono-SKU stamp, ZERO Dove fallback!) ---
     raw_gt = json.loads(b_ms.blob("derived_manifests/gtmerch_golden/rpc.json").download_as_bytes())
     verified_gt_splits = verify_gtmerch_shelf_boxes(client, raw_gt.get("splits", {}), v2_classes)
+    verified_gt_splits = {
+        sp: [r for r in rows if r.get("boxes") and r.get("products")]
+        for sp, rows in verified_gt_splits.items()
+    }
     gt_v2_manifest = {
         "source": f"gs://{gtmerch_bucket}/input_data/gtmerch_dataset_sku_asset (v2.2 Per-Box Verified Multi-Brand Shelf Benchmark)",
         "classes": v2_classes,
@@ -510,9 +587,8 @@ def publish_clean_golden_manifests_to_gcs(
             "split_hashes": compute_split_hashes(verified_gt_splits, v2_gallery),
         },
     }
-    gt_json_str = json.dumps(gt_v2_manifest, indent=2)
-    b_ms.blob("derived_manifests/gtmerch_golden/rpc.json").upload_from_string(gt_json_str, content_type="application/json")
-    b_gt.blob("derived_manifests/gtmerch_golden/rpc.json").upload_from_string(gt_json_str, content_type="application/json")
+    _upload_manifest_with_jsonl(b_ms, "derived_manifests/gtmerch_golden", gt_v2_manifest)
+    _upload_manifest_with_jsonl(b_gt, "derived_manifests/gtmerch_golden", gt_v2_manifest)
 
     # --- 8. Build & Publish ms_json_golden/rpc.json (Clean-Pixel Verified Store Shelves from gs://ms-json-dataset/gt/) ---
     ms_json_manifest = build_ms_json_golden_manifest(
@@ -524,6 +600,11 @@ def publish_clean_golden_manifests_to_gcs(
         max_shelves=90,
         seed=seed,
     )
+    for sp_key in ("train", "val", "test"):
+        rows = (ms_json_manifest.get("splits") or {}).get(sp_key) or []
+        b_ms.blob(f"derived_manifests/ms_json_golden/{sp_key}.jsonl").upload_from_string(
+            format_split_jsonl(rows), content_type="application/jsonl"
+        )
 
     summary = {
         "schema_version": "2.2.0",
