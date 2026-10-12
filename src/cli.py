@@ -152,6 +152,22 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--owner", default=None)
     s.add_argument("--dry-run", action="store_true", help="output Vertex AI CustomJob JSON payload without submitting")
 
+    s = sub.add_parser(
+        "legacy-eval",
+        help="export standalone legacy_mapping_table.jsonl or score joined legacy Brand (ABrand) + Pack (Category__PackType) + Variant predictions",
+    )
+    s.add_argument("-d", "--dataset", default="hul_golden", help="Golden dataset name (default: hul_golden)")
+    s.add_argument("--split", default="test", choices=dataset.SPLITS)
+    s.add_argument("--root", default=None, help="Override dataset root directory or GCS URI")
+    s.add_argument(
+        "--export-mapping",
+        default=None,
+        help="Write standalone legacy_mapping_table.jsonl to this local path",
+    )
+    s.add_argument("--brand-preds", default=None, help="JSON/JSONL file mapping image_id -> raw legacy brand (e.g. ADove)")
+    s.add_argument("--pack-preds", default=None, help="JSON/JSONL file mapping image_id -> raw legacy Category__PackType (e.g. Hair_Care__Bottle)")
+    s.add_argument("--variant-preds", default=None, help="JSON/JSONL file mapping image_id -> raw legacy variant (e.g. ADove__Hair_Fall_Rescue)")
+
     a = p.parse_args(argv)
 
     if a.cmd == "download":
@@ -340,6 +356,49 @@ def main(argv: list[str] | None = None) -> int:
             for m in target_models
         ]
         print(json.dumps(results[0] if len(results) == 1 else results, indent=2))
+    elif a.cmd == "legacy-eval":
+        import json
+
+        from utils.legacy_benchmark import (
+            evaluate_joined_legacy_models,
+            write_legacy_mapping_table_jsonl,
+        )
+
+        ds_root = a.root or dataset.data_root(a.dataset)
+        if a.export_mapping:
+            mf = dataset._rpc_json(ds_root)
+            n_rows = write_legacy_mapping_table_jsonl(mf.get("classes", {}), a.export_mapping)
+            print(f"Exported {n_rows} legacy mapping rows -> {a.export_mapping}")
+        if a.brand_preds or a.pack_preds or a.variant_preds:
+            def _load_pred_map(path_str: str | None, field_hint: str) -> dict[str, str]:
+                if not path_str:
+                    return {}
+                raw_txt = Path(path_str).read_text().strip()
+                try:
+                    parsed = json.loads(raw_txt)
+                    if isinstance(parsed, dict):
+                        return {str(k): str(v) for k, v in parsed.items()}
+                except Exception:
+                    pass
+                out_map: dict[str, str] = {}
+                for line in raw_txt.splitlines():
+                    if not line.strip():
+                        continue
+                    row_obj = json.loads(line)
+                    img_k = str(row_obj.get("image") or row_obj.get("image_id") or "")
+                    val_s = str(row_obj.get(field_hint) or row_obj.get("prediction") or row_obj.get("label") or "")
+                    if img_k:
+                        out_map[img_k] = val_s
+                return out_map
+
+            samples = list(dataset.load_rpc(a.split, ds_root).values())
+            report = evaluate_joined_legacy_models(
+                samples=samples,
+                brand_preds=_load_pred_map(a.brand_preds, "brand"),
+                pack_preds=_load_pred_map(a.pack_preds, "packaging_type"),
+                variant_preds=_load_pred_map(a.variant_preds, "base_variant"),
+            )
+            print(json.dumps({k: v for k, v in report.items() if k != "labels"}, indent=2))
     return 0
 
 
