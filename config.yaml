@@ -11,6 +11,14 @@ gcp:
   shelves: gs://ul-fs-s-sandbx-16-prj-shelf-images/shelves        # HoloSelecta shelves + gallery (shelf-bench shelves)
   tuning: gs://ul-fs-s-sandbx-16-prj-shelf-images/tuning          # SFT training/val jsonl + sheets (shelf-bench tune)
   marketshare: gs://marketshare-datasets                          # pack_data, brand_data, input_data SFT datasets
+  hul_golden: gs://marketshare-datasets/derived_manifests/hul_golden          # v2.2 HUL + Non-HUL Golden crop manifest
+  hul_variants: gs://marketshare-datasets/derived_manifests/hul_variants      # v2.2 Variant-only crop manifest
+  hul_packs: gs://marketshare-datasets/derived_manifests/hul_packs            # v2.2 Packaging-form crop manifest
+  gtmerch_golden: gs://marketshare-datasets/derived_manifests/gtmerch_golden  # v2.2 GTMerch 2-class shelf + asset manifest
+  ms_json_golden: gs://marketshare-datasets/derived_manifests/ms_json_golden  # v2.2 Verified clean LabelMe store shelf manifest
+  hul_promos: gs://marketshare-datasets/derived_manifests/hul_promos          # v2.2 Promo & Price callout Golden subset
+  hul_brands: gs://marketshare-datasets/derived_manifests/hul_brands          # v2.2 50/50 Stratified Brand & M&A benchmark
+  hul_sessions: gs://marketshare-datasets/derived_manifests/hul_sessions      # v2.2 Multi-facing store session shelf strips
   results: gs://ul-fs-s-sandbx-16-prj-shelf-images/results        # run outputs from Cloud Run
 
 # Cloud Run job that executes benchmark runs (shelf-bench cloud-run). One task per
@@ -83,6 +91,37 @@ cloudsql:
 openjev:
   base_url: ""           # or set $OPENJEV_BASE_URL (e.g. http://localhost:8000)
   model: openjev-latest  # e.g. openjev-latest or google/diffusiongemma-26B-A4B-it
+
+# Hugging Face open-weight models benchmarked via Vertex AI Custom Job GPU workers (shelf-bench hf-gpu-job):
+#   * Cloudflare/clef-flash (Qwen3.5-9B, Apache 2.0) -> 1x NVIDIA_L4 (g2-standard-12)
+#   * Cloudflare/clef-27b (Qwen3.5-27B, Apache 2.0) -> 1x NVIDIA_A100_80GB (a2-ultragpu-1g)
+#   * Contrastive-LM/CLM-v0.1-8B (Qwen3-VL-8B, Apache 2.0) -> 1x NVIDIA_L4 (g2-standard-12)
+hf_gpu_models:
+  Cloudflare/clef-flash:
+    hf_repo: Cloudflare/clef-flash
+    base_arch: Qwen/Qwen3.5-9B
+    machine_type: g2-standard-12
+    accelerator_type: NVIDIA_L4
+    accelerator_count: 1
+    serving_container: us-docker.pkg.dev/vertex-ai/vertex-vision-model-garden-dockers/pytorch-vllm-serve:v0.20.0
+    base_url: ""         # set automatically inside Vertex AI Custom Job or via $HF_VLLM_BASE_URL
+  Cloudflare/clef-27b:
+    hf_repo: Cloudflare/clef-27b
+    base_arch: Qwen/Qwen3.5-27B
+    machine_type: g2-standard-48
+    accelerator_type: NVIDIA_L4
+    accelerator_count: 4
+    serving_container: us-docker.pkg.dev/vertex-ai/vertex-vision-model-garden-dockers/pytorch-vllm-serve:v0.20.0
+    base_url: ""
+  Contrastive-LM/CLM-v0.1-8B:
+    hf_repo: Contrastive-LM/CLM-v0.1-8B
+    base_arch: Qwen/Qwen3-VL-8B-Instruct
+    machine_type: g2-standard-12
+    accelerator_type: NVIDIA_L4
+    accelerator_count: 1
+    serving_container: us-docker.pkg.dev/vertex-ai/vertex-vision-model-garden-dockers/pytorch-vllm-serve:v0.20.0
+    base_url: ""
+
 
 # Prices are NOT configured here: every run fetches current list prices from GCP's Cloud
 # Billing Catalog API (Gemini SKUs per traffic type, Cloud Run, Cloud Storage) and GCP's own
