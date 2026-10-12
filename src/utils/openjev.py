@@ -220,22 +220,6 @@ def resolve_jev_choice(
 
     conf = float(slot.get("confidence", 1.0))
     probs: dict[int, float] = {int(k): float(v) for k, v in (slot.get("probabilities") or {}).items()}
-    meta: dict[str, Any] = {
-        "jev_confidence": conf,
-        "jev_probabilities": {str(k): round(v, 4) for k, v in probs.items()},
-        "jev_top2_margin": slot.get("top2_margin"),
-    }
-
-    # Confident System-1 read: accept choice (subject to energy veto) or handle abstention (0)
-    if conf >= min_confidence:
-        if isinstance(raw_choice, int) and 1 <= raw_choice <= k_len:
-            return _apply_energy_veto(raw_choice, conf, {**meta, "mode": "jev_confident"})
-        if raw_choice == 0:
-            if not allow_abstain and s1 >= closed_set_floor:
-                return top[0][1], conf, {**meta, "mode": "closed_set_top1_fallback", "choice": 0}
-            return None, conf, {**meta, "mode": "jev_confident_abstain"}
-
-    # High-entropy / uncertain slot: fuse VLM token distribution with visual similarity prior
     max_cos = max(s for s, _, _ in top)
     vis_unnorm = {
         idx + 1: math.exp((cos - max_cos) / max(1e-4, cosine_temp))
@@ -243,13 +227,36 @@ def resolve_jev_choice(
     }
     vis_denom = sum(vis_unnorm.values()) or 1.0
     vis_probs = {k: v / vis_denom for k, v in vis_unnorm.items()}
+    c1_conf = jev_entropy_confidence(list(vis_probs.values()), n_options=max(2, k_len))
+    w2_poe = round(conf / max(1e-6, c1_conf + conf), 4)
 
+    meta: dict[str, Any] = {
+        "jev_confidence": conf,
+        "c1_confidence": c1_conf,
+        "c2_confidence": conf,
+        "poe_weight_w2": w2_poe,
+        "jev_probabilities": {str(k): round(v, 4) for k, v in probs.items()},
+        "jev_top2_margin": slot.get("top2_margin"),
+    }
+
+    # Confident System-2 read when C_2 >= min_confidence and System 2 certainty dominates System 1:
+    if conf >= min_confidence and w2_poe >= 0.45:
+        if isinstance(raw_choice, int) and 1 <= raw_choice <= k_len:
+            return _apply_energy_veto(raw_choice, conf, {**meta, "mode": "jev_confident"})
+        if raw_choice == 0:
+            if not allow_abstain and s1 >= closed_set_floor:
+                return top[0][1], conf, {**meta, "mode": "closed_set_top1_fallback", "choice": 0}
+            return None, conf, {**meta, "mode": "jev_confident_abstain"}
+
+    # Continuous Entropy-Weighted Bayesian Product-of-Experts (PoE) fusion:
+    # log P_joint(k) = w2 * log P_2(k) + (1 - w2) * log P_1(k)
+    eff_alpha = w2_poe if fusion_alpha == 0.65 else fusion_alpha
     p_abstain = probs.get(0, 0.0)
     fused_scores: dict[int, float] = {}
     for k in range(1, k_len + 1):
         p_jev = max(probs.get(k, 1e-3), 1e-3)
         p_vis = max(vis_probs.get(k, 1e-3), 1e-3)
-        fused_scores[k] = (p_jev ** fusion_alpha) * (p_vis ** (1.0 - fusion_alpha))
+        fused_scores[k] = (p_jev ** eff_alpha) * (p_vis ** (1.0 - eff_alpha))
 
     best_k = max(fused_scores, key=lambda k: fused_scores[k])
     best_jev_p = probs.get(best_k, 0.0)

@@ -25,50 +25,31 @@ def unit(v: list[float]) -> list[float]:
 
 
 def scoped_catalog_for_ctx(dataset_name: str, ctx: Context) -> dict[int, dict]:
-    """Return catalog scoped to max_skus using label-blind brand-stratified sampling (unless SHELF_BENCH_DEV_SCOPED_GALLERY=1)."""
+    """Return full catalog by default, or label-blind brand-stratified subset when SHELF_BENCH_MAX_GALLERY_SKUS > 0."""
     import os
 
     cat = dataset.catalog(name=dataset_name)
-    max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "240"))
-    if len(cat) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
-        if os.environ.get("SHELF_BENCH_DEV_SCOPED_GALLERY", "1") == "1":
-            eval_samples = getattr(ctx, "eval_samples", None) or []
-            active_pids: set[int] = set()
-            for s in eval_samples:
-                for lbl in getattr(s, "labels", []) or []:
-                    if lbl and lbl.get("sku_id") is not None:
-                        active_pids.add(int(lbl["sku_id"]))
-            active_brands = {str((cat.get(pid) or {}).get("brand") or "") for pid in active_pids}
-            sister_pids = sorted(
-                pid for pid in cat
-                if pid not in active_pids and str((cat.get(pid) or {}).get("brand") or "") in active_brands
-            )
-            other_pids = sorted(pid for pid in cat if pid not in active_pids and pid not in sister_pids)
-            chosen_pids = set(active_pids)
-            for pid in sister_pids + other_pids:
-                if len(chosen_pids) >= max(len(active_pids), max_skus):
-                    break
-                chosen_pids.add(pid)
-        else:
-            by_brand: dict[str, list[int]] = {}
-            for pid in sorted(cat):
-                b = str((cat.get(pid) or {}).get("brand") or f"brand_{pid}")
-                by_brand.setdefault(b, []).append(pid)
-            chosen_pids = set()
-            brand_keys = sorted(by_brand)
-            round_idx = 0
-            while len(chosen_pids) < max_skus and brand_keys:
-                added_any = False
-                for b in brand_keys:
-                    pids_b = by_brand[b]
-                    if round_idx < len(pids_b):
-                        chosen_pids.add(pids_b[round_idx])
-                        added_any = True
-                        if len(chosen_pids) >= max_skus:
-                            break
-                if not added_any:
-                    break
-                round_idx += 1
+    max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "0"))
+    if max_skus > 0 and len(cat) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
+        by_brand: dict[str, list[int]] = {}
+        for pid in sorted(cat):
+            b = str((cat.get(pid) or {}).get("brand") or f"brand_{pid}")
+            by_brand.setdefault(b, []).append(pid)
+        chosen_pids: set[int] = set()
+        brand_keys = sorted(by_brand)
+        round_idx = 0
+        while len(chosen_pids) < max_skus and brand_keys:
+            added_any = False
+            for b in brand_keys:
+                pids_b = by_brand[b]
+                if round_idx < len(pids_b):
+                    chosen_pids.add(pids_b[round_idx])
+                    added_any = True
+                    if len(chosen_pids) >= max_skus:
+                        break
+            if not added_any:
+                break
+            round_idx += 1
         cat = {pid: p for pid, p in cat.items() if pid in chosen_pids}
     return cat
 

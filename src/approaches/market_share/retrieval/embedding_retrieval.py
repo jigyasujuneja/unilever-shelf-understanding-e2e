@@ -53,48 +53,29 @@ class EmbeddingRetrieval(Approach):
         self.emb = VertexEmbeddings(config, model=emb_model)
         root = dataset.data_root(self.dataset)
         gallery = dataset.rpc_gallery(root)
-        max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "240"))
-        if len(gallery) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
+        max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "0"))
+        if max_skus > 0 and len(gallery) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
             cat = dataset.catalog(root, self.dataset)
-            if os.environ.get("SHELF_BENCH_DEV_SCOPED_GALLERY", "1") == "1":
-                eval_samples = getattr(ctx, "eval_samples", None) or []
-                active_pids: set[int] = set()
-                for s in eval_samples:
-                    for lbl in getattr(s, "labels", []) or []:
-                        if lbl and lbl.get("sku_id") is not None:
-                            active_pids.add(int(lbl["sku_id"]))
-                active_brands = {str((cat.get(pid) or {}).get("brand") or "") for pid in active_pids}
-                sister_pids = sorted(
-                    pid for pid in gallery
-                    if pid not in active_pids and str((cat.get(pid) or {}).get("brand") or "") in active_brands
-                )
-                other_pids = sorted(pid for pid in gallery if pid not in active_pids and pid not in sister_pids)
-                chosen_pids = set(active_pids)
-                for pid in sister_pids + other_pids:
-                    if len(chosen_pids) >= max(len(active_pids), max_skus):
-                        break
-                    chosen_pids.add(pid)
-            else:
-                # Label-blind stratified gallery selection across all catalog brands (never inspects eval_samples)
-                by_brand: dict[str, list[int]] = {}
-                for pid in sorted(gallery):
-                    b = str((cat.get(pid) or {}).get("brand") or f"brand_{pid}")
-                    by_brand.setdefault(b, []).append(pid)
-                chosen_pids: set[int] = set()
-                brand_keys = sorted(by_brand)
-                round_idx = 0
-                while len(chosen_pids) < max_skus and brand_keys:
-                    added_any = False
-                    for b in brand_keys:
-                        pids_b = by_brand[b]
-                        if round_idx < len(pids_b):
-                            chosen_pids.add(pids_b[round_idx])
-                            added_any = True
-                            if len(chosen_pids) >= max_skus:
-                                break
-                    if not added_any:
-                        break
-                    round_idx += 1
+            # Label-blind stratified gallery selection across all catalog brands (zero eval_samples access)
+            by_brand: dict[str, list[int]] = {}
+            for pid in sorted(gallery):
+                b = str((cat.get(pid) or {}).get("brand") or f"brand_{pid}")
+                by_brand.setdefault(b, []).append(pid)
+            chosen_pids: set[int] = set()
+            brand_keys = sorted(by_brand)
+            round_idx = 0
+            while len(chosen_pids) < max_skus and brand_keys:
+                added_any = False
+                for b in brand_keys:
+                    pids_b = by_brand[b]
+                    if round_idx < len(pids_b):
+                        chosen_pids.add(pids_b[round_idx])
+                        added_any = True
+                        if len(chosen_pids) >= max_skus:
+                            break
+                if not added_any:
+                    break
+                round_idx += 1
             gallery = {pid: paths for pid, paths in gallery.items() if pid in chosen_pids}
 
         refs = [(pid, path) for pid, paths in gallery.items() for path in paths]

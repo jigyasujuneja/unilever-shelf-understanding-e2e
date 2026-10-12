@@ -348,12 +348,16 @@ def run_12_gate_qc(
     g10_violations: list[str] = []
     onnx_src = Path("src/approaches/market_share/detection/onnx_yolo_detector.py").read_text()
     runner_src = Path("src/runner.py").read_text()
+    emb_ret_src = Path("src/approaches/market_share/retrieval/embedding_retrieval.py").read_text()
+    emb_txt_src = Path("src/approaches/market_share/classification/embedding_text_match.py").read_text()
     if "_scope_to_bay_or_strip" in onnx_src:
         g10_violations.append("onnx_yolo_detector.py still contains _scope_to_bay_or_strip oracle")
     if "image.width % 220 == 0" in onnx_src:
         g10_violations.append("onnx_yolo_detector.py still contains hardcoded 220px grid division oracle")
     if 'if task == "planogram_compliance"' not in runner_src:
         g10_violations.append("runner.py does not restrict sample.asset_boxes pre-seeding to planogram_compliance")
+    if "setup_ctx.eval_samples" in runner_src or "getattr(ctx, \"eval_samples\"" in emb_ret_src or "getattr(ctx, \"eval_samples\"" in emb_txt_src:
+        g10_violations.append("setup() inspects eval_samples (candidate-pool leakage)")
     gates.append({
         "gate_id": 10,
         "name": "detector_deoracle_integrity",

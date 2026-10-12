@@ -187,6 +187,33 @@ class CoarseJevLaya(JevLayaHybrid):
             else:
                 uncertain.append(idx)
 
+        eff_smooth_cos = float(getattr(self, "smooth_cosine", SMOOTH_COSINE))
+        asset_bxs = getattr(ctx, "detected_asset_boxes", None)
+
+        # Pre-System-2 1D Shelf-Row Spatial Context: resolve [P, None, P] interior facings in System 1 (0 VLM calls)
+        if uncertain and len(boxes) >= 3:
+            top2_shortlists = [{pid for _, pid, _ in rl[:2]} for rl in ranked_lists]
+            ids, pre_smoothed = smooth_shelf_rows(
+                boxes,
+                ids,
+                vecs,
+                top2_shortlists,
+                confidences=confidences,
+                max_smooth_confidence=0.0,
+                asset_boxes=asset_bxs,
+                smooth_cosine=eff_smooth_cos,
+            )
+            if pre_smoothed:
+                resolved_idx = {int(item["box_index"]) for item in pre_smoothed}
+                for r_i in resolved_idx:
+                    confidences[r_i] = 0.85
+                uncertain = [u for u in uncertain if u not in resolved_idx]
+                ctx.trace.step(
+                    "System-1 1D Shelf-Row Spatial Prior",
+                    f"{len(pre_smoothed)} interior facing(s) [P, x_i, P] resolved before System-2 escalation (cos >= {eff_smooth_cos:.3f})",
+                    info={"pre_smoothed": pre_smoothed, "smooth_cosine": eff_smooth_cos},
+                )
+
         if uncertain:
             clusters = cluster_uncertain_crops(uncertain, boxes, vecs, top_ids)
             medoids = [
@@ -234,12 +261,13 @@ class CoarseJevLaya(JevLayaHybrid):
             shortlists,
             confidences=confidences,
             max_smooth_confidence=self.smooth_max_confidence,
-            asset_boxes=getattr(ctx, "detected_asset_boxes", None),
+            asset_boxes=asset_bxs,
+            smooth_cosine=eff_smooth_cos,
         )
         if smoothed:
             ctx.trace.step(
                 "Shelf-row smoothing",
                 f"{len(smoothed)} occluded/low-confidence facing(s) recovered via flanking row context",
-                info={"smoothed": smoothed},
+                info={"smoothed": smoothed, "smooth_cosine": eff_smooth_cos},
             )
         return ids

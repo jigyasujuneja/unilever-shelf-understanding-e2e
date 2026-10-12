@@ -134,6 +134,7 @@ def smooth_shelf_rows(
     confidences: list[float] | None = None,
     max_smooth_confidence: float = SMOOTH_MAX_CONFIDENCE,
     asset_boxes: list[Box] | None = None,
+    smooth_cosine: float = SMOOTH_COSINE,
 ) -> tuple[list[int | None], list[dict]]:
     """Visually-gated 1D Markov shelf-row smoothing: [P, None/?, P] -> [P, P, P].
 
@@ -193,7 +194,7 @@ def smooth_shelf_rows(
                 continue
             cos_l = _dot(vecs[mid], vecs[left])
             cos_r = _dot(vecs[mid], vecs[right])
-            if cos_l >= SMOOTH_COSINE and cos_r >= SMOOTH_COSINE and pid in shortlists[mid]:
+            if cos_l >= smooth_cosine and cos_r >= smooth_cosine and pid in shortlists[mid]:
                 prev = out[mid]
                 out[mid] = pid
                 smoothed.append({
