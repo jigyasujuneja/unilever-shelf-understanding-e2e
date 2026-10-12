@@ -30,6 +30,9 @@ SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "src
 
 
 def _session() -> AuthorizedSession:
+    from utils.llm import ensure_gcloud_auth_fallback
+
+    ensure_gcloud_auth_fallback()
     creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     return AuthorizedSession(creds)
 
@@ -79,6 +82,8 @@ def build_image(s: AuthorizedSession, project: str, region: str, log=print) -> s
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for name in SOURCE_FILES:
+            if not (ROOT / name).exists():
+                continue
             tar.add(ROOT / name, arcname=name,
                     filter=lambda t: None if "__pycache__" in t.name or ".egg-info" in t.name else t)
     bucket, obj = f"run-sources-{project}-{region}", f"shelf-bench/source-{tag}.tgz"
@@ -228,6 +233,9 @@ def deploy_ui(log=print) -> str:
     gcp, cr = cfg["gcp"], cfg.get("cloud_run", {})
     project, region = gcp["project"], gcp["region"]
     name = cr.get("service", "shelf-bench-ui")
+    if gcp.get("results") and Path(runner.RESULTS_DIR).is_dir() and any(Path(runner.RESULTS_DIR).glob("*/summary.json")):
+        pushed = runner.push(gcp["results"], overwrite=True, prune_remote=False)
+        log(f"Pushed {pushed} local run(s) + experiments_registry.json + qc_audit_report.json to {gcp['results']}")
     s = _session()
     image = build_image(s, project, region, log)
     base = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services"
@@ -238,10 +246,10 @@ def deploy_ui(log=print) -> str:
         "resources": {"limits": {"cpu": "1", "memory": "2Gi"}},
     }]}}
     exists = s.get(f"{base}/{name}").status_code == 200
-    op = _ok(s.patch(f"{base}/{name}", json=body) if exists
+    op = _ok(s.patch(f"{base}/{name}?updateMask=template", json=body) if exists
              else s.post(f"{base}?serviceId={name}", json=body))
     uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
-    log(f"Deployed {name}: {uri} (private)\nOpen it: make ui-proxy   (http://localhost:8083)")
+    log(f"Deployed {name}: {uri} (Direct IAP enabled)")
     return uri
 
 
@@ -304,3 +312,116 @@ def proxy_ui(port: int = 8083, host: str = "127.0.0.1", log=print) -> None:
     log(f"Proxying {target} -> http://{host}:{port}  (Ctrl-C to stop)")
     with ThreadingHTTPServer((host, port), Handler) as httpd:
         httpd.serve_forever()
+
+
+def submit_hf_gpu_custom_job(
+    approaches: list[str],
+    hf_model: str = "Cloudflare/clef-flash",
+    dataset_name: str = "hul_golden",
+    splits: tuple[str, ...] = ("val", "test"),
+    limit: int = 1000,
+    seed: int = 0,
+    workers: int = 8,
+    owner: str = "jjuneja",
+    *,
+    dry_run: bool = False,
+    log=print,
+) -> dict:
+    """Build or submit a Vertex AI GPU CustomJob that loads a Hugging Face open-weight checkpoint
+    (``Cloudflare/clef-flash``, ``Cloudflare/clef-27b``, or ``Contrastive-LM/CLM-v0.1-8B``) via vLLM
+    and runs ``shelf-bench run`` across ``val`` and ``test`` splits (default ``limit=1000`` per split).
+    """
+    cfg = load_config()
+    gcp = cfg.get("gcp", {})
+    project = gcp.get("project", "ul-fs-s-sandbx-16-prj")
+    region = gcp.get("region", "us-central1")
+    results_gcs = gcp.get("results", "gs://ul-fs-s-sandbx-16-prj-shelf-images/results")
+
+    hf_models = cfg.get("hf_gpu_models") or {}
+    spec = hf_models.get(hf_model) or {
+        "hf_repo": hf_model,
+        "base_arch": "Qwen/Qwen3.5-9B",
+        "machine_type": "g2-standard-12",
+        "accelerator_type": "NVIDIA_L4",
+        "accelerator_count": 1,
+        "serving_container": "us-docker.pkg.dev/vertex-ai/vertex-vision-model-garden-dockers/pytorch-vllm-serve:v0.20.0",
+    }
+    hf_repo = str(spec.get("hf_repo") or hf_model)
+    safe_slug = hf_repo.lower().replace("/", "-").replace(".", "-")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    display_name = f"shelf-bench-hf-{safe_slug}-{dataset_name}-{ts}"
+    src_bucket = dataset._split_gs(results_gcs)[0]
+    src_obj = "source/source-hf-gpu.tgz"
+
+    split_cmds = [
+        f"PYTHONPATH=src ~/.local/bin/uv run --python 3.12 python -m cli run -a {' '.join(approaches)} -m {hf_repo} -d {dataset_name} "
+        f"--split {sp} --limit {limit} --seed {seed} --workers {workers} --owner {owner} "
+        f"--results {results_gcs}"
+        for sp in splits
+    ]
+    accel_count = int(spec.get("accelerator_count", 1))
+    tp_flag = f" --tensor-parallel-size {accel_count}" if accel_count > 1 else ""
+    boot_script = (
+        "mkdir -p /tmp/shelf-bench && cd /tmp/shelf-bench\n"
+        "curl -LsSf https://astral.sh/uv/install.sh | sh\n"
+        "export PATH=\"$HOME/.local/bin:$PATH\"\n"
+        f"(vllm serve {hf_repo} --host 127.0.0.1 --port 8000 --max-model-len 4096 --gpu-memory-utilization 0.90 --enforce-eager --max-logprobs 16 --trust-remote-code{tp_flag} "
+        f"|| python3 -m vllm.entrypoints.openai.api_server --model {hf_repo} --host 127.0.0.1 --port 8000 --max-model-len 4096 --gpu-memory-utilization 0.90 --enforce-eager --max-logprobs 16 --trust-remote-code{tp_flag}) &\n"
+        f"~/.local/bin/uv run --python 3.12 --with google-cloud-storage python -c \"from google.cloud import storage; storage.Client().bucket('{src_bucket}').blob('{src_obj}').download_to_filename('src.tgz')\"\n"
+        "tar -xzf src.tgz\n"
+        "~/.local/bin/uv sync --python 3.12\n"
+        "for i in $(seq 1 90); do curl -sf http://127.0.0.1:8000/health && break || sleep 5; done\n"
+        "export HF_VLLM_BASE_URL=http://127.0.0.1:8000/v1\n"
+        + "\n".join(split_cmds)
+    )
+
+    job_payload = {
+        "displayName": display_name,
+        "jobSpec": {
+            "workerPoolSpecs": [
+                {
+                    "machineSpec": {
+                        "machineType": spec.get("machine_type", "g2-standard-12"),
+                        "acceleratorType": spec.get("accelerator_type", "NVIDIA_L4"),
+                        "acceleratorCount": int(spec.get("accelerator_count", 1)),
+                    },
+                    "replicaCount": 1,
+                    "containerSpec": {
+                        "imageUri": spec.get(
+                            "serving_container",
+                            "us-docker.pkg.dev/vertex-ai/vertex-vision-model-garden-dockers/pytorch-vllm-serve:v0.20.0",
+                        ),
+                        "command": ["bash", "-lc"],
+                        "args": [boot_script],
+                        "env": [
+                            {"name": "HF_HUB_ENABLE_HF_TRANSFER", "value": "1"},
+                            {"name": "HF_VLLM_BASE_URL", "value": "http://127.0.0.1:8000/v1"},
+                        ],
+                    },
+                }
+            ]
+        },
+    }
+
+    url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/customJobs"
+    if dry_run:
+        log(f"[DRY-RUN] Vertex AI GPU CustomJob spec prepared for {hf_repo} on {dataset_name} ({splits}, limit={limit}):")
+        return {"status": "DRY_RUN", "endpoint_url": url, "custom_job": job_payload}
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name in SOURCE_FILES:
+            if not (ROOT / name).exists():
+                continue
+            tar.add(
+                ROOT / name,
+                arcname=name,
+                filter=lambda t: None if "__pycache__" in t.name or ".egg-info" in t.name else t,
+            )
+    dataset._gcs().bucket(src_bucket).blob(src_obj).upload_from_string(buf.getvalue())
+
+    s = _session()
+    resp = _ok(s.post(url, json=job_payload))
+    log(f"Submitted Vertex AI GPU CustomJob: {resp.get('name')} ({display_name})")
+    return {"status": "SUBMITTED", "endpoint_url": url, "response": resp, "custom_job": job_payload}
+
