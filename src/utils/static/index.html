@@ -3,13 +3,37 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Shelf Benchmark Leaderboard</title>
+  <title>Unilever Shelf Intelligence &bull; Engineering Workbench</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <header>
-    <a href="#/" class="brand">Shelf Benchmark Leaderboard</a>
-    <span class="muted">detection on SKU-110K &middot; product classification / retrieval on labelled product photos</span>
+  <header class="m3-header">
+    <div class="m3-header-inner">
+      <a href="#/" class="brand-cluster">
+        <div class="brand-logo">UL</div>
+        <div>
+          <div class="brand-eyebrow">GOOGLE CLOUD VERTEX AI &bull; ENGINEERING WORKBENCH</div>
+          <div class="brand">Shelf Intelligence Benchmark</div>
+        </div>
+      </a>
+
+      <nav class="top-nav">
+        <a href="#/board/market_share" data-nav="board" class="nav-link">Leaderboard</a>
+        <a href="#/performance" data-nav="performance" class="nav-link">Performance Breakdown</a>
+        <a href="#/experiments" data-nav="experiments" class="nav-link">Experiments &amp; 12-Gate QC</a>
+        <a href="#/models" data-nav="models" class="nav-link">Model Registry &amp; GPU Jobs</a>
+      </nav>
+
+      <div class="header-actions">
+        <span class="verified-pill" title="Only 12/12 QC-validated, zero-error Golden runs are displayed">
+          <span class="verified-dot"></span> 12/12 QC Verified Runs Only
+        </span>
+        <a href="/exec" class="exec-switch-btn">Executive Portal &nearr;</a>
+      </div>
+    </div>
   </header>
   <main id="app"></main>
   <script src="/static/app.js"></script>
