@@ -46,7 +46,14 @@ from typing import Any
 
 from utils.alloydb import iam_user, pgvector
 
-__all__ = ["CloudSQL", "iam_user", "pgvector", "SCHEMA_SQL_CLOUDSQL", "HYBRID_RRF_SQL"]
+__all__ = [
+    "CloudSQL",
+    "iam_user",
+    "pgvector",
+    "SCHEMA_SQL_CLOUDSQL",
+    "HYBRID_RRF_SQL",
+    "build_hybrid_rrf_params",
+]
 
 SCHEMA_SQL_CLOUDSQL = """
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -130,6 +137,36 @@ FULL OUTER JOIN k ON v.id = k.id
 ORDER BY rrf_score DESC, COALESCE(v.vec_sim, 0.0) DESC
 LIMIT %s;
 """
+
+
+def build_hybrid_rrf_params(
+    vec_str: str,
+    kw_query: str = "",
+    category: str = "",
+    pack_form: str = "",
+    limit: int = 10,
+) -> tuple[Any, ...]:
+    """Construct the exact 15-element parameter tuple required by ``HYBRID_RRF_SQL``."""
+    cat = str(category or "")
+    pack = str(pack_form or "")
+    kw = str(kw_query or "")
+    return (
+        vec_str,
+        vec_str,
+        cat,
+        cat,
+        pack,
+        pack,
+        vec_str,
+        kw,
+        kw,
+        cat,
+        cat,
+        pack,
+        pack,
+        kw,
+        int(limit),
+    )
 
 
 class _AdminApiCloudSQLConnector:
