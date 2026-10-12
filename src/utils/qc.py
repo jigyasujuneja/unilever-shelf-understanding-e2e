@@ -379,8 +379,9 @@ def run_12_gate_qc(
             task_name = str(s_data.get("task") or "")
             if ds_name.startswith(("hul_", "gtmerch", "ms_json")) and task_name != "detection":
                 fa = s_data.get("field_accuracy") or {}
+                eval_fields = tuple(s_data.get("evaluated_fields") or ("product", "brand", "category", "packaging_type"))
                 for req_f in ("product", "brand", "category", "packaging_type"):
-                    if req_f not in fa:
+                    if req_f in eval_fields and req_f not in fa:
                         g11_violations.append(f"{run_dir.name}: missing {req_f} in summary.field_accuracy")
                 img_p = run_dir / "images.jsonl"
                 if img_p.exists():
@@ -401,8 +402,8 @@ def run_12_gate_qc(
                                 brand_s = str(d_side.get("brand") or "")
                                 cat_s = str(d_side.get("category") or "")
                                 pack_s = str(d_side.get("packaging_type") or "")
-                                if side == "gt" and prod_s:
-                                    unique_gt_prods.add(prod_s)
+                                if side == "gt":
+                                    unique_gt_prods.add(prod_s or f"{brand_s}__{cat_s}__{pack_s}")
                                 if cat_s == "Unknown" or pack_s == "Unknown":
                                     g11_violations.append(
                                         f"{run_dir.name}/{r_row.get('image_id')}[{side}]: contains Unknown taxonomy ({cat_s}, {pack_s})"

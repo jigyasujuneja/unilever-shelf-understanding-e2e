@@ -16,8 +16,10 @@ from utils.taxonomy.brands import (
 )
 from utils.taxonomy.categories import (
     _FUZZY_CATEGORY_TARGETS,
+    BRAND_CATEGORY_MAP,
     HFD_SUPPLEMENT_BRANDS,
     MULTI_CATEGORY_BRAND_PROFILES,
+    NON_HUL_BRAND_CATEGORY_MAP,
     TREE_DEFAULT_CATEGORY,
     VARIANT_CATEGORY_KEYWORD_RULES,
     _damerau_levenshtein_le1,
@@ -27,15 +29,21 @@ from utils.taxonomy.categories import (
 )
 from utils.taxonomy.packaging import normalize_packaging_type, resolve_packaging_type
 
+_NON_PROMO_FREE_PREFIX = (
+    r"(?<!Oil_)(?<!Sugar_)(?<!Sulfate_)(?<!Sulphate_)(?<!Soap_)(?<!Paraben_)"
+    r"(?<!Alcohol_)(?<!Acne_)(?<!Dandruff_)(?<!Chemical_)(?<!Cruelty_)(?<!Gluten_)"
+    r"(?<!Caffeine_)(?<!Dust_)(?<!Stain_)(?<!Tears_)(?<!Frizz_)(?<!Shine_)(?<!Blemish_)"
+)
+
 # Expanded promotional & multipack token regex covering both HUL and Non-HUL rival conventions
 PROMO_TOKEN_RE = re.compile(
-    r"(?:^|_)(B[1-9]G[1-9]|PO[2-9]|Pack_Of_\d+|Free_[A-Za-z0-9_]+|Combo|Super_Saver|Value_Pack|Extra_\d+|Offer)(?:$|_)",
+    rf"(?:^|_)(B[1-9]G[1-9]|PO[2-9]|Pack_Of_\d+|{_NON_PROMO_FREE_PREFIX}Free_[A-Za-z0-9_]+|Combo|Super_Saver|Value_Pack|Extra_\d+|Offer)(?:$|_)",
     re.I,
 )
 PRICE_TOKEN_RE = re.compile(r"(?:^|_)Rs_?(\d+)(?:$|_)", re.I)
 ARTWORK_TOKEN_RE = re.compile(r"_(New|Old|Square)(?:_\d+)?$", re.I)
 STRIP_PROMO_ART_SUFFIX_RE = re.compile(
-    r"_(?:New|Old|Square|PO[2-9]|B[1-9]G[1-9]|Pack_Of_\d+|Free_[A-Za-z0-9_]+|Combo|Super_Saver|Value_Pack|Extra_\d+|Offer|Rs_?\d+)(?:_\d+)?$",
+    rf"(?:_(?:with_)?{_NON_PROMO_FREE_PREFIX}Free_[A-Za-z0-9_]+|_(?:New|Old|Square|PO[2-9]|B[1-9]G[1-9]|Pack_Of_\d+|Combo|Super_Saver|Value_Pack|Extra_\d+|Offer|Rs_?\d+|copy\d+)(?:_\d+)?)+$",
     re.I,
 )
 
@@ -55,7 +63,7 @@ SPACE_BRACKET_SESS_RE = re.compile(
     r"(?:^|[\s_\-\[\]\(\)])(?P<sess>\d{3,})(?:\s*[\[\(]\d+[\]\)])?_(?P<idx>\d+)(?:\s*[\[\(]\d+[\]\)])?$"
 )
 PACK_BV_FILE_RE = re.compile(
-    r"^(?P<brand>[A-Za-z0-9][A-Za-z0-9_]*?)__(?P<variant>[A-Za-z0-9_]+?)(?:_(?:image|img)_?(?P<img_idx>\d+)|_(?:GT\d+_)?(?:PCLW_)?(?P<sess>\d{2,})_(?P<idx>\d+)|_(?P<idx_only>\d+))?$",
+    r"^(?P<brand>[A-Za-z0-9][A-Za-z0-9_]*?)__(?P<variant>[A-Za-z0-9_]+?)(?:_(?:image|img|copy)_?(?P<img_idx>\d+)|_(?:GT\d+_)?(?:PCLW_)?(?P<sess>\d{2,})_(?P<idx>\d+)|_(?P<idx_only>\d+))?$",
     re.I,
 )
 
@@ -122,7 +130,7 @@ def normalize_brand_folder(folder: str) -> dict | None:
         brand = raw[1:]
         tier = "priority_a_prefix"
     else:
-        brand = raw
+        brand = re.sub(r"[\s_]+", "_", raw).strip("_")
         tier = "standard"
     key = brand.lower()
     is_hul = key in HUL_BRANDS
@@ -141,14 +149,22 @@ def parse_variant_folder(tree: str, folder: str, crc_votes: dict[str, int] | Non
     """Parse an ``input_data/variant_*/train/<Brand>__<Variant>`` folder into canonical W1-W9 attributes."""
     raw = folder.strip()
     if "__" in raw:
-        raw_brand, variant = raw.split("__", 1)
+        raw_brand, raw_variant = raw.split("__", 1)
     else:
-        raw_brand, variant = raw, "Standard"
+        raw_brand, raw_variant = raw, "Standard"
     brand = canonicalize_brand_name(raw_brand)
+    variant = re.sub(r"[\s_]+", "_", raw_variant.strip()).strip("_") or "Standard"
     b_key = brand.lower()
     raw_silo_category = tree[len("variant_") :] if tree.startswith("variant_") else tree
     norm_var = normalize_variant_tokens(variant)
-    allowed_cats = MULTI_CATEGORY_BRAND_PROFILES.get(b_key)
+    if b_key in MULTI_CATEGORY_BRAND_PROFILES:
+        allowed_cats: tuple[str, ...] | None = MULTI_CATEGORY_BRAND_PROFILES[b_key]
+    elif b_key in BRAND_CATEGORY_MAP:
+        allowed_cats = (BRAND_CATEGORY_MAP[b_key],)
+    elif b_key in NON_HUL_BRAND_CATEGORY_MAP:
+        allowed_cats = (NON_HUL_BRAND_CATEGORY_MAP[b_key],)
+    else:
+        allowed_cats = None
 
     category = None
     if b_key in HFD_SUPPLEMENT_BRANDS:
@@ -189,7 +205,11 @@ def parse_variant_folder(tree: str, folder: str, crc_votes: dict[str, int] | Non
     artwork_gen = art_m.group(1).lower() if art_m else "standard"
 
     base_variant = STRIP_PROMO_ART_SUFFIX_RE.sub("", variant) or variant
-    is_catchall = base_variant.lower() in ("others", "non_hul_competitor", raw_brand.lower(), b_key, "standard")
+    bv_canon_brand = canonicalize_brand_name(base_variant).lower()
+    is_catchall = (
+        base_variant.lower() in ("others", "other", "na", "unknown", "non_hul_competitor", raw_brand.strip().lower(), b_key, "standard")
+        or bv_canon_brand == b_key
+    )
     is_hul = (
         any(tok in variant.lower().replace("_", " ") for tok in ("taj mahal", "bru", "red label", "taaza", "3 roses", "lipton", "kissan", "knorr", "annapurna"))
         if b_key == "tata"
