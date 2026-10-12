@@ -11,11 +11,14 @@ import logging
 import os
 import random
 import re
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import google.auth
+import google.auth._default
 import yaml
 from opentelemetry import trace as otel_trace
 from PIL import Image
@@ -26,9 +29,79 @@ logging.getLogger("google_genai.models").setLevel(logging.ERROR)  # hide AFC not
 CONFIG_PATH = Path(os.environ.get("SHELF_BENCH_CONFIG")
                    or Path(__file__).resolve().parents[2] / "config.yaml")
 
+_GCLOUD_TOKEN_CACHE: dict[str, Any] = {"token": None, "ts": 0.0}
+
+
+def _fetch_gcloud_cli_token() -> str | None:
+    """Fetch a fresh OAuth2 access token from `gcloud auth print-access-token` (cached 45m)."""
+    now = time.time()
+    if _GCLOUD_TOKEN_CACHE["token"] and (now - float(_GCLOUD_TOKEN_CACHE["ts"])) < 2700:
+        return str(_GCLOUD_TOKEN_CACHE["token"])
+    try:
+        tok = subprocess.check_output(
+            ["gcloud", "auth", "print-access-token"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+        ).strip()
+        if tok:
+            _GCLOUD_TOKEN_CACHE["token"] = tok
+            _GCLOUD_TOKEN_CACHE["ts"] = now
+            return tok
+    except Exception:
+        pass
+    return None
+
+
+def ensure_gcloud_auth_fallback() -> None:
+    """Patch `google.auth.default` so `gcloud auth login` seamlessly backs expired ADC files."""
+    if getattr(google.auth.default, "_gcloud_fallback_wrapped", False):
+        return
+    orig_default = google.auth.default
+
+    def _wrap_creds(creds: Any) -> Any:
+        if creds is None or getattr(creds, "_gcloud_refresh_wrapped", False):
+            return creds
+        orig_refresh = getattr(creds, "refresh", None)
+        if callable(orig_refresh):
+            def _refresh(request: Any) -> None:
+                try:
+                    orig_refresh(request)
+                except Exception:
+                    tok = _fetch_gcloud_cli_token()
+                    if not tok:
+                        raise
+                    creds.token = tok
+                    creds.expiry = None
+
+            creds.refresh = _refresh
+            creds._gcloud_refresh_wrapped = True
+        return creds
+
+    def _default_with_fallback(*args: Any, **kwargs: Any) -> tuple[Any, str | None]:
+        try:
+            creds, project = orig_default(*args, **kwargs)
+            return _wrap_creds(creds), project
+        except Exception:
+            tok = _fetch_gcloud_cli_token()
+            if not tok:
+                raise
+            from google.oauth2.credentials import Credentials
+
+            c = _wrap_creds(Credentials(token=tok))
+            proj = load_config().get("gcp", {}).get("project", "ul-fs-s-sandbx-16-prj")
+            return c, proj
+
+    _default_with_fallback._gcloud_fallback_wrapped = True  # type: ignore[attr-defined]
+    google.auth.default = _default_with_fallback
+    google.auth._default.default = _default_with_fallback
+
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
     return yaml.safe_load(Path(path).read_text()) if Path(path).exists() else {}
+
+
+ensure_gcloud_auth_fallback()
 
 
 @dataclass
@@ -185,6 +258,14 @@ class Gemini:
             raise ValueError(f"tier must be one of {TIERS}, got {tier!r}")
         full_cfg = config or load_config()
         cfg = full_cfg.get("gcp", {})
+        hf_cfg = (full_cfg.get("hf_gpu_models") or {}).get(model)
+        self.hf_spec = hf_cfg if isinstance(hf_cfg, dict) else (
+            {"hf_repo": model} if "/" in model and not model.startswith("projects/") else None
+        )
+        self.hf_base_url = (
+            os.environ.get("HF_VLLM_BASE_URL")
+            or (str(self.hf_spec.get("base_url") or "") if self.hf_spec else "")
+        ).rstrip("/")
         target, base_model, loc = resolve_model(model, full_cfg)
         self.model = model
         self.target_model = target
@@ -198,10 +279,98 @@ class Gemini:
         self._http_options = (
             types.HttpOptions(headers=TIER_HEADERS[tier]) if tier in TIER_HEADERS else None
         )
-        self.client = genai.Client(
-            vertexai=True, project=self.project, location=self.location,
-            http_options=self._http_options,
+        self.client = (
+            None
+            if self.hf_spec is not None
+            else genai.Client(
+                vertexai=True, project=self.project, location=self.location,
+                http_options=self._http_options,
+            )
         )
+
+    def _call_hf_vllm(
+        self,
+        image: Image.Image,
+        prompt: str,
+        schema: dict | None = None,
+        max_side: int | None = None,
+        logprobs: int | None = None,
+        max_output_tokens: int | None = None,
+    ) -> LLMResult:
+        import base64
+        import urllib.request
+
+        if not self.hf_base_url:
+            raise RuntimeError(
+                f"Hugging Face open-weight model {self.model!r} requires a live GPU vLLM endpoint "
+                "($HF_VLLM_BASE_URL) or Vertex AI Custom Job execution (`uv run shelf-bench hf-gpu-job "
+                f"-a clef_standalone -m {self.model} --dataset hul_golden`). Zero offline fallback permitted."
+            )
+        jpeg = image_to_jpeg(image, max_side)
+        b64_img = base64.b64encode(jpeg).decode("ascii")
+        hf_repo = str((self.hf_spec or {}).get("hf_repo") or self.model)
+        payload: dict[str, Any] = {
+            "model": hf_repo,
+            "temperature": 0.0,
+            "max_tokens": int(max_output_tokens or 1024),
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+        }
+        if schema is not None:
+            payload["response_format"] = {"type": "json_object"}
+        if logprobs and logprobs > 0:
+            payload["logprobs"] = True
+            payload["top_logprobs"] = int(min(16, logprobs))
+
+        t0 = time.perf_counter()
+        req = urllib.request.Request(
+            f"{self.hf_base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=180) as r:
+            resp_json = json.loads(r.read().decode("utf-8"))
+        seconds = time.perf_counter() - t0
+
+        choice0 = (resp_json.get("choices") or [{}])[0]
+        text = str((choice0.get("message") or {}).get("content") or "")
+        u_raw = resp_json.get("usage") or {}
+        in_tok = int(u_raw.get("prompt_tokens") or 0)
+        out_tok = int(u_raw.get("completion_tokens") or 0)
+        usage = Usage(in_tok, out_tok, 0, 1, {self.tier: 1}, {f"{self.tier}/text_input": in_tok, f"{self.tier}/output": out_tok})
+
+        lp_steps: list[dict[str, Any]] = []
+        for item in ((choice0.get("logprobs") or {}).get("content") or []):
+            tok = item.get("token")
+            lp = item.get("logprob")
+            if tok is not None and lp is not None:
+                top_list = [
+                    {"token": str(t.get("token")), "logprob": round(float(t.get("logprob", -20.0)), 5)}
+                    for t in (item.get("top_logprobs") or [])
+                    if t.get("token") is not None and t.get("logprob") is not None
+                ]
+                lp_steps.append({"token": str(tok), "logprob": round(float(lp), 5), "top": top_list})
+
+        meta: dict[str, Any] = {
+            "attempts": 1,
+            "model_version": hf_repo,
+            "finish_reason": choice0.get("finish_reason"),
+            "tier_requested": self.tier,
+            "temperature": 0.0,
+            "image_bytes": len(jpeg),
+            "response_chars": len(text),
+        }
+        if lp_steps:
+            meta["logprobs"] = lp_steps
+        return LLMResult(parse_json(text) if text else [], usage, seconds, text, meta)
 
     def __call__(
         self,
@@ -211,15 +380,26 @@ class Gemini:
         max_side: int | None = None,
         retries: int = 6,
         logprobs: int | None = None,
+        max_output_tokens: int | None = None,
     ) -> LLMResult:
+        if self.hf_spec is not None:
+            return self._call_hf_vllm(
+                image, prompt, schema=schema, max_side=max_side,
+                logprobs=logprobs, max_output_tokens=max_output_tokens,
+            )
         from google import genai
         from google.genai import types
 
         from utils.openjev import serialize_logprobs
 
+        resolved_max_tokens = (
+            int(max_output_tokens)
+            if max_output_tokens is not None
+            else (2048 if (schema is not None or (logprobs and logprobs > 0)) else 32768)
+        )
         cfg = types.GenerateContentConfig(
             temperature=0.0,
-            max_output_tokens=32768,
+            max_output_tokens=resolved_max_tokens,
             response_mime_type="application/json",
             response_schema=schema,
         )
@@ -232,6 +412,10 @@ class Gemini:
         contents = [types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), prompt]
         span = otel_trace.get_current_span()  # the call's span, opened by Context.ask
         retries_seen: list[str] = []
+        resp: Any = None
+        seconds = 0.0
+        attempt = 0
+        assert self.client is not None
         for attempt in range(retries):
             t0 = time.perf_counter()
             try:

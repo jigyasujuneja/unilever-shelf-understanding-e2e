@@ -28,11 +28,25 @@ def test_registry_has_builtin_approaches():
     assert cfg["tool"]["setuptools"]["packages"]["find"] == {"where": ["src"]}
     names = set(approaches.all_approaches())
     assert names == {
-        "single_pass_dedup", "tiled_dedup",                               # detection
+        "single_pass_dedup", "tiled_dedup", "yolo_sku110k_onnx", "distilled_yolo_onnx",
+        "distilled_yolo_960_softnms",
         "hierarchy_classify", "embedding_text_match", "djev_classify", "coarse_jev_gemini",
+        "clef_flash_classify", "clm_classify", "clm_standalone_classify", "clef_standalone_classify",
         "embedding_retrieval", "tiered_hybrid", "jev_laya_hybrid", "coarse_jev_laya",
+        "jev_laya_zscore_lid", "cold_start_lid_discovery", "jev_laya_global_wb", "jev_laya_zoom_strip",
+        "clef_flash_decision", "clm_contrastive", "l8_hul_ultimate", "hierarchical_clm_jev",
+        "outlet_scoped_clm_jev", "tube_midband_jev", "row_neighbor_prior_jev",
+        "shelf_height_size_prior_jev", "session_overlap_dedup_jev",
+        "clm_standalone", "clef_standalone",
         "detect_retrieve", "detect_tiered", "detect_jev_laya", "detect_coarse_jev_gemini",
+        "detect_onnx_jev_laya", "detect_clef_flash", "detect_clm_contrastive", "detect_l8_ultimate",
+        "detect_clm_standalone", "detect_clef_standalone",
         "shelf_detect_retrieve", "shelf_detect_tiered", "shelf_jev_laya", "shelf_coarse_jev_gemini",
+        "shelf_onnx_jev_laya", "shelf_l8_ultimate", "shelf_hierarchical_clm_jev",
+        "shelf_outlet_scoped_clm_jev", "shelf_tube_midband_jev", "shelf_row_neighbor_prior",
+        "shelf_height_size_prior", "shelf_960_softnms_e2e", "session_overlap_dedup_e2e",
+        "shelf_clm_standalone", "shelf_clef_standalone",
+        "clm_promo_matcher", "jev_promo_verifier", "bay_planogram_verifier",
     }
     for ap in approaches.all_approaches().values():
         assert ap.architecture and ap.steps
@@ -40,14 +54,28 @@ def test_registry_has_builtin_approaches():
     assert gemini_approaches == {
         "single_pass_dedup", "tiled_dedup",
         "hierarchy_classify", "djev_classify", "coarse_jev_gemini",
+        "clef_flash_classify", "clm_classify", "clef_standalone_classify",
         "tiered_hybrid", "jev_laya_hybrid", "coarse_jev_laya",
+        "jev_laya_zscore_lid", "cold_start_lid_discovery", "jev_laya_global_wb", "jev_laya_zoom_strip",
+        "clef_flash_decision", "clm_contrastive", "l8_hul_ultimate", "hierarchical_clm_jev",
+        "outlet_scoped_clm_jev", "tube_midband_jev", "row_neighbor_prior_jev",
+        "shelf_height_size_prior_jev", "session_overlap_dedup_jev",
+        "clef_standalone",
         "detect_retrieve", "detect_tiered", "detect_jev_laya", "detect_coarse_jev_gemini",
+        "detect_onnx_jev_laya", "detect_clef_flash", "detect_clm_contrastive", "detect_l8_ultimate",
+        "detect_clm_standalone", "detect_clef_standalone",
         "shelf_detect_retrieve", "shelf_detect_tiered", "shelf_jev_laya", "shelf_coarse_jev_gemini",
+        "shelf_onnx_jev_laya", "shelf_l8_ultimate", "shelf_hierarchical_clm_jev",
+        "shelf_outlet_scoped_clm_jev", "shelf_tube_midband_jev", "shelf_row_neighbor_prior",
+        "shelf_height_size_prior", "shelf_960_softnms_e2e", "session_overlap_dedup_e2e",
+        "shelf_clef_standalone",
+        "jev_promo_verifier", "bay_planogram_verifier",
     }
 
 
 def test_retrieval_template_is_not_registered():
     assert "detect_retrieve_alloydb" not in approaches.all_approaches()
+    assert "detect_retrieve_cloudsql" not in approaches.all_approaches()
     assert "single_call_shelf_identify" not in approaches.all_approaches()
 
 
@@ -115,6 +143,9 @@ def test_end_to_end_needs_the_right_box_and_the_right_product(rpc_root, colour_e
     )
     # Boxes 1-2 right; box 3 is on a real product but names the wrong one (FP + FN); box 4 FP.
     assert (s["tp"], s["fp"], s["fn"]) == (2, 2, 1) and s["found_recall"] == 1.0
+    assert s["stage_metrics"]["stage1_detection_recall"] == 1.0
+    assert s["stage_metrics"]["stage1_detection_precision"] == 0.75
+    assert s["stage_metrics"]["stage2_id_acc_on_matched_boxes"] == pytest.approx(2 / 3, abs=1e-4)
     assert colour_embeddings == ["gemini-embedding-2"]
     assert s["tier"] == "priority"
     assert s["architecture"].endswith("[gemini-t + gemini-embedding-2, priority]")

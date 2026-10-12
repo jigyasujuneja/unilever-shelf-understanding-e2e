@@ -313,3 +313,112 @@ def test_djev_logprob_entropy_calibration_and_openjev_systemone_client(
         server.shutdown()
 
 
+def test_photometry_and_clm_math_primitives():
+    import numpy as np
+    from PIL import Image
+
+    from approaches.market_share.retrieval.clef_standalone import clef_logprob_select
+    from utils.clm import (
+        compute_csls_hubness,
+        compute_zscore_and_lid,
+        infonce_posterior,
+        infonce_rerank,
+    )
+    from utils.photometry import apply_illuminant, estimate_shelf_illuminant, inner_lab_zones
+
+    im = Image.new("RGB", (64, 96), (210, 80, 60))
+    gains = estimate_shelf_illuminant(im, p=6.0)
+    assert len(gains) == 3 and all(0.70 <= g <= 1.40 for g in gains)
+    wb = apply_illuminant(im, gains)
+    zones = inner_lab_zones(wb)
+    assert len(zones) == 13  # 3 inner LAB bands (9) + aspect/taper/promo-chroma features (4)
+
+    zlid = compute_zscore_and_lid([0.92, 0.75, 0.73, 0.72, 0.71])
+    assert zlid["z_margin"] > 1.5 and zlid["z_top1"] > 1.5 and zlid["lid"] > 0.0
+
+    # Degenerate tied runner-ups must NOT produce inflated z_margin >= 1.42
+    zlid_tied = compute_zscore_and_lid([0.751, 0.750, 0.750, 0.750, 0.750])
+    assert zlid_tied["z_margin"] < 0.25
+
+    # Open-set dustbin suppresses false confidence on low-similarity OOD crops
+    p_ood, _ = infonce_posterior([(0.52, 10, "a.jpg"), (0.35, 20, "b.jpg")], inv_temp=28.0)
+    assert p_ood < 0.05
+
+    mat = np.asarray([[1.0, 0.0], [0.99, 0.14], [0.0, 1.0]], dtype=np.float32)
+    csls = compute_csls_hubness(mat, k_nn=1)
+    assert csls.shape == (3,)
+
+    coarse = [(0.88, 10, "a.jpg"), (0.87, 20, "b.jpg")]
+    reranked = infonce_rerank(
+        coarse,
+        q=[1.0, 0.0],
+        q_lab=zones,
+        lab_index={"a.jpg": [0.0] * 13, "b.jpg": zones},
+        sku_centroids={10: [0.5, 0.5], 20: [1.0, 0.0]},
+    )
+    assert reranked[0][1] == 20
+    p1, ent = infonce_posterior(reranked, inv_temp=28.0)
+    assert 0.50 <= p1 <= 1.0 and 0.0 <= ent <= 1.0
+
+    # Ensure digits inside "pack_size" before "choice" are ignored by clef_logprob_select
+    lp_steps = [
+        {"token": '"pack_size"', "logprob": -0.01, "top": []},
+        {"token": "3", "logprob": -0.01, "top": [{"token": "3", "logprob": -0.01}]},
+        {"token": '"choice"', "logprob": -0.01, "top": []},
+        {"token": "2", "logprob": -0.05, "top": [{"token": "2", "logprob": -0.05}, {"token": "1", "logprob": -3.0}]},
+    ]
+    slots = clef_logprob_select(lp_steps, {0, 1, 2, 3, 4, 5}, n_slots=1)
+    assert len(slots) == 1 and slots[0]["choice"] == 2
+
+
+def test_standalone_clm_and_clef_have_zero_jev_inheritance(rpc_root, colour_embeddings, tmp_path):
+    from approaches.market_share.classification.clef_standalone_classify import (
+        ClefStandaloneClassify,
+    )
+    from approaches.market_share.classification.clm_standalone_classify import (
+        ClmStandaloneClassify,
+    )
+    from approaches.market_share.classification.coarse_jev_gemini import CoarseJevGemini
+    from approaches.market_share.classification.djev_classify import DjevClassify
+    from approaches.market_share.retrieval.clef_standalone import ClefStandaloneRetrieval
+    from approaches.market_share.retrieval.clm_standalone import ClmStandaloneRetrieval
+    from approaches.market_share.retrieval.coarse_jev_laya import CoarseJevLaya
+    from approaches.market_share.retrieval.jev_laya_hybrid import JevLayaHybrid
+
+    assert not issubclass(ClmStandaloneRetrieval, (JevLayaHybrid, CoarseJevLaya))
+    assert not issubclass(ClefStandaloneRetrieval, (JevLayaHybrid, CoarseJevLaya))
+    assert not issubclass(ClmStandaloneClassify, (DjevClassify, CoarseJevGemini))
+    assert not issubclass(ClefStandaloneClassify, (DjevClassify, CoarseJevGemini))
+
+    s_clm = runner.run(
+        "clm_standalone",
+        "multimodalembedding@001",
+        "test",
+        0,
+        0,
+        1,
+        "t",
+        results_dir=tmp_path,
+        log=lambda *_: None,
+    )
+    assert s_clm["tokens"]["calls"] == 0
+    assert s_clm["accuracy"] >= 2 / 3
+
+    s_clef = runner.run(
+        "clef_standalone",
+        "gemini-t",
+        "test",
+        0,
+        0,
+        1,
+        "t",
+        results_dir=tmp_path,
+        llm=lambda im, pr, **kw: LLMResult({"pack_sizes": ["", "", ""], "choices": [1, 1, 2]}, usage(), 0.01),
+        log=lambda *_: None,
+    )
+    assert s_clef["tokens"]["calls"] == 1
+    assert s_clef["accuracy"] == 1.0
+
+
+
+

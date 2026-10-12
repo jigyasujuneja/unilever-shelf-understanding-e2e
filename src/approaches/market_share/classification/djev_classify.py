@@ -34,14 +34,17 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
 from approaches.base import Approach, Context, register
-from approaches.market_share.classification.embedding_text_match import unit
+from approaches.market_share.classification.embedding_text_match import (
+    scoped_catalog_for_ctx,
+    unit,
+    visual_gallery_centroids_for_catalog,
+)
 from approaches.market_share.classification.hierarchy_classify import (
     PICK_PROMPT,
     PICK_SCHEMA,
     candidates_info,
     norm_size,
 )
-from utils import dataset
 from utils.embeddings import GEMINI_EMBEDDING, MODELS, SKUS, VertexEmbeddings
 from utils.openjev import extract_slot_distributions
 from utils.photometry import restore_photometry
@@ -87,7 +90,7 @@ class DjevClassify(Approach):
         self.emb = VertexEmbeddings(
             config, model=ctx.model if ctx.model in MODELS else SHORTLIST_MODEL
         )
-        self.catalog = dataset.catalog(name=self.dataset)
+        self.catalog = scoped_catalog_for_ctx(self.dataset, ctx)
         self.brand_counts: dict[str, int] = {}
         for p in self.catalog.values():
             b = p.get("brand") or p.get("category", "")
@@ -99,8 +102,15 @@ class DjevClassify(Approach):
             for p in self.catalog.values()
         ]
         with ThreadPoolExecutor(max_workers=8) as pool:
-            vecs = list(pool.map(lambda t: self.emb.text(t, ctx), texts))
-        self.index = list(zip(ids, (unit(v) for v in vecs), strict=True))
+            vecs = [unit(v) for v in pool.map(lambda t: self.emb.text(t, ctx), texts)]
+        vis_cents = visual_gallery_centroids_for_catalog(self.dataset, ids, self.emb, ctx)
+        fused = [
+            unit([0.85 * vc + 0.15 * tv for vc, tv in zip(vis_cents[i], tv_vec, strict=True)])
+            if i in vis_cents
+            else tv_vec
+            for i, tv_vec in zip(ids, vecs, strict=True)
+        ]
+        self.index = list(zip(ids, fused, strict=True))
 
     def _rank_catalog(
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None

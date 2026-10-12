@@ -99,14 +99,14 @@ class Trace:
             for t in threads:
                 for unit, n in self._billed.pop(t, {}).items():
                     billed[unit] = billed.get(unit, 0) + n
-        if calls:
-            s["calls"] = calls[:MAX_STEP_CALLS]
-            if len(calls) > MAX_STEP_CALLS:
-                s["calls_omitted"] = len(calls) - MAX_STEP_CALLS
-        if billed:
-            s["billed"] = billed
-        self.steps.append(s)
-        self._t0 = now
+            if calls:
+                s["calls"] = calls[:MAX_STEP_CALLS]
+                if len(calls) > MAX_STEP_CALLS:
+                    s["calls_omitted"] = len(calls) - MAX_STEP_CALLS
+            if billed:
+                s["billed"] = billed
+            self.steps.append(s)
+            self._t0 = now
         if self.span is not None:
             self.span.add_event(f"step: {name}", telemetry.clean({
                 "detail": detail, "ms": s["ms"],
@@ -133,12 +133,15 @@ class Context:
     """
 
     model: str
-    llm: Callable[..., LLMResult]
+    llm: Callable[..., LLMResult] | None = None
     trace: Trace = field(default_factory=Trace)
     # Set by the runner: OTel parent for model-call spans (works from any thread), and
     # usage -> Gemini cost dict (list_usd / credit_usd / net_usd) for the span.
     otel_parent: Any = None
     price: Callable[[Usage], dict] | None = None
+    detected_asset_boxes: list[Box] = field(default_factory=list)
+    eval_samples: list[Any] = field(default_factory=list)
+    eval_split: str = "test"
 
     def ask(self, image: Image.Image, prompt: str, **kw) -> LLMResult:
         """Call the run's Gemini model. kw: schema=<JSON schema>, max_side=<px downscale>.
@@ -399,6 +402,7 @@ def compose(
 
                 self.catalog = ds_mod.catalog(name=self.dataset)
             for s in (self.det_stage, *self.id_stages):
+                s.dataset = self.dataset
                 s.setup(config, ctx)
 
         def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
@@ -447,6 +451,9 @@ def all_approaches() -> dict[str, Approach]:
 
 
 def _discover() -> None:
+    import os
+    from pathlib import Path
+
     import approaches as pkg
 
     for info in pkgutil.walk_packages(pkg.__path__, prefix=f"{pkg.__name__}."):
@@ -458,6 +465,17 @@ def _discover() -> None:
             leaf = parts[-1]
             sys.modules.setdefault(f"{pkg.__name__}.{leaf}", mod)
             setattr(pkg, leaf, mod)
+
+    if os.environ.get("SHELF_BENCH_INCLUDE_EXPERIMENTS", "1") != "0":
+        repo_root = Path(__file__).resolve().parents[2]
+        abl_dir = repo_root / "experiments" / "ablations"
+        if abl_dir.is_dir():
+            if str(repo_root) not in sys.path:
+                sys.path.insert(0, str(repo_root))
+            for info in pkgutil.walk_packages([str(abl_dir)], prefix="experiments.ablations."):
+                if not info.name.rsplit(".", 1)[-1].startswith("_"):
+                    importlib.import_module(info.name)
+
 
 
 # ---- helpers shared by the Gemini approaches -------------------------------------------------
