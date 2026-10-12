@@ -145,31 +145,46 @@ def build_ms_json_golden_manifest(
     b_ms = client.bucket(marketshare_bucket)
     b_json = client.bucket(ms_json_bucket)
 
-    # Map canonical product keys and brand keys to v2_classes IDs (strictly without fallback)
+    # Map canonical product keys and brand+variant token sets to v2_classes IDs (strictly without MD5-to-RGB fallback)
     prod_to_cid: dict[str, int] = {}
-    brand_cat_to_cid: dict[tuple[str, str], int] = {}
-    brand_to_cid: dict[str, int] = {}
-    non_hul_cids: list[int] = []
-    non_hul_vecs: list[np.ndarray] = []
-    for cid_s, cm in v2_classes.items():
+    brand_candidates: dict[str, list[tuple[int, set[str], str, str]]] = {}
+    for cid_s, cm in sorted(v2_classes.items(), key=lambda kv: int(kv[0])):
         cid_i = int(cid_s)
         p_key = str(cm.get("product") or "").lower()
-        bv_key = f"{cm.get('brand')}__{cm.get('base_variant')}".lower()
+        bv_str = str(cm.get("base_variant") or "").lower()
+        bv_key = f"{cm.get('brand')}__{bv_str}".lower()
         b_low = str(cm.get("brand") or "").lower()
         cat_low = str(cm.get("category") or "").lower()
+        pkg_str = str(cm.get("packaging_type") or "")
         prod_to_cid[p_key] = cid_i
         prod_to_cid[bv_key] = cid_i
-        if (b_low, cat_low) not in brand_cat_to_cid:
-            brand_cat_to_cid[(b_low, cat_low)] = cid_i
-        if b_low not in brand_to_cid:
-            brand_to_cid[b_low] = cid_i
-        if not cm.get("is_hul"):
-            non_hul_cids.append(cid_i)
-            hd = hashlib.md5(p_key.encode("utf-8")).digest()
-            non_hul_vecs.append(
-                np.array([hd[0] / 255.0, hd[1] / 255.0, hd[2] / 255.0, (hd[3] % 128) / 255.0, 0.45 + (hd[4] % 100) / 100.0], dtype=np.float32)
-            )
-    non_hul_mat = np.stack(non_hul_vecs, axis=0) if non_hul_vecs else np.zeros((1, 5), dtype=np.float32)
+        bv_toks = {t for t in bv_str.split("_") if t}
+        brand_candidates.setdefault(b_low, []).append((cid_i, bv_toks, cat_low, pkg_str))
+
+    def _match_explicit_label_to_cid(p_info: dict[str, Any]) -> int | None:
+        if p_info.get("is_others_catchall"):
+            return None
+        p_low = str(p_info.get("product") or "").lower()
+        if p_low in prod_to_cid:
+            return prod_to_cid[p_low]
+        b_low = str(p_info.get("brand") or "").lower()
+        cands = brand_candidates.get(b_low)
+        if not cands:
+            return None
+        q_toks = {t for t in str(p_info.get("base_variant") or "").lower().split("_") if t and t != b_low}
+        q_cat = str(p_info.get("category") or "").lower()
+        q_pkg = str(p_info.get("packaging_type") or "")
+        best_cid: int | None = None
+        best_key = (-1.0, -1, -1)
+        for cid_i, bv_toks, cat_low, pkg_str in cands:
+            overlap = len(q_toks & bv_toks) / max(1, len(q_toks | bv_toks)) if q_toks else 0.0
+            cat_match = int(cat_low == q_cat)
+            pkg_match = int(pkg_str == q_pkg)
+            score_key = (overlap, pkg_match, cat_match)
+            if score_key > best_key:
+                best_key = score_key
+                best_cid = cid_i
+        return best_cid
 
     gt_blobs = [
         bl for bl in client.list_blobs(b_json, prefix="gt/", max_results=450)
@@ -224,21 +239,14 @@ def build_ms_json_golden_manifest(
             crop_arr = arr[iy1:iy2, ix1:ix2]
             if not is_valid_product_crop(box, w, h, p_info, crop_arr):
                 continue
-            cid: int | None = None
             conf = float(p_info.get("confidence") or 0.0)
-            if not p_info.get("is_others_catchall") and conf >= 0.92:
-                p_low = str(p_info.get("product") or "").lower()
-                b_low = str(p_info.get("brand") or "").lower()
-                c_low = str(p_info.get("category") or "").lower()
-                cid = prod_to_cid.get(p_low) or brand_cat_to_cid.get((b_low, c_low)) or brand_to_cid.get(b_low)
-                if cid is not None:
-                    explicit_high_conf_count += 1
-            if cid is None and non_hul_cids:
-                vec = _crop_rgb_aspect_vector(crop_arr, box[2] - box[0], box[3] - box[1])
-                dists = np.sum((non_hul_mat - vec[None, :]) ** 2, axis=1)
-                cid = non_hul_cids[int(np.argmin(dists))]
+            if p_info.get("is_others_catchall") or conf < 0.50:
+                continue
+            cid = _match_explicit_label_to_cid(p_info)
             if cid is None:
                 continue
+            if conf >= 0.80:
+                explicit_high_conf_count += 1
             cat_entry = dict(v2_classes[str(cid)])
             verified_boxes.append([round(box[0], 1), round(box[1], 1), round(box[2], 1), round(box[3], 1)])
             verified_products.append(cid)

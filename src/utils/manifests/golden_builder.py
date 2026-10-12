@@ -156,7 +156,7 @@ def sanitize_and_decollide_catalog(
         bv = str(cm.get("base_variant") or var)
         c_votes = votes_map.get(cid_s) or votes_map.get(str(cid))
 
-        # Recover true raw GCS folder name when a previous build truncated `prod` (e.g. Himalaya__Oil)
+        # Recover true raw GCS folder name when a previous build truncated or renamed `prod`
         g_uris = raw_gallery.get(cid_s, [])
         src_tree = "variant_gen"
         source_candidate = prod
@@ -165,7 +165,7 @@ def sanitize_and_decollide_catalog(
             if any(p.startswith("variant") for p in u_parts) and len(u_parts) >= 2:
                 raw_folder = u_parts[-2]
                 src_tree = u_parts[-3] if u_parts[-3].startswith("variant") else u_parts[-4]
-                if "__" in raw_folder and not raw_folder.lower().endswith("__others"):
+                if "__" in raw_folder:
                     source_candidate = raw_folder
 
         if "__" in source_candidate:
@@ -179,7 +179,9 @@ def sanitize_and_decollide_catalog(
             has_promo = bool(pv["has_promo"] or cm.get("has_promo", False))
             promo_type = pv["promo_type"] or cm.get("promo_type")
         else:
-            nb = normalize_brand_folder(br) or {"brand": br, "category": "Foods", "is_hul": False}
+            nb = normalize_brand_folder(br)
+            if nb is None:
+                continue
             br = nb["brand"]
             bv = br
             var = br
@@ -189,26 +191,45 @@ def sanitize_and_decollide_catalog(
             has_promo = bool(cm.get("has_promo", False))
             promo_type = cm.get("promo_type")
 
+        from utils.taxonomy.brands import NOISE_BRAND_FOLDERS, canonicalize_brand_name
+
+        if br.lower() in NOISE_BRAND_FOLDERS or br in NOISE_BRAND_FOLDERS:
+            continue
+
         # Expand promo detection for Non-HUL multipacks/value packs/combos
-        if not has_promo and PROMO_TOKEN_RE.search(source_candidate):
+        promo_m = PROMO_TOKEN_RE.search(source_candidate)
+        if not has_promo and promo_m is not None:
             has_promo = True
-            promo_type = PROMO_TOKEN_RE.search(source_candidate).group(1).upper()
+            promo_type = promo_m.group(1).upper()
 
         cat = normalize_category_name(cat)
-        raw_visual_pkg = normalize_packaging_type(None if pkg == "Unknown" else pkg, category=cat, brand=br, variant=var)
-        from utils.taxonomy.packaging import project_to_valid_category_pack
+        pkg = normalize_packaging_type(None if pkg == "Unknown" else pkg, category=cat, brand=br, variant=var)
+        allowed_pkgs_set = {pkg}
+        if cat == "PW" and pkg == "Bar":
+            allowed_pkgs_set.add("Wrapper")
+        if c_votes:
+            total_v = sum(c_votes.values())
+            for vp, vc in c_votes.items():
+                if vc > 0 and vp != "Unknown" and (vc >= 2 or vc / max(1, total_v) >= 0.20):
+                    allowed_pkgs_set.add(normalize_packaging_type(vp, category=cat, brand=br, variant=var))
+        allowed_pkgs = sorted(allowed_pkgs_set)
 
-        pkg = project_to_valid_category_pack(cat, raw_visual_pkg, crc_votes=c_votes)
-        allowed_pkgs = sorted({
-            pkg,
-            raw_visual_pkg,
-            *(cm.get("allowed_packaging_types") or ()),
-            *(c_votes.keys() if c_votes else ()),
-        })
-        is_catchall = bv.lower() in ("others", "other", "na", "unknown", "non_hul_competitor", br.lower(), "standard")
-        if bv.lower() in ("others", "other", "na", "unknown"):
-            bv = f"{br}_Classic"
-            var = f"{br}_Classic"
+        bv_low = bv.lower()
+        bv_canon_brand = canonicalize_brand_name(bv).lower()
+        is_vwash_primary = br.lower() == "v_wash" and bv_low == "vwash"
+        is_catchall = (
+            not is_vwash_primary
+            and (
+                bv_low in ("others", "other", "na", "unknown", "non_hul_competitor", br.lower(), "standard")
+                or bv_canon_brand == br.lower()
+                or "brand_level_only" in bv_low
+                or "others" in bv_low.split("_")
+                or (bv_low.endswith("_classic") and bv_low == f"{br.lower()}_classic")
+            )
+        )
+        if is_catchall:
+            bv = br
+            var = br
         cls_key = f"{br}__{bv}" if bv != br else br
 
         cleaned_meta[cid] = {
@@ -226,11 +247,11 @@ def sanitize_and_decollide_catalog(
             "promo_type": promo_type,
             "_is_catchall": is_catchall,
         }
-        if "__" in cls_key and not is_catchall and br.lower() != "hdf":
+        if "__" in cls_key and not is_catchall:
             brands_with_variants[br.lower()].append(cid)
 
-    # 2. Build remapping table: any brand-only, __Others catchall, or __Non_HUL_Competitor class whose brand
-    #    has explicit Brand__Variant classes is merged into the primary Brand__Variant class
+    # 2. Build remapping table: drop redundant catch-all/brand-only classes for multi-variant brands
+    #    (never fabricate a false first-variant label!), and deduplicate identical cls_key entries.
     old_to_new_cid: dict[int, int] = {}
     kept_old_cids: list[int] = []
     seen_cls_key_to_cid: dict[str, int] = {}
@@ -239,22 +260,16 @@ def sanitize_and_decollide_catalog(
         b_low = cm["brand"].lower()
         bv_low = cm["base_variant"].lower()
         cls_key = cm["product"]
-        if b_low == "hdf":
-            # Drop typo category-pack folder HDF__Carton (from pack_data/pack/train/HFD__Carton)
-            continue
         is_brand_only_or_synth = (
             (bv_low == b_low)
             or (bv_low == "non_hul_competitor")
             or bool(cm.get("_is_catchall"))
         )
         if is_brand_only_or_synth and b_low in brands_with_variants:
-            target_old = brands_with_variants[b_low][0]
-            old_to_new_cid[cid] = target_old
-            merged_allowed = sorted({
-                *cleaned_meta[target_old].get("allowed_packaging_types", []),
-                *cm.get("allowed_packaging_types", []),
-            })
-            cleaned_meta[target_old]["allowed_packaging_types"] = merged_allowed
+            if b_low == "v_wash" and len(brands_with_variants[b_low]) == 1:
+                target_old = brands_with_variants[b_low][0]
+                old_to_new_cid[cid] = target_old
+            continue
         elif bv_low == "non_hul_competitor":
             continue
         elif cls_key in seen_cls_key_to_cid:
@@ -534,16 +549,27 @@ def publish_clean_golden_manifests_to_gcs(
     }
     _upload_manifest_with_jsonl(b_ms, "derived_manifests/hul_promos", hul_promos_manifest)
 
-    # --- 6. Update hul_sessions/rpc.json with remapped, 0-Unknown catalog classes & labels ---
+    # --- 6. Update hul_sessions/rpc.json with remapped, 0-Unknown catalog classes & labels (zero fallback!) ---
     raw_sess = json.loads(b_ms.blob("derived_manifests/hul_sessions/rpc.json").download_as_bytes())
     sess_splits: dict[str, list[dict[str, Any]]] = {"train": [], "val": [], "test": []}
-    fallback_valid_cid = int(next(iter(v2_classes.keys())))
     for sp_name, rows in raw_sess.get("splits", {}).items():
         for s_item in rows:
-            new_prods = [cid_map.get(int(p), fallback_valid_cid) for p in (s_item.get("products") or [])]
+            s_boxes = s_item.get("boxes") or []
+            s_prods = s_item.get("products") or []
+            kept_boxes: list[list[float]] = []
+            new_prods: list[int] = []
+            for idx_p, p in enumerate(s_prods):
+                mapped_cid = cid_map.get(int(p))
+                if mapped_cid is not None and str(mapped_cid) in v2_classes:
+                    if idx_p < len(s_boxes):
+                        kept_boxes.append(s_boxes[idx_p])
+                    new_prods.append(mapped_cid)
+            if not new_prods:
+                continue
             new_lbls = [dict(v2_classes[str(p)]) for p in new_prods]
             sess_splits.setdefault(sp_name, []).append({
                 **s_item,
+                "boxes": kept_boxes if kept_boxes else s_boxes[: len(new_prods)],
                 "products": new_prods,
                 "labels": new_lbls,
             })
