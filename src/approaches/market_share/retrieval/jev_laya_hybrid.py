@@ -133,12 +133,14 @@ def smooth_shelf_rows(
     shortlists: list[set[int]],
     confidences: list[float] | None = None,
     max_smooth_confidence: float = SMOOTH_MAX_CONFIDENCE,
+    asset_boxes: list[Box] | None = None,
 ) -> tuple[list[int | None], list[dict]]:
     """Visually-gated 1D Markov shelf-row smoothing: [P, None/?, P] -> [P, P, P].
 
     Smooths an interior slot only when it was either abstained (``None``) or had low ``djev``
     entropy confidence (``< max_smooth_confidence``), so confident Gemini-verified or high-cosine
-    predictions are never overwritten by neighbour smoothing.
+    predictions are never overwritten by neighbour smoothing. When ``asset_boxes`` (Class 0 display
+    headers/bays) are present, blocks smoothing across distinct display-bay boundaries.
     """
     n = len(boxes)
     if n < 3:
@@ -161,6 +163,15 @@ def smooth_shelf_rows(
         if not placed:
             rows.append([i])
 
+    def _bay_index(b: Box) -> int | None:
+        if not asset_boxes:
+            return None
+        cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+        for a_idx, ab in enumerate(asset_boxes):
+            if ab[0] <= cx <= ab[2] and ab[1] <= cy <= ab[3]:
+                return a_idx
+        return -1
+
     smoothed: list[dict] = []
     for row in rows:
         row.sort(key=lambda i: (boxes[i][0] + boxes[i][2]) / 2)
@@ -171,6 +182,10 @@ def smooth_shelf_rows(
             can_smooth_mid = out[mid] is None or (mid_conf < max_smooth_confidence and out[mid] != pid)
             if pid is None or out[right] != pid or not can_smooth_mid:
                 continue
+            if asset_boxes:
+                bay_l, bay_m, bay_r = _bay_index(boxes[left]), _bay_index(boxes[mid]), _bay_index(boxes[right])
+                if len({bay_l, bay_m, bay_r}) > 1:
+                    continue
             avg_w = ((boxes[left][2] - boxes[left][0]) + (boxes[right][2] - boxes[right][0])) / 2
             gap_l = max(0.0, boxes[mid][0] - boxes[left][2])
             gap_r = max(0.0, boxes[right][0] - boxes[mid][2])
@@ -253,10 +268,10 @@ class JevLayaHybrid(EmbeddingRetrieval):
         for cos, pid, path in coarse[: 2 * K]:
             ref_lab = self.lab_index.get(path)
             s_lab = lab_similarity(q_lab, ref_lab) if ref_lab else 0.5
-            joint = cos + LAB_WEIGHT * (s_lab - 0.5)
+            joint = min(1.0, cos + LAB_WEIGHT * (s_lab - 0.5))
             head.append((joint, cos, pid, path))
         head.sort(reverse=True)
-        reranked = [(cos, pid, path) for _, cos, pid, path in head] + coarse[2 * K :]
+        reranked = [(joint, pid, path) for joint, _, pid, path in head] + coarse[2 * K :]
         return reranked, q, restored
 
     def pick_with_confidence(
@@ -472,6 +487,7 @@ class JevLayaHybrid(EmbeddingRetrieval):
             shortlists,
             confidences=confidences,
             max_smooth_confidence=self.smooth_max_confidence,
+            asset_boxes=getattr(ctx, "detected_asset_boxes", None),
         )
         if smoothed:
             ctx.trace.step(
