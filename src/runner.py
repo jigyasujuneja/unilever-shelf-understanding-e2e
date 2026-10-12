@@ -134,9 +134,8 @@ def run(
 
     # The approach's own clients and indexes (embeddings, AlloyDB, ...). What it bills here is
     # a one-off setup cost (e.g. embedding a reference gallery), reported apart from cost/img.
+    # Zero-leakage invariant: setup_ctx NEVER receives eval samples or test/val ground-truth labels.
     setup_ctx = Context(model=model, llm=llm, price=price)
-    setup_ctx.eval_samples = samples
-    setup_ctx.eval_split = split
     t_setup = time.perf_counter()
     appr.setup(config, setup_ctx)
     setup_s = time.perf_counter() - t_setup
@@ -807,7 +806,18 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
     Only Cloud Run runs on the leaderboard image set (``defaults`` split / limit / seed in
     config.yaml) or verified Unilever Golden test runs get a numeric ``rank``; other runs are
     listed after them as ``"dev"``."""
-    from utils.experiment_matrix import APPROACH_INTUITIONS, TASK_DEFINITIONS
+    from utils.experiment_matrix import (
+        APPROACH_INTUITIONS,
+        POC_EXPERIMENTS,
+        TASK_DEFINITIONS,
+    )
+
+    exp_by_app_ds: dict[tuple[str, str], dict] = {}
+    exp_by_app: dict[str, dict] = {}
+    for ed in POC_EXPERIMENTS:
+        for ea in ed.get("approaches", []):
+            exp_by_app_ds.setdefault((ea, ed.get("dataset", "")), ed)
+            exp_by_app.setdefault(ea, ed)
 
     results_dir = resolve_results_dir(results_dir)
     d = (config if config is not None else load_config()).get("defaults", {})
@@ -824,6 +834,19 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
         s.setdefault("use_case", "market_share")  # runs from before use cases existed
         s.setdefault("task", "detection")  # runs from before tasks existed
         s.setdefault("dataset", "sku110k")
+        raw_tk = str(s.get("task") or "detection")
+        raw_ds = str(s.get("dataset") or "sku110k")
+        # Normalize legacy composite task names (e.g. hul_golden_classification, shelves_end_to_end)
+        if raw_tk == "hul_golden_classification":
+            s["task"], s["dataset"] = "classification", "hul_golden"
+        elif raw_tk == "shelves_end_to_end":
+            s["task"], s["dataset"] = "end_to_end", "shelves" if raw_ds == "sku110k" else raw_ds
+        elif raw_tk == "shelves_retrieval":
+            s["task"], s["dataset"] = "retrieval", "shelves" if raw_ds == "sku110k" else raw_ds
+        elif raw_tk == "rpc_retrieval":
+            s["task"], s["dataset"] = "retrieval", "rpc" if raw_ds == "sku110k" else raw_ds
+        elif raw_tk == "products":
+            s["task"], s["dataset"] = "classification", "products"
         ds = str(s.get("dataset") or "")
         ap = str(s.get("approach") or "")
         tk = str(s.get("task") or "detection")
@@ -845,6 +868,24 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
         s["task_title"] = tk_meta.get("title", tk)
         s["approach_title"] = ap_meta.get("display_name", ap)
         s["approach_intuition"] = ap_meta.get("intuition", s.get("architecture", ""))
+        s["primary_score"] = float(s.get("f2", 0.0) if tk in ("detection", "end_to_end") else s.get("accuracy", 0.0))
+        # Human-friendly short Run ID & short Model name
+        rid = str(s.get("run_id") or p.parent.name)
+        parts_id = rid.split("-")
+        s["short_id"] = f"#{parts_id[1]}" if len(parts_id) >= 2 and parts_id[1].isdigit() else f"#{rid[:6]}"
+        raw_mod = str(s.get("model") or "")
+        if "sft" in raw_mod.lower() or "endpoints/" in raw_mod.lower():
+            base_m = "gemini-3.5-flash" if "3-5-flash" in raw_mod and "lite" not in raw_mod else "gemini-3.5-flash-lite"
+            s["short_model"] = f"{base_m} (SFT)"
+        else:
+            s["short_model"] = raw_mod
+        matched_ed = exp_by_app_ds.get((ap, ds)) or exp_by_app.get(ap)
+        if matched_ed:
+            raw_eid = str(matched_ed.get("experiment_id", ""))
+            s["exp_id"] = f"EXP-{raw_eid.rsplit('-', 1)[-1]}" if "-" in raw_eid else raw_eid
+            s["exp_priority"] = matched_ed.get("priority")
+            s["exp_title"] = matched_ed.get("title")
+            s["exp_hypothesis"] = matched_ed.get("hypothesis")
         runs.append(s)
 
     def official(r: dict) -> bool:
@@ -855,7 +896,7 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
                 and (r["split"], r.get("limit"), r.get("seed")) == board_set)
 
     def score(r: dict) -> float:
-        return r["f2"] if r["task"] in ("detection", "end_to_end") else r["accuracy"]
+        return float(r.get("f2", 0.0) if r["task"] in ("detection", "end_to_end") else r.get("accuracy", 0.0))
 
     def board(r: dict) -> tuple[int, str, int, str]:  # one tab per task and dataset (Golden first)
         ds = str(r["dataset"])

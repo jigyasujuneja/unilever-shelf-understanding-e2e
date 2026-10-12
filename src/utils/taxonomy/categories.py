@@ -93,7 +93,7 @@ _NON_HUL_BRANDS_BY_CATEGORY: dict[str, tuple[str, ...]] = {
         "karthika", "kesh_king", "khadi", "livon", "loreal", "matrix", "meera", "navratna",
         "nyle", "pantene", "parachute", "revlon", "sesa", "streax", "vasmol", "vatika", "vcare",
         "amla", "anuved", "bblunt", "bigen", "color_mate", "coconad", "cocosoft", "dr_batra",
-        "gliss", "hair_care", "halo", "indica", "keo_karpin", "kaveri", "mediker", "neha_mehndi",
+        "gliss", "halo", "indica", "keo_karpin", "kaveri", "mediker", "neha_mehndi",
         "nihar", "raavi", "scalp", "shaumaa", "superia", "thulasi", "trichmey",
         "alayam", "arsi", "arasi", "ashtapathy", "ashwa", "ayucare", "ayurvedamix", "banjaras",
         "coco", "coco_plus", "cosmo_silky", "crown", "dhanadan", "full_bloom", "glori",
@@ -104,7 +104,7 @@ _NON_HUL_BRANDS_BY_CATEGORY: dict[str, tuple[str, ...]] = {
         "surabhi", "thanda_cool", "thann_mann", "tulasi", "vaijayanthi", "vedganga", "vega",
     ),
     "PW": (
-        "cinthol", "dermi_cool", "dettol", "dyna", "fiama", "get_real", "ghar", "glimmer",
+        "cinthol", "clean_and_dry", "dermi_cool", "dettol", "dyna", "fiama", "get_real", "ghar", "glimmer",
         "godrej_no_1", "jive", "margo", "medimix", "mysore_sandal", "nycil", "puric",
         "safe_life", "santoor", "savlon", "vivel",
         "alife", "aramusk", "arasan", "camay", "chandrika", "cuticura", "fa", "hygienix",
@@ -199,7 +199,7 @@ _NON_HUL_BRANDS_BY_CATEGORY: dict[str, tuple[str, ...]] = {
         "grain_grace", "guud", "habit", "haeal", "hamly", "harima", "hillers", "hot_spicy",
         "ht_mart", "ikrish", "inchi", "italian_flavor", "jaambu", "jevton", "k_pra", "kato",
         "key_brand", "khaass", "kimball", "kims", "kishores", "krmp", "kudos", "lion", "mamos",
-        "muffins", "ongs", "original_apna", "others3", "palat", "panvel", "pedigree", "pineapple",
+        "muffins", "ongs", "original_apna", "palat", "panvel", "pedigree", "pineapple",
         "pingani", "pipo", "popzo", "purepet", "raj", "rinkup", "rusk", "sao", "sarwar",
         "savour", "sds", "skr", "spicezzaa", "srb", "teju", "temptin", "this", "whiskas",
     ),
@@ -366,7 +366,7 @@ VARIANT_CATEGORY_KEYWORD_RULES: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(
-            r"(?:^|_)(facewash|face_wash|facwash|facescrub|face_scrub|face_cream|day_cream|night_cream|skin_cream|shaving_cream|shavingcream|sunscreen|suncreen|sunblock|toner|astringent|(?<!toilet_)(?<!bathroom_)cleanser|cleansing_milk|bodylotion|body_lotion|body_lotions|hand_body_lotion|body_milk|bodyscrub|body_scrub|apricot_scrub|walnut_scrub|face_pack|facepack|face_makeup|sheet_mask|clay_mask|peel_off_mask|lip_mask|sleeping_mask|moisturizer|moisturiser|moistrurizer|moisturising|moisturizing|petroleum_jelly|petroleumjelly|gulabari|aloe_vera_gel|aloevera_gel|saundarya|beauty_talc|prickly_heat_powder)(?:$|_)",
+            r"(?:^|_)(facewash|face_wash|facwash|facescrub|face_scrub|blackhead_scrub|pimple_scrub|face_cream|day_cream|night_cream|skin_cream|shaving_cream|shavingcream|sunscreen|suncreen|sunblock|toner|astringent|(?<!toilet_)(?<!bathroom_)cleanser|cleansing_milk|bodylotion|body_lotion|body_lotions|hand_body_lotion|body_milk|bodyscrub|body_scrub|apricot_scrub|walnut_scrub|face_pack|facepack|face_makeup|sheet_mask|clay_mask|peel_off_mask|lip_mask|sleeping_mask|moisturizer|moisturiser|moistrurizer|moisturising|moisturizing|petroleum_jelly|petroleumjelly|gulabari|aloe_vera_gel|aloevera_gel|saundarya|beauty_talc|prickly_heat_powder)(?:$|_)",
             re.I,
         ),
         "Skin",

@@ -29,9 +29,12 @@ GOLDEN_DATASETS: tuple[str, ...] = (
 FORBIDDEN_BRAND_TOKENS: frozenset[str] = frozenset({
     "unknown",
     "others",
+    "others3",
     "other",
     "na",
     "none",
+    "hair_care",
+    "hdf",
     "tetely",
     "twinnings",
     "ppvwash",
@@ -41,7 +44,7 @@ FORBIDDEN_BRAND_TOKENS: frozenset[str] = frozenset({
 def _offline_fallback_manifest(ds_name: str) -> dict[str, Any]:
     """Return a canonical v2.2 manifest fixture when GCS credentials/network are offline in CI."""
     c1 = {
-        "product": "Dove_Hair_Fall_Rescue_Shampoo",
+        "product": "Dove__Hair_Fall_Rescue_Shampoo",
         "brand": "Dove",
         "base_variant": "Hair_Fall_Rescue_Shampoo",
         "category": "Hair_Care",
@@ -49,7 +52,7 @@ def _offline_fallback_manifest(ds_name: str) -> dict[str, Any]:
         "is_hul": True,
     }
     c2 = {
-        "product": "Pantene_Advanced_Hair_Fall_Solution",
+        "product": "Pantene__Advanced_Hair_Fall_Solution",
         "brand": "Pantene",
         "base_variant": "Advanced_Hair_Fall_Solution",
         "category": "Hair_Care",
@@ -87,7 +90,7 @@ def _offline_fallback_manifest(ds_name: str) -> dict[str, Any]:
             "split_hashes": {
                 "train_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                 "val_sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
-                "test_sha256": "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d",
+                "test_sha256": "3e23e8160039594a33894f6564e1b1348bbd7a0038d42c4acb73eeaed59c009d",
             },
         },
     }
@@ -114,6 +117,8 @@ def run_12_gate_qc(
     allow_offline_fixture: bool = False,
 ) -> dict[str, Any]:
     """Execute all 12 hard QC gates and return a structured report with pass/fail status."""
+    import re
+
     import runner
 
     results_dir = runner.resolve_results_dir(results_dir)
@@ -154,7 +159,7 @@ def run_12_gate_qc(
         "sample_violations": g1_violations[:5],
     })
 
-    # --- Gate 2: canonical_taxonomy_domain ---
+    # --- Gate 2: canonical_taxonomy_domain (Syntactic + Semantic Physical-Form Plausibility) ---
     g2_violations: list[str] = []
     g2_checked = 0
     for ds, mf in manifests.items():
@@ -164,14 +169,35 @@ def run_12_gate_qc(
             cat = str(c.get("category") or "").strip()
             pkg = str(c.get("packaging_type") or "").strip()
             bv = str(c.get("base_variant") or "").strip()
+            bv_low = bv.lower()
             if br.lower() in FORBIDDEN_BRAND_TOKENS or not br:
                 g2_violations.append(f"{ds} class {cid}: forbidden brand={br!r}")
             if cat not in CANONICAL_CATEGORIES:
                 g2_violations.append(f"{ds} class {cid} ({br}): non-canonical category={cat!r}")
             if pkg not in CANONICAL_PACKAGING_TYPES:
                 g2_violations.append(f"{ds} class {cid} ({br}): non-canonical packaging_type={pkg!r}")
-            if bv.lower() in ("unknown", "others", "na", ""):
-                g2_violations.append(f"{ds} class {cid} ({br}): invalid base_variant={bv!r}")
+            if (
+                bv_low in ("unknown", "others", "na", "")
+                or "brand_level_only" in bv_low
+                or "others" in bv_low.split("_")
+                or (bv_low.endswith("_classic") and bv_low == f"{br.lower()}_classic")
+            ):
+                g2_violations.append(f"{ds} class {cid} ({br}): catch-all/invalid base_variant={bv!r}")
+            # Physical-form semantic plausibility checks (prevents legacy 46-class projection corruption)
+            if "toothbrush" in bv_low and pkg != "Carton":
+                g2_violations.append(f"{ds} class {cid} ({br}__{bv}): toothbrush must be Carton, got {pkg!r}")
+            if re.search(r"(?:^|_)(roll_on)(?:$|_)", bv_low) and pkg != "Roll_On":
+                g2_violations.append(f"{ds} class {cid} ({br}__{bv}): roll_on must be Roll_On, got {pkg!r}")
+            if (
+                re.search(r"(?:^|_)(soap|soaps|soap_bars?|bathing_bar)(?:$|_)", bv_low)
+                and not re.search(r"(?:^|_)(liquid|handwash|bodywash|gel)(?:$|_)", bv_low)
+                and pkg != "Bar"
+            ):
+                g2_violations.append(f"{ds} class {cid} ({br}__{bv}): soap bar must be Bar, got {pkg!r}")
+            if re.search(r"(?:^|_)(dishwash_gel|gel_dishwash|liquid_gel)(?:$|_)", bv_low) and pkg != "Bottle":
+                g2_violations.append(f"{ds} class {cid} ({br}__{bv}): dishwash gel must be Bottle, got {pkg!r}")
+            if (re.search(r"(?:^|_)(cuppa_noodles|cup_noodles)(?:$|_)", bv_low) or br.lower() == "cup_noodles") and pkg != "Tub":
+                g2_violations.append(f"{ds} class {cid} ({br}__{bv}): cup noodles must be Tub, got {pkg!r}")
     gates.append({
         "gate_id": 2,
         "name": "canonical_taxonomy_domain",
@@ -191,7 +217,7 @@ def run_12_gate_qc(
             if key in seen_keys:
                 g3_violations.append(f"{ds}: duplicate (brand, base_variant)={key} in classes {seen_keys[key]} and {cid}")
             seen_keys[key] = cid
-            if ds == "hul_variants" and key[0].lower() == key[1].lower():
+            if ds == "hul_variants" and (key[0].lower() == key[1].lower() or "__" not in str(c.get("product") or "")):
                 g3_violations.append(f"hul_variants class {cid}: brand-only class {key} not allowed in variant benchmark")
     gates.append({
         "gate_id": 3,
@@ -348,12 +374,16 @@ def run_12_gate_qc(
     g10_violations: list[str] = []
     onnx_src = Path("src/approaches/market_share/detection/onnx_yolo_detector.py").read_text()
     runner_src = Path("src/runner.py").read_text()
+    emb_ret_src = Path("src/approaches/market_share/retrieval/embedding_retrieval.py").read_text()
+    emb_txt_src = Path("src/approaches/market_share/classification/embedding_text_match.py").read_text()
     if "_scope_to_bay_or_strip" in onnx_src:
         g10_violations.append("onnx_yolo_detector.py still contains _scope_to_bay_or_strip oracle")
     if "image.width % 220 == 0" in onnx_src:
         g10_violations.append("onnx_yolo_detector.py still contains hardcoded 220px grid division oracle")
     if 'if task == "planogram_compliance"' not in runner_src:
         g10_violations.append("runner.py does not restrict sample.asset_boxes pre-seeding to planogram_compliance")
+    if "setup_ctx.eval_samples" in runner_src or "getattr(ctx, \"eval_samples\"" in emb_ret_src or "getattr(ctx, \"eval_samples\"" in emb_txt_src:
+        g10_violations.append("setup() inspects eval_samples (candidate-pool leakage)")
     gates.append({
         "gate_id": 10,
         "name": "detector_deoracle_integrity",

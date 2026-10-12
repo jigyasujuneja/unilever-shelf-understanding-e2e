@@ -141,26 +141,31 @@ def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
         )
 
         gt_cat_str = str(gt.get("category") or "Foods")
+        p_str = str(p_val or "").strip() if p_val and p_val != "Unknown" else ""
+        is_legacy_pred = ("__" in p_str) or bool(pred.get("legacy_pack_folder"))
         allowed = set(gt.get("allowed_packaging_types") or [])
         if g_val and g_val != "Unknown":
             allowed.add(str(g_val))
-            allowed.add(project_to_valid_category_pack(gt_cat_str, str(g_val)))
+            if is_legacy_pred:
+                allowed.add(project_to_valid_category_pack(gt_cat_str, str(g_val)))
         candidates: list[str] = []
-        if p_val and p_val != "Unknown":
-            p_str = str(p_val).strip()
+        if p_str:
             if "__" in p_str:
                 candidates.append(parse_legacy_pack_folder(p_str)["packaging_type"])
             else:
                 candidates.append(p_str)
                 norm_p = normalize_packaging_type(p_str, category=gt_cat_str)
                 candidates.append(norm_p)
-                candidates.append(project_to_valid_category_pack(gt_cat_str, norm_p))
         for k in ("legacy_pack_folder", "product"):
             raw_lp = str(pred.get(k) or "").strip()
             if "__" in raw_lp:
-                lp_pkg = parse_legacy_pack_folder(raw_lp)["packaging_type"]
-                candidates.append(lp_pkg)
-                candidates.append(project_to_valid_category_pack(gt_cat_str, lp_pkg))
+                head = raw_lp.split("__", 1)[0]
+                from utils.legacy_benchmark import LEGACY_PACK_CATEGORY_TO_CANONICAL
+                from utils.taxonomy.categories import PACK_CATEGORY_ALIAS
+
+                if k == "legacy_pack_folder" or head.lower() in LEGACY_PACK_CATEGORY_TO_CANONICAL or head in PACK_CATEGORY_ALIAS:
+                    lp_pkg = parse_legacy_pack_folder(raw_lp)["packaging_type"]
+                    candidates.append(lp_pkg)
         return any(c != "Unknown" and c in allowed for c in candidates)
 
     if field in ("base_variant", "variant", "product"):

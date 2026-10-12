@@ -420,5 +420,56 @@ def test_standalone_clm_and_clef_have_zero_jev_inheritance(rpc_root, colour_embe
     assert s_clef["accuracy"] == 1.0
 
 
+def test_two_tier_gallery_self_calibration_and_poe_fusion():
+    import pytest
 
+    from utils.clm import calibrate_gallery_geometry
+    from utils.openjev import resolve_jev_choice
+
+    # 1. Forbid calibrating on test split
+    with pytest.raises(ValueError, match="Zero-leakage invariant violated"):
+        calibrate_gallery_geometry({}, {}, split="test")
+
+    # 2. Tier A + Tier B LOVO calibration on synthetic 4-SKU train gallery
+    sku_centroids = {
+        10: [1.0, 0.0, 0.0],
+        20: [0.95, 0.3122, 0.0],
+        30: [0.0, 1.0, 0.0],
+        40: [0.0, 0.0, 1.0],
+    }
+    index = [
+        (10, "g/10_1.jpg", [0.99, 0.141, 0.0]),
+        (10, "g/10_2.jpg", [0.98, -0.199, 0.0]),
+        (20, "g/20_1.jpg", [0.95, 0.3122, 0.0]),
+        (20, "g/20_2.jpg", [0.94, 0.341, 0.0]),
+        (30, "g/30_1.jpg", [0.0, 0.99, 0.141]),
+        (30, "g/30_2.jpg", [0.0, 1.0, 0.0]),
+        (40, "g/40_1.jpg", [0.0, 0.0, 1.0]),
+        (40, "g/40_2.jpg", [0.0, 0.141, 0.99]),
+    ]
+    cal = calibrate_gallery_geometry(
+        index,
+        sku_centroids,
+        target_system1_precision=0.95,
+        split="train",
+    )
+    assert 12.0 <= cal["inv_temp"] <= 60.0
+    assert 0.35 <= cal["conformal_min_prob"] <= 0.92
+    assert 0.72 <= cal["intra_sku_cosine_floor"] <= 0.96
+    # Close siblings (10 and 20) have higher sibling cosine and tighter gap than isolated SKU 40
+    assert cal["sku_sibling_cosine"][10] > cal["sku_sibling_cosine"][40]
+    assert cal["sku_required_margin"][10] < cal["sku_required_margin"][40]
+
+    # 3. Continuous Entropy-Weighted Bayesian Product-of-Experts metadata
+    slot = {
+        "choice": 2,
+        "confidence": 0.25,
+        "probs": {"0": 0.02, "1": 0.47, "2": 0.51},
+    }
+    top_cands = [(0.92, 101, "g/1.jpg"), (0.76, 202, "g/2.jpg")]
+    ans, conf, meta = resolve_jev_choice(2, slot, top_cands, min_confidence=0.45)
+    assert ans == 101
+    assert meta["mode"] == "jev_visual_fusion"
+    assert "c1_confidence" in meta and "c2_confidence" in meta and "poe_weight_w2" in meta
+    assert 0.0 <= meta["poe_weight_w2"] <= 1.0
 

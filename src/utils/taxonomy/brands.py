@@ -7,7 +7,14 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-NOISE_BRAND_FOLDERS: set[str] = set()
+NOISE_BRAND_FOLDERS: set[str] = {
+    "others3",
+    "Others3",
+    "hair_care",
+    "Hair_Care",
+    "hdf",
+    "HDF",
+}
 
 BRAND_ALIAS_MAP: dict[str, str] = {
     "a_3_roses": "3_Roses",

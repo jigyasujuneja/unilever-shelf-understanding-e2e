@@ -114,7 +114,7 @@ GTMERCH_BAY_BRAND_RULES: tuple[tuple[tuple[str, ...], str, str, str, bool], ...]
 def normalize_brand_folder(folder: str) -> dict | None:
     """Normalize a ``brand_data/`` folder into canonical ``(brand, is_hul, category, legacy_tier)``."""
     raw = folder.strip()
-    if not raw or raw in NOISE_BRAND_FOLDERS:
+    if not raw or raw in NOISE_BRAND_FOLDERS or raw.lower() in NOISE_BRAND_FOLDERS:
         return None
     raw_low = raw.lower()
     if raw_low in BRAND_ALIAS_MAP:
@@ -133,6 +133,8 @@ def normalize_brand_folder(folder: str) -> dict | None:
         brand = re.sub(r"[\s_]+", "_", raw).strip("_")
         tier = "standard"
     key = brand.lower()
+    if key in NOISE_BRAND_FOLDERS:
+        return None
     is_hul = key in HUL_BRANDS
     if is_hul and key in HUL_BRAND_ONLY_NO_VARIANT_TREE and tier == "standard":
         tier = "hul_umbrella_brand_only"
@@ -205,10 +207,13 @@ def parse_variant_folder(tree: str, folder: str, crc_votes: dict[str, int] | Non
     artwork_gen = art_m.group(1).lower() if art_m else "standard"
 
     base_variant = STRIP_PROMO_ART_SUFFIX_RE.sub("", variant) or variant
+    bv_low = base_variant.lower()
     bv_canon_brand = canonicalize_brand_name(base_variant).lower()
     is_catchall = (
-        base_variant.lower() in ("others", "other", "na", "unknown", "non_hul_competitor", raw_brand.strip().lower(), b_key, "standard")
+        bv_low in ("others", "other", "na", "unknown", "non_hul_competitor", raw_brand.strip().lower(), b_key, "standard")
         or bv_canon_brand == b_key
+        or "brand_level_only" in bv_low
+        or "others" in bv_low.split("_")
     )
     is_hul = (
         any(tok in variant.lower().replace("_", " ") for tok in ("taj mahal", "bru", "red label", "taaza", "3 roses", "lipton", "kissan", "knorr", "annapurna"))

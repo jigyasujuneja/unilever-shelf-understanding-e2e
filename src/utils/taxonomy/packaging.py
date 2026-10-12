@@ -63,7 +63,7 @@ PKG_SYNONYM_MAP: dict[str, str] = {
 }
 
 PKG_SUFFIX_RE = re.compile(
-    r"(?:^|_)(Bottle|Sachet|Sachets|Pouch|Polly|Poly|Jar|Tub|Tube|Bar|Bars|Soapbars|Box|Can|Carton|Stick|Roll_On|Pump|Tin|Wrapper|Tetrapack|Tetra|Tablets)(?:_(?:New|Old|Square|PO[2-9]|B[1-9]G[1-9]|Pack_Of_\d+|Free_[A-Za-z0-9_]+|Rs_?\d+|copy\d+|\d+))*$",
+    r"(?:^|_)(Bottle|Sachet|Sachets|Pouch|Polly|Poly|Jar|Tub|Tube|Bar|Bars|Soapbars|Box|Can|Carton|Stick|Roll_On|Pump|Spray|Tin|Wrapper|Tetrapack|Tetra)(?:_(?:New|Old|Square|PO[2-9]|B[1-9]G[1-9]|Pack_Of_\d+|Free_[A-Za-z0-9_]+|Rs_?\d+|copy\d+|\d+))*$",
     re.I,
 )
 
@@ -79,13 +79,15 @@ PKG_SUFFIX_NORM: dict[str, str] = {
 }
 
 EXPLICIT_CONTAINER_TOKEN_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"(?:^|_)(refill|refil|doy|polly|poly|pouch|coffee_pouch|surface_wipe|wipe|wipes)(?:$|_)", re.I), "Pouch"),
+    (re.compile(r"(?:^|_)(refill|refil|doy|polly|poly|pouch|coffee_pouch|surface_wipe|wipe|wipes|pichkoo)(?:$|_)", re.I), "Pouch"),
     (re.compile(r"(?:^|_)(roll_on)(?:$|_)", re.I), "Roll_On"),
     (re.compile(r"(?:^|_)(tetra|tetrapack)(?:$|_)", re.I), "Tetrapack"),
     (re.compile(r"(?:^|_)(sachet|sachets|sheet_mask)(?:$|_)", re.I), "Sachet"),
     (re.compile(r"(?:^|_)(peel_off_mask)(?:$|_)", re.I), "Tube"),
     (re.compile(r"(?:^|_)(instant_jar|bru_instant_jar)(?:$|_)", re.I), "Jar"),
-    (re.compile(r"(?:^|_)(smart_shots|tea_bags)(?:$|_)", re.I), "Carton"),
+    (re.compile(r"(?:^|_)(cup_noodles|cuppa_noodles|cuppa)(?:$|_)", re.I), "Tub"),
+    (re.compile(r"(?:^|_)(smart_shots|tea_bags|descaler_tablets|cube_vegetarian|bouillon_cube)(?:$|_)", re.I), "Carton"),
+    (re.compile(r"(?:^|_)(disinfectant_spray|disinfictant_spray|sunscreen_spray|smart_spray|shudhham_spray)(?:$|_)", re.I), "Spray"),
 ]
 
 # Ordered from most specific physical form (`toothbrush` -> Carton, `talc` -> Bottle) to general forms.
@@ -94,7 +96,7 @@ EXPLICIT_CONTAINER_TOKEN_RULES: list[tuple[re.Pattern[str], str]] = [
 PRODUCT_FORM_PACK_RULES: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(
-            r"(?:^|_)(toothbrush|tooth_brush|toothbrushes|tooth_brushes|manual_toothbrush|electric_toothbrush|blade|razor|shaver|mosquito_coil|good_knight|smart_shots)(?:$|_)",
+            r"(?:^|_)(toothbrush|tooth_brush|toothbrushes|tooth_brushes|manual_toothbrush|electric_toothbrush|blade|razor|shaver|mosquito_coil|good_knight|smart_shots|descaler_tablets|cube_vegetarian)(?:$|_)",
             re.I,
         ),
         "Carton",
@@ -119,7 +121,7 @@ PRODUCT_FORM_PACK_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?:^|_)(cold_coffee)(?:$|_)", re.I), "Tin"),
     (
         re.compile(
-            r"(?:^|_)(refill|refil|doy|polly|poly|pouch|wipe|wipes|surface_wipe|soup|cream_of|coffee_pouch)(?:$|_)",
+            r"(?:^|_)(refill|refil|doy|polly|poly|pouch|wipe|wipes|surface_wipe|soup|cream_of|coffee_pouch|pichkoo)(?:$|_)",
             re.I,
         ),
         "Pouch",
@@ -143,21 +145,21 @@ PRODUCT_FORM_PACK_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?:^|_)(soap|soaps|soap_bars?|bathing_bar|detergen_bar|detergent_bar|wash_bar|vim_bar|exo_bar|rin_bar)(?:$|_)", re.I), "Bar"),
     (
         re.compile(
-            r"(?:^|_)(toothpaste|tooth_paste|tooth_gel|sensitivity_relief|purifying_turmeric|anti_cavity|dant_kanti|meswak|babool|face_wash|facewash|facwash|facescrub|face_scrub|shaving_cream|shavingcream|face_pack|facepack|scrub|cream|creame|ointment|gel|conditionar|bb_natural|fairness|bright_beauty)(?:$|_)",
+            r"(?:^|_)(toothpaste|tooth_paste|tooth_gel|sensitivity_relief|purifying_turmeric|anti_cavity|dant_kanti|meswak|babool|face_wash|facewash|facwash|facescrub|face_scrub|shaving_cream|shavingcream|face_pack|facepack|scrub|cream|creame|creme|ointment|gel|conditionar|bb_natural|fairness|bright_beauty)(?:$|_)",
             re.I,
         ),
         "Tube",
     ),
     (
         re.compile(
-            r"(?:^|_)(hair_mask|moisture_mask|strength_mask|clay_mask|sleeping_mask|repair_mask|_?mask|petroleum_jelly|petroleumjelly|peanut_butter|mayonnaise|jam|pickle|chutney|ghee|honey|nutella|nescafe_classic|bru_instant_jar|instant_jar)(?:$|_)",
+            r"(?:^|_)(hair_mask|moisture_mask|strength_mask|clay_mask|sleeping_mask|repair_mask|_?mask|petroleum_jelly|petroleumjelly|peanut_butter|mayonnaise|spread|jam|pickle|chutney|ghee|honey|nutella|nescafe_classic|bru_instant_jar|instant_jar)(?:$|_)",
             re.I,
         ),
         "Jar",
     ),
     (
         re.compile(
-            r"(?:^|_)(hair_oil|almond_drops|cool_oil|oil|bringha|bhringaraj|shikakai|serum|toner|astringent|mouthwash|listerine|shampoo|conditioner|bodywash|body_wash|handwash|hand_wash|hand_sanitizer|hand_sanitiser|hand_sanetizer|bodylotion|body_lotion|lotions|lotion|disinfectant|surface_cleaner|toilet_cleaner|toilet_cleanser|bathroom_cleanser|dishwash_liquid|matic_liquid|matic_front_load_liquid|matic_top_load_liquid|liquid|tablets|capsules|gummies|multivitamin|biotin|ketchup|sauce|vinegar)(?:$|_)",
+            r"(?:^|_)(hair_oil|almond_drops|cool_oil|oil|bringha|bhringaraj|shikakai|serum|toner|astringent|mouthwash|listerine|shampoo|conditioner|bodywash|body_wash|handwash|hand_wash|hand_sanitizer|hand_sanitiser|hand_sanetizer|bodylotion|body_lotion|lotions|lotion|disinfectant|surface_cleaner|toilet_cleaner|toilet_cleanser|bathroom_cleanser|dishwash_liquid|matic_liquid|matic_front_load_liquid|matic_top_load_liquid|liquid|tablets|capsules|gummies|multivitamin|biotin|ketchup|sauce|syrup|vinegar)(?:$|_)",
             re.I,
         ),
         "Bottle",
@@ -281,6 +283,7 @@ BRAND_DEFAULT_PACKAGING: dict[str, str] = {
     "fiama": "Bar",
     "dyna": "Bar",
     "v_wash": "Bottle",
+    "clean_and_dry": "Bottle",
     "ponds": "Tube",
     "lakme": "Tube",
     "glow_and_lovely": "Tube",
@@ -335,6 +338,7 @@ BRAND_DEFAULT_PACKAGING: dict[str, str] = {
     "annapurna": "Pouch",
     "cornetto": "Wrapper",
     "kwality": "Tub",
+    "cup_noodles": "Tub",
     "maggi": "Wrapper",
     "yippee": "Wrapper",
     "wai_wai": "Wrapper",
@@ -412,7 +416,7 @@ def resolve_packaging_type(
         raw_pkg = pkg_m.group(1)
         return PKG_SUFFIX_NORM.get(raw_pkg.lower(), raw_pkg.title())
 
-    # 2b. Explicit container token in variant (e.g. Refill/Doy/Polly/Roll_On/Tetrapack/Peel_Off_Mask)
+    # 2b. Explicit container token in variant (e.g. Refill/Doy/Polly/Roll_On/Tetrapack/Peel_Off_Mask/Cup_Noodles)
     for ct_re, ct_pack in EXPLICIT_CONTAINER_TOKEN_RULES:
         if ct_re.search(variant) or ct_re.search(norm_var):
             return ct_pack
@@ -425,11 +429,29 @@ def resolve_packaging_type(
             if top_c / total_v >= 0.65 and top_p != "Unknown":
                 return PKG_SYNONYM_MAP.get(top_p.lower(), top_p)
 
-    # 4. Category-scoped flavor/form rules (prevent Green_Tea on Skin or Chocolate on HFD from misfiring)
+    # 4. Category-scoped flavor/form rules (prevent cross-category token collisions)
     if cat_canon == "Beverages" and re.search(r"(?:^|_)(green_tea)(?:$|_)", norm_var, re.I):
         return "Carton"
-    if cat_canon == "Foods" and re.search(r"(?:^|_)(chocolate)(?:$|_)", norm_var, re.I):
-        return "Wrapper"
+    if cat_canon == "HHC":
+        if re.search(r"(?:^|_)(dish_?wash_gel|gel_dish_?wash|liquid_gel|dish_?wash_liquid|liquid)(?:$|_)", norm_var, re.I):
+            return "Bottle"
+        if re.search(r"(?:^|_)(scrub_easy|scrub_magic|scrub_pad|scrubber|scrub)(?:$|_)", norm_var, re.I):
+            return "Wrapper"
+    if cat_canon == "Oral_Care" and re.search(r"(?:^|_)(rock_salt|clove_and_salt|salt)(?:$|_)", norm_var, re.I):
+        if not re.search(r"(?:^|_)(mouthwash|toothpowder|tooth_powder)(?:$|_)", norm_var, re.I):
+            return "Tube"
+    if cat_canon == "Skin":
+        if re.search(r"(?:^|_)(powder_finish_creme|powder_finish_cream)(?:$|_)", norm_var, re.I):
+            return "Tube"
+        if re.search(r"(?:^|_)(baby_powder|face_powder|faceit_powder|compact_powder|talcum_powder|dusting_powder|powder)(?:$|_)", norm_var, re.I):
+            return "Bottle"
+    if cat_canon == "Foods":
+        if re.search(r"(?:^|_)(spread)(?:$|_)", norm_var, re.I):
+            return "Jar"
+        if re.search(r"(?:^|_)(syrup)(?:$|_)", norm_var, re.I):
+            return "Bottle"
+        if re.search(r"(?:^|_)(chocolate)(?:$|_)", norm_var, re.I):
+            return "Wrapper"
 
     # 5. Product-form rules matched strictly on variant tokens (never brand name!)
     for pf_re, pf_pack in PRODUCT_FORM_PACK_RULES:
@@ -487,14 +509,17 @@ CATEGORY_PACK_PROJECTION_MAP: dict[tuple[str, str], str] = {
     ("PW", "Box"): "Wrapper",
     ("PW", "Carton"): "Wrapper",
     ("PW", "Sachet"): "Pouch",
+    ("PW", "Spray"): "Bottle",
     ("DMT", "Roll_On"): "Bottle",
     ("DMT", "Sachet"): "Bottle",
     ("DMT", "Carton"): "Bottle",
+    ("DMT", "Spray"): "Can",
     ("Oral_Care", "Carton"): "Sachet",
     ("Oral_Care", "Box"): "Sachet",
     ("Oral_Care", "Wrapper"): "Sachet",
     ("Oral_Care", "Pouch"): "Sachet",
     ("Oral_Care", "Jar"): "Bottle",
+    ("Oral_Care", "Spray"): "Bottle",
     ("Beverages", "Sachet"): "Pouch",
     ("Beverages", "Bottle"): "Jar",
     ("Beverages", "Wrapper"): "Pouch",
@@ -506,6 +531,7 @@ CATEGORY_PACK_PROJECTION_MAP: dict[tuple[str, str], str] = {
     ("Foods", "Tin"): "Jar",
     ("Skin", "Pouch"): "Sachet",
     ("Skin", "Pump"): "Bottle",
+    ("Skin", "Spray"): "Bottle",
     ("Skin", "Tub"): "Jar",
     ("Skin", "Tin"): "Jar",
     ("Skin", "Carton"): "Bottle",
@@ -516,6 +542,7 @@ CATEGORY_PACK_PROJECTION_MAP: dict[tuple[str, str], str] = {
     ("HHC", "Tube"): "Bottle",
     ("HHC", "Tub"): "Box",
     ("HHC", "Can"): "Bottle",
+    ("HHC", "Spray"): "Bottle",
     ("HHC", "Wrapper"): "Pouch",
     ("HHC", "Carton"): "Box",
     ("HHC", "Jar"): "Bottle",
@@ -528,11 +555,13 @@ CATEGORY_PACK_PROJECTION_MAP: dict[tuple[str, str], str] = {
     ("Hair_Care", "Box"): "Bottle",
     ("Hair_Care", "Can"): "Bottle",
     ("Hair_Care", "Pump"): "Bottle",
+    ("Hair_Care", "Spray"): "Bottle",
     ("Hair_Care", "Tub"): "Jar",
     ("Laundry", "Tub"): "Carton",
     ("Laundry", "Box"): "Carton",
     ("Laundry", "Wrapper"): "Bar",
     ("Laundry", "Jar"): "Bottle",
+    ("Laundry", "Spray"): "Bottle",
 }
 
 

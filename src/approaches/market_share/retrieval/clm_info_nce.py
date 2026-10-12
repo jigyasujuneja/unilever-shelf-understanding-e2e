@@ -30,6 +30,7 @@ from approaches.market_share.retrieval.jev_laya_hybrid import (
     _dot,
 )
 from utils.clm import (
+    calibrate_gallery_geometry,
     compute_csls_hubness,
     compute_zscore_and_lid,
     infonce_posterior,
@@ -50,14 +51,15 @@ class ClmContrastive(CoarseJevLaya):
     name = "clm_contrastive"
     clm_inv_temp = 28.0
     clm_min_prob = 0.56
+    target_system1_precision = 0.96
     architecture = (
         f"CLM (Contrastive-LM) InfoNCE Multi-View Encoder ({SHORTLIST_MODEL} max-view + centroid + "
-        f"CSLS hubness + inner-CIELAB InfoNCE posterior, 1/tau={clm_inv_temp}) -> Gemini 3.8 contact-sheet fallback"
+        f"CSLS hubness + inner-CIELAB InfoNCE posterior, self-calibrated 1/tau & Conformal risk SLA={target_system1_precision:.0%}) -> Gemini 3.8 contact-sheet fallback"
     )
     steps = [
-        "Setup: build multi-view & centroid embeddings + CSLS hubness penalties + inner-80% CIELAB descriptors per SKU",
-        f"Compute CLM InfoNCE energy E(x, y_k) = 0.78*(max_cos - 0.5*csls) + 0.22*centroid_cos + 0.035*s_lab and softmax P_CLM(y|x) at 1/tau={clm_inv_temp}",
-        f"Auto-accept in 0 VLM calls when InfoNCE posterior P_CLM(y_1|x) >= {clm_min_prob} (or sister-adjusted)",
+        "Setup: build multi-view & centroid embeddings + CSLS hubness penalties + train-gallery LOVO conformal calibration",
+        "Compute CLM InfoNCE energy E(x, y_k) = 0.78*(max_cos - 0.5*csls) + 0.22*centroid_cos + 0.035*s_lab and softmax P_CLM(y|x)",
+        f"Auto-accept in 0 VLM calls when Conformal risk gate passes (target System-1 precision={target_system1_precision:.0%})",
         "Escalate high-entropy crops to batched Gemini 3.8 contact sheets + 1D shelf-row smoothing",
     ]
 
@@ -73,6 +75,15 @@ class ClmContrastive(CoarseJevLaya):
             self.csls_penalties = {
                 path: float(pen) for path, pen in zip(self.index_paths, r_t.tolist(), strict=True)
             }
+        self.gallery_calibration = calibrate_gallery_geometry(
+            self.index,
+            self.sku_centroids,
+            target_system1_precision=self.target_system1_precision,
+            split="train",
+        )
+        self.clm_inv_temp = float(self.gallery_calibration.get("inv_temp", 28.0))
+        self.clm_min_prob = float(self.gallery_calibration.get("conformal_min_prob", 0.56))
+        self.smooth_cosine = float(self.gallery_calibration.get("intra_sku_cosine_floor", 0.86))
 
     def _rank_crop(
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None
@@ -118,7 +129,9 @@ class ClmContrastive(CoarseJevLaya):
         c1 = self.sku_centroids.get(id1)
         c2 = self.sku_centroids.get(id2)
         family_cos = _dot(c1, c2) if (c1 is not None and c2 is not None and id1 != id2) else 0.0
-        same_family = family_cos >= COARSE_FAMILY_COSINE
+        cal = getattr(self, "gallery_calibration", None) or {}
+        med_sib = float(cal.get("median_sibling_cosine", COARSE_FAMILY_COSINE))
+        same_family = family_cos >= max(COARSE_FAMILY_COSINE, med_sib)
 
         req_prob = (self.clm_min_prob + 0.09) if same_family else self.clm_min_prob
         confident = s1 >= self.min_cosine and (s1 >= self.high_cosine or p1 >= req_prob)
@@ -126,6 +139,7 @@ class ClmContrastive(CoarseJevLaya):
             "same_coarse_family": same_family,
             "family_cosine": round(family_cos, 4),
             "clm_top1_prob": p1,
+            "clm_inv_temp": self.clm_inv_temp,
             "coarse_entropy_conf": ent_conf,
             "required_margin": round(req_prob, 3),
         }
@@ -154,20 +168,23 @@ class L8HulUltimate(ClmContrastive):
         if not ranked:
             return False, meta
         zlid = compute_zscore_and_lid([s for s, _, _ in ranked[:K]])
-        s1 = ranked[0][0]
+        s1, id1, _ = ranked[0]
         s2 = ranked[1][0] if len(ranked) > 1 else -1.0
         margin = s1 - s2
         same_family = meta.get("same_coarse_family", False)
+        cal = getattr(self, "gallery_calibration", None) or {}
+        sku_margins = cal.get("sku_required_margin") or {}
+        local_req_margin = float(sku_margins.get(id1, 0.022))
         req_z = 1.38 if same_family else 1.02
         confident = (
             s1 >= self.min_cosine
-            and margin >= 0.022
+            and margin >= min(0.022, local_req_margin)
             and (
                 s1 >= self.high_cosine
                 or (confident_clm and zlid["z_margin"] >= req_z and zlid["lid"] <= self.max_lid)
             )
         )
-        return confident, {**meta, **zlid}
+        return confident, {**meta, **zlid, "local_sku_margin": local_req_margin}
 
     def identify_boxes(
         self, image: Image.Image, boxes: list[Box], ctx: Context

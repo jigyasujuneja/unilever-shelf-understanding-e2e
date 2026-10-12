@@ -140,8 +140,6 @@ class Context:
     otel_parent: Any = None
     price: Callable[[Usage], dict] | None = None
     detected_asset_boxes: list[Box] = field(default_factory=list)
-    eval_samples: list[Any] = field(default_factory=list)
-    eval_split: str = "test"
 
     def ask(self, image: Image.Image, prompt: str, **kw) -> LLMResult:
         """Call the run's Gemini model. kw: schema=<JSON schema>, max_side=<px downscale>.

@@ -230,3 +230,107 @@ def zoom_multi_sheet_midband(
             draw.text((x0 + 6, y0 + 2), label, fill="red" if c_idx == 0 else "black", font=font)
     return out
 
+
+def calibrate_gallery_geometry(
+    index: list[tuple[int, str, list[float]]],
+    sku_centroids: dict[int, list[float]],
+    *,
+    target_system1_precision: float = 0.96,
+    split: str = "train",
+) -> dict[str, object]:
+    """Two-Tier Self-Calibration of System 1 -> System 2 gates strictly from ``train`` gallery geometry.
+
+    Tier A (Intrinsic ``train`` Gallery Geometry at ``setup()``):
+      - Computes per-SKU closest-sibling centroid similarity ``s_sib(i) = max_{j != i} <c_i, c_j>``.
+      - Derives scale-free InfoNCE inverse temperature ``inv_temp = clip(1.40 / median_i(1 - s_sib(i)), 18.0, 44.0)``.
+      - Derives per-SKU local margin requirement ``req_margin(i) = clip(0.35 * (1 - s_sib(i)), 0.015, 0.055)``.
+      - Computes Leave-One-View-Out (LOVO) intra-SKU cosine floor for 1D shelf-row spatial context ``[P, x_i, P]``.
+
+    Tier B (Leave-One-View-Out Conformal Risk Quantile controlled by ``target_system1_precision``):
+      - Evaluates LOVO non-conformity on multi-view ``train`` gallery references to calibrate ``conformal_min_prob``.
+      - Strictly forbids ``split == 'test'`` to guarantee zero hyperparameter leakage.
+    """
+    if split == "test":
+        raise ValueError("Zero-leakage invariant violated: calibrate_gallery_geometry cannot be fit on 'test' split")
+
+    pids = sorted(sku_centroids.keys())
+    if len(pids) < 4:
+        return {
+            "source_split": split,
+            "target_system1_precision": target_system1_precision,
+            "inv_temp": 28.0,
+            "conformal_min_prob": 0.56,
+            "intra_sku_cosine_floor": 0.86,
+            "median_sibling_cosine": 0.80,
+            "sku_sibling_cosine": {pid: 0.80 for pid in pids},
+            "sku_required_margin": {pid: 0.026 for pid in pids},
+        }
+
+    mat = np.asarray([sku_centroids[pid] for pid in pids], dtype=np.float32)
+    sim = mat @ mat.T
+    np.fill_diagonal(sim, -np.inf)
+    max_sib = sim.max(axis=1)
+
+    sku_sib_cos: dict[int, float] = {}
+    sku_req_margin: dict[int, float] = {}
+    gaps: list[float] = []
+    for idx_p, pid in enumerate(pids):
+        s_sib = float(max(-1.0, min(0.999, float(max_sib[idx_p]))))
+        gap = max(1e-3, 1.0 - s_sib)
+        gaps.append(gap)
+        sku_sib_cos[pid] = round(s_sib, 4)
+        sku_req_margin[pid] = round(float(max(0.015, min(0.055, 0.35 * gap))), 4)
+
+    med_gap = float(np.median(gaps)) if gaps else 0.05
+    inv_temp = round(float(max(18.0, min(44.0, 1.40 / max(1e-3, med_gap)))), 2)
+    med_sib_cos = round(1.0 - med_gap, 4)
+
+    # Leave-One-View-Out (LOVO) intra-SKU cosine floor & Conformal posterior quantile
+    by_sku: dict[int, list[np.ndarray]] = {}
+    for pid, _, vec in index:
+        by_sku.setdefault(pid, []).append(np.asarray(vec, dtype=np.float32))
+
+    lovo_intra_cos: list[float] = []
+    lovo_posteriors: list[float] = []
+    for pid, v_list in by_sku.items():
+        if len(v_list) < 2:
+            continue
+        v_sum = np.sum(v_list, axis=0)
+        s_sib = sku_sib_cos.get(pid, med_sib_cos)
+        for v in v_list:
+            rest_mean = v_sum - v
+            norm = float(np.linalg.norm(rest_mean))
+            if norm <= 1e-8:
+                continue
+            rest_unit = rest_mean / norm
+            pos_cos = float(np.dot(v, rest_unit))
+            lovo_intra_cos.append(pos_cos)
+            # 2-class LOVO conformal proxy against closest sibling centroid
+            logit_diff = inv_temp * (pos_cos - s_sib)
+            p_lovo = 1.0 / (1.0 + math.exp(-max(-25.0, min(25.0, logit_diff))))
+            lovo_posteriors.append(p_lovo)
+
+    if lovo_intra_cos:
+        intra_floor = round(float(max(0.82, min(0.92, float(np.percentile(lovo_intra_cos, 15))))), 4)
+    else:
+        intra_floor = 0.86
+
+    alpha = max(0.01, min(0.25, 1.0 - float(target_system1_precision)))
+    if lovo_posteriors:
+        q_prob = float(np.quantile(lovo_posteriors, alpha))
+        conformal_min_prob = round(float(max(0.50, min(0.72, q_prob))), 4)
+    else:
+        conformal_min_prob = 0.56
+
+    return {
+        "source_split": split,
+        "target_system1_precision": target_system1_precision,
+        "inv_temp": inv_temp,
+        "conformal_min_prob": conformal_min_prob,
+        "intra_sku_cosine_floor": intra_floor,
+        "median_sibling_cosine": med_sib_cos,
+        "sku_sibling_cosine": sku_sib_cos,
+        "sku_required_margin": sku_req_margin,
+    }
+
+
