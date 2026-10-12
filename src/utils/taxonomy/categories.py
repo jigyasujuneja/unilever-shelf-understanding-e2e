@@ -183,10 +183,10 @@ _NON_HUL_BRANDS_BY_CATEGORY: dict[str, tuple[str, ...]] = {
         "lays", "lotte_choco_pie", "m&m", "m_d_h_chat_masala", "mackays", "madhusudan_desi_ghee",
         "malas", "malkist", "mapro", "mars", "mccain", "milkfood", "milky_mist", "monaco",
         "morton", "mother_garlic", "mothers_dairy", "mr_vities", "mtr", "muesli", "munchys",
-        "nandos", "nanma foods", "nilons", "nutralite", "open_secret", "orbit_mints", "oreo",
+        "nandos", "nanma_foods", "nilons", "nutralite", "open_secret", "orbit_mints", "oreo",
         "panzani", "paras_ghee", "parle", "parrys", "pillsburry", "polo", "pravin", "pringles",
         "priya", "pro_nature", "quaker", "ragu", "rajasthan_garlic_chutney", "rajdhani",
-        "rasoi magic", "real_thai", "remia", "sadguru_gram_flour", "safal", "saffola", "sakthi",
+        "rasoi_magic", "real_thai", "remia", "sadguru_gram_flour", "safal", "saffola", "sakthi",
         "salsalito", "shan", "sil", "skippy", "skittles", "smith_jones", "snac_tac", "snapin",
         "snickers", "sorrentina", "spice_story", "sprig", "st.dalfour", "stute", "sugar_lite",
         "suhana", "sunfeast", "swad", "swastiks", "tabasco", "tamar_hind", "tasty_nibbles",
@@ -238,8 +238,17 @@ MULTI_CATEGORY_BRAND_PROFILES: dict[str, tuple[str, ...]] = {
     "dove": ("Skin", "Hair_Care", "PW", "DMT"),
     "ayush": ("Skin", "Oral_Care", "Hair_Care", "PW"),
     "lbp": ("Hair_Care", "Skin", "PW"),
+    "love_beauty_and_planet": ("Hair_Care", "Skin", "PW"),
     "lifebuoy": ("PW", "HHC", "Skin"),
     "rexona": ("DMT", "PW"),
+    "clinic_plus": ("Hair_Care", "PW"),
+    "indulekha": ("Hair_Care", "PW"),
+    "lux": ("PW", "Hair_Care", "Skin"),
+    "pears": ("PW", "Skin"),
+    "st_ives": ("PW", "Skin"),
+    "ghar": ("PW", "Skin"),
+    "nature_protect": ("PW", "HHC", "Laundry"),
+    "funfoods": ("Foods", "Beverages"),
     "tata": ("Beverages", "Foods"),
     "patanjali": ("Skin", "Oral_Care", "Hair_Care", "PW", "Foods", "HHC", "Laundry"),
     "himalaya": ("Skin", "Hair_Care", "Oral_Care", "PW", "HFD"),
@@ -264,6 +273,7 @@ MULTI_CATEGORY_BRAND_PROFILES: dict[str, tuple[str, ...]] = {
     "mamaearth": ("Skin", "Hair_Care", "PW"),
     "nestle": ("Beverages", "Foods", "HFD"),
     "vicco": ("Skin", "Oral_Care"),
+    "nycil": ("Skin", "PW"),
 }
 
 HFD_SUPPLEMENT_BRANDS: set[str] = {
@@ -310,7 +320,14 @@ VARIANT_CATEGORY_KEYWORD_RULES: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(
-            r"(?:^|_)(shampoo|shampoos|conditioner|conditioners|conditionar|hair_mask|deep_repair_mask|moisture_mask|strength_mask|hair_oil|hair_colour|hair_color|hair_cream|hair_serum|hair_care|scalp|dandruff|anti_dandruff|antidandruff|bringha|bhringaraj|shikakai|reetha|amla|hibiscus|hair_fall|hairfall|anti_hairfall|damage_repair|dryness_defense|detangler|almond_drops|cool_oil|6oil_nourish|black_naturals|color_naturals|color_natural|beautiful_curls|healthy_rituals|daily_shine|nourishing_oil_care|oxygen_moisture|environment_defence|peptide_bond_strength|mencare_[a-z0-9_]*2_in_1|intense_damage_repair__?mask|intense_repair__?mask)(?:$|_)",
+            r"(?:^|_)(laundry_sanitiser|laundry_sanitizer|laundry_sanetizer|laundry_disinfectant|germ_removal_detergent|detergent_powder|detergent_liquid|liquid_detergent|detergent_bar|detergen_bar|detergent|washing_powder|fabric_conditioner|fab_conditioner|fabric_wash|matic_liquid|matic_front_load|matic_top_load|(?<!mould_)stain_remover|after_wash)(?:$|_)",
+            re.I,
+        ),
+        "Laundry",
+    ),
+    (
+        re.compile(
+            r"(?:^|_)(shampoo|shampoos|(?<!fabric_)(?<!fab_)conditioner|(?<!fabric_)(?<!fab_)conditioners|conditionar|hair_mask|deep_repair_mask|moisture_mask|strength_mask|hair_oil|hair_colour|hair_color|hair_cream|hair_serum|hair_care|scalp|dandruff|anti_dandruff|antidandruff|bringha|bhringaraj|shikakai|reetha|amla|hibiscus|hair_fall|hairfall|anti_hairfall|damage_repair|dryness_defense|detangler|almond_drops|cool_oil|6oil_nourish|black_naturals|color_naturals|color_natural|beautiful_curls|healthy_rituals|daily_shine|nourishing_oil_care|oxygen_moisture|environment_defence|peptide_bond_strength|mencare_[a-z0-9_]*2_in_1|intense_damage_repair__?mask|intense_repair__?mask)(?:$|_)",
             re.I,
         ),
         "Hair_Care",
@@ -321,28 +338,21 @@ VARIANT_CATEGORY_KEYWORD_RULES: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(
-            r"(?:^|_)(laundry_sanitiser|laundry_sanitizer|laundry_sanetizer|laundry_disinfectant|germ_removal_detergent|detergent_powder|detergent_liquid|liquid_detergent|detergent_bar|detergen_bar|detergent|washing_powder|fabric_conditioner|fab_conditioner|fabric_wash|matic_liquid|matic_front_load|matic_top_load|stain_remover|after_wash)(?:$|_)",
-            re.I,
-        ),
-        "Laundry",
-    ),
-    (
-        re.compile(
-            r"(?:^|_)(surface_cleaner|floor_cleaner|glass_cleaner|kitchen_cleaner|bathroom_cleanser|toilet_cleaner|fruit_and_vegetable_wash|dishwash|dish_wash|surface_disinfectant|disinfectant_surface|disinfectant_liquid|liquid_disinfectant|disinfectant_spray|disinfictant_spray|surface_wipe|antiseptic_liquid|hand_sanitizer|hand_sanitiser|hand_sanetizer|sanitiser|sanitizer)(?:$|_)",
+            r"(?:^|_)(surface_cleaner|floor_cleaner|glass_cleaner|kitchen_cleaner|bathroom_cleanser|toilet_cleaner|toilet_cleanser|mould_stain_remover|fruit_and_vegetable_wash|dishwash|dish_wash|surface_disinfectant|disinfectant_surface|disinfectant_liquid|liquid_disinfectant|disinfectant_spray|disinfictant_spray|surface_wipe|antiseptic_liquid|hand_sanitizer|hand_sanitiser|hand_sanetizer|sanitiser|sanitizer)(?:$|_)",
             re.I,
         ),
         "HHC",
     ),
     (
         re.compile(
-            r"(?:^|_)(soap|soaps|soap_bar|soap_bars|bath_soap|bathing_bar|bodywash|body_wash|shower_gel|handwash|hand_wash|top_to_toe_bath|prickly_heat_powder)(?:$|_)",
+            r"(?:^|_)(soap|soaps|soap_bar|soap_bars|bath_soap|bathing_bar|bodywash|body_wash|shower_gel|handwash|hand_wash|top_to_toe_bath)(?:$|_)",
             re.I,
         ),
         "PW",
     ),
     (
         re.compile(
-            r"(?:^|_)(chai|tea_bags|green_tea|teaveda|darjeeling|kahwa|cappuccino|espresso|latte|filter_coffee|cold_coffee|coffee_gold|coffee_grand|coffee_pouch|coffelovers|chakra_gold|kanan_devan|agni)(?:$|_)",
+            r"(?:^|_)(chai|tea_bags|green_tea|masala_tea|instant_masala|masala_flavour_tea|masala_chaska|dust_masala_tea|tea_poly|leaf_tea|premium_tea|teaveda|darjeeling|kahwa|cappuccino|espresso|latte|filter_coffee|cold_coffee|coffee_gold|coffee_grand|coffee_pouch|coffelovers|chakra_gold|kanan_devan|agni)(?:$|_)",
             re.I,
         ),
         "Beverages",
@@ -356,7 +366,7 @@ VARIANT_CATEGORY_KEYWORD_RULES: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(
-            r"(?:^|_)(facewash|face_wash|facwash|face_cream|day_cream|night_cream|skin_cream|shaving_cream|shavingcream|sunscreen|suncreen|sunblock|toner|astringent|cleanser|cleansing_milk|bodylotion|body_lotion|body_lotions|hand_body_lotion|body_milk|bodyscrub|body_scrub|apricot_scrub|walnut_scrub|face_pack|facepack|face_makeup|sheet_mask|clay_mask|peel_off_mask|lip_mask|sleeping_mask|moisturizer|moisturiser|moistrurizer|moisturising|moisturizing|petroleum_jelly|petroleumjelly|gulabari|aloe_vera_gel|aloevera_gel|saundarya)(?:$|_)",
+            r"(?:^|_)(facewash|face_wash|facwash|facescrub|face_scrub|face_cream|day_cream|night_cream|skin_cream|shaving_cream|shavingcream|sunscreen|suncreen|sunblock|toner|astringent|(?<!toilet_)(?<!bathroom_)cleanser|cleansing_milk|bodylotion|body_lotion|body_lotions|hand_body_lotion|body_milk|bodyscrub|body_scrub|apricot_scrub|walnut_scrub|face_pack|facepack|face_makeup|sheet_mask|clay_mask|peel_off_mask|lip_mask|sleeping_mask|moisturizer|moisturiser|moistrurizer|moisturising|moisturizing|petroleum_jelly|petroleumjelly|gulabari|aloe_vera_gel|aloevera_gel|saundarya|beauty_talc|prickly_heat_powder)(?:$|_)",
             re.I,
         ),
         "Skin",

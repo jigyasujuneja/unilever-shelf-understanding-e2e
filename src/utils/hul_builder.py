@@ -1408,10 +1408,16 @@ def save_golden_json_payload(payload: dict[str, Any], output_dir: str = "data/hu
         json.dumps({"count": len(quarantined), "items": quarantined}, indent=2)
     )
     rpc_file.write_text(json.dumps(rpc_manifest, indent=2))
+    from utils.dataset import export_rpc_splits_jsonl
+
+    jsonl_paths = export_rpc_splits_jsonl(rpc_manifest, out_path)
     return {
         "golden_payload_path": str(golden_file),
         "quarantined_conflicts_path": str(quarantine_file),
         "rpc_manifest_path": str(rpc_file),
+        "train_jsonl_path": jsonl_paths["train"],
+        "val_jsonl_path": jsonl_paths["val"],
+        "test_jsonl_path": jsonl_paths["test"],
     }
 
 

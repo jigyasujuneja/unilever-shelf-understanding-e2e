@@ -81,12 +81,15 @@ TATA_HUL_VARIANTS: tuple[str, ...] = (
 
 def canonicalize_brand_name(raw_brand: str) -> str:
     """Normalize a raw brand token or folder name to its canonical spelling."""
-    raw = raw_brand.strip()
+    raw = re.sub(r"[\s_]+", "_", raw_brand.strip()).strip("_")
     if not raw:
         return "Unknown"
     raw_low = raw.lower()
+    raw_space_low = raw_low.replace("_", " ")
     if raw_low in BRAND_ALIAS_MAP:
         return BRAND_ALIAS_MAP[raw_low]
+    if raw_space_low in BRAND_ALIAS_MAP:
+        return BRAND_ALIAS_MAP[raw_space_low]
     if raw_low in A_PREFIX_TWINS:
         return A_PREFIX_TWINS[raw_low]
     if raw.startswith("Z_"):

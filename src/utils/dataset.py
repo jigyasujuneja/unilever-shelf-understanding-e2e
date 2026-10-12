@@ -390,6 +390,37 @@ def _rpc_json(root: str) -> dict:
         raise
 
 
+def format_split_jsonl(rows: list[dict] | tuple[dict, ...]) -> str:
+    """Serialize split records into JSON Lines (``.jsonl``) format (one JSON object per line)."""
+    import json
+
+    if not rows:
+        return ""
+    return "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
+
+
+def parse_split_jsonl(raw_text: str | bytes) -> list[dict]:
+    """Parse a JSON Lines (``.jsonl``) payload into a list of split record dicts."""
+    import json
+
+    text = raw_text.decode("utf-8") if isinstance(raw_text, (bytes, bytearray)) else str(raw_text)
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def export_rpc_splits_jsonl(manifest: dict, output_dir: str | Path) -> dict[str, str]:
+    """Write ``train.jsonl``, ``val.jsonl``, and ``test.jsonl`` (one JSON object per line) into ``output_dir``."""
+    out_p = Path(output_dir)
+    out_p.mkdir(parents=True, exist_ok=True)
+    splits = manifest.get("splits") or {}
+    written: dict[str, str] = {}
+    for sp in ("train", "val", "test"):
+        rows = splits.get(sp) or []
+        target = out_p / f"{sp}.jsonl"
+        target.write_text(format_split_jsonl(rows), encoding="utf-8")
+        written[sp] = str(target)
+    return written
+
+
 def rpc_catalog(root: str) -> dict[int, dict]:
     return {int(k): v for k, v in _rpc_json(root)["classes"].items()}
 
@@ -399,24 +430,51 @@ def rpc_gallery(root: str) -> dict[int, list[str]]:
     return {int(k): [join(root, f) for f in v] for k, v in _rpc_json(root)["gallery"].items()}
 
 
-@lru_cache(maxsize=16)
-def load_rpc(split: str, root: str) -> dict[str, Sample]:
-    if split not in RPC_SUBSETS:
-        raise ValueError(f"the rpc dataset has splits {tuple(RPC_SUBSETS)}, got {split!r}")
-    cat = rpc_catalog(root)
+def _rpc_split_rows(split: str, root: str) -> list[dict]:
+    """Load split rows from ``<root>/<split>.jsonl`` if present or from ``rpc.json['splits'][split]``."""
+    is_gcs = str(root).startswith("gs://")
+    ds_leaf = str(root).rstrip("/").rsplit("/", 1)[-1]
+    local_jsonl = Path("data") / ds_leaf / f"{split}.jsonl"
+    if not is_gcs:
+        direct_jsonl = Path(join(root, f"{split}.jsonl"))
+        if direct_jsonl.exists():
+            return parse_split_jsonl(direct_jsonl.read_bytes())
+    try:
+        mf = _rpc_json(root)
+        rows = mf.get("splits", {}).get(split)
+        if rows:
+            return list(rows)
+    except Exception:
+        pass
+    try:
+        return parse_split_jsonl(read_bytes(join(root, f"{split}.jsonl")))
+    except Exception:
+        if local_jsonl.exists():
+            return parse_split_jsonl(local_jsonl.read_bytes())
+        return []
+
+
+def _rows_to_samples(
+    rows: list[dict],
+    cat: dict[int, dict] | None = None,
+    root: str = "",
+) -> dict[str, Sample]:
+    cat_map = cat or {}
     out: dict[str, Sample] = {}
-    for r in _rpc_json(root).get("splits", {}).get(split, []):
+    for r in rows:
         prods = [int(c) for c in r.get("products", [])]
         raw_labels = r.get("labels") or []
         labels: list[dict] = []
-        for idx_p, pid in enumerate(prods):
-            base_lbl = dict(cat[pid]) if pid in cat else {}
-            if idx_p < len(raw_labels) and isinstance(raw_labels[idx_p], dict):
-                # Catalog is authoritative for taxonomy fields; preserve any extra box-specific keys
-                merged = {**raw_labels[idx_p], **base_lbl}
-                labels.append(merged)
-            elif base_lbl:
-                labels.append(base_lbl)
+        if prods:
+            for idx_p, pid in enumerate(prods):
+                base_lbl = dict(cat_map[pid]) if pid in cat_map else {}
+                if idx_p < len(raw_labels) and isinstance(raw_labels[idx_p], dict):
+                    merged = {**raw_labels[idx_p], **base_lbl}
+                    labels.append(merged)
+                elif base_lbl:
+                    labels.append(base_lbl)
+        else:
+            labels = [dict(lbl) for lbl in raw_labels if isinstance(lbl, dict)]
         out[r["image"]] = Sample(
             r["image"],
             join(root, r["uri"]) if r.get("uri") else join(root, "images", r["image"]),
@@ -427,6 +485,25 @@ def load_rpc(split: str, root: str) -> dict[str, Sample]:
             asset_boxes=[tuple(b) for b in r.get("asset_boxes", [])],
         )
     return out
+
+
+def load_split_jsonl(
+    jsonl_path: str | Path,
+    catalog: dict[int, dict] | None = None,
+    root: str = "",
+) -> dict[str, Sample]:
+    """Load ``{image_id: Sample}`` directly from a ``train.jsonl``, ``val.jsonl``, or ``test.jsonl`` file or URI."""
+    rows = parse_split_jsonl(read_bytes(str(jsonl_path)))
+    return _rows_to_samples(rows, cat=catalog, root=root)
+
+
+@lru_cache(maxsize=16)
+def load_rpc(split: str, root: str) -> dict[str, Sample]:
+    if split not in RPC_SUBSETS:
+        raise ValueError(f"the rpc dataset has splits {tuple(RPC_SUBSETS)}, got {split!r}")
+    cat = rpc_catalog(root)
+    rows = _rpc_split_rows(split, root)
+    return _rows_to_samples(rows, cat=cat, root=root)
 
 
 RPC_CACHE = Path("data/rpc_cache")  # API pages, so an interrupted `shelf-bench rpc` resumes
