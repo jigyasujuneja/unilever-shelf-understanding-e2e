@@ -294,14 +294,18 @@ def deploy_ui(image: str | None = None, log=print) -> str:
     s = _session()
     image = image or build_image(s, project, region, log)
     base = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services"
-    body = {"template": {"containers": [{
-        "image": image,
-        "args": ["serve", "--pull", "--host", "0.0.0.0", "--port", "8080"],
-        "ports": [{"containerPort": 8080}],
-        "resources": {"limits": {"cpu": "2", "memory": "4Gi"}},
-    }]}}
+    body = {
+        "launchStage": "BETA",
+        "iapEnabled": True,
+        "template": {"containers": [{
+            "image": image,
+            "args": ["serve", "--pull", "--host", "0.0.0.0", "--port", "8080"],
+            "ports": [{"containerPort": 8080}],
+            "resources": {"limits": {"cpu": "2", "memory": "4Gi"}},
+        }]},
+    }
     exists = s.get(f"{base}/{name}", timeout=30).status_code == 200
-    op = _ok(s.patch(f"{base}/{name}?updateMask=template", json=body, timeout=60) if exists
+    op = _ok(s.patch(f"{base}/{name}?updateMask=template,iapEnabled,launchStage", json=body, timeout=60) if exists
              else s.post(f"{base}?serviceId={name}", json=body, timeout=60))
     uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
     log(f"Deployed {name}: {uri} (Direct IAP enabled)")

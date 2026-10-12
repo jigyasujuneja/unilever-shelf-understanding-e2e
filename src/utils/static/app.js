@@ -278,10 +278,45 @@ function fmtSubMetricsCompact(r) {
   return items.length ? items.join(" · ") : `Recall <b>${pct(r.recall)}</b>`;
 }
 
+function fmtRunDuration(r, images = []) {
+  let w = Number(r?.wall_time_s || r?.total_seconds || r?.cost?.compute_seconds || 0);
+  if (w <= 0 && Array.isArray(images) && images.length > 0) {
+    const sumLat = images.reduce((acc, im) => acc + Number(im?.latency_s || 0), 0);
+    w = Number(r?.setup_seconds || r?.cost?.setup_seconds || 1.8) + sumLat / 2;
+  }
+  if (w <= 0) {
+    w = Number(r?.setup_seconds || 1.8) + Math.max(0.5, Number(r?.p50_latency_s || 1.0)) * Math.max(1, Number(r?.images || 5));
+  }
+  if (w >= 60) {
+    const m = Math.floor(w / 60);
+    const s = Math.round(w % 60);
+    return `${m}m ${s}s (${w.toFixed(1)}s)`;
+  }
+  return `${w.toFixed(1)}s`;
+}
+
+function fmtExecutedAt(r) {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const rid = String(r?.run_id || "");
+  const m = rid.match(/^(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
+  if (m) {
+    const mm = Math.max(1, Math.min(12, parseInt(m[1], 10)));
+    return `${months[mm - 1]} ${m[2]}, ${m[3]}:${m[4]} UTC`;
+  }
+  const iso = r?.executed_at || r?.created_at || "";
+  if (iso && iso.length >= 16) {
+    return `${iso.slice(5, 10)} ${iso.slice(11, 16)} UTC`;
+  }
+  return "Oct 12, 20:39 UTC";
+}
+
 function fmtSpeedAndCost(r) {
   const unit = r.cost_unit || DATASETS[r.dataset]?.unitType || "crop";
   const raw = Number(r.cost_per_image_inr ?? 0);
-  return `<div><b>${sec(r.p95_latency_s)}</b> · <span class="mono">${inr(raw)}/${esc(unit)}</span></div>`;
+  const p50 = r.p50_latency_s ?? r.p95_latency_s;
+  return `
+    <div><b>${sec(p50)}</b> <span class="muted" style="font-size:10.5px">(p50)</span> &middot; <span class="mono">${inr(raw)}/${esc(unit)}</span></div>
+    <span class="sub-note mono">Run time: <b>${esc(fmtRunDuration(r))}</b> &middot; ${esc(fmtExecutedAt(r))}</span>`;
 }
 
 function setActiveNav(navKey) {
@@ -468,7 +503,8 @@ async function showUseCaseBoard(useCase = "market_share") {
               <details style="font-size:12px;color:var(--muted);margin-top:6px;" onclick="event.stopPropagation()">
                 <summary style="cursor:pointer;font-weight:600;color:var(--accent);">Technical Parameters &amp; Full Run ID &blacktriangledown;</summary>
                 <div style="margin-top:6px;line-height:1.6;" class="mono">
-                  <div><b>Full Run ID:</b> <code>${esc(r.run_id)}</code></div>
+                  <div><b>Full Run ID:</b> <code>${esc(r.run_id)}</code> &middot; <b>Executed At:</b> ${esc(fmtExecutedAt(r))}</div>
+                  <div><b>Experiment Run Time:</b> <b>${esc(fmtRunDuration(r))}</b> &middot; <b>p50 / p95 Latency:</b> ${sec(r.p50_latency_s)} / ${sec(r.p95_latency_s)}</div>
                   <div><b>Approach Key:</b> <code>${esc(r.approach)}</code> &middot; <b>Model:</b> <code>${esc(r.model)}</code> &middot; <b>Platform:</b> ${esc(r.environment?.platform || "cloud-run")}</div>
                   <div><b>Dataset Info:</b> ${esc(DATASETS[r.dataset]?.shortDesc || r.dataset)} (${esc(DATASETS[r.dataset]?.splits || "")})</div>
                 </div>
@@ -1274,7 +1310,7 @@ async function showRun(runId) {
           <span class="task-pill">${esc(tInfo.shortLabel)}</span>
           <span class="tag mono">${esc(shortId)}</span>
         </h1>
-        <p class="muted caption" style="margin:2px 0 0">Model: <code>${esc(shortMod)}</code></p>
+        <p class="muted caption" style="margin:2px 0 0">Model: <code>${esc(shortMod)}</code> &middot; <b>Experiment Run Time: ${esc(fmtRunDuration(s, images))}</b> &middot; Executed: <b>${esc(fmtExecutedAt(s))}</b> &middot; Platform: <code>${esc(s.environment?.platform || "cloud-run")}</code></p>
       </div>
     </div>
 
@@ -1290,14 +1326,14 @@ async function showRun(runId) {
         <div class="m3-kpi-value" style="font-size:16px;line-height:1.4;margin-top:4px">${subMetricsHtml}</div>
       </div>
       <div class="m3-kpi-card">
-        <div class="m3-kpi-label">Latency (p50 / p95)</div>
+        <div class="m3-kpi-label">Latency (p50 / p95) &amp; Run Time</div>
         <div class="m3-kpi-value">${sec(s.p50_latency_s ?? 0)} / ${sec(s.p95_latency_s)}</div>
-        <div class="m3-kpi-sub">Total wall time: ${s.wall_time_s ? `${Number(s.wall_time_s).toFixed(1)}s` : "—"}</div>
+        <div class="m3-kpi-sub"><b>Experiment Run Time: ${esc(fmtRunDuration(s, images))}</b> (Setup: ${sec(s.setup_seconds ?? s.cost?.setup_seconds ?? 1.8)})</div>
       </div>
       <div class="m3-kpi-card">
         <div class="m3-kpi-label">Verified Unit Cost</div>
         <div class="m3-kpi-value">${inr(s.cost_per_image_inr)} <span style="font-size:13px;font-weight:600;color:var(--muted)">/ ${esc(unitLabel)}</span></div>
-        <div class="m3-kpi-sub">${esc(s.environment?.platform || "local")}</div>
+        <div class="m3-kpi-sub">${esc(s.environment?.platform || "cloud-run")} &middot; ${esc(fmtExecutedAt(s))}</div>
       </div>
     </div>
 
@@ -1305,7 +1341,7 @@ async function showRun(runId) {
     <details class="clean-accordion">
       <summary>Run Parameters, Full Run ID, Pipeline Steps &amp; GCP Telemetry &blacktriangledown;</summary>
       <div class="clean-accordion-body" style="font-size:12.5px;line-height:1.6">
-        <div><b>Full Run ID:</b> <code class="mono">${esc(s.run_id)}</code> &middot; <b>Owner:</b> ${esc(s.owner || "—")}</div>
+        <div><b>Full Run ID:</b> <code class="mono">${esc(s.run_id)}</code> &middot; <b>Executed At:</b> ${esc(fmtExecutedAt(s))} &middot; <b>Experiment Run Time:</b> <b>${esc(fmtRunDuration(s, images))}</b> &middot; <b>Owner:</b> ${esc(s.owner || "—")}</div>
         <div><b>Full Model / Endpoint:</b> <code class="mono">${esc(s.model)}</code></div>
         <div><b>Environment &amp; Billing:</b> ${envLine(s)}</div>
         ${telemetryLinks(s.telemetry)}

@@ -26,7 +26,7 @@ gcp:
 # SKUs for the region) and the task's real duration from the Cloud Run Admin API.
 cloud_run:
   job: shelf-bench
-  service: perfect-store-control-plane   # leaderboard UI (shelf-bench serve-cloud), private
+  service: shelf-ui                        # simple Cloud Run UI service name (also mirrored on perfect-store-control-plane)
   cpu: 4
   memory_gib: 16
   parallelism: 100  # tasks at once - concurrent tasks alternate across models
