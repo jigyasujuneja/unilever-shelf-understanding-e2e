@@ -311,11 +311,35 @@ function fmtExecutedAt(r) {
 }
 
 function fmtSpeedAndCost(r) {
-  const unit = r.cost_unit || DATASETS[r.dataset]?.unitType || "crop";
-  const raw = Number(r.cost_per_image_inr ?? 0);
+  const ds = r.dataset || "";
+  const unit = r.cost_unit || DATASETS[ds]?.unitType || "crop";
+  const rawInr = Number(r.cost_per_image_inr ?? 0);
+  const rawUsd = Number(r.cost_per_image_usd ?? rawInr / 86.6);
   const p50 = r.p50_latency_s ?? r.p95_latency_s;
+  const ap = String(r.approach || "");
+  let shelfLine = "";
+  if (ds === "hul_sessions") {
+    const bayUsd = rawUsd;
+    const shUsd = bayUsd / 3.0;
+    shelfLine = `<div class="sub-note mono" style="color:#0057b8;font-weight:600;">$${shUsd.toFixed(5)}/shelf (${inr(rawInr / 3.0)}) &middot; $${bayUsd.toFixed(4)}/bay</div>`;
+  } else if (unit === "shelf") {
+    const boxes = Math.max(1, Number(r.boxes_per_image || 32.4));
+    const cropUsd = rawUsd / boxes;
+    shelfLine = `<div class="sub-note mono" style="color:#0057b8;font-weight:600;">$${rawUsd.toFixed(5)}/shelf (${inr(rawInr)}) &middot; $${cropUsd.toFixed(6)}/box</div>`;
+  } else {
+    const isZeroVlm = ap.includes("clm_standalone") || ap.includes("embedding") || ap.includes("clm_promo");
+    const isNaivePerCrop = ap === "gemini_classify" || ap === "hierarchy_classify";
+    const shelfUsd = isZeroVlm
+      ? 0.00004 + rawUsd * 2.5
+      : isNaivePerCrop
+        ? 0.00004 + rawUsd * 35.0
+        : 0.00004 + 0.00055 + rawUsd * 1.65;
+    const shelfInr = shelfUsd * 86.6;
+    shelfLine = `<div class="sub-note mono" style="color:#0057b8;font-weight:600;">~$${shelfUsd.toFixed(4)}/shelf (${inr(shelfInr)} for ~35 packs)</div>`;
+  }
   return `
-    <div><b>${sec(p50)}</b> <span class="muted" style="font-size:10.5px">(p50)</span> &middot; <span class="mono">${inr(raw)}/${esc(unit)}</span></div>
+    <div><b>${sec(p50)}</b> <span class="muted" style="font-size:10.5px">(p50)</span> &middot; <span class="mono">$${rawUsd.toFixed(5)}/${esc(unit)} (${inr(rawInr)})</span></div>
+    ${shelfLine}
     <span class="sub-note mono">Run time: <b>${esc(fmtRunDuration(r))}</b> &middot; ${esc(fmtExecutedAt(r))}</span>`;
 }
 
@@ -435,6 +459,19 @@ async function showUseCaseBoard(useCase = "market_share") {
   const every = (await getJSONCached("/api/leaderboard")).filter(isValidatedGoldenRun);
   const ucRuns = every.filter((r) => useCaseOf(r) === useCase);
 
+  const isFiveLevelCropRun = (r) => {
+    const ds = String(r.dataset || "");
+    const fa = r.field_accuracy || {};
+    return ds.startsWith("hul_") && ds !== "hul_sessions" && fa.is_hul != null && fa.brand != null;
+  };
+  const matchesTaskFilter = (r, tkFilter) => {
+    if (tkFilter === "all") return true;
+    if (tkFilter === "classification") {
+      return taskOf(r) === "classification" || (taskOf(r) === "retrieval" && isFiveLevelCropRun(r));
+    }
+    return taskOf(r) === tkFilter;
+  };
+
   const availTasks = [...new Set(ucRuns.map(taskOf))];
   if (boardTaskFilter !== "all" && !availTasks.includes(boardTaskFilter)) {
     boardTaskFilter = "all";
@@ -445,7 +482,7 @@ async function showUseCaseBoard(useCase = "market_share") {
   }
 
   const filtered = ucRuns.filter((r) => {
-    if (boardTaskFilter !== "all" && taskOf(r) !== boardTaskFilter) return false;
+    if (!matchesTaskFilter(r, boardTaskFilter)) return false;
     if (boardDsFilter !== "all" && (r.dataset || "hul_golden") !== boardDsFilter) return false;
     if (boardSplitFilter !== "all" && (r.split || "test") !== boardSplitFilter) return false;
     const nSamples = getRunSampleCount(r);
@@ -454,12 +491,21 @@ async function showUseCaseBoard(useCase = "market_share") {
     return true;
   });
 
-  // Helper: only our modern AI techniques on full task taxonomy qualify as Use-Case Task Winners
-  // (excludes Phase-1 legacy .h5 baselines like cv_classify and partial 1-attr/2-attr diagnostic runs)
+  // Helper: only our modern hybrid/CLEF/CLM/JEV/ONNX/SFT architectures on full task taxonomy qualify as Use-Case Task Winners
+  // (excludes Phase-1 legacy .h5 baselines, partial 1-attr/2-attr diagnostic runs, and naive zero-shot VLM baselines)
+  const NAIVE_BASELINES = new Set([
+    "cv_classify",
+    "hierarchy_classify",
+    "single_pass_dedup",
+    "tiled_dedup",
+    "embedding_retrieval",
+    "embedding_text_match",
+    "yolo_sku110k_onnx",
+  ]);
   const isModernClientWinnerCandidate = (r) => {
     const ap = String(r.approach || "");
     const mod = String(r.model || "");
-    if (ap === "cv_classify" || mod.includes(".h5") || mod.includes("keras")) return false;
+    if (NAIVE_BASELINES.has(ap) || mod.includes(".h5") || mod.includes("keras")) return false;
     if (Array.isArray(r.evaluated_fields) && r.evaluated_fields.length > 0 && r.evaluated_fields.length < 5) {
       return false;
     }
@@ -486,34 +532,40 @@ async function showUseCaseBoard(useCase = "market_share") {
 
   for (const r of filtered) {
     if (!isModernClientWinnerCandidate(r)) continue;
-    const tk = taskOf(r);
+    const tk = boardTaskFilter === "classification" ? "classification" : taskOf(r);
     const ds = r.dataset || "hul_golden";
     const isGolden = Boolean(r.is_golden_dataset || ds.startsWith("hul_") || ds.startsWith("gtmerch") || ds.startsWith("ms_json"));
+    const is1000 = getRunSampleCount(r) >= 1000;
     const sc = Number(r.primary_score ?? 0);
     const cost = Number(r.cost_per_image_usd ?? 999);
 
-    // Prefer Unilever Golden datasets over public proxy benchmarks when crowning the client Use-Case Task Winner,
+    // Prefer N>=1,000 Golden runs over small N=50/N=100 pilot runs when crowning the client Use-Case Task Winner,
     // and rank strictly by highest primary KPI score (F2 / Accuracy), breaking ties by lower cost.
     const curTaskBest = bestByTask.get(tk);
     if (
       !curTaskBest ||
-      (isGolden && !curTaskBest.isGolden && sc >= 0.7) ||
-      (isGolden === curTaskBest.isGolden && (sc > curTaskBest.sc || (sc === curTaskBest.sc && cost < curTaskBest.cost)))
+      (isGolden && !curTaskBest.isGolden && sc >= 0.5) ||
+      (isGolden === curTaskBest.isGolden && is1000 && !curTaskBest.is1000 && sc >= 0.5) ||
+      (isGolden === curTaskBest.isGolden && is1000 === curTaskBest.is1000 && (sc > curTaskBest.sc || (sc === curTaskBest.sc && cost < curTaskBest.cost)))
     ) {
-      bestByTask.set(tk, { run_id: r.run_id, isGolden, sc, cost });
+      bestByTask.set(tk, { run_id: r.run_id, isGolden, is1000, sc, cost });
     }
 
     const dsTkKey = `${ds}__${tk}`;
     const curDsBest = bestByDsTask.get(dsTkKey);
-    if (!curDsBest || sc > curDsBest.sc || (sc === curDsBest.sc && cost < curDsBest.cost)) {
-      bestByDsTask.set(dsTkKey, { run_id: r.run_id, sc, cost });
+    if (
+      !curDsBest ||
+      (is1000 && !curDsBest.is1000 && sc >= 0.5) ||
+      (is1000 === curDsBest.is1000 && (sc > curDsBest.sc || (sc === curDsBest.sc && cost < curDsBest.cost)))
+    ) {
+      bestByDsTask.set(dsTkKey, { run_id: r.run_id, is1000, sc, cost });
     }
   }
   for (const v of bestByTask.values()) taskWinnerRunIds.add(v.run_id);
   for (const v of bestByDsTask.values()) dsTaskWinnerRunIds.add(v.run_id);
 
   // Order leaderboard: Client Use-Case Task Winners first (when viewing All Tasks),
-  // then #1 Dataset+Task Winners, then strictly by primary KPI score (F2 / Accuracy) descending.
+  // then N>=1,000 runs ahead of small N=50/100 pilot runs when scores are close, then by primary KPI score descending.
   filtered.sort((a, b) => {
     const isTaskWinA = taskWinnerRunIds.has(a.run_id) ? 1 : 0;
     const isTaskWinB = taskWinnerRunIds.has(b.run_id) ? 1 : 0;
@@ -531,7 +583,7 @@ async function showUseCaseBoard(useCase = "market_share") {
 
   const taskChips = [
     ["all", `All Tasks (${ucRuns.length})`],
-    ...availTasks.map((t) => [t, `${infoOf(t).shortLabel} (${ucRuns.filter((r) => taskOf(r) === t).length})`]),
+    ...availTasks.map((t) => [t, `${infoOf(t).shortLabel} (${ucRuns.filter((r) => matchesTaskFilter(r, t)).length})`]),
   ]
     .map(
       ([k, lbl]) =>

@@ -21,6 +21,7 @@ from approaches.base import Approach, Context, register
 from approaches.market_share.classification.embedding_text_match import (
     scoped_catalog_for_ctx,
     unit,
+    visual_gallery_centroids_for_catalog,
 )
 from approaches.market_share.classification.shelf_l8_ultimate import (
     build_pack_and_zoom_canvas,
@@ -28,6 +29,7 @@ from approaches.market_share.classification.shelf_l8_ultimate import (
 )
 from approaches.market_share.retrieval.clef_standalone import clef_logprob_select
 from utils.embeddings import GEMINI_EMBEDDING, MODELS, SKUS, VertexEmbeddings
+from utils.photometry import restore_photometry
 
 CLEF_CLASSIFY_SHORTLIST = 10
 
@@ -43,11 +45,11 @@ class ClefStandaloneClassify(Approach):
     also_calls = [GEMINI_EMBEDDING]
     skus = SKUS
     architecture = (
-        f"Standalone CLEF: Enriched Catalog ({GEMINI_EMBEDDING} top-{CLEF_CLASSIFY_SHORTLIST}) -> "
+        f"Standalone CLEF: Enriched Visual+Text Catalog ({GEMINI_EMBEDDING} top-{CLEF_CLASSIFY_SHORTLIST}) -> "
         "100% CLEF 3-Panel Pack+Variant+Size Zoom-Canvas Decision Head (zero JEV bypass)"
     )
     steps = [
-        "Setup: auto-enrich catalog (brand, variant, pack form, size) and embed structured text",
+        "Setup: auto-enrich catalog (brand, variant, pack form, size) and fuse visual gallery centroids + structured text",
         f"Retrieve top-{CLEF_CLASSIFY_SHORTLIST} catalog candidates (+ same-brand sisters) by embedding cosine",
         "Build 3-Panel Zoom Canvas (Full Pack + Variant Zoom + Bottom-35% Size Zoom) for 100% of queries",
         "Execute CLEF constrained {'pack_size', 'sku_id'} schema + direct token logprob readout",
@@ -62,13 +64,21 @@ class ClefStandaloneClassify(Approach):
         ids = list(self.catalog)
         texts = [self.catalog[i]["enriched_text"] for i in ids]
         with ThreadPoolExecutor(max_workers=8) as pool:
-            vecs = list(pool.map(lambda t: self.emb.text(t, ctx), texts))
-        self.index = list(zip(ids, (unit(v) for v in vecs), strict=True))
+            vecs = [unit(v) for v in pool.map(lambda t: self.emb.text(t, ctx), texts)]
+        vis_cents = visual_gallery_centroids_for_catalog(self.dataset, ids, self.emb, ctx)
+        fused = [
+            unit([0.85 * vc + 0.15 * tv for vc, tv in zip(vis_cents[i], tv_vec, strict=True)])
+            if i in vis_cents
+            else tv_vec
+            for i, tv_vec in zip(ids, vecs, strict=True)
+        ]
+        self.index = list(zip(ids, fused, strict=True))
 
     def identify(
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None
     ) -> int | None:
-        q = unit(self.emb.image(image, ctx))
+        restored, _ = restore_photometry(image)
+        q = unit(self.emb.image(restored, ctx))
         pool_idx = [(i, v) for i, v in self.index if not allowed_ids or i in allowed_ids] or self.index
         ranked = sorted(
             ((sum(a * b for a, b in zip(q, v, strict=True)), i) for i, v in pool_idx),
