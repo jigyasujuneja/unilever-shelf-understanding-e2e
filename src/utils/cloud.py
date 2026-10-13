@@ -281,13 +281,15 @@ def bootstrap(log=print) -> None:
 
 
 def deploy_ui(image: str | None = None, log=print) -> str:
-    """Deploy the leaderboard UI as a private Cloud Run service (``cloud_run.service``).
+    """Deploy the leaderboard UI as a private Cloud Run service (``cloud_run.service`` and
+    ``perfect-store-control-plane``).
     On start it pulls every finished run from ``gcp.results``; nobody can call it without the
     Cloud Run Invoker role (open it with ``shelf-bench proxy``)."""
     cfg = load_config()
     gcp, cr = cfg["gcp"], cfg.get("cloud_run", {})
     project, region = gcp["project"], gcp["region"]
-    name = cr.get("service", "shelf-bench-ui")
+    primary_name = cr.get("service", "shelf-ui")
+    services = list(dict.fromkeys([primary_name, "perfect-store-control-plane"]))
     if gcp.get("results") and Path(runner.RESULTS_DIR).is_dir() and any(Path(runner.RESULTS_DIR).glob("*/summary.json")):
         pushed = runner.push(gcp["results"], overwrite=True, prune_remote=False)
         log(f"Pushed {pushed} local run(s) + experiments_registry.json + qc_audit_report.json to {gcp['results']}")
@@ -304,12 +306,16 @@ def deploy_ui(image: str | None = None, log=print) -> str:
             "resources": {"limits": {"cpu": "2", "memory": "4Gi"}},
         }]},
     }
-    exists = s.get(f"{base}/{name}", timeout=30).status_code == 200
-    op = _ok(s.patch(f"{base}/{name}?updateMask=template,iapEnabled,launchStage", json=body, timeout=60) if exists
-             else s.post(f"{base}?serviceId={name}", json=body, timeout=60))
-    uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
-    log(f"Deployed {name}: {uri} (Direct IAP enabled)")
-    return uri
+    primary_uri = ""
+    for svc_name in services:
+        exists = s.get(f"{base}/{svc_name}", timeout=30).status_code == 200
+        op = _ok(s.patch(f"{base}/{svc_name}?updateMask=template,iapEnabled,launchStage", json=body, timeout=60) if exists
+                 else s.post(f"{base}?serviceId={svc_name}", json=body, timeout=60))
+        uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
+        log(f"Deployed {svc_name}: {uri} (Direct IAP enabled)")
+        if svc_name == primary_name or not primary_uri:
+            primary_uri = uri
+    return primary_uri
 
 
 def proxy_ui(port: int = 8083, host: str = "127.0.0.1", log=print) -> None:
