@@ -579,14 +579,15 @@ async function showUseCaseBoard(useCase = "market_share") {
       const sampleLabel = isShelfSet
         ? `${nEvalUnits.toLocaleString()} box samples (${r.images} shelves)`
         : `${nEvalUnits.toLocaleString()} samples`;
-      const ownerStr = r.owner || "Jigyasu Juneja (jjuneja@google.com)";
+      const ownerShort = r.owner || "jjuneja";
+      const ownerStr = ownerShort === "rgavigan" ? "Riley Gavigan (rgavigan@google.com)" : ownerShort.includes("@") ? ownerShort : "Jigyasu Juneja (jjuneja@google.com)";
 
       return `
         <tr onclick="toggleRowDrawer(${idx})" title="Click to expand run details or inspect images" style="${isTaskWin ? "background:#fffbeb;" : ""}">
           <td class="rank">#${idx + 1}${expBadge}</td>
           <td>
             <div class="arch-title">${esc(shortTitle)}${winnerPill}</div>
-            <span class="sub-note mono">${esc(fmtShortModel(r))} &middot; ${esc(fmtShortRunId(r))} &middot; 👤 J. Juneja</span>
+            <span class="sub-note mono">${esc(fmtShortModel(r))} &middot; ${esc(fmtShortRunId(r))} &middot; 👤 ${esc(ownerShort)}</span>
           </td>
           <td>
             <span class="ds-pill" title="${esc(dsMeta.shortDesc || dsKey)}">${esc(dsMeta.pillLabel || dsKey)}</span>
@@ -638,7 +639,7 @@ async function showUseCaseBoard(useCase = "market_share") {
     <div class="page-head">
       <div>
         <h1>${esc(ucMeta.label)} — Unified Experiment Leaderboard</h1>
-        <p class="muted caption" style="margin:0">${esc(ucMeta.subtitle)} Ordered with <b>🏆 Task Winners</b> first. Experimenter: <b>Jigyasu Juneja (jjuneja@google.com)</b>.</p>
+        <p class="muted caption" style="margin:0">${esc(ucMeta.subtitle)} Ordered with <b>🏆 Task Winners</b> first. Experimenters: <b>jjuneja</b> (373 runs) &amp; <b>rgavigan</b> (21 runs).</p>
       </div>
       <div style="font-size:12.5px;color:var(--muted);">
         Showing <b>${filtered.length}</b> of <b>${ucRuns.length}</b> verified runs
@@ -1380,7 +1381,7 @@ async function showTechnicalStory() {
     <div class="page-head" style="margin-bottom:8px;">
       <div>
         <h1 style="font-size:19px;">4. Engineering Chronicle — Latest Production System vs. Phase-1 Baseline</h1>
-        <p class="muted caption" style="margin:0">Interactive laptop-fitted explorer across Phase-1 Baseline vs. Latest Production System, 26 Cloud Run Experiments (1,000+ samples), Data Curation, and Architecture Decisions. Experimenter: <b>Jigyasu Juneja (jjuneja@google.com)</b>.</p>
+        <p class="muted caption" style="margin:0">Interactive laptop-fitted explorer across Phase-1 Baseline vs. Latest Production System, 26 Cloud Run Experiments (1,000+ samples), Data Curation, and Architecture Decisions. Experimenters: <b>jjuneja</b> (373 runs) &amp; <b>rgavigan</b> (21 runs).</p>
       </div>
       <div>
         <span class="status-pill status-completed">60 Approaches · 26 Exps (1,000+ Samples) · 12/12 QC</span>

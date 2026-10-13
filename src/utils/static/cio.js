@@ -270,7 +270,7 @@ function renderLegacySourceFootnote() {
       <strong>W6 Packaging Form (80.6% mean, 65.0%–91.0%)</strong>;
       <strong>Phase-1 1-Class Detector Baseline (51.1% F2)</strong>; and
       <strong>Toker Closed-Set 240-SKU ViT Promo Baseline (75.0%)</strong>.
-      All Our Latest Production System metrics are verified on Google Cloud Run across <strong>1,000 crop samples</strong> and <strong>1,080–4,050 shelf box samples</strong> (Experimenter: <strong>Jigyasu Juneja &bull; jjuneja@google.com</strong>).
+      All Our Latest Production System metrics are verified on Google Cloud Run across <strong>1,000 crop samples</strong> and <strong>1,080–4,050 shelf box samples</strong> (Experimenters: <strong>jjuneja &bull; rgavigan</strong>).
     </div>
   `;
 }
@@ -384,7 +384,7 @@ function renderOverviewTab() {
           </h2>
         </div>
         <div style="font-size:12px;color:#93c5fd;font-weight:600;">
-          Experimenter: <strong>Jigyasu Juneja (jjuneja@google.com)</strong> &bull; <strong>1,000+ Samples</strong> Verified per Task
+          Experimenters: <strong>jjuneja &bull; rgavigan</strong> &bull; <strong>1,000+ Samples</strong> Verified per Task
         </div>
       </div>
 
