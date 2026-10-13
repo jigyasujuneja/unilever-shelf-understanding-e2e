@@ -454,49 +454,79 @@ async function showUseCaseBoard(useCase = "market_share") {
     return true;
   });
 
-  // Identify #1 Task Winner per task and #1 Dataset+Task Winner within the filtered set
+  // Helper: only our modern AI techniques on full task taxonomy qualify as Use-Case Task Winners
+  // (excludes Phase-1 legacy .h5 baselines like cv_classify and partial 1-attr/2-attr diagnostic runs)
+  const isModernClientWinnerCandidate = (r) => {
+    const ap = String(r.approach || "");
+    const mod = String(r.model || "");
+    if (ap === "cv_classify" || mod.includes(".h5") || mod.includes("keras")) return false;
+    if (Array.isArray(r.evaluated_fields) && r.evaluated_fields.length > 0 && r.evaluated_fields.length < 5) {
+      return false;
+    }
+    return true;
+  };
+
+  const USE_CASE_TASK_WINNER_LABELS = {
+    market_share__detection: "🏆 MT Shelf Localization Winner",
+    market_share__classification: "🏆 MT 5-Attr SKU Classification Winner",
+    market_share__retrieval: "🏆 MT Catalog Retrieval Winner",
+    market_share__end_to_end: "🏆 MT Full-Shelf E2E Winner",
+    merchandising__detection: "🏆 Merch Bay Detection Winner",
+    merchandising__retrieval: "🏆 Merch Session Retrieval Winner",
+    merchandising__end_to_end: "🏆 Merch Session Dedup E2E Winner",
+    merchandising__planogram_compliance: "🏆 Planogram Compliance Winner",
+    merchandising__promo_detection: "🏆 Promo Pack Verification Winner",
+  };
+
+  // Identify #1 Use-Case Task Winner (per useCase + task) and #1 Dataset+Task Winner using our techniques
   const taskWinnerRunIds = new Set();
   const dsTaskWinnerRunIds = new Set();
   const bestByTask = new Map();
   const bestByDsTask = new Map();
 
   for (const r of filtered) {
+    if (!isModernClientWinnerCandidate(r)) continue;
     const tk = taskOf(r);
     const ds = r.dataset || "hul_golden";
-    const nSamples = getRunSampleCount(r);
-    const tier = nSamples >= 1000 ? 2 : nSamples >= 500 ? 1 : 0;
+    const isGolden = Boolean(r.is_golden_dataset || ds.startsWith("hul_") || ds.startsWith("gtmerch") || ds.startsWith("ms_json"));
     const sc = Number(r.primary_score ?? 0);
+    const cost = Number(r.cost_per_image_usd ?? 999);
+
+    // Prefer Unilever Golden datasets over public proxy benchmarks when crowning the client Use-Case Task Winner,
+    // and rank strictly by highest primary KPI score (F2 / Accuracy), breaking ties by lower cost.
     const curTaskBest = bestByTask.get(tk);
-    if (!curTaskBest || tier > curTaskBest.tier || (tier === curTaskBest.tier && sc > curTaskBest.sc)) {
-      bestByTask.set(tk, { run_id: r.run_id, tier, sc });
+    if (
+      !curTaskBest ||
+      (isGolden && !curTaskBest.isGolden && sc >= 0.7) ||
+      (isGolden === curTaskBest.isGolden && (sc > curTaskBest.sc || (sc === curTaskBest.sc && cost < curTaskBest.cost)))
+    ) {
+      bestByTask.set(tk, { run_id: r.run_id, isGolden, sc, cost });
     }
+
     const dsTkKey = `${ds}__${tk}`;
     const curDsBest = bestByDsTask.get(dsTkKey);
-    if (!curDsBest || tier > curDsBest.tier || (tier === curDsBest.tier && sc > curDsBest.sc)) {
-      bestByDsTask.set(dsTkKey, { run_id: r.run_id, tier, sc });
+    if (!curDsBest || sc > curDsBest.sc || (sc === curDsBest.sc && cost < curDsBest.cost)) {
+      bestByDsTask.set(dsTkKey, { run_id: r.run_id, sc, cost });
     }
   }
   for (const v of bestByTask.values()) taskWinnerRunIds.add(v.run_id);
   for (const v of bestByDsTask.values()) dsTaskWinnerRunIds.add(v.run_id);
 
-  // Order leaderboard: Task #1 Winners first (so the best model for each task is immediately at the top),
-  // then Dataset #1 Winners, then full-scale (>=1,000 samples) runs, then by primary_score descending.
+  // Order leaderboard: Client Use-Case Task Winners first (when viewing All Tasks),
+  // then #1 Dataset+Task Winners, then strictly by primary KPI score (F2 / Accuracy) descending.
   filtered.sort((a, b) => {
     const isTaskWinA = taskWinnerRunIds.has(a.run_id) ? 1 : 0;
     const isTaskWinB = taskWinnerRunIds.has(b.run_id) ? 1 : 0;
     if (boardTaskFilter === "all" && isTaskWinB !== isTaskWinA) return isTaskWinB - isTaskWinA;
 
-    const samplesA = getRunSampleCount(a);
-    const samplesB = getRunSampleCount(b);
-    const tierA = samplesA >= 1000 ? 2 : samplesA >= 500 ? 1 : 0;
-    const tierB = samplesB >= 1000 ? 2 : samplesB >= 500 ? 1 : 0;
-    if (tierB !== tierA) return tierB - tierA;
+    const scDiff = Number(b.primary_score ?? 0) - Number(a.primary_score ?? 0);
+    if (Math.abs(scDiff) > 1e-6) return scDiff;
 
     const isDsWinA = dsTaskWinnerRunIds.has(a.run_id) ? 1 : 0;
     const isDsWinB = dsTaskWinnerRunIds.has(b.run_id) ? 1 : 0;
     if (isDsWinB !== isDsWinA) return isDsWinB - isDsWinA;
 
-    return Number(b.primary_score ?? 0) - Number(a.primary_score ?? 0);
+    return Number(a.cost_per_image_usd ?? 999) - Number(b.cost_per_image_usd ?? 999);
   });
 
   const taskChips = [
@@ -546,16 +576,19 @@ async function showUseCaseBoard(useCase = "market_share") {
 
   const rowsHtml = filtered
     .map((r, idx) => {
-      const ti = infoOf(taskOf(r));
+      const tk = taskOf(r);
+      const ti = infoOf(tk);
       const sc = Number(r.primary_score ?? r[ti.scoreKey] ?? 0);
       const shortTitle = SHORT_APPROACH_NAMES[r.approach] || r.approach_title || r.approach;
       const expBadge = r.exp_id ? ` <span class="task-badge">${esc(r.exp_id)}</span>` : "";
       const isTaskWin = taskWinnerRunIds.has(r.run_id);
       const isDsWin = !isTaskWin && dsTaskWinnerRunIds.has(r.run_id);
+      const winLabel = USE_CASE_TASK_WINNER_LABELS[`${useCase}__${tk}`] || `🏆 ${ti.shortLabel} Winner`;
+      const dsShort = DATASETS[r.dataset]?.chipLabel || r.dataset || "Dataset";
       const winnerPill = isTaskWin
-        ? ` <span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:800;margin-left:4px;vertical-align:middle;" title="Highest-scoring run for ${esc(ti.shortLabel)}">🏆 Task Winner</span>`
+        ? ` <span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:800;margin-left:4px;vertical-align:middle;" title="Top-performing modern architecture for ${esc(ucMeta.title)} — ${esc(ti.shortLabel)}">${esc(winLabel)}</span>`
         : isDsWin
-          ? ` <span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #10b981;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle;" title="Top run for this Dataset + Task">#1 Dataset Winner</span>`
+          ? ` <span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #10b981;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle;" title="Top-performing modern architecture on ${esc(dsShort)} (${esc(ti.shortLabel)})">🥇 #1 on ${esc(dsShort)}</span>`
           : "";
 
       const fa = r.field_accuracy || {};

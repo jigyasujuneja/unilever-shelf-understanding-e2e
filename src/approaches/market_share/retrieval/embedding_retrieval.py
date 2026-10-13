@@ -71,7 +71,7 @@ class EmbeddingRetrieval(Approach):
         self.emb = VertexEmbeddings(config, model=emb_model)
         root = dataset.data_root(self.dataset)
         gallery = dataset.rpc_gallery(root)
-        max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "400"))
+        max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "0"))
         if max_skus > 0 and len(gallery) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
             cat = dataset.catalog(root, self.dataset)
             # Label-blind stratified gallery selection across all catalog brands (zero eval_samples access)
