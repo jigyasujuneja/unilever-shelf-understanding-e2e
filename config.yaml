@@ -21,6 +21,15 @@ gcp:
   hul_sessions: gs://marketshare-datasets/derived_manifests/hul_sessions      # v2.2 Multi-facing store session shelf strips
   results: gs://ul-fs-s-sandbx-16-prj-shelf-images/results        # run outputs from Cloud Run
 
+# Legacy InceptionV3 Keras classifiers for `-a cv_classify`. The .h5 files are registered in Vertex AI
+# Model Registry and served on these Vertex AI Endpoints (`shelf-bench deploy-cv-endpoints` prints them).
+# The brand model's class names are in <model>_classes.json next to its .h5.
+cv_models:
+  brand_model: gs://sos-datasets/legacy-models/mt_brand/marketshare_brand.h5
+  pack_model: gs://sos-datasets/legacy-models/mt_pack/marketshare_packtype.h5
+  brand_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/4323610123659378688
+  pack_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/5408977633855668224
+
 # Cloud Run job that executes benchmark runs (shelf-bench cloud-run). One task per
 # approach x tier x model. Its compute is priced from the Billing Catalog API (Jobs CPU/Memory
 # SKUs for the region) and the task's real duration from the Cloud Run Admin API.

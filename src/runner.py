@@ -81,6 +81,15 @@ def combos(names: list[str], tiers: list[str], models: list[str],
     return out
 
 
+def _fmt_label(d: dict | None) -> str:
+    if not d:
+        return "nothing"
+    if "product" in d and d["product"]:
+        return str(d["product"])
+    parts = [str(d.get(k) or "?") for k in ("brand", "packaging_type", "category", "variant") if k in d]
+    return " · ".join(parts) if parts else "nothing"
+
+
 def run(
     approach: str,
     model: str,
@@ -96,6 +105,7 @@ def run(
     tier: str = "priority",
     prices: dict | None = None,
     dataset_override: str | None = None,
+    fields: str | list[str] | tuple[str, ...] | None = None,
 ) -> dict:
     appr = type(approaches.get(approach))()
     if dataset_override:
@@ -115,19 +125,20 @@ def run(
     task = appr.task
     if appr.dataset != "sku110k":  # --root is SKU-110K's; the other sets have their own location
         data_root = dataset.data_root(appr.dataset)
-    fields = {"rpc": dataset.RPC_FIELDS, "shelves": dataset.SHELF_FIELDS, **dataset.HUL_FIELDS}.get(
+    default_fields = {"rpc": dataset.RPC_FIELDS, "shelves": dataset.SHELF_FIELDS, **dataset.HUL_FIELDS}.get(
         appr.dataset, dataset.PRODUCT_FIELDS)
+    eval_fields = default_fields
+    appr.evaluated_fields = None
+    if fields:  # --fields: score only these attributes
+        from utils.cv_models import resolve_evaluated_fields
+
+        eval_fields = appr.evaluated_fields = resolve_evaluated_fields(appr.dataset, fields)
     catalog = dataset.catalog(str(data_root), appr.dataset) if task != "detection" else {}
     samples = dataset.sample_images(split, limit, seed, str(data_root), appr.dataset)
     if not samples:
         raise RuntimeError(f"No images found for split={split!r} under {data_root}")
 
     started = datetime.now(timezone.utc)
-    ds_suffix = f"-{appr.dataset}" if dataset_override else ""
-    split_suffix = f"-{split}" if (dataset_override and split != "test") else ""
-    run_id = (f"{started:%m%d-%H%M%S}-{approach}-{model}"
-              + ("" if tier == "standard" else f"-{tier}") + ds_suffix + split_suffix)
-    log(f"[{run_id}] {len(samples)} images from {appr.dataset} {split} (seed {seed}) on {env['platform']}")
 
     def price(u: Usage) -> dict:
         return pricing.gemini_cost(model, u.buckets, sheet, started.date())
@@ -140,6 +151,18 @@ def run(
     appr.setup(config, setup_ctx)
     setup_s = time.perf_counter() - t_setup
     setup_usd = price(setup_ctx.trace.usage)["net_usd"] + pricing.extra_cost(setup_ctx.trace.billed, sheet)
+
+    if appr.evaluated_fields:  # setup may narrow them to what the approach can answer
+        eval_fields = tuple(appr.evaluated_fields)
+    if getattr(appr, "resolved_model", None) and model == "keras-h5":
+        model = str(appr.resolved_model)
+
+    ds_suffix = f"-{appr.dataset}" if dataset_override else ""
+    split_suffix = f"-{split}" if (dataset_override and split != "test") else ""
+    fields_suffix = "" if eval_fields == default_fields else f"-{len(eval_fields)}attr-{'_'.join(eval_fields)}"
+    run_id = (f"{started:%m%d-%H%M%S}-{approach}-{model}"
+              + ("" if tier == "standard" else f"-{tier}") + ds_suffix + split_suffix + fields_suffix)
+    log(f"[{run_id}] {len(samples)} images from {appr.dataset} {split} (seed {seed}) on {env['platform']}")
 
     # One trace per run (Cloud Trace), with correlated log entries (Cloud Logging).
     telemetry.init(config)
@@ -263,11 +286,15 @@ def run(
             }
             extra["stage2_fast_gate_count"] = fast_gated
             extra["labels"] = [
-                {"box": [round(v, 1) for v in b], "pred": catalog.get(i),
+                {"box": [round(v, 1) for v in b], "pred": i if isinstance(i, dict) else catalog.get(i),
                  "gt": sample.labels[m["pairs"][k]] if k in m["pairs"] else None,
                  "correct": (
-                     metrics.match_product(catalog.get(i), sample.labels[m["pairs"][k]], fields)["correct"]
-                     if k in m["pairs"] else dict.fromkeys(fields, False)
+                     metrics.match_product(
+                         i if isinstance(i, dict) else catalog.get(i),
+                         sample.labels[m["pairs"][k]],
+                         eval_fields,
+                     )["correct"]
+                     if k in m["pairs"] else dict.fromkeys(eval_fields, False)
                  )}
                 for k, (b, i) in enumerate(zip(preds, ids, strict=True))]
             trace.step("Score vs ground truth",
@@ -279,8 +306,8 @@ def run(
             m = {"tp": 0, "fp": 0, "fn": 0, "matched": []}
             extra["labels"] = []
             for k, (b, gt, i) in enumerate(zip(sample.boxes, sample.labels, ids, strict=True)):
-                pred = catalog.get(i) if i is not None else None
-                mk = metrics.match_product(pred, gt, fields)
+                pred = i if isinstance(i, dict) else (catalog.get(i) if i is not None else None)
+                mk = metrics.match_product(pred, gt, eval_fields)
                 for key in ("tp", "fp", "fn"):
                     m[key] += mk[key]
                 if mk["tp"]:
@@ -290,8 +317,8 @@ def run(
             trace.step("Score vs ground truth",
                        f"{m['tp']} of {len(sample.boxes)} products identified correctly"
                        if len(sample.boxes) > 1 else
-                       f"predicted {(extra['labels'][0]['pred'] or {}).get('product', 'nothing')}; "
-                       f"truth {sample.labels[0]['product']} "
+                       f"predicted {_fmt_label(extra['labels'][0]['pred'])}; "
+                       f"truth {_fmt_label(sample.labels[0])} "
                        f"({', '.join(f + (' ✓' if ok else ' ✗') for f, ok in extra['labels'][0]['correct'].items())})")
         g = price(trace.usage)
         s_usd = pricing.extra_cost(trace.billed, sheet)
@@ -323,7 +350,7 @@ def run(
             for i, row in enumerate(pool.map(one, samples), 1):
                 rows.append(row)
                 flag = f"  ERROR {row['error']}" if row["error"] else ""
-                what = (f"{'✓' if row['tp'] else '✗'} {(row['labels'][0]['pred'] or {}).get('product', '-')}"
+                what = (f"{'✓' if row['tp'] else '✗'} {_fmt_label(row['labels'][0]['pred'])}"
                         if task == "classification" else
                         f"{row['tp']:>3} / {row['gt_count']:>3} identified"
                         if task in ("retrieval", "promo_detection", "planogram_compliance") else
@@ -343,9 +370,16 @@ def run(
             if boxes:
                 summary["field_accuracy"] = {
                     f: round(sum(bool(lab["correct"].get(f)) for lab in boxes) / max(1, len(boxes)), 4)
-                    for f in fields}
+                    for f in eval_fields}
                 if task in ("classification", "retrieval", "promo_detection", "planogram_compliance"):
-                    summary["accuracy"] = summary["field_accuracy"]["product"]
+                    if "product" in summary["field_accuracy"] and eval_fields == default_fields:
+                        summary["accuracy"] = summary["field_accuracy"]["product"]
+                    else:
+                        summary["accuracy"] = round(
+                            sum(all(bool(lab["correct"].get(f)) for f in eval_fields) for lab in boxes)
+                            / max(1, len(boxes)),
+                            4,
+                        )
                 summary["hierarchical_accuracy"] = metrics.hierarchical_field_scores(boxes)
                 # Macro-averaged accuracy across GT brands and GT variants + HUL vs Non-HUL competitor breakdown
                 from collections import defaultdict
@@ -537,7 +571,9 @@ def run(
             "use_case": appr.use_case,
             "task": appr.task,
             "dataset": appr.dataset,
+            "evaluated_fields": list(eval_fields),
             "model": model,
+            "model_uris": list(getattr(appr, "model_uris", []) or []),
             "tier": tier,
             "traffic": usage.traffic,  # calls per traffic type Vertex actually served
             # Share of calls Vertex actually served at priority / flex (the rest were downgraded).
@@ -545,8 +581,12 @@ def run(
             if calls and tier == "priority" else None,
             "flex_served": round(usage.traffic.get("flex", 0) / calls, 3)
             if calls and tier == "flex" else None,
-            "architecture": f"{appr.architecture} [{' + '.join([model, *appr.also_calls])}"
-                            + ("" if tier == "standard" else f", {tier}") + "]",
+            "architecture": (
+                appr.architecture
+                if getattr(appr, "model_uris", None) and not appr.also_calls and tier == "standard"
+                else f"{appr.architecture} [{' + '.join([model, *appr.also_calls])}"
+                + ("" if tier == "standard" else f", {tier}") + "]"
+            ),
             "steps": appr.steps,
             "owner": owner or getpass.getuser(),
             "split": split, "limit": limit, "seed": seed, "workers": workers,

@@ -225,7 +225,8 @@ def match_product(pred: dict | None, gt: dict, fields: Sequence[str]) -> dict:
     answer is FN. So precision = right / answered, recall = right / all photos.
     """
     correct = {f: _field_matches(pred, gt, f) for f in fields}
-    tp = int(correct[fields[0]])
+    # "product" ranks when scored; a --fields subset without it needs every field right.
+    tp = int(correct[fields[0]]) if "product" in fields else int(bool(fields) and all(correct.values()))
     return {"tp": tp, "fp": int(pred is not None) - tp, "fn": 1 - tp,
             "matched": [0] if tp else [], "correct": correct}
 

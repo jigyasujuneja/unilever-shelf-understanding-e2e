@@ -24,6 +24,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "ruff>=0.12.0"]
+# Legacy InceptionV3 .h5 models: only the Vertex AI prediction server (`deploy-cv-endpoints`) loads them.
+cv = ["tensorflow-cpu>=2.16.0", "tf-keras>=2.16.0"]
 
 [project.scripts]
 shelf-bench = "cli:main"

@@ -76,7 +76,8 @@ def task_seconds(env: dict, session: AuthorizedSession | None = None) -> float:
     return math.ceil(secs * 10) / 10
 
 
-def build_image(s: AuthorizedSession, project: str, region: str, log=print) -> str:
+def build_image(s: AuthorizedSession, project: str, region: str, log=print, extras: str = "") -> str:
+    """Build and push the repo image with Cloud Build; ``extras`` = pip extras (e.g. ``cv``)."""
     tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     image = f"{region}-docker.pkg.dev/{project}/cloud-run-source-deploy/shelf-bench:{tag}"
     buf = io.BytesIO()
@@ -92,7 +93,9 @@ def build_image(s: AuthorizedSession, project: str, region: str, log=print) -> s
     op = _ok(s.post(
         f"https://cloudbuild.googleapis.com/v1/projects/{project}/locations/{region}/builds",
         json={"source": {"storageSource": {"bucket": bucket, "object": obj}},
-              "steps": [{"name": "gcr.io/cloud-builders/docker", "args": ["build", "-t", image, "."]}],
+              "steps": [{"name": "gcr.io/cloud-builders/docker",
+                         "args": ["build", *(["--build-arg", f"EXTRAS={extras}"] if extras else []),
+                                  "-t", image, "."]}],
               "images": [image],
               "options": {"logging": "CLOUD_LOGGING_ONLY"}}))
     build_id = op["metadata"]["build"]["id"]
@@ -174,6 +177,9 @@ def run_on_cloud(
     workers: int,
     owner: str,
     dataset_override: str | None = None,
+    fields: str | None = None,
+    brand_model: str | None = None,
+    pack_model: str | None = None,
     image: str | None = None,
     pull_local: bool = False,
     log=print,
@@ -189,6 +195,9 @@ def run_on_cloud(
     args = [
         "run", "-a", *approaches, "-m", *models, "-t", *tiers,
         *(["-d", dataset_override] if dataset_override else []),
+        *(["--fields", fields] if fields else []),
+        *(["--brand-model", brand_model] if brand_model else []),
+        *(["--pack-model", pack_model] if pack_model else []),
         "--split", split, "--limit", str(limit),
         "--seed", str(seed), "--workers", str(workers), "--owner", owner,
         "--root", gcp["data"], "--results", gcp["results"],
@@ -316,6 +325,75 @@ def deploy_ui(image: str | None = None, log=print) -> str:
         if svc_name == primary_name or not primary_uri:
             primary_uri = uri
     return primary_uri
+
+
+def _wait_vertex_op(s, region: str, name: str, log=print, every: int = 15) -> dict:
+    """Poll a Vertex AI long-running operation; return its response, raise on its error."""
+    url = f"https://{region}-aiplatform.googleapis.com/v1/{name}"
+    while True:
+        op = _ok(s.get(url, timeout=30))
+        if op.get("done"):
+            if "error" in op:
+                raise RuntimeError(f"Vertex AI {name}: {op['error']}")
+            return op.get("response", {})
+        log(f"  waiting for {name.rsplit('/operations/', 1)[0].rsplit('/', 1)[-1]} ...")
+        time.sleep(every)
+
+
+def deploy_cv_endpoints(brand_model: str | None = None, pack_model: str | None = None,
+                        image: str | None = None, log=print) -> dict:
+    """Register the legacy .h5 brand / pack classifiers in Vertex AI Model Registry and deploy each
+    to its Vertex AI Endpoint, served by this repo's image (``shelf-bench serve``, /api/cv/predict).
+    A redeploy moves all traffic to the new model and undeploys the old one. Put the endpoints in
+    config.yaml ``cv_models.{brand,pack}_endpoint``."""
+    cfg = load_config()
+    gcp, cv = cfg["gcp"], cfg.get("cv_models") or {}
+    project, region = gcp["project"], gcp["region"]
+    s = _session()
+    image = image or build_image(s, project, region, log, extras="cv")  # the server needs TensorFlow
+    api = f"https://{region}-aiplatform.googleapis.com/v1"
+    base = f"{api}/projects/{project}/locations/{region}"
+    out: dict = {"image": image}
+    for role, name, model_uri in (("brand", "marketshare-brand", brand_model or cv["brand_model"]),
+                                  ("pack", "marketshare-packtype", pack_model or cv["pack_model"])):
+        log(f"Uploading {model_uri} to Vertex AI Model Registry ...")
+        op = _ok(s.post(f"{base}/models:upload", timeout=60, json={"model": {
+            "displayName": f"{name}-h5",
+            "description": f"Legacy InceptionV3 Keras classifier ({model_uri})",
+            "artifactUri": model_uri.rsplit("/", 1)[0],  # Vertex copies it to AIP_STORAGE_URI
+            "containerSpec": {
+                "imageUri": image,
+                "command": ["shelf-bench"],
+                # --results outside results/: the prediction server must not pull the leaderboard
+                "args": ["serve", "--host", "0.0.0.0", "--port", "8080", "--results", "/tmp/cv-serving"],
+                "env": [{"name": "SHELF_BENCH_CV_ROLE", "value": role},
+                        {"name": f"SHELF_BENCH_CV_{role.upper()}_MODEL", "value": model_uri}],
+                "ports": [{"containerPort": 8080}],
+                "predictRoute": "/api/cv/predict",
+                "healthRoute": "/api/cv/health",
+            },
+        }}))
+        model = _wait_vertex_op(s, region, op["name"], log)["model"]
+        ep_name = f"{name}-vertex-endpoint"
+        eps = _ok(s.get(f"{base}/endpoints", timeout=30)).get("endpoints", [])
+        endpoint = next((e["name"] for e in eps if e.get("displayName") == ep_name), None)
+        if endpoint is None:
+            op = _ok(s.post(f"{base}/endpoints", json={"displayName": ep_name}, timeout=60))
+            endpoint = _wait_vertex_op(s, region, op["name"], log)["name"]
+        old = [d["id"] for d in _ok(s.get(f"{api}/{endpoint}", timeout=30)).get("deployedModels", [])]
+        log(f"Deploying {model} to {endpoint} (15-30 min) ...")
+        op = _ok(s.post(f"{api}/{endpoint}:deployModel", timeout=60, json={
+            "deployedModel": {"model": model, "displayName": f"{name}-h5", "dedicatedResources": {
+                "machineSpec": {"machineType": "n1-standard-4"}, "minReplicaCount": 1, "maxReplicaCount": 2}},
+            "trafficSplit": {"0": 100},
+        }))
+        _wait_vertex_op(s, region, op["name"], log, every=30)
+        for dm_id in old:
+            op = _ok(s.post(f"{api}/{endpoint}:undeployModel", json={"deployedModelId": dm_id}, timeout=60))
+            _wait_vertex_op(s, region, op["name"], log)
+        out[role] = {"model_uri": model_uri, "vertex_model": model, "endpoint": endpoint}
+        log(f"  cv_models.{role}_endpoint: {endpoint}")
+    return out
 
 
 def proxy_ui(port: int = 8083, host: str = "127.0.0.1", log=print) -> None:

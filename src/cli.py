@@ -7,6 +7,8 @@
     shelf-bench run -a single_pass_dedup tiled_dedup -m gemini-3.5-flash-lite gemini-3.8-flash
     shelf-bench run -a hierarchy_classify embedding_retrieval -m gemini-3.5-flash-lite gemini-embedding-2
     shelf-bench cloud-run -a shelf_detect_retrieve -m gemini-3.5-flash-lite -t priority flex
+    shelf-bench run -a cv_classify -d hul_golden # legacy .h5 models on Vertex AI Endpoints
+    shelf-bench deploy-cv-endpoints              # (re)deploy those endpoints
     shelf-bench leaderboard
     shelf-bench serve                            # leaderboard UI on http://localhost:8080
     shelf-bench serve-cloud                      # the same UI as a private Cloud Run service
@@ -59,12 +61,18 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("run", help="evaluate approach x model combinations")
     s.add_argument("-a", "--approach", nargs="+", required=True)
-    s.add_argument("-m", "--model", nargs="+", required=True)
+    s.add_argument("-m", "--model", nargs="+", default=None, help="required (cv_classify: keras-h5)")
     s.add_argument("-t", "--tier", nargs="+", choices=TIERS, default=d.get("tier", ["priority"]),
                    help="Gemini PayGo tier(s): priority (1.8x, default), standard and/or flex (0.5x)")
     s.add_argument("-d", "--dataset", default=None,
                    choices=("sku110k", "products", *dataset.RPC_FORMAT_SETS),
                    help="override dataset for approaches (e.g. hul_golden, gtmerch_golden, hul_variants, hul_brands, hul_packs, hul_promos)")
+    s.add_argument("--fields", default=None,
+                   help="score only these attributes: 1 / 2 / 3 (HUL presets) or names, e.g. brand,packaging_type")
+    s.add_argument("--brand-model", default=None,
+                   help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.brand_endpoint")
+    s.add_argument("--pack-model", default=None,
+                   help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.pack_endpoint")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
@@ -75,12 +83,18 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("cloud-run", help="run approach x model combinations on Cloud Run")
     s.add_argument("-a", "--approach", nargs="+", required=True)
-    s.add_argument("-m", "--model", nargs="+", required=True)
+    s.add_argument("-m", "--model", nargs="+", default=None, help="required (cv_classify: keras-h5)")
     s.add_argument("-t", "--tier", nargs="+", choices=TIERS, default=d.get("tier", ["priority"]),
                    help="Gemini PayGo tier(s): priority (1.8x, default), standard and/or flex (0.5x)")
     s.add_argument("-d", "--dataset", default=None,
                    choices=("sku110k", "products", *dataset.RPC_FORMAT_SETS),
                    help="override dataset for approaches (e.g. hul_golden, gtmerch_golden, hul_variants, hul_brands, hul_packs, hul_promos)")
+    s.add_argument("--fields", default=None,
+                   help="score only these attributes: 1 / 2 / 3 (HUL presets) or names, e.g. brand,packaging_type")
+    s.add_argument("--brand-model", default=None,
+                   help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.brand_endpoint")
+    s.add_argument("--pack-model", default=None,
+                   help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.pack_endpoint")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
@@ -89,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--image", default=None, help="reuse pre-built Artifact Registry image URI instead of rebuilding")
     s.add_argument("--pull", action="store_true", help="pull finished runs into local results/ (default: finalize directly on GCS with zero local files)")
     s.add_argument("--no-pull", action="store_true", help="keep results 100% on GCS without pulling to local results/")
+
+    s = sub.add_parser("deploy-cv-endpoints",
+                       help="register the legacy .h5 models in Vertex AI Model Registry and deploy their Vertex AI Endpoints")
+    s.add_argument("--brand-model", default=None, help="gs:// .h5 (default: config cv_models.brand_model)")
+    s.add_argument("--pack-model", default=None, help="gs:// .h5 (default: config cv_models.pack_model)")
+    s.add_argument("--image", default=None, help="reuse a pre-built image (must include the cv extra)")
 
     sub.add_parser("pull", help="copy finished Cloud Run results from GCS into results/")
 
@@ -177,6 +197,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--variant-preds", default=None, help="JSON/JSONL file mapping image_id -> raw legacy variant (e.g. ADove__Hair_Fall_Rescue)")
 
     a = p.parse_args(argv)
+    if a.cmd in ("run", "cloud-run"):
+        if not a.model:
+            if set(a.approach) != {"cv_classify"}:
+                p.error("the following arguments are required: -m/--model")
+            a.model = ["keras-h5"]
+        for role in ("brand", "pack"):  # read by utils/cv_models.CVPipeline.from_config
+            if getattr(a, f"{role}_model"):
+                os.environ[f"SHELF_BENCH_CV_{role.upper()}_MODEL"] = getattr(a, f"{role}_model")
 
     if a.cmd == "download":
         dataset.download(a.root)
@@ -214,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 runner.run(name, model, a.split, a.limit, a.seed, a.workers, a.owner,
                            results_dir=a.results, data_root=a.root, tier=tier,
-                           dataset_override=a.dataset)
+                           dataset_override=a.dataset, fields=a.fields)
             except Exception as e:
                 failed += 1
                 print(f"[{name} x {model} x {tier}] FAILED: {e}", file=sys.stderr)
@@ -226,9 +254,18 @@ def main(argv: list[str] | None = None) -> int:
             a.approach, a.model, a.tier, a.split, a.limit, a.seed, a.workers,
             a.owner or getpass.getuser(),
             dataset_override=a.dataset,
+            fields=a.fields,
+            brand_model=a.brand_model,
+            pack_model=a.pack_model,
             image=a.image,
             pull_local=bool(a.pull and not a.no_pull),
         )
+    elif a.cmd == "deploy-cv-endpoints":
+        import json
+
+        from utils import cloud
+
+        print(json.dumps(cloud.deploy_cv_endpoints(a.brand_model, a.pack_model, a.image), indent=2))
     elif a.cmd == "pull":
         print(f"Pulled {runner.pull(cfg['gcp']['results'])} new run(s) into results/")
     elif a.cmd == "push":

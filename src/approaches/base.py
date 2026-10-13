@@ -245,6 +245,7 @@ class Approach:
     # many (detect, identify, count); "merchandising" = how they are displayed (planogram,
     # shelf position, promo material, price tags). Ranked separately.
     use_case: str = "market_share"
+    evaluated_fields: tuple[str, ...] | None = None
     # The -m models this approach really calls. None = any Vertex Gemini model (via ctx.ask).
     # Anything else is refused, so a run is always labelled with the model that produced it.
     models: list[str] | None = None
