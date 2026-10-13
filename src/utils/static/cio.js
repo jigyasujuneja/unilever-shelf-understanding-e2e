@@ -90,8 +90,10 @@ const TASK_PERFORMANCE = [
     question: 'Unilever vs. Competitor Ownership (L1 on hul_golden N=1,000 & hul_sessions)',
     legacy: 86.8,
     legacySource: 'NR_final_PW2.py W3 Brand (874 rivals in "Others") • 88.9% brand.h5 (N=1,000)',
-    ours: 98.9,
+    ours: 99.2,
     latency: '1.68s (#013246 N=1,000) • 2.51s (Lite N=1,000)',
+    shelfCost: '$0.00059–$0.00145 / shelf (₹0.05–₹0.13)',
+    cropCost: '$0.00023–$0.00051 / crop (Lite/CLM)',
     sampleSummary: 'N=1,000 crops (#025000 CLEF: 99.2% • #025000 Variants: 99.1% • #013248 JEV: 98.9% • #013248 Ultimate: 98.6% • #034648 Brands: 98.4%)',
     runId: '1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden',
     shortRunId: '#025000 (99.2% N=1,000) & #013248 (98.9% N=1,000)',
@@ -108,6 +110,8 @@ const TASK_PERFORMANCE = [
     legacySource: 'NR_final_PW2.py W2 Mean (72.6%–92.0%) • 22.1% packtype.h5 on hul_golden (N=1,000)',
     ours: 97.5,
     latency: '1.68s (#013246 N=1,000) • 2.69s (#025000 Lite N=1,000)',
+    shelfCost: '$0.00059–$0.00145 / shelf (₹0.05–₹0.13)',
+    cropCost: '$0.00023–$0.00091 / crop (CLM/CLEF Lite)',
     sampleSummary: 'N=1,000 (#025000 CLEF 3.8: 97.5% • #025000 CLEF Lite: 96.9% • #013248 JEV: 96.5% • #013248 Ultimate: 96.3% • #021828 SFT: 92.7%)',
     runId: '1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden',
     shortRunId: '#025000 (97.5% N=1,000) & #013248 (96.5% N=1,000)',
@@ -124,6 +128,8 @@ const TASK_PERFORMANCE = [
     legacySource: 'Direct Head-to-Head: marketshare_packtype.h5 on hul_golden (N=1,000 #010924; 41.0% on pack_data; 80.6% W6 5-bucket)',
     ours: 93.3,
     latency: '1.26s (#031439 hul_packs N=1,000) • 2.69s (#025000 Lite N=1,000)',
+    shelfCost: '$0.00120–$0.00145 / shelf (₹0.10–₹0.13)',
+    cropCost: '$0.00022–$0.00051 / crop (#031438/#031439)',
     sampleSummary: 'N=1,000 (#025000 CLEF Lite: 93.3% • #025000 CLEF 3.8: 93.2% • #013248 Ultimate: 92.2% • #031440 hul_packs N=1,000: 89.5% • #021828 SFT: 76.1%)',
     runId: '1013-025000-clef_standalone-gemini-3.5-flash-lite-priority-hul_golden',
     shortRunId: '#025000 (93.3% N=1,000), #013248 (92.2%) & #031440 (hul_packs N=1,000)',
@@ -140,6 +146,8 @@ const TASK_PERFORMANCE = [
     legacySource: 'Direct Head-to-Head: marketshare_brand.h5 1-Attr on hul_golden (N=1,000 #004620; 85.2% #013446; 86.8% W3 Mean)',
     ours: 97.4,
     latency: '1.34s (#034648 hul_brands N=1,000) • 1.68s (#013246 N=1,000)',
+    shelfCost: '$0.00059–$0.00145 / shelf (₹0.05–₹0.13)',
+    cropCost: '$0.00022–$0.00050 / crop (#034648/#034650)',
     sampleSummary: 'N=1,000 (#025000 CLEF: 97.4% • #025000 Variants: 97.2% • #013248 JEV: 96.5% • #034648 hul_brands N=1,000: 95.9% • #021828 SFT: 93.2%)',
     runId: '1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden',
     shortRunId: '#025000 (97.4% N=1,000) & #034648 (hul_brands N=1,000)',
@@ -156,6 +164,8 @@ const TASK_PERFORMANCE = [
     legacySource: 'NR_final_PW2.py W4 Variant Mean (57.4%–85.0% across 13 categories)',
     ours: 82.6,
     latency: '0.66s (#025002 3.8-Flash N=1,000) • 0.80s (#025000 Lite N=1,000)',
+    shelfCost: '$0.00114 / shelf (₹0.10 Lite) • $0.0041 (3.8)',
+    cropCost: '$0.00046 / crop (#025000 Lite) • $0.00020 (CLM)',
     sampleSummary: 'N=1,000 hul_variants (#025000 Ultimate 3.8: 82.6% 5-attr / 91.8% 3-attr • #025001 Ultimate Lite: 81.8% • #025002 Fast: 81.5% in 0.66s • #025000 Lite: 80.6% at $0.00046)',
     runId: '1013-025000-l8_hul_ultimate-gemini-3.8-flash-priority-hul_variants',
     shortRunId: '#025000 (82.6% N=1,000) & #025002 (81.5% 0.66s N=1,000)',
@@ -172,6 +182,8 @@ const TASK_PERFORMANCE = [
     legacySource: 'NR_final_PW2.py W1 = W4×W5 (31.9%–70.6%) • 16.0% Chained brand.h5+packtype.h5 (#182625 N=100)',
     ours: 84.5,
     latency: '0.87s–1.68s (#025000/#013246 N=1,000) • 2.51s–2.69s (Lite N=1,000)',
+    shelfCost: '$0.00145 / shelf (₹0.13 Lite) • $0.0041 (3.8)',
+    cropCost: '$0.00051 / crop (#013248 Lite) • $0.00091 (#025000)',
     sampleSummary: 'N=1,000 (#025000 CLEF 3.8: 84.5% 5-attr / 92.2% 3-attr • #013248 Ultimate: 82.4% / 90.8% • #025000 CLEF Lite: 81.9% / 91.4% • #013246 Fast: 80.3% • #021828 Clean SFT: 70.4% 3-attr)',
     runId: '1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden',
     shortRunId: '#025000 (84.5%), #013248 (82.4%) & #021828 SFT (70.4%) [N=1,000]',
@@ -188,6 +200,8 @@ const TASK_PERFORMANCE = [
     legacySource: 'Phase-1 1-Class Detector Baseline • 50.4% F2 yolov12s-sku110k (#203935 N=100)',
     ours: 95.0,
     latency: '1.49s CPU Det (#031926 N=100) • 5.25s Session Audit (#022245 Lite)',
+    shelfCost: '$0.00004 / shelf (CPU Det) • $0.00114 / shelf (Planogram)',
+    cropCost: '$0.00341 / 3-shelf bay session (#022245 Lite)',
     sampleSummary: 'N=25 hul_sessions (#022245 3.8-Flash: 100% Bay Block Purity, 95.0% HUL • #022245 Lite: 99.4% Purity) • N=100 gtmerch_golden (#031926) • N=60 sku110k (#032240: 69.5% F2)',
     runId: '1013-022245-bay_planogram_verifier-gemini-3.8-flash-priority',
     shortRunId: '#022245 (Planogram), #031926 (gtmerch N=100) & #032240 (sku110k)',
@@ -204,6 +218,8 @@ const TASK_PERFORMANCE = [
     legacySource: 'Phase-1 Closed-Set ViT-240 (3–4 wk retrain per campaign)',
     ours: 84.4,
     latency: '3.42s (#022246 Lite) • 9.08s (#024958 Zero-VLM N=1,000 at $0.00020)',
+    shelfCost: '$0.00055–$0.00140 / promo display (₹0.05–₹0.12)',
+    cropCost: '$0.00020 / crop (Zero-VLM #024958) • $0.00069 (Lite #025000)',
     sampleSummary: 'hul_promos N=1,000 Cloud Run (#025000 3.8-Flash: 84.4% 3-attr / 73.1% 5-attr, 97.8% HUL, 93.7% Brand • #025000 Lite: 84.0% 3-attr / 73.0% 5-attr at $0.00069 • #022245 N=25: 84.0% 5-attr / 100% Brand)',
     runId: '1013-025000-jev_promo_verifier-gemini-3.8-flash-priority-hul_promos',
     shortRunId: '#025000 (N=1,000: 84.4% 3-Attr / 93.7% Brand) & #022245 (N=25: 84% 5-Attr)',
@@ -382,61 +398,90 @@ function renderOverviewTab() {
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px;">
-        <!-- WORKLOAD 1: MT MARKET SHARE -->
-        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(147,197,253,0.3); border-radius: 12px; padding: 16px 18px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px;">
+        <!-- USE CASE 1: GT & MT MERCHANDISING -->
+        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(110,231,183,0.35); border-radius: 12px; padding: 15px 16px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:8px;">
-            <span style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#93c5fd;">
-              Workload 1 • MT Market Share &amp; SOS/P2P (323,935 Photos/Day)
+            <span style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#6ee7b7;">
+              Use Case 1 &bull; GT &amp; MT Merchandising (145K+ Visits/Day)
             </span>
-            <span style="font-size:11px;background:rgba(16,185,129,0.2);color:#6ee7b7;padding:2px 8px;border-radius:999px;font-weight:700;">
-              2,659 SKUs • 953 Brands
+            <span style="font-size:10.5px;background:rgba(16,185,129,0.22);color:#6ee7b7;padding:2px 8px;border-radius:999px;font-weight:700;">
+              Display Bays &bull; Planogram
             </span>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
             <div>
-              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">5-Level SKU &amp; 3-Attr Exact</div>
-              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">84.5% <span style="font-size:13px;color:#93c5fd;">(92.2% 3-Attr)</span></div>
-              <div style="font-size:11.5px;color:#cbd5e1;">Up from <strong>16.0%</strong> chained <code>.h5</code> / <strong>50.5%</strong> <code>W1</code>. <strong>97.4%</strong> Brand • <strong>82.6%</strong> Variant (N=1,000 <code>#025000</code>).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Bay Purity &amp; Det F2</div>
+              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">100% <span style="font-size:12px;color:#6ee7b7;">(95% HUL)</span></div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>100%</strong> Bay Block Purity (<code>#022245</code>) &bull; <strong>69.5%</strong> Det F2 (<code>#032240</code> vs 50.4% base).</div>
             </div>
             <div>
-              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Latency (p50)</div>
-              <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.66s–1.68s</div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>0.66s</strong> Variant Hybrid (N=1,000 <code>#025002</code>) • <strong>1.68s</strong> Golden Hybrid (N=1,000 <code>#013246</code> vs. 180s SLA).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Shelf &amp; Bay Latency</div>
+              <div style="font-size:19px;font-weight:800;color:#6ee7b7;margin:2px 0;">1.49s / 5.25s</div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>1.49s</strong> CPU Shelf Det (<code>#031926</code> N=100) &bull; <strong>5.25s</strong> 3-Shelf Bay Audit (<code>#022245</code> vs 180s).</div>
             </div>
             <div>
-              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Unit Cost &amp; Efficiency</div>
-              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">$0.00023–$0.00051 <span style="font-size:12px;font-weight:600;color:#93c5fd;">/ crop</span></div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>$0.00023</strong> Zero-VLM CLM (N=1,000 <code>#013247</code>) • <strong>$0.00051</strong> Flash-Lite Hybrid (N=1,000 <code>#013248</code>).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Shelf &amp; Bay Cost</div>
+              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">$0.00114 <span style="font-size:11.5px;font-weight:600;color:#93c5fd;">/ shelf</span></div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>$0.00004/shelf</strong> CPU Det (<code>#031926</code>) &bull; <strong>$0.00341 / 3-shelf bay</strong> (<code>₹0.10/shelf</code> Lite).</div>
             </div>
           </div>
         </div>
 
-        <!-- WORKLOAD 2: GT & MT MERCHANDISING & PROMO -->
-        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(110,231,183,0.3); border-radius: 12px; padding: 16px 18px;">
+        <!-- USE CASE 2: MT MARKET SHARE & SHARE OF SHELF -->
+        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(147,197,253,0.35); border-radius: 12px; padding: 15px 16px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:8px;">
-            <span style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#6ee7b7;">
-              Workload 2 • GT &amp; MT Merchandising &amp; Promo (182,596 Photos/Day)
+            <span style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#93c5fd;">
+              Use Case 2 &bull; MT Market Share &amp; SOS (323,935 Photos/Day)
             </span>
-            <span style="font-size:11px;background:rgba(59,130,246,0.25);color:#bfdbfe;padding:2px 8px;border-radius:999px;font-weight:700;">
-              Display Bays • 240 Promos
+            <span style="font-size:10.5px;background:rgba(59,130,246,0.25);color:#bfdbfe;padding:2px 8px;border-radius:999px;font-weight:700;">
+              2,659 SKUs &bull; 953 Brands
             </span>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
             <div>
-              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Bay Purity &amp; Promo Acc</div>
-              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">100% / 84.4%–93.7%</div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>100%</strong> Bay Block Purity (<code>#022245</code>) • <strong>93.7%</strong> Promo Brand / <strong>84.4%</strong> 3-Attr (N=1,000 <code>#025000</code>).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">5-Level SKU &amp; 3-Attr</div>
+              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">84.5% <span style="font-size:12px;color:#93c5fd;">(92.2% 3-Attr)</span></div>
+              <div style="font-size:11px;color:#cbd5e1;">Up from <strong>16.0%</strong> <code>.h5</code> / <strong>50.5%</strong> <code>W1</code>. <strong>97.4%</strong> Brand &bull; <strong>82.6%</strong> Variant (N=1,000 <code>#025000</code>).</div>
             </div>
             <div>
-              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Audit Latency (p50)</div>
-              <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.97s–1.49s / 3.42s</div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>0.97s–1.49s</strong> CPU Bay+Pack Det (<code>#024028</code> / <code>#031926</code>) • <strong>3.42s</strong> Promo Verifier (<code>#022246</code>).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Latency (p50)</div>
+              <div style="font-size:19px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.66s–1.68s</div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>0.66s</strong> Variant Hybrid (N=1,000 <code>#025002</code>) &bull; <strong>1.68s</strong> Golden Hybrid (N=1,000 <code>#013246</code>).</div>
             </div>
             <div>
-              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Promo Launch &amp; Cost</div>
-              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">5 Minutes</div>
-              <div style="font-size:11.5px;color:#cbd5e1;">1-photo zero-shot onboarding (vs. <strong>3–4 wk</strong> <code>ViT-240</code> retrain) • <strong>$0.00020</strong> Zero-LLM Promo (N=1,000 <code>#024958</code>).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Per-Shelf &amp; Per-Crop Cost</div>
+              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">$0.00114–$0.00145 <span style="font-size:11.5px;font-weight:600;color:#93c5fd;">/ shelf</span></div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>₹0.10–₹0.13/shelf</strong> (~35 packs) &bull; <strong>$0.00059/shelf</strong> Zero-VLM &bull; <strong>$0.00023–$0.00051/crop</strong>.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- USE CASE 3: MT TOKER PROMOTIONAL COMPLIANCE -->
+        <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(253,224,71,0.35); border-radius: 12px; padding: 15px 16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:8px;">
+            <span style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#fde047;">
+              Use Case 3 &bull; MT Toker Promo Audit (37,596 Audits/Day)
+            </span>
+            <span style="font-size:10.5px;background:rgba(234,179,8,0.22);color:#fef08a;padding:2px 8px;border-radius:999px;font-weight:700;">
+              240 Promo SKUs &bull; 5-Min Launch
+            </span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+            <div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Promo &amp; Brand Acc</div>
+              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">84.4% <span style="font-size:12px;color:#fde047;">(93.7% Brand)</span></div>
+              <div style="font-size:11px;color:#cbd5e1;">Up from <strong>75.0%</strong> <code>ViT-240</code>. <strong>97.8%</strong> HUL (N=1,000 <code>#025000</code>) &bull; <strong>84.0%</strong> 5-Attr (<code>#022245</code>).</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Launch &amp; Audit Speed</div>
+              <div style="font-size:19px;font-weight:800;color:#6ee7b7;margin:2px 0;">5 Min / 3.42s</div>
+              <div style="font-size:11px;color:#cbd5e1;">1-photo zero-shot launch (vs <strong>3–4 wk</strong> <code>ViT-240</code> retrain) &bull; <strong>3.42s</strong> p50 (<code>#022246</code>).</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Per-Display &amp; Crop Cost</div>
+              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">$0.00055–$0.00140 <span style="font-size:11.5px;font-weight:600;color:#fde047;">/ shelf</span></div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>₹0.05–₹0.12/display</strong> &bull; <strong>$0.00020/crop</strong> Zero-VLM (<code>#024958</code>) &bull; <strong>$0.00069/crop</strong> Lite.</div>
             </div>
           </div>
         </div>
@@ -684,71 +729,143 @@ function renderCompactCostSimulator() {
   const costHybrid = 0.1204;
   const costFlash = 0.3510;
   const costEmbed = 0.0485;
+  const usdHybridShelf = 0.00139;
+  const usdFlashShelf = 0.00410;
+  const usdEmbedShelf = 0.00059;
 
   return `
     <section class="cio-panel">
       <div class="cio-panel-header" style="margin-bottom:12px;">
         <div>
-          <h3 class="cio-panel-title">Scale &amp; Cost Simulator</h3>
+          <h3 class="cio-panel-title">Scale &amp; Cost Simulator: Per-Shelf (~35 Packs), Per-Bay (3 Shelves) &amp; Per-Crop Economics</h3>
+          <p class="cio-panel-subtitle">Real Cloud Run token &amp; CPU telemetry across single-crop (~1 pack), full-shelf (~35 packs), and store bay session (3 shelves / ~105 packs)</p>
         </div>
         <span class="mono" style="color:#0057b8;font-size:14px;font-weight:700;">
-          ${daily.toLocaleString('en-IN')} photos/day (${(monthly / 1000000).toFixed(1)}M / mo)
+          ${daily.toLocaleString('en-IN')} shelf photos/day (${(monthly / 1000000).toFixed(1)}M / mo)
         </span>
       </div>
 
       <input id="cio-volume-slider" type="range" min="50000" max="1000000" step="10000" value="${daily}"
         style="width:100%;accent-color:#0057b8;cursor:pointer;margin-bottom:14px;" />
 
-      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:14px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:14px;">
         <div style="border:2px solid #0057b8;background:#eff6ff;border-radius:10px;padding:14px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-            <span class="badge badge-blue">Recommended Default</span>
-            <span class="mono" style="font-size:12px;font-weight:700;color:#0057b8;">4.8s</span>
+            <span class="badge badge-blue">Recommended Production Default</span>
+            <span class="mono" style="font-size:12px;font-weight:700;color:#0057b8;">2.5s–4.8s</span>
           </div>
           <div style="font-weight:700;color:#0f172a;">Hybrid + Gemini 3.5 Flash-Lite</div>
-          <div style="font-size:22px;font-weight:800;color:#0057b8;margin:4px 0;">
-            ${fmtInr(costHybrid)} <span style="font-size:12px;font-weight:600;color:#334155;">/ shelf</span>
+          <div style="font-size:21px;font-weight:800;color:#0057b8;margin:4px 0;">
+            $0.00114–$0.00145 <span style="font-size:12px;font-weight:600;color:#334155;">/ shelf (${fmtInr(costHybrid)})</span>
           </div>
-          <div style="font-size:12px;color:#0f172a;font-weight:600;">
-            ${fmtCompactInr(daily * costHybrid)}/day &bull; ${fmtCompactInr(monthly * costHybrid)}/mo
+          <div style="font-size:11.5px;color:#1e3a8a;margin-bottom:4px;">
+            <strong>$0.00341 / 3-shelf bay</strong> (<code>#022245</code>) &bull; <strong>$0.00046–$0.00051 / crop</strong> (<code>#025000</code>/<code>#013248</code>)
+          </div>
+          <div style="font-size:12px;color:#0f172a;font-weight:700;">
+            $${Math.round(daily * usdHybridShelf).toLocaleString('en-US')}/day (${fmtCompactInr(daily * costHybrid)}) &bull; $${Math.round(monthly * usdHybridShelf).toLocaleString('en-US')}/mo (${fmtCompactInr(monthly * costHybrid)})
           </div>
         </div>
 
         <div style="border:1px solid #e2e8f0;background:#ffffff;border-radius:10px;padding:14px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-            <span class="badge badge-pass">High-Density Cosmetics</span>
-            <span class="mono" style="font-size:12px;font-weight:700;color:#475569;">5.4s</span>
+            <span class="badge badge-pass">Peak-Accuracy Cosmetics &amp; Tubes</span>
+            <span class="mono" style="font-size:12px;font-weight:700;color:#475569;">1.68s–5.4s</span>
           </div>
           <div style="font-weight:700;color:#0f172a;">Hybrid + Gemini 3.8 Flash</div>
-          <div style="font-size:22px;font-weight:800;color:#0f172a;margin:4px 0;">
-            ${fmtInr(costFlash)} <span style="font-size:12px;font-weight:600;color:#64748b;">/ shelf</span>
+          <div style="font-size:21px;font-weight:800;color:#0f172a;margin:4px 0;">
+            $0.00410–$0.00658 <span style="font-size:12px;font-weight:600;color:#64748b;">/ shelf (${fmtInr(costFlash)})</span>
           </div>
-          <div style="font-size:12px;color:#334155;font-weight:600;">
-            ${fmtCompactInr(daily * costFlash)}/day &bull; ${fmtCompactInr(monthly * costFlash)}/mo
+          <div style="font-size:11.5px;color:#475569;margin-bottom:4px;">
+            <strong>$0.0123–$0.0197 / 3-shelf bay</strong> &bull; <strong>$0.00330–$0.00636 / crop</strong> (<code>#025002</code>/<code>#025000</code>)
+          </div>
+          <div style="font-size:12px;color:#334155;font-weight:700;">
+            $${Math.round(daily * usdFlashShelf).toLocaleString('en-US')}/day (${fmtCompactInr(daily * costFlash)}) &bull; $${Math.round(monthly * usdFlashShelf).toLocaleString('en-US')}/mo (${fmtCompactInr(monthly * costFlash)})
           </div>
         </div>
 
         <div style="border:1px solid #e2e8f0;background:#ffffff;border-radius:10px;padding:14px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-            <span class="badge badge-amber">Zero-LLM Mode</span>
-            <span class="mono" style="font-size:12px;font-weight:700;color:#475569;">0.9s</span>
+            <span class="badge badge-amber">Zero-VLM Edge / Vector Mode</span>
+            <span class="mono" style="font-size:12px;font-weight:700;color:#475569;">0.9s–1.5s</span>
           </div>
           <div style="font-weight:700;color:#0f172a;">CPU Detector + Embeddings Only</div>
-          <div style="font-size:22px;font-weight:800;color:#0f172a;margin:4px 0;">
-            ${fmtInr(costEmbed)} <span style="font-size:12px;font-weight:600;color:#64748b;">/ shelf</span>
+          <div style="font-size:21px;font-weight:800;color:#0f172a;margin:4px 0;">
+            $0.00059 <span style="font-size:12px;font-weight:600;color:#64748b;">/ shelf (${fmtInr(costEmbed)})</span>
           </div>
-          <div style="font-size:12px;color:#334155;font-weight:600;">
-            ${fmtCompactInr(daily * costEmbed)}/day &bull; ${fmtCompactInr(monthly * costEmbed)}/mo
+          <div style="font-size:11.5px;color:#475569;margin-bottom:4px;">
+            <strong>$0.00004/shelf</strong> CPU Det Only (<code>#031926</code>) &bull; <strong>$0.00177 / bay</strong> &bull; <strong>$0.00020–$0.00023 / crop</strong>
+          </div>
+          <div style="font-size:12px;color:#334155;font-weight:700;">
+            $${Math.round(daily * usdEmbedShelf).toLocaleString('en-US')}/day (${fmtCompactInr(daily * costEmbed)}) &bull; $${Math.round(monthly * usdEmbedShelf).toLocaleString('en-US')}/mo (${fmtCompactInr(monthly * costEmbed)})
           </div>
         </div>
       </div>
 
-      <details style="margin-top:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;">
-        <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:#0057b8;">
-          Unit Cost Breakdown (₹0.1204 / shelf) &blacktriangledown;
+      <details open style="margin-top:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">
+        <summary style="cursor:pointer;font-size:12.5px;font-weight:700;color:#0057b8;">
+          Why Full-Shelf Image Cost ($0.00114–$0.00145 / shelf) Is 9x–29x Lower Than Naive Per-Crop VLM Calling &blacktriangledown;
         </summary>
-        <div style="margin-top:6px;font-size:12px;color:#334155;">
-          Stage 1 CPU Detector (₹0.0042) + Stage 2A Grouped Embeddings (₹0.0589) + Stage 2B 4-Crop Contact Sheet on 32% lookalikes (₹0.0573) = <strong>₹0.1204 / shelf</strong>.
+        <div style="margin-top:8px;font-size:12px;color:#334155;line-height:1.5;">
+          A retail shelf photo contains <strong>~35 product packs</strong> (<code>32.4</code> on <code>gtmerch_golden</code>, <code>41.0</code> on <code>ms_json_golden</code>), and a store bay session captures <strong>3 shelf photos (~105 packs)</strong>. Instead of invoking a VLM 35 separate times per shelf, our 3-stage funnel runs:
+          <strong>(1) Stage 1 CPU ONNX Detector</strong> (<code>$0.00004/shelf</code>, <code>#031926</code>) &rarr;
+          <strong>(2) Stage 2A 3.2x Spatial Neighbor Medoid Grouping + <code>gemini-embedding-2</code> CLM Gate</strong> (resolves ~68% of packs in vector space for <code>$0.00055/shelf</code>) &rarr;
+          <strong>(3) Stage 2B 1 Batched Contact Sheet VLM Call</strong> on only the ~11 ambiguous lookalike variants (<code>$0.00055–$0.00086/shelf</code> on Flash-Lite).
+        </div>
+        <div class="cio-table-wrap" style="margin-top:8px;">
+          <table class="cio-table" style="font-size:11.5px;">
+            <thead>
+              <tr>
+                <th>Architecture Tier &amp; Verified Cloud Run ID</th>
+                <th>Per-Crop Cost (1 Pack)</th>
+                <th>Full Shelf Image (~35 Packs)</th>
+                <th>3-Shelf Store Bay (~105 Packs)</th>
+                <th>506,531 Photos/Day</th>
+                <th>Accuracy (N=1,000)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Stage 1 CPU ONNX Detector Only</strong> (<code>#031926</code> N=100 / <code>#032240</code> N=60)</td>
+                <td class="mono">$0.000001 / box</td>
+                <td class="mono"><strong>$0.00004 / shelf</strong> (₹0.003)</td>
+                <td class="mono"><strong>$0.00012 / bay</strong> (₹0.01)</td>
+                <td class="mono">$20 / day</td>
+                <td><strong>69.5% Det F2</strong> (1.49s CPU)</td>
+              </tr>
+              <tr>
+                <td><strong>Zero-VLM CLM Vector Search</strong> (<code>#013247</code> golden / <code>#024958</code> promos N=1,000)</td>
+                <td class="mono">$0.00020–$0.00023 / crop</td>
+                <td class="mono"><strong>$0.00059 / shelf</strong> (₹0.05)</td>
+                <td class="mono"><strong>$0.00177 / bay</strong> (₹0.15)</td>
+                <td class="mono">$299 / day</td>
+                <td><strong>78.6% 5-Attr / 89.5% 3-Attr</strong></td>
+              </tr>
+              <tr style="background:#eff6ff;">
+                <td><strong>Recommended: Hybrid + 3.5 Flash-Lite</strong> (<code>#013248</code> / <code>#025000</code> N=1,000 &bull; <code>#022245</code> Bay)</td>
+                <td class="mono"><strong>$0.00046–$0.00051 / crop</strong></td>
+                <td class="mono"><strong style="color:#0057b8;">$0.00114–$0.00145 / shelf</strong> (₹0.10–₹0.13)</td>
+                <td class="mono"><strong style="color:#0057b8;">$0.00341 / bay</strong> (₹0.30)</td>
+                <td class="mono"><strong>$577–$704 / day</strong></td>
+                <td><strong>79.5%–81.9% 5-Attr / 91.4% 3-Attr / 99.4% Bay</strong></td>
+              </tr>
+              <tr>
+                <td><strong>Peak-Accuracy: Hybrid + 3.8 Flash</strong> (<code>#025000</code> CLEF / <code>#013248</code> Ultimate N=1,000)</td>
+                <td class="mono">$0.00330–$0.00636 / crop</td>
+                <td class="mono"><strong>$0.00410–$0.00658 / shelf</strong> (₹0.35–₹0.57)</td>
+                <td class="mono"><strong>$0.0123–$0.0197 / bay</strong></td>
+                <td class="mono">$2,077 / day</td>
+                <td><strong>82.4%–84.5% 5-Attr / 92.2% 3-Attr / 100% Bay</strong></td>
+              </tr>
+              <tr style="color:#64748b;">
+                <td><em>Baseline Comparison: Naive 35x Single-Crop SFT / VLM</em> (<code>#021828</code> / <code>#013249</code> N=1,000)</td>
+                <td class="mono">$0.00095–$0.01129 / crop</td>
+                <td class="mono">$0.03325–$0.39515 / shelf (₹2.88–₹34.22)</td>
+                <td class="mono">$0.0998–$1.185 / bay</td>
+                <td class="mono">$16,842 / day</td>
+                <td>70.4% 3-Attr SFT (29x costlier per shelf)</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </details>
     </section>
@@ -839,8 +956,9 @@ function renderTaskPerfView() {
             <th>Phase-1 Baseline (Source)</th>
             <th>Our Latest System</th>
             <th>Latency (p50)</th>
+            <th>Unit Cost ($/Shelf &amp; $/Crop)</th>
             <th>Sample Size, 95% CI &amp; Cloud Run</th>
-            <th style="width:140px;">Comparison</th>
+            <th style="width:120px;">Comparison</th>
             <th>Details</th>
           </tr>
         </thead>
@@ -864,6 +982,10 @@ function renderTaskPerfView() {
                   ${row.unit ? `<div style="font-size:10.5px;color:#475569;font-family:Inter,sans-serif;">${esc(row.unit)}</div>` : ''}
                 </td>
                 <td class="mono" style="font-size:11.5px;color:#0f766e;font-weight:600;">${esc(row.latency || '—')}</td>
+                <td class="mono" style="font-size:11px;color:#0f172a;">
+                  <div style="font-weight:700;color:#0057b8;">${esc(row.shelfCost || '$0.00114–$0.00145 / shelf')}</div>
+                  <div style="color:#475569;font-size:10.5px;">${esc(row.cropCost || '$0.00023–$0.00051 / crop')}</div>
+                </td>
                 <td class="mono" style="font-size:11.5px;color:#334155;">
                   <div>${esc(row.sampleSummary || '—')}</div>
                   ${runLink}
