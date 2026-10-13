@@ -321,11 +321,11 @@ function fmtSpeedAndCost(r) {
   if (ds === "hul_sessions") {
     const bayUsd = rawUsd;
     const shUsd = bayUsd / 3.0;
-    shelfLine = `<div class="sub-note mono" style="color:#0057b8;font-weight:600;">$${shUsd.toFixed(5)}/shelf (${inr(rawInr / 3.0)}) &middot; $${bayUsd.toFixed(4)}/bay</div>`;
+    shelfLine = `<div class="sub-note mono" style="color:#0057b8;font-weight:600;">$${shUsd.toFixed(5)}/img (shelf &middot; ${inr(rawInr / 3.0)}) &middot; $${bayUsd.toFixed(4)}/bay</div>`;
   } else if (unit === "shelf") {
     const boxes = Math.max(1, Number(r.boxes_per_image || 32.4));
     const cropUsd = rawUsd / boxes;
-    shelfLine = `<div class="sub-note mono" style="color:#0057b8;font-weight:600;">$${rawUsd.toFixed(5)}/shelf (${inr(rawInr)}) &middot; $${cropUsd.toFixed(6)}/box</div>`;
+    shelfLine = `<div class="sub-note mono" style="color:#0057b8;font-weight:600;">$${rawUsd.toFixed(5)}/img (shelf &middot; ${inr(rawInr)}) &middot; $${cropUsd.toFixed(6)}/box</div>`;
   } else {
     const isZeroVlm = ap.includes("clm_standalone") || ap.includes("embedding") || ap.includes("clm_promo");
     const isNaivePerCrop = ap === "gemini_classify" || ap === "hierarchy_classify";
@@ -335,7 +335,7 @@ function fmtSpeedAndCost(r) {
         ? 0.00004 + rawUsd * 35.0
         : 0.00004 + 0.00055 + rawUsd * 1.65;
     const shelfInr = shelfUsd * 86.6;
-    shelfLine = `<div class="sub-note mono" style="color:#0057b8;font-weight:600;">~$${shelfUsd.toFixed(4)}/shelf (${inr(shelfInr)} for ~35 packs)</div>`;
+    shelfLine = `<div class="sub-note mono" style="color:#0057b8;font-weight:600;">~$${shelfUsd.toFixed(5)}/img (shelf ~35 packs &middot; ${inr(shelfInr)})</div>`;
   }
   return `
     <div><b>${sec(p50)}</b> <span class="muted" style="font-size:10.5px">(p50)</span> &middot; <span class="mono">$${rawUsd.toFixed(5)}/${esc(unit)} (${inr(rawInr)})</span></div>
