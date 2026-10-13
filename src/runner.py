@@ -637,45 +637,86 @@ def _write(local_dir: Path, run_id: str, summary: dict, rows: list[dict], dest: 
 
 
 def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] = print) -> int:
-    """Copy finished runs from GCS into ``results/`` and finalize their compute cost.
+    """Copy finished runs from GCS into ``results/``, prune deleted runs, and finalize compute cost.
 
     A Cloud Run task can't know its own billed duration, so it stores a provisional compute
     cost. Here we look up the task's start/completion time in the Cloud Run Admin API and
     re-price compute from it, then write the final summary back to GCS too.
     """
+    import shutil
+    from typing import Any
+
     bucket, prefix = dataset._split_gs(src.rstrip("/"))
     gcs = dataset._gcs().bucket(bucket)
-    n = 0
+    rpath = Path(results_dir)
+    rpath.mkdir(parents=True, exist_ok=True)
+    remote_blobs: dict[tuple[str, str], Any] = {}
     for blob in dataset._gcs().list_blobs(bucket, prefix=prefix + "/"):
         if blob.name in (f"{prefix}/qc_audit_report.json", f"{prefix}/experiments_registry.json"):
             meta_name = blob.name.rsplit("/", 1)[-1]
-            meta_dest = Path(results_dir) / meta_name
+            meta_dest = rpath / meta_name
             meta_dest.parent.mkdir(parents=True, exist_ok=True)
             if not meta_dest.exists():
                 blob.download_to_filename(str(meta_dest))
             continue
-        if not blob.name.endswith("/summary.json"):
-            continue
-        run_id = blob.name.split("/")[-2]
-        dest = Path(results_dir) / run_id
+        rel = blob.name[len(prefix) + 1 :]
+        parts = rel.split("/")
+        if len(parts) == 2 and parts[1] in ("summary.json", "images.jsonl"):
+            remote_blobs[(parts[0], parts[1])] = blob
+
+    ready_runs = sorted(
+        {rid for (rid, fn) in remote_blobs if (rid, "summary.json") in remote_blobs and (rid, "images.jsonl") in remote_blobs}
+    )
+    ready_set = set(ready_runs)
+
+    # Prune any local run folder that was deleted from the GCS results/ prefix
+    pruned = 0
+    if ready_set:
+        for local_sum in rpath.glob("*/summary.json"):
+            local_rid = local_sum.parent.name
+            if local_rid not in ready_set:
+                shutil.rmtree(local_sum.parent, ignore_errors=True)
+                pruned += 1
+
+    to_download: list[str] = []
+    for rid in ready_runs:
+        dest = rpath / rid
         local_sum = dest / "summary.json"
-        need_dl = not local_sum.exists() or (blob.size is not None and local_sum.stat().st_size != blob.size)
-        if need_dl:
-            img_blob = gcs.blob(f"{prefix}/{run_id}/images.jsonl")
-            if not img_blob.exists():
-                continue
-            dest.mkdir(parents=True, exist_ok=True)
-            img_blob.download_to_filename(str(dest / "images.jsonl"))
-            blob.download_to_filename(str(local_sum))
-            n += 1
-        summary = json.loads(local_sum.read_text())
+        local_img = dest / "images.jsonl"
+        sum_b = remote_blobs[(rid, "summary.json")]
+        img_b = remote_blobs[(rid, "images.jsonl")]
+        sum_diff = not local_sum.exists() or ( getattr(sum_b, "size", None) is not None and local_sum.stat().st_size != getattr(sum_b, "size") )
+        img_diff = not local_img.exists() or ( getattr(img_b, "size", None) is not None and local_img.stat().st_size != getattr(img_b, "size") )
+        if sum_diff or img_diff:
+            to_download.append(rid)
+
+    def _dl_one(rid: str) -> int:
+        dest = rpath / rid
+        dest.mkdir(parents=True, exist_ok=True)
+        remote_blobs[(rid, "images.jsonl")].download_to_filename(str(dest / "images.jsonl"))
+        remote_blobs[(rid, "summary.json")].download_to_filename(str(dest / "summary.json"))
+        return 1
+
+    n = pruned
+    if to_download:
+        with ThreadPoolExecutor(max_workers=min(16, len(to_download))) as pool:
+            n += sum(pool.map(_dl_one, to_download))
+
+    for rid in ready_runs:
+        local_sum = rpath / rid / "summary.json"
+        if not local_sum.exists():
+            continue
+        try:
+            summary = json.loads(local_sum.read_text())
+        except Exception:
+            continue
         if "provisional" in summary.get("cost", {}).get("compute_source", ""):
             from utils import cloud
 
             try:
                 seconds = cloud.task_seconds(summary["environment"])
             except Exception as e:  # task not finished yet / API error: keep provisional
-                log(f"  {run_id}: compute stays provisional ({e})")
+                log(f"  {rid}: compute stays provisional ({e})")
                 continue
             set_compute(summary, seconds, "Cloud Run task start->completion (Admin API)")
             if os.environ.get("SHELF_BENCH_VERTEX_EXPERIMENTS", "1") != "0":
@@ -684,12 +725,12 @@ def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] =
 
                     exp_id = os.environ.get("SHELF_BENCH_EXPERIMENT_ID", vertex_experiments.DEFAULT_EXPERIMENT)
                     summary["vertex_experiment"] = vertex_experiments.log_experiment_run(
-                        summary, results_uri=f"{src.rstrip('/')}/{run_id}", experiment_id=exp_id
+                        summary, results_uri=f"{src.rstrip('/')}/{rid}", experiment_id=exp_id
                     )
                 except Exception as exp_err:
-                    log(f"  {run_id}: Vertex AI Experiment update warning ({exp_err})")
-            (dest / "summary.json").write_text(json.dumps(summary, indent=2))
-            gcs.blob(blob.name).upload_from_filename(str(dest / "summary.json"))
+                    log(f"  {rid}: Vertex AI Experiment update warning ({exp_err})")
+            local_sum.write_text(json.dumps(summary, indent=2))
+            gcs.blob(f"{prefix}/{rid}/summary.json").upload_from_filename(str(local_sum))
     return n
 
 

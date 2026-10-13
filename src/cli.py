@@ -247,17 +247,18 @@ def main(argv: list[str] | None = None) -> int:
 
         from utils.server import serve
 
+        eff_results = runner.resolve_results_dir(a.results)
         if a.pull:
             def _bg_initial_pull() -> None:
                 try:
-                    n = runner.pull(cfg["gcp"]["results"], a.results)
+                    n = runner.pull(cfg["gcp"]["results"], eff_results)
                     if n:
-                        print(f"Pulled {n} new run(s) into {a.results}/")
+                        print(f"Pulled {n} updated/pruned run(s) into {eff_results}/")
                 except Exception:
                     pass
 
             threading.Thread(target=_bg_initial_pull, daemon=True).start()
-        serve(a.host, a.port, a.results, a.root, pull_src=cfg["gcp"]["results"] if a.pull else None, mode=a.mode)
+        serve(a.host, a.port, eff_results, a.root, pull_src=cfg["gcp"]["results"] if a.pull else None, mode=a.mode)
     elif a.cmd == "serve-cloud":
         from utils import cloud
 
