@@ -227,18 +227,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send((STATIC / entry).read_bytes(), "text/html; charset=utf-8")
             if parts in (["exec"], ["executive"], ["summary"], ["cio"]):
                 return self._send((STATIC / "cio.html").read_bytes(), "text/html; charset=utf-8")
-            if parts in (["deck"], ["presentation"], ["slides"]):
-                return self._send((STATIC / "deck.html").read_bytes(), "text/html; charset=utf-8")
             if parts == ["engineering"]:
                 return self._send((STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
-            if parts == ["static", "demo.mp4"]:
-                return self._send_video(STATIC / "demo.mp4")
             if parts[0] == "static" and len(parts) == 2 and parts[1] in (
                 "app.js",
                 "styles.css",
                 "cio.js",
                 "cio.css",
-                "deck.html",
                 "data_audit_pipeline.png",
                 "shelf_bay_vs_sku_example.png",
                 "cross_folder_join_example.png",

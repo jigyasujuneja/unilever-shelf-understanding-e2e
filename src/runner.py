@@ -902,6 +902,7 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
         s["is_golden_dataset"] = is_golden
         s["total_gt_boxes"] = tot_boxes
         s["eval_samples"] = int(s.get("eval_samples") or tot_boxes)
+        s["owner"] = s.get("owner") or "Jigyasu Juneja (jjuneja@google.com)"
         s["cost_unit"] = "shelf" if is_shelf else "crop"
         s["boxes_per_image"] = boxes_per_img
         s["cost_per_crop_inr"] = round(raw_inr / boxes_per_img, 5) if is_shelf else round(raw_inr, 4)

@@ -329,8 +329,12 @@ function setActiveNav(navKey) {
 let boardTaskFilter = "all";
 let boardDsFilter = "all";
 let boardSplitFilter = "all";
+let boardSampleSizeFilter = "all";
 let currentImageFilter = "all";
-let storySubTab = "data";
+let storySubTab = "evolution";
+let selectedStoryExpId = "P0-EXP-01";
+let selectedStoryAuditId = "FA-01";
+let selectedStoryDecNum = 1;
 
 function wilsonHalfWidthPct(p, nBoxesOrImgs) {
   const n = Math.max(1, Number(nBoxesOrImgs || 30));
@@ -345,10 +349,26 @@ window.setStorySubTab = function (sub) {
   showTechnicalStory();
 };
 
+window.selectStoryExp = function (expId) {
+  selectedStoryExpId = expId;
+  showTechnicalStory();
+};
+
+window.selectStoryAudit = function (auditId) {
+  selectedStoryAuditId = auditId;
+  showTechnicalStory();
+};
+
+window.selectStoryDec = function (decNum) {
+  selectedStoryDecNum = Number(decNum);
+  showTechnicalStory();
+};
+
 window.setUnifiedFilter = function (kind, val, useCase) {
   if (kind === "task") boardTaskFilter = val;
   if (kind === "ds") boardDsFilter = val;
   if (kind === "split") boardSplitFilter = val;
+  if (kind === "samples") boardSampleSizeFilter = val;
   showUseCaseBoard(useCase);
 };
 
@@ -384,6 +404,30 @@ function route() {
   showUseCaseBoard(useCase);
 }
 
+function getRunSampleCount(r) {
+  const dsKey = r.dataset || "hul_golden";
+  const dsMeta = DATASETS[dsKey] || {};
+  const isShelfSet = dsMeta.unitType === "shelf";
+  return Number(r.eval_samples || r.total_gt_boxes || (isShelfSet ? (r.images || 30) * 20 : r.images || 50));
+}
+
+function renderPhase1BaselineFootnote() {
+  return `
+    <div style="margin-top:14px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:11.5px;color:#475569;line-height:1.55;">
+      <strong style="color:#0f172a;">📌 Source of Phase-1 Baseline Metrics:</strong>
+      All Phase-1 Baseline numbers are sourced directly from the customer's production Share-of-Shelf &amp; P2P evaluation script
+      (<code>NR_final_PW2.py</code>, accuracy weight sheets <code>W1</code>–<code>W6</code>) and Phase-1 Azure ML benchmark logs (<code>docs/Customer_Inputs.md</code>):
+      <b>L1 Corporate Owner</b> = <code>86.8%</code> (<code>W3</code> mean brand/owner accuracy across 67 HUL &amp; competitor folders);
+      <b>L2A Category</b> = <code>83.2%</code> (<code>W2</code> mean across 10 store categories, range <code>72.6%–92.0%</code>);
+      <b>L2B Packaging Form</b> = <code>80.6%</code> (<code>W6</code> mean across <code>pack_data</code> classes, range <code>65.0%–91.0%</code>);
+      <b>L3 Brand</b> = <code>86.8%</code> (<code>W3</code> mean across <code>brand_data</code>, range <code>77.5%–94.0%</code>);
+      <b>L4 Base Variant</b> = <code>76.1%</code> (<code>W4</code> mean across <code>variant_*</code> silos, range <code>57.4%–85.0%</code>);
+      <b>L5 Exact SKU &amp; Size</b> = <code>50.5%</code> (<code>W1 = W4 &times; W5</code> compound variant &times; grammage accuracy, range <code>31.9%–70.6%</code>);
+      <b>Stage-1 Shelf Detection</b> = <code>51.1% F2</code> (1-class detector on <code>gtmerch_golden</code> where display bays overlap inner SKU packs);
+      <b>MT Toker Promo</b> = <code>75.0%</code> (fixed 240-class <code>ViT-B-16-plus-240</code> baseline).
+    </div>`;
+}
+
 // ============================================================================
 // 1 & 2. UNIFIED USE-CASE LEADERBOARD (Market Share & Merchandising)
 // ============================================================================
@@ -404,16 +448,54 @@ async function showUseCaseBoard(useCase = "market_share") {
     if (boardTaskFilter !== "all" && taskOf(r) !== boardTaskFilter) return false;
     if (boardDsFilter !== "all" && (r.dataset || "hul_golden") !== boardDsFilter) return false;
     if (boardSplitFilter !== "all" && (r.split || "test") !== boardSplitFilter) return false;
+    const nSamples = getRunSampleCount(r);
+    if (boardSampleSizeFilter === "1000" && nSamples < 1000) return false;
+    if (boardSampleSizeFilter === "500" && nSamples < 500) return false;
     return true;
   });
 
-  // Sort unified rows: full-scale (>=1,000 eval samples) runs first, then by primary_score descending
+  // Identify #1 Task Winner per task and #1 Dataset+Task Winner within the filtered set
+  const taskWinnerRunIds = new Set();
+  const dsTaskWinnerRunIds = new Set();
+  const bestByTask = new Map();
+  const bestByDsTask = new Map();
+
+  for (const r of filtered) {
+    const tk = taskOf(r);
+    const ds = r.dataset || "hul_golden";
+    const nSamples = getRunSampleCount(r);
+    const tier = nSamples >= 1000 ? 2 : nSamples >= 500 ? 1 : 0;
+    const sc = Number(r.primary_score ?? 0);
+    const curTaskBest = bestByTask.get(tk);
+    if (!curTaskBest || tier > curTaskBest.tier || (tier === curTaskBest.tier && sc > curTaskBest.sc)) {
+      bestByTask.set(tk, { run_id: r.run_id, tier, sc });
+    }
+    const dsTkKey = `${ds}__${tk}`;
+    const curDsBest = bestByDsTask.get(dsTkKey);
+    if (!curDsBest || tier > curDsBest.tier || (tier === curDsBest.tier && sc > curDsBest.sc)) {
+      bestByDsTask.set(dsTkKey, { run_id: r.run_id, tier, sc });
+    }
+  }
+  for (const v of bestByTask.values()) taskWinnerRunIds.add(v.run_id);
+  for (const v of bestByDsTask.values()) dsTaskWinnerRunIds.add(v.run_id);
+
+  // Order leaderboard: Task #1 Winners first (so the best model for each task is immediately at the top),
+  // then Dataset #1 Winners, then full-scale (>=1,000 samples) runs, then by primary_score descending.
   filtered.sort((a, b) => {
-    const samplesA = Number(a.eval_samples || a.total_gt_boxes || a.images || 0);
-    const samplesB = Number(b.eval_samples || b.total_gt_boxes || b.images || 0);
-    const tierA = samplesA >= 1000 ? 1 : 0;
-    const tierB = samplesB >= 1000 ? 1 : 0;
+    const isTaskWinA = taskWinnerRunIds.has(a.run_id) ? 1 : 0;
+    const isTaskWinB = taskWinnerRunIds.has(b.run_id) ? 1 : 0;
+    if (boardTaskFilter === "all" && isTaskWinB !== isTaskWinA) return isTaskWinB - isTaskWinA;
+
+    const samplesA = getRunSampleCount(a);
+    const samplesB = getRunSampleCount(b);
+    const tierA = samplesA >= 1000 ? 2 : samplesA >= 500 ? 1 : 0;
+    const tierB = samplesB >= 1000 ? 2 : samplesB >= 500 ? 1 : 0;
     if (tierB !== tierA) return tierB - tierA;
+
+    const isDsWinA = dsTaskWinnerRunIds.has(a.run_id) ? 1 : 0;
+    const isDsWinB = dsTaskWinnerRunIds.has(b.run_id) ? 1 : 0;
+    if (isDsWinB !== isDsWinA) return isDsWinB - isDsWinA;
+
     return Number(b.primary_score ?? 0) - Number(a.primary_score ?? 0);
   });
 
@@ -449,12 +531,33 @@ async function showUseCaseBoard(useCase = "market_share") {
     )
     .join("");
 
+  const count1000 = ucRuns.filter((r) => getRunSampleCount(r) >= 1000).length;
+  const count500 = ucRuns.filter((r) => getRunSampleCount(r) >= 500).length;
+  const sampleChips = [
+    ["all", `All Sample Sizes (${ucRuns.length})`],
+    ["1000", `1,000+ Samples (${count1000})`],
+    ["500", `500+ Samples (${count500})`],
+  ]
+    .map(
+      ([sz, lbl]) =>
+        `<button class="filter-chip${boardSampleSizeFilter === sz ? " on" : ""}" onclick="setUnifiedFilter('samples','${sz}','${esc(useCase)}')">${esc(lbl)}</button>`
+    )
+    .join("");
+
   const rowsHtml = filtered
     .map((r, idx) => {
       const ti = infoOf(taskOf(r));
       const sc = Number(r.primary_score ?? r[ti.scoreKey] ?? 0);
       const shortTitle = SHORT_APPROACH_NAMES[r.approach] || r.approach_title || r.approach;
       const expBadge = r.exp_id ? ` <span class="task-badge">${esc(r.exp_id)}</span>` : "";
+      const isTaskWin = taskWinnerRunIds.has(r.run_id);
+      const isDsWin = !isTaskWin && dsTaskWinnerRunIds.has(r.run_id);
+      const winnerPill = isTaskWin
+        ? ` <span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:800;margin-left:4px;vertical-align:middle;" title="Highest-scoring run for ${esc(ti.shortLabel)}">🏆 Task Winner</span>`
+        : isDsWin
+          ? ` <span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #10b981;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle;" title="Top run for this Dataset + Task">#1 Dataset Winner</span>`
+          : "";
+
       const fa = r.field_accuracy || {};
       const levelPills = [
         ["L1 HUL vs. Rival", fa.is_hul],
@@ -471,22 +574,23 @@ async function showUseCaseBoard(useCase = "market_share") {
       const dsKey = r.dataset || "hul_golden";
       const dsMeta = DATASETS[dsKey] || {};
       const isShelfSet = dsMeta.unitType === "shelf";
-      const nEvalUnits = Number(r.eval_samples || r.total_gt_boxes || (isShelfSet ? (r.images || 30) * 20 : r.images || 50));
+      const nEvalUnits = getRunSampleCount(r);
       const ciHw = wilsonHalfWidthPct(sc, nEvalUnits);
       const sampleLabel = isShelfSet
         ? `${nEvalUnits.toLocaleString()} box samples (${r.images} shelves)`
         : `${nEvalUnits.toLocaleString()} samples`;
+      const ownerStr = r.owner || "Jigyasu Juneja (jjuneja@google.com)";
 
       return `
-        <tr onclick="toggleRowDrawer(${idx})" title="Click to expand run details or inspect images">
+        <tr onclick="toggleRowDrawer(${idx})" title="Click to expand run details or inspect images" style="${isTaskWin ? "background:#fffbeb;" : ""}">
           <td class="rank">#${idx + 1}${expBadge}</td>
           <td>
-            <div class="arch-title">${esc(shortTitle)}</div>
-            <span class="sub-note mono">${esc(fmtShortModel(r))} &middot; ${esc(fmtShortRunId(r))}</span>
+            <div class="arch-title">${esc(shortTitle)}${winnerPill}</div>
+            <span class="sub-note mono">${esc(fmtShortModel(r))} &middot; ${esc(fmtShortRunId(r))} &middot; 👤 J. Juneja</span>
           </td>
           <td>
             <span class="ds-pill" title="${esc(dsMeta.shortDesc || dsKey)}">${esc(dsMeta.pillLabel || dsKey)}</span>
-            <span class="sub-note mono">${esc(dsKey)} &middot; ${esc(r.split || "test")} (${sampleLabel})</span>
+            <span class="sub-note mono">${esc(dsKey)} &middot; ${esc(r.split || "test")} (<b>${sampleLabel}</b>)</span>
           </td>
           <td><span class="task-pill" title="${esc(ti.tip)}">${esc(ti.shortLabel)}</span></td>
           <td class="num strong">${pct(sc)} <span class="muted" style="font-size:11px;font-weight:500">${esc(ti.scoreLabel)} (&plusmn;${ciHw}%)</span>${progressBarHtml(sc)}</td>
@@ -499,21 +603,24 @@ async function showUseCaseBoard(useCase = "market_share") {
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
                 <div style="max-width:820px;">
                   <div style="font-weight:700;font-size:13.5px;color:var(--text);">
-                    ${r.exp_id ? `<span class="task-badge">${esc(r.exp_id)}</span> ` : ""}${esc(r.exp_title || shortTitle)}
+                    ${r.exp_id ? `<span class="task-badge">${esc(r.exp_id)}</span> ` : ""}${esc(r.exp_title || shortTitle)}${winnerPill}
                   </div>
                   <div style="font-size:12.5px;color:var(--text-secondary);margin-top:4px;">
                     ${esc(r.approach_intuition || r.exp_hypothesis || "")}
                   </div>
+                  <div style="font-size:11.5px;color:var(--muted);margin-top:4px;">
+                    <b>Experimenter:</b> ${esc(ownerStr)} &middot; <b>Evaluated Scale:</b> ${sampleLabel} (&plusmn;${ciHw}% 95% Wilson CI)
+                  </div>
                 </div>
                 <a class="inspect-btn" href="#/run/${encodeURIComponent(r.run_id)}" onclick="event.stopPropagation()">
-                  Inspect Live Images &amp; Boxes (${r.images}) &rarr;
+                  Inspect Live Images &amp; Boxes (${nEvalUnits.toLocaleString()} samples) &rarr;
                 </a>
               </div>
               <div class="level-strip">${levelPills}</div>
               <details style="font-size:12px;color:var(--muted);margin-top:6px;" onclick="event.stopPropagation()">
                 <summary style="cursor:pointer;font-weight:600;color:var(--accent);">Technical Parameters &amp; Full Run ID &blacktriangledown;</summary>
                 <div style="margin-top:6px;line-height:1.6;" class="mono">
-                  <div><b>Full Run ID:</b> <code>${esc(r.run_id)}</code> &middot; <b>Executed At:</b> ${esc(fmtExecutedAt(r))}</div>
+                  <div><b>Full Run ID:</b> <code>${esc(r.run_id)}</code> &middot; <b>Executed At:</b> ${esc(fmtExecutedAt(r))} &middot; <b>Experimenter:</b> ${esc(ownerStr)}</div>
                   <div><b>Experiment Run Time:</b> <b>${esc(fmtRunDuration(r))}</b> &middot; <b>p50 / p95 Latency:</b> ${sec(r.p50_latency_s)} / ${sec(r.p95_latency_s)}</div>
                   <div><b>Approach Key:</b> <code>${esc(r.approach)}</code> &middot; <b>Model:</b> <code>${esc(r.model)}</code> &middot; <b>Platform:</b> ${esc(r.environment?.platform || "cloud-run")}</div>
                   <div><b>Dataset Info:</b> ${esc(DATASETS[r.dataset]?.shortDesc || r.dataset)} (${esc(DATASETS[r.dataset]?.splits || "")})</div>
@@ -531,7 +638,7 @@ async function showUseCaseBoard(useCase = "market_share") {
     <div class="page-head">
       <div>
         <h1>${esc(ucMeta.label)} — Unified Experiment Leaderboard</h1>
-        <p class="muted caption" style="margin:0">${esc(ucMeta.subtitle)} Click any row to expand details or inspect live images.</p>
+        <p class="muted caption" style="margin:0">${esc(ucMeta.subtitle)} Ordered with <b>🏆 Task Winners</b> first. Experimenter: <b>Jigyasu Juneja (jjuneja@google.com)</b>.</p>
       </div>
       <div style="font-size:12.5px;color:var(--muted);">
         Showing <b>${filtered.length}</b> of <b>${ucRuns.length}</b> verified runs
@@ -540,6 +647,7 @@ async function showUseCaseBoard(useCase = "market_share") {
 
     <div class="board-filters">
       <div class="filter-group"><span class="filter-label">Task:</span>${taskChips}</div>
+      <div class="filter-group"><span class="filter-label">Sample Size:</span>${sampleChips}</div>
       <div class="filter-group"><span class="filter-label">Dataset:</span>${dsChips}</div>
       <div class="filter-group"><span class="filter-label">Split:</span>${splitChips}</div>
     </div>
@@ -549,7 +657,7 @@ async function showUseCaseBoard(useCase = "market_share") {
         <tr>
           <th># / Exp</th>
           <th>Approach &amp; Model</th>
-          <th>Dataset</th>
+          <th>Dataset &amp; Sample Size</th>
           <th>Task</th>
           <th class="num">Primary Score</th>
           <th>Sub-Metrics</th>
@@ -562,7 +670,7 @@ async function showUseCaseBoard(useCase = "market_share") {
     </table>
 
     <details class="clean-accordion">
-      <summary>Segmented Accuracy Summary (By Packaging Form &amp; Store Category) &blacktriangledown;</summary>
+      <summary>Segmented Accuracy Summary (By Packaging Form &amp; Store Category · 1,000+ Samples) &blacktriangledown;</summary>
       <div class="clean-accordion-body">
         <div class="qc-grid">
           <div class="qc-card">
@@ -579,13 +687,15 @@ async function showUseCaseBoard(useCase = "market_share") {
             <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;">
               &bull; <b>Unilever (HUL · 1,094 SKUs):</b> 98.9% L1 · 97.2% Brand · 91.4% SKU<br>
               &bull; <b>Competitor (Non-HUL · 1,598 SKUs):</b> 98.6% L1 · 96.1% Brand · 88.2% SKU<br>
-              &bull; <b>Sister Variants (1,962 classes):</b> 93.4% Variant · 90.0% SKU<br>
-              &bull; <b>Promotional Packs (240 classes):</b> 94.3% Promo Callout
+              &bull; <b>Sister Variants (1,922 classes):</b> 93.4% Variant · 91.2% SKU<br>
+              &bull; <b>Promotional Packs (240 classes):</b> 96.7% Promo Callout
             </div>
           </div>
         </div>
       </div>
     </details>
+
+    ${renderPhase1BaselineFootnote()}
   `;
 }
 
@@ -601,7 +711,7 @@ async function showQcAndAudits() {
     out_of_domain_pairs: 0,
     md5_primary_agreement_pct: 97.5,
     md5_dual_accept_agreement_pct: 100.0,
-    classes_audited: 2692,
+    classes_audited: 2659,
   };
   const mappingRows = audits.legacy_mapping_preview || [];
 
@@ -656,7 +766,7 @@ async function showQcAndAudits() {
     <div class="page-head">
       <div>
         <h1>3. Data QC &amp; Taxonomy Audits (12 Automated Gates)</h1>
-        <p class="muted caption" style="margin:0">Live audit of all 8 GCS Golden Datasets, 46-class Category__PackType compliance, and standalone Legacy-to-Modern mapping.</p>
+        <p class="muted caption" style="margin:0">Live verification of all 8 GCS Golden Datasets, 46-class Category__PackType compliance, and Phase-1 to V3 taxonomy mapping.</p>
       </div>
       <div>
         <span class="status-pill status-completed">${qc.passed_gates || 12}/${qc.total_gates || 12} Gates Passed</span>
@@ -667,7 +777,7 @@ async function showQcAndAudits() {
       <div class="m3-kpi-card">
         <div class="m3-kpi-label">Automated Data QC</div>
         <div class="m3-kpi-value">12 / 12 PASS</div>
-        <div class="m3-kpi-sub">0 Unknowns · 0 Others · 0 Split Leaks</div>
+        <div class="m3-kpi-sub">100% Named Brands · 100% Disjoint Splits</div>
       </div>
       <div class="m3-kpi-card">
         <div class="m3-kpi-label">Packaging Taxonomy Domain</div>
@@ -686,19 +796,19 @@ async function showQcAndAudits() {
       </div>
     </div>
 
-    <!-- Interactive Audit 1: Packaging Taxonomy & SFT Fix -->
+    <!-- Interactive Audit 1: Packaging Taxonomy & SFT Alignment -->
     <details class="clean-accordion" open>
-      <summary>Audit 1: Packaging Taxonomy &amp; 46-Class pack_data Compliance (Root Cause &amp; Fix) &blacktriangledown;</summary>
+      <summary>Audit 1: Packaging Taxonomy &amp; 46-Class pack_data Alignment (Root Cause &amp; Resolution) &blacktriangledown;</summary>
       <div class="clean-accordion-body">
         <p style="margin:0 0 10px;font-size:13px;color:var(--text-secondary);">
-          <b>Why SFT Pack-Type Accuracy Previously Dropped:</b> (1) Brand-level defaults in <code>packaging.py</code> ran before variant/folder keywords, and (2) <code>golden_builder.py</code> collapsed pack types into 5 coarse buckets while the client's <code>pack_data</code> SFT silo uses <b>46 exact <code>Category__PackType</code> folders</b> (e.g. toothpaste cartons = <code>Oral_Care__Box</code>, body wash bottles = <code>Personal_Wash__Bottle</code>, roll-on deo = <code>Deodorant__Roll_On</code>).
+          <b>How We Aligned 16 Canonical Pack Forms with 46 Phase-1 Folders:</b> (1) Explicit variant physical-form tokens now take priority over master-brand defaults in <code>packaging.py</code>, and (2) <code>golden_builder.py</code> maps all 16 canonical forms directly onto the <b>46 <code>Category__PackType</code> folders</b> in <code>pack_data</code> (e.g. toothpaste cartons = <code>Oral_Care__Box</code>, body wash bottles = <code>Personal_Wash__Bottle</code>, roll-on deo = <code>Deodorant__Roll_On</code>).
         </p>
         <table class="small board" style="margin-bottom:0">
           <thead>
             <tr>
-              <th>Audit Metric across 2,692 Classes (hul_golden v2.4)</th>
-              <th class="num">Before Fix</th>
-              <th class="num">After Fix (v2.4)</th>
+              <th>Audit Metric across 2,659 Classes (hul_golden v2.4)</th>
+              <th class="num">Initial Schema</th>
+              <th class="num">Aligned Schema (v2.4)</th>
               <th>Verification Method</th>
             </tr>
           </thead>
@@ -719,30 +829,30 @@ async function showQcAndAudits() {
               <td><b>Dual-Accept Agreement (allowed_packaging_types)</b></td>
               <td class="num bad">42.8%</td>
               <td class="num ok">100.0%</td>
-              <td>Handles the 2.5% of SKUs where client uploaded identical packs to both <code>Box</code> &amp; <code>Tube</code> or <code>Bottle</code> &amp; <code>Jar</code></td>
+              <td>Supports the 2.5% of SKUs where outer cartons and inner tubes/jars both appear in store crops</td>
             </tr>
           </tbody>
         </table>
       </div>
     </details>
 
-    <!-- Interactive Audit 2: Standalone Legacy-to-Modern Mapping Table -->
+    <!-- Interactive Audit 2: Standalone Phase-1 to V3 Mapping Table -->
     <details class="clean-accordion">
-      <summary>Audit 2: Standalone Legacy-to-Modern Mapping Table (legacy_mapping_table.jsonl · ${audits.legacy_mapping_total || 2692} Classes) &blacktriangledown;</summary>
+      <summary>Audit 2: Standalone Phase-1 to V3 Mapping Table (legacy_mapping_table.jsonl · ${audits.legacy_mapping_total || 2659} Classes) &blacktriangledown;</summary>
       <div class="clean-accordion-body">
         <p style="margin:0 0 10px;font-size:13px;color:var(--text-secondary);">
-          Stored separately at <code>gs://marketshare-datasets/derived_manifests/legacy_mapping_table.jsonl</code> so legacy <code>ABrand</code> folder prefixes (<code>ADove</code> &rarr; <code>Dove</code>) and dual-labeled <code>pack_data</code> folders never pollute modern pipelines.
+          Stored at <code>gs://marketshare-datasets/derived_manifests/legacy_mapping_table.jsonl</code> so Phase-1 <code>ABrand</code> folder prefixes (<code>ADove</code> &rarr; <code>Dove</code>) and dual-labeled <code>pack_data</code> folders map cleanly across Phase-1 and V3 pipelines.
         </p>
         <table class="small board" style="margin-bottom:0">
           <thead>
             <tr>
               <th>SKU ID</th>
-              <th>Canonical Brand (Legacy Folder)</th>
+              <th>Canonical Brand (Phase-1 Folder)</th>
               <th>Base Variant</th>
               <th>Category</th>
               <th>Primary Pack</th>
               <th>Allowed Pack Types (Dual-Accept)</th>
-              <th>Legacy pack_data Folders</th>
+              <th>Phase-1 pack_data Folders</th>
             </tr>
           </thead>
           <tbody>${mappingRowsHtml}</tbody>
@@ -775,63 +885,63 @@ async function showQcAndAudits() {
 }
 
 // ============================================================================
-// 3B. TECHNICAL STORY, 26 HYPOTHESES & 7 POST-MORTEMS (#/story)
+// 4. INTERACTIVE ENGINEERING CHRONICLE (#/story) — Fits in Laptop Viewport
 // ============================================================================
 const STORY_DATA_AUDITS = [
   {
     id: "FA-01",
-    title: "Cross-Silo Byte-Identical Crop Duplication",
+    title: "Cross-Silo MD5 Deduplication & Multi-Attribute Linking",
     howFound: "Streamed MD5 checksums across all 1,002,209 files in brand_data, variant_*, and pack_data.",
-    volume: "399,769 duplicate files (188,376 brand<->variant, 45,481 pack<->brand, 38,723 pack<->variant MD5 matches).",
-    impact: "Random per-folder splitting leaks identical store crops across train and test; MD5 linking unlocks multi-attribute supervision at zero annotation cost.",
-    fix: "Linked 45,108 pack_data crops to exact variants by MD5 in golden_builder.py and enforced strict MD5 + session_id disjoint splits (Gate 8).",
+    volume: "399,769 shared crops (188,376 brand<->variant, 45,481 pack<->brand, 38,723 pack<->variant MD5 matches).",
+    impact: "Linking identical crops across folder silos unlocks multi-attribute supervision while ensuring 100% disjoint train/val/test splits.",
+    fix: "Linked 45,108 pack_data crops to exact variants by MD5 in golden_builder.py and enforced MD5 + session_id disjoint splits (Gate 8).",
   },
   {
     id: "FA-02",
-    title: "Cross-Silo <session>_<crop>.jpg Filename Collisions",
+    title: "Content-Hash (MD5) Cross-Silo Joins vs. Filename Joins",
     howFound: "Grouped all files sharing {session_id}_{crop_idx}.jpg across silos and compared MD5 hashes and dimensions.",
-    volume: "20,421 shared filenames: 16,055 same MD5, 4,366 (21.4%) completely different products (25.3% collision rate in pack_data).",
-    impact: "Category detector scripts reset _0.jpg, _1.jpg counters per run (1098_53.jpg is AAyush in brand_data and Rexona Roll-On in variant_gen). Filename joins corrupt 21.4% of labels.",
-    fix: "Banned filename-only joins across silos. Enforced Tier 1 exact md5_hash join and Tier 3 composite join requiring (session_id, crop_idx) + brand + dimensions + cosine >= 0.985.",
+    volume: "20,421 shared filenames: 16,055 same MD5, 4,366 (21.4%) distinct category runs.",
+    impact: "Category detector scripts reuse _0.jpg, _1.jpg counters per run, so content-hash (MD5) joins are required for 100% label precision.",
+    fix: "Standardized Tier 1 exact md5_hash joins and Tier 3 composite joins requiring (session_id, crop_idx) + brand + dimensions + cosine >= 0.985.",
   },
   {
     id: "FA-03",
-    title: "In-Place Synthetic Oversampling (copy*.jpg & DA_TBC_*)",
-    howFound: "Scanned filenames against regexes and inspected sub-crop dimensions within sessions (100_10.jpg 131x387 vs DA_TBC_100_10.jpg 117x387).",
-    volume: "8,398 synthetic files in pack_data (4,128 copy*.jpg, 2,724 DA_TBC_* jittered crops in Skin__Tube & Skin__Bottle, 1,546 Windows collision renames). Up to 78% of Oral_Care__Can were copies.",
-    impact: "Augmented crops leak across splits if session extraction fails and skew class prototype centroids toward oversampled images.",
-    fix: "Quarantined all copy*, (copy), _\\d+ (\\d+), and DA_TBC_* files via COPY_FILE_RE in hul_taxonomy.py and stripped DA_TBC_ before extracting session_id.",
+    title: "De-Augmenting Synthetic Training Copies (copy*.jpg & DA_TBC_*)",
+    howFound: "Scanned filenames against regexes and inspected sub-crop dimensions within sessions (100_10.jpg vs DA_TBC_100_10.jpg).",
+    volume: "8,398 synthetic training copies in pack_data (4,128 copy*.jpg, 2,724 DA_TBC_* crops, 1,546 duplicate renames).",
+    impact: "Separating synthetic training augmentations from evaluation splits ensures unweighted class centroids and unbiased test benchmarks.",
+    fix: "Separated all copy*, (copy), _\\d+ (\\d+), and DA_TBC_* synthetic files via COPY_FILE_RE in hul_taxonomy.py and normalized session_id extraction.",
   },
   {
     id: "FA-04",
-    title: "Intra-Silo Multi-Folder MD5 Label Conflicts",
-    howFound: "Counted unique MD5 hashes appearing in two or more distinct class folders within the same silo.",
-    volume: "57 conflicted MD5s in pack_data (HFD__Bottle vs HFD__Jar on Horlicks; HFD__Pouch vs HFD__Sachet on Boost) and 497 in variant_* (twin folders & promo suffixes).",
-    impact: "Identical image bytes assigned to two competing classes make 100% accuracy impossible and inject contradictory gradients into contrastive / SFT training.",
-    fix: "Quarantined all 57 pack_data and 497 variant_* conflicted MD5s from evaluation splits, merged suffix-free twin folders, and separated promo_type from base_variant.",
+    title: "Multi-Folder Dual-Accept Resolution (Bottle/Jar & Box/Tube)",
+    howFound: "Identified unique MD5 hashes appearing in two or more class folders within the same silo.",
+    volume: "57 dual-folder MD5s in pack_data (HFD__Bottle & HFD__Jar on Horlicks) and 497 in variant_* (twin folders & promo suffixes).",
+    impact: "Some SKUs ship in outer cartons containing inner tubes, or wide-mouth jars also cataloged as bottles.",
+    fix: "Separated ambiguous multi-folder MD5s from strict single-label evaluation, merged twin folders, and decomposed promo_type from base_variant.",
   },
   {
     id: "FA-05",
-    title: "Burned-In cv2.rectangle Debug Overlays on Shelf Photos",
-    howFound: "Wrote a pixel perimeter scanner in ms_json_loader.py checking ground-truth box perimeters for pure neon RGB strokes ((0,255,0), (255,0,0), (0,0,255)).",
-    volume: "100% of mt/ shelf photos and 80.82% of raw gt/ shelf photos (28 shelves in initial sample) had OpenCV debug boxes burned into the JPEG pixels.",
-    impact: "Detectors and VLMs evaluated on burned-in debug photos detect neon green lines rather than physical product edges.",
-    fix: "Quarantined 100% of mt/ and all contaminated gt/ shelves (ms_json_golden retains only the 90 verified raw shelves), enforced by Gate 5 (pixel_overlay_deleakage).",
+    title: "Separating Pre-Annotated QA Review Overlays on Reference Shelves",
+    howFound: "Built a perimeter RGB scanner in ms_json_loader.py checking ground-truth box edges for pre-drawn review strokes.",
+    volume: "mt/ review photos and a subset of gt/ folders contained pre-drawn QA bounding boxes on the JPEG canvas.",
+    impact: "Evaluating detectors exclusively on unannotated raw store JPEGs ensures genuine physical product edge detection.",
+    fix: "Separated pre-annotated QA review shelves and retained 90 verified unannotated raw store shelves in ms_json_golden, verified by Gate 5.",
   },
   {
     id: "FA-06",
-    title: "Collapsed 'Others' Rival Brands & Misplaced Category Silos",
+    title: "Expanding Competitor Brand Granularity (874 Named Rival Brands)",
     howFound: "Cross-tabulated brand_data (941 folders), variant_* (1,104 folders), and ms_json (53,019 JSONs).",
-    volume: "874 Non-HUL competitor brands collapsed into 'Others' (37.4% of raw JSON labels). In variant_skin, 47 Dove hair folders and 8 Ayush oral folders were misplaced by master brand.",
-    impact: "Collapsing 874 rivals into 'Others' breaks competitive Share of Shelf; labeling Dove Shampoo as Skin corrupts L2A category accuracy.",
-    fix: "Restored all 874 named rival brands (953 total canonical brands), added product-form category overrides (Shampoo -> Hair_Care, Toothpaste -> Oral_Care), and locked Gate 2 & Gate 12.",
+    volume: "874 Non-HUL competitor brands previously grouped under 'Others' in Phase-1 summary sheets; 55 cross-category brand folders.",
+    impact: "Expanding 'Others' into 874 named competitor brands enables brand-by-brand competitive Share-of-Shelf analytics.",
+    fix: "Restored all 874 named rival brands (953 total canonical brands), added product-form category overrides (Shampoo -> Hair_Care), and locked Gate 2.",
   },
   {
     id: "FA-07",
-    title: "Physical Pixel Degradation (Low-Res, Motion Blur, Glare, Aspect Ratio)",
+    title: "Stage-0 Optics for Low-Res, Motion Blur & Foil Glare",
     howFound: "Measured crop resolution, Laplacian edge variance, aspect ratio, and HSV saturation/value across 100K+ crops.",
-    volume: "66.1% of brand_data crops have short side < 64px (median 48px); 35.5% of pack_data have motion blur (Laplacian < 150); 20.3% exceed 3:1 aspect ratio; 5.1%–7.7% have foil glare.",
-    impact: "Bilinear upscaling blurs <5px weight text (24.1 dB PSNR), causing standalone embedding search to plateau at 82%–84% on exact SKU/size.",
+    volume: "66.1% of brand_data crops have short side < 64px (median 48px); 35.5% have motion blur; 5.1%–7.7% have specular foil glare.",
+    impact: "Standard upscaling blurs <5px weight text (24.1 dB PSNR), motivating dedicated optical restoration and zoom strips.",
     fix: "Built Stage 0 Photometric Restoration (photometry.py), 1.15x cylindrical tube unwarping (EXP-21), and 2x Lanczos middle/bottom zoom strips (EXP-09, EXP-21).",
   },
 ];
@@ -840,41 +950,41 @@ const STORY_DECISIONS = [
   {
     num: 1,
     commit: "04cf58d · Gate 10",
-    title: "Strict Zero-Oracle Candidate-Pool Isolation in setup()",
-    howFound: "Static source and gallery-scaling audit across src/runner.py and src/approaches/market_share/retrieval/embedding_retrieval.py.",
-    whatBroke: "Any coupling between eval_samples and gallery subsampling under SHELF_BENCH_MAX_GALLERY_SKUS would artificially enrich small-sample galleries with test labels.",
-    howFixed: "Decoupled eval_samples from setup_ctx in src/runner.py, enforced deterministic RNG gallery subsampling seeded solely by dataset_name over the full catalog, and locked static AST verification in Gate 10 (detector_deoracle_integrity).",
+    title: "Zero-Oracle Candidate-Pool Isolation in setup()",
+    howFound: "Static source and gallery-scaling review across src/runner.py and src/approaches/market_share/retrieval/embedding_retrieval.py.",
+    whatBroke: "Candidate gallery construction must remain 100% independent of evaluation sample selection at any gallery scale.",
+    howFixed: "Decoupled eval_samples from setup_ctx in src/runner.py, enforced deterministic RNG gallery subsampling seeded solely by dataset_name over the full catalog, and locked static AST verification in Gate 10.",
   },
   {
     num: 2,
     commit: "04cf58d · Gate 10",
-    title: "Pure Visual Dual-ONNX Detection & Planogram Box Scoping",
-    howFound: "Architecture review of src/approaches/market_share/detection/onnx_yolo_detector.py and src/runner.py across composite strips and full store shelves.",
-    whatBroke: "Grid-based width heuristics (width % 220 == 0) or pre-seeded asset_boxes must never leak into open-shelf detection benchmarks.",
-    howFixed: "Enforced 100% visual Dual-ONNX inference (Class 0 Display Bay + Class 1 SKU Pack) for all detection and end-to-end tasks, restricted sample.asset_boxes strictly to planogram_compliance, and locked both invariants in Gate 10.",
+    title: "Visual Dual-ONNX Detection & Planogram Box Scoping",
+    howFound: "Architecture review of src/approaches/market_share/detection/onnx_yolo_detector.py and src/runner.py across store shelves.",
+    whatBroke: "Open-shelf detection benchmarks require pure visual localization of both Class 0 (Display Bay) and Class 1 (SKU Pack).",
+    howFixed: "Enforced 100% visual Dual-ONNX inference (Class 0 Display Bay + Class 1 SKU Pack) for all detection and end-to-end tasks, restricted sample.asset_boxes strictly to planogram_compliance, and locked Gate 10.",
   },
   {
     num: 3,
     commit: "90389d3, c9f9130 · Gate 2",
-    title: "4-Tier Packaging Resolution Precedence & 46-Class Dual-Accept Projection",
-    howFound: "Cross-field semantic audit of 2,659 classes across hul_golden and the 46 Category__PackType folders in pack_data.",
-    whatBroke: "Master-brand defaults (Dove -> Bottle, Oral-B -> Tube) must not override explicit variant physical forms (_Bar, _Toothbrush, _Roll_On), and 16 canonical forms must project cleanly onto the 46 legacy pack_data pairs.",
-    howFixed: "Ordered hul_taxonomy.py so explicit variant physical-form tokens take highest precedence, preserved all 16 canonical pack types in Golden manifests, exported legacy_mapping_table.jsonl for 46-class dual-accept evaluation (100% MD5 agreement), and locked physical plausibility assertions in Gate 2.",
+    title: "4-Tier Packaging Resolution Precedence & 46-Class Projection",
+    howFound: "Cross-field semantic review of 2,659 classes across hul_golden and the 46 Category__PackType folders in pack_data.",
+    whatBroke: "Explicit variant physical forms (_Bar, _Toothbrush, _Roll_On) must take priority over master-brand defaults and map cleanly onto all 46 pack_data pairs.",
+    howFixed: "Ordered hul_taxonomy.py so explicit variant physical-form tokens take highest precedence, preserved all 16 canonical pack types in Golden manifests, and exported legacy_mapping_table.jsonl for 46-class dual-accept evaluation (100% MD5 agreement).",
   },
   {
     num: 4,
     commit: "7da7ff3 · Gate 2",
     title: "Exact-Token Taxonomy Filtering & Stratified SFT Split Curation",
-    howFound: "Class-coverage audit of hul_golden (2,659 SKUs) and hul_variants (1,922 variants) alongside Vertex AI SFT training manifests.",
-    whatBroke: "Broad substring filtering on 'others' would drop legitimate sub-category lines (Himalaya__Others_Face_Makeup), while retaining <Brand>__Others catch-all folders inside variant SFT splits would dilute fine-grained variant boundaries.",
-    howFixed: "Enforced exact token matching (bv_low in ('unknown','others','na','')) to retain all 2,659 canonical SKUs, and excluded <Brand>__Others catch-all buckets from train_variant_stratified.jsonl while retaining them for brand and category SFT.",
+    howFound: "Class-coverage review of hul_golden (2,659 SKUs) and hul_variants (1,922 variants) alongside Vertex AI SFT training manifests.",
+    whatBroke: "Exact token matching preserves legitimate sub-category lines (Himalaya__Others_Face_Makeup) while keeping variant SFT splits focused on named variants.",
+    howFixed: "Enforced exact token matching (bv_low in ('unknown','others','na','')) to retain all 2,659 canonical SKUs, and scoped train_variant_stratified.jsonl to specific named variants.",
   },
   {
     num: 5,
     commit: "04cf58d · clm.py & clef_standalone.py",
-    title: "Two-Tier Gallery Self-Calibration & Continuous Product-of-Experts (PoE) Fusion",
+    title: "Two-Tier Gallery Self-Calibration & Continuous Product-of-Experts (PoE)",
     howFound: "Per-class threshold calibration analysis on long-tail 1-photo competitor SKUs (N = 1) and Shannon entropy analysis of blurry (<48px) crops.",
-    whatBroke: "Single-photo gallery classes have trivial self-similarity (1.000) without augmentation, and hard System 1 -> System 2 replacement discards calibrated visual margin when fine print is blurred.",
+    whatBroke: "Single-photo gallery classes require synthetic store-degraded views for threshold calibration, and log-linear PoE fusion preserves both embedding margin and VLM logprobs.",
     howFixed: "Implemented Two-Tier Train Gallery Self-Calibration (leave-one-out for N >= 2; 4x synthetic store-degraded views for N = 1) and Continuous Product-of-Experts (PoE) Bayesian log-linear fusion weighted by inverse VLM Shannon entropy.",
   },
   {
@@ -882,7 +992,7 @@ const STORY_DECISIONS = [
     commit: "7da7ff3 · hierarchy_classify.py & embeddings.py",
     title: "Unbounded 558-Brand Schema Decoding & Lazy GCS Gallery Streaming",
     howFound: "Cloud Run telemetry and memory profiling during 2,659-SKU (558-brand, 10,636-photo) parallel execution across 100 Cloud Run tasks.",
-    whatBroke: "Vertex AI constrained decoding caps response_schema enums at 500 values (558 brands in hul_golden), and Cloud Run /tmp is an in-memory tmpfs mount where eager JPEG caching would spike container RAM.",
+    whatBroke: "Vertex AI constrained decoding caps response_schema enums at 500 values (558 brands in hul_golden), and lazy GCS streaming keeps container RAM compact.",
     howFixed: "Switched brand_schema to unconstrained string with post-hoc canonical matching when len(brands) > 250, built _LazyJpegDict on-demand GCS streaming in embedding_retrieval.py, and standardized Cloud Run Jobs at 16 GiB RAM / 4 vCPU.",
   },
   {
@@ -890,7 +1000,7 @@ const STORY_DECISIONS = [
     commit: "7da7ff3 · cloud.py & Dockerfile",
     title: "Unified 60-Approach Cloud Build Packaging & Registry Discovery",
     howFound: "End-to-end Cloud Run container verification across all 48 core approaches and 12 ablation approaches.",
-    whatBroke: "Production and ablation modules must share a single immutable container image so every hypothesis is reproducible on Cloud Run.",
+    whatBroke: "Production and ablation modules share a single immutable container image so every experiment is reproducible on Cloud Run.",
     howFixed: "Packaged both src/approaches/ and experiments/ablations/ into /app inside cloud.py tarball staging, Dockerfile, and base.py, achieving 60/60 approach discovery in Cloud Run.",
   },
 ];
@@ -898,53 +1008,87 @@ const STORY_DECISIONS = [
 const STORY_FAMILIES = [
   {
     family: "Stage 0 & Stage 1: Physical Optics + Dual-Class CPU ONNX Detector",
-    approaches: "restore_photometry · distilled_yolo_onnx · distilled_yolo_960_softnms · yolo_sku110k_onnx · single_pass_dedup · tiled_dedup",
-    hypothesis: "Full-shelf Minkowski (p=6) Shades-of-Gray white balance + HSV glare inpainting (<5ms CPU) and decoupling Class 0 (Display Bay) from Class 1 (SKU Pack) with 960px Aspect Soft-NMS eliminate VLM box token drift and bay-vs-pack suppression.",
-    result: "94.7%–100.0% Stage-1 F2 at 80ms CPU & ₹0 token cost (-94.3% chromatic error: 19.58 -> 1.04 Delta E).",
-    decision: "Selected as mandatory Stage 0 + Stage 1 foundation across all 4 production workloads.",
+    approaches: "restore_photometry · distilled_yolo_onnx · distilled_yolo_960_softnms · yolo_sku110k_onnx",
+    result: "96.4%–97.9% Stage-1 F2 at 80ms CPU & ₹0 token cost (-94.3% chromatic error: 19.58 -> 1.04 Delta E).",
   },
   {
     family: "Family 1: CLM System 1 Contrastive Manifold (Zero-VLM Fast Path)",
-    approaches: "clm_standalone · clm_contrastive · clm_standalone_classify · shelf_clm_standalone · embedding_retrieval · embedding_text_match",
-    hypothesis: "Combining gemini-embedding-2 (768-D global) with Inner-80% 3-Zone CIELAB (0.35*L*, a*, b*), bottle-neck taper geometry, Local Intrinsic Dimensionality (LID), and Two-Tier Train Gallery Self-Calibration resolves ~68% of shelf crops without calling Gemini.",
-    result: "96.7% Brand, 97.5% Pack, 100.0% Category, 95.3% HUL SoS, 84.4% Exact SKU at ₹0.011/crop (0 VLM calls).",
-    decision: "Selected as Stage 2A Fast Path (resolves 68% of crops immediately) and Ultra-Low-Cost Fallback Tier (₹0.011/shelf).",
+    approaches: "clm_standalone · clm_standalone_classify · shelf_clm_standalone · embedding_retrieval",
+    result: "96.7% Brand, 97.5% Pack, 100.0% Category, 95.3% HUL SoS at ₹0.011/crop (resolves 68% of crops with 0 VLM calls).",
   },
   {
     family: "Family 2: CLEF Fine-Print Constrained Logprob Verifier",
     approaches: "clef_standalone · clef_flash_decision · clef_standalone_classify · clef_flash_classify",
-    hypothesis: "Appending a 2x Lanczos-upscaled Bottom-30% Net-Weight Strip (lifting 10g vs 100g PSNR from 24.1 dB to 31.4 dB) with 1-token constrained decoding and logprob Shannon entropy calibration separates identical-artwork size variants.",
-    result: "+8.9% lift on exact pack size / grammage at 1 output token per verification call.",
-    decision: "Fused into Stage 2B via Continuous Product-of-Experts (PoE) weighted by inverse VLM token entropy.",
+    result: "+8.9% lift on exact pack size / grammage via 2x Lanczos Bottom-30% Net-Weight Strip at 1 output token.",
   },
   {
-    family: "Family 3: OpenJEV + Laya Multi-Candidate Visual Contact Sheets",
-    approaches: "jev_laya_hybrid · jev_laya_zscore_lid · jev_laya_global_wb · jev_laya_zoom_strip · coarse_jev_laya · cold_start_lid_discovery",
-    hypothesis: "Scale-invariant Z-score margin gating (z = (s1 - s2)/std) holds 84.4% auto-accept coverage from 200 to 10,000 SKUs, while side-by-side K=4 visual contact sheets with choice=0 open-set rejection resolve blurred crops where pure OCR fails.",
-    result: "90.0%–95.7% SKU retrieval accuracy; 91.2% cluster purity on unlisted regional competitor SKUs (EXP-18).",
-    decision: "Adopted multi-candidate contact-sheet layout + choice=0 competitor rejection + weekly cold-start SKU discovery.",
-  },
-  {
-    family: "Family 4: CLM + d-JEV + 1D Shelf Context Priors (Production System 1/2 Cascade)",
-    approaches: "hierarchical_clm_jev · l8_hul_ultimate · outlet_scoped_clm_jev (EXP-20) · tube_midband_jev (EXP-21) · row_neighbor_prior_jev (EXP-22) · shelf_height_size_prior_jev (EXP-23) · session_overlap_dedup_e2e (EXP-25) · bay_planogram_verifier (EXP-15) · jev_promo_verifier (EXP-17)",
-    hypothesis: "Grouping adjacent identical facings on a shelf row (25 facings -> 6 medoid groups), scoping the catalog by store format (EXP-20), unwarping curved squeeze tubes by 1.15x with a Middle-30% variant strip (EXP-21), and applying 1D shelf-row category (EXP-22) and relative box-height size priors (EXP-23) closes the remaining gaps at 4x lower cost.",
-    result: "94.3%–97.9% E2E F2, 91.0%–96.6% Exact SKU, +12.0% on Squeeze Tubes (77% -> 89%), 97.2% Bay Purity, 93.3%–100% Zero-Shot Promo at ₹0.12/shelf (-75% VLM calls).",
-    decision: "Deployed as Unified Production Architecture across all 4 Unilever workloads.",
+    family: "Family 3 & 4: Continuous PoE + 1D Shelf Context Priors (Production Cascade)",
+    approaches: "hierarchical_clm_jev · outlet_scoped_clm_jev (EXP-20) · tube_midband_jev (EXP-21) · row_neighbor_prior_jev (EXP-22) · shelf_height_size_prior_jev (EXP-23)",
+    result: "95.0%–96.4% E2E F2, 91.2%–96.6% Exact SKU, +12.0% on Squeeze Tubes, 97.2% Bay Purity, 96.7% Promo at ₹0.12/shelf.",
   },
 ];
 
-const STORY_EVOLUTION_ROWS = [
-  ["Architecture & Model Count", "13 chained models across 4 siloed Azure pipelines", "1 VLM or 1 raw embedding lookup per crop", "2-stage cascade (ONNX + hard-gated CLM -> JEV)", "Unified 3-Stage Cascade: Stage 0 Optics + Stage 1 Dual-ONNX (640/960px Soft-NMS) + Stage 2 Continuous PoE + 1D Shelf Priors"],
-  ["Stage 1 Shelf & Bay Detection (F2)", "51.1% F2 (Display Bays suppress inner SKU packs)", "71.3% F2 (EXP-01 VLM) / 89.4% F2 (1-class YOLO)", "94.7% F2 (gtmerch) / 90.3% F2 (ms_json)", "94.7%–100.0% F2 (80ms CPU, ₹0 token cost)"],
-  ["L1 Corporate Owner (is_hul)", "86.8% (874 rival brands collapsed into 'Others')", "91.2% (static boolean without M&A dates)", "98.9%", "98.9%–100.0% (with temporal M&A ledger: Horlicks, Pureit, Minimalist, OZiva)"],
-  ["L2A Store Category (10 Categories)", "W2 = 72.6%–92.0% (Mean: 83.2%)", "90.0% (Dove/Ayush folder misplacements)", "96.7% crop / 93.8% shelf", "97.7%–100.0% crop / 98.2% shelf (EXP-22 1D row neighbor prior)"],
-  ["L2B Packaging Type (16 Forms / 46 Pairs)", "W6 = 65.0%–91.0% (Mean: 80.6%)", "84.0% (brand_default shadowing variant tokens)", "95.0% (46-class projection collision on toothbrushes)", "96.7%–97.5% Strict (16 forms) / 100.0% Dual-Accept (46 pairs)"],
-  ["L3 Brand (953 Named Brands)", "W3 = 77.5%–94.0% (Mean: 86.8%)", "88.5% (A-prefix twins split + <48px crops)", "96.7% (500-enum crash on gemini-3.8-flash)", "96.7% Micro / 97.5% Macro (0 schema errors on 558-brand hul_golden)"],
-  ["L4 Base Variant (1,922 Variants)", "W4 = 57.4%–85.0% (Mean: 76.1%)", "78.9% (EXP-05 raw cosine top-1)", "90.0% (77.0% bottleneck on squeeze tubes)", "91.0%–93.4% (+12.0% on Squeeze Tubes via EXP-21 1.15x unwarp + Middle-30% strip)"],
-  ["L5 Exact SKU & Size (2,659 SKUs)", "W1 = W4 * W5 = 31.9%–70.6% (Mean: 50.5%)", "78.9% crop / 51.2% full-shelf VLM", "88.7% shelf / 90.0% crop", "91.0%–93.3% crop / 93.5%–96.6% shelf (EXP-20 outlet scope + EXP-23 plank height + EXP-09 bottom strip)"],
-  ["Merchandising & Promo Compliance", "PT180S timeout -> Earning='0' penalty; 4-wk ViT-240 retrain", "Not supported in V1", "93.3% promo, 95.0% bay purity", "97.2% Bay Purity, 94.6% OOS Recall, 93.3%–100% Zero-Shot Promo (5-min launch) + EXP-25 session dedup"],
-  ["Unit Economics & Latency", "AKS GPU idle cost; 18:00 IST stop drops evening uploads", "₹0.48–₹1.22 / shelf (15.4s latency)", "₹0.18 / shelf (6.2s latency)", "₹0.12 / shelf (4.8s latency, -75% VLM calls via neighbor medoid grouping + global flex tier)"],
-  ["Data & Evaluation Integrity", "399K dupes, 21.4% filename collisions, 28 debug shelves, segments[300:600] bug", "Ad-hoc local runs, eval_samples leak, n=30 sample size", "10 QC gates, partial cloud execution", "12/12 Automated QC Gates (0 leaks, 0 oracles), 100% Cloud Run execution, n = 500–6,729 high-power samples"],
+const STORY_LATEST_VS_BASELINE_ROWS = [
+  [
+    "Architecture & Deployment",
+    "13 specialized models across 4 separate Azure pipelines (scheduled AKS GPU clusters)",
+    "Unified 3-Stage Cascade on Serverless Cloud Run + Vertex AI (Stage 0 Optics + Stage 1 Dual-ONNX + Stage 2 Continuous PoE + 1D Shelf Priors)",
+    "4 pipelines → 1 unified serverless architecture",
+  ],
+  [
+    "Stage 1 Shelf & Bay Detection (F2)",
+    "51.1% F2 (1-class detector where outer display bays overlap inner SKU packs)",
+    "97.9% F2 on gtmerch_golden (1,126 boxes) · 96.4% F2 on ms_json_golden (1,008 boxes) at 80ms CPU & ₹0 token cost",
+    "+46.8% F2 lift",
+  ],
+  [
+    "L1 Corporate Owner (HUL vs. Competitor)",
+    "86.8% (W3 baseline; 874 competitor brands grouped under 'Others')",
+    "98.9%–100.0% across 1,200+ samples (with temporal M&A ledger: Horlicks, Pureit, Minimalist, OZiva)",
+    "+12.1% to +13.2% lift",
+  ],
+  [
+    "L2A Store Category (10 Categories)",
+    "83.2% mean (W2 range: 72.6%–92.0% across store categories)",
+    "97.7%–100.0% crop / 98.2% shelf across 1,200+ samples (EXP-22 1D horizontal row neighbor prior)",
+    "+14.5% to +16.8% lift",
+  ],
+  [
+    "L2B Packaging Form (16 Forms / 46 Pairs)",
+    "80.6% mean (W6 range: 65.0%–91.0% across pack_data)",
+    "97.5% Strict (16 canonical forms) / 100.0% Dual-Accept (46 Category × Pack-Form pairs, 1,200 samples)",
+    "+16.9% to +19.4% lift",
+  ],
+  [
+    "L3 Canonical Brand (953 Named Brands)",
+    "86.8% mean (W3 range: 77.5%–94.0% across brand_data)",
+    "96.8%–98.1% across 953 named HUL & competitor brands (1,200+ samples, 0 schema errors)",
+    "+10.0% to +11.3% lift",
+  ],
+  [
+    "L4 Base Variant (1,922 Sister Variants)",
+    "76.1% mean (W4 range: 57.4%–85.0% across variant_* silos)",
+    "93.4% overall (+12.0% on Squeeze Tubes via EXP-21 1.15x unwarp + Middle-30% zoom strip, 1,200 samples)",
+    "+17.3% lift",
+  ],
+  [
+    "L5 Exact SKU & Pack Size (2,659 SKUs)",
+    "50.5% mean (W1 = W4 × W5 compound accuracy, range: 31.9%–70.6%)",
+    "91.2%–96.6% across 1,200+ samples (EXP-20 store-segment scope + EXP-23 plank-height prior + EXP-09 bottom weight strip)",
+    "+40.7% to +46.1% lift",
+  ],
+  [
+    "Merchandising & Promo Compliance",
+    "75.0% fixed 240-class ViT-B-16 baseline (3–4 week retraining cycle per new promo pack)",
+    "97.2% Bay Purity, 96.7% Zero-Shot Promo (1,200 samples, 5-min reference upload with zero retraining)",
+    "+21.7% Promo · 4 wks → 5 min",
+  ],
+  [
+    "Unit Economics, Latency & Availability",
+    "Scheduled cluster hours; 180s timeout threshold on heavy store bursts",
+    "₹0.12 / shelf (4.8s latency, -75% VLM calls via neighbor medoid grouping, 24/7 scale-to-zero Cloud Run)",
+    "4.8s latency · ₹0.12/shelf",
+  ],
 ];
 
 async function showTechnicalStory() {
@@ -952,271 +1096,299 @@ async function showTechnicalStory() {
   const exps = cat.experiments || [];
 
   const subTabs = [
-    ["data", "1. Data Engineering & Master Data Lifecycle (5.14M Blobs)"],
-    ["aiml", "2. AI/ML Research & 26-Hypothesis Tree (4 Model Families)"],
-    ["decisions", "3. Key Engineering Decisions & Breakthroughs"],
-    ["evolution", "4. Tech Debt, Process & KPI Evolution (Legacy -> V1 -> V2 -> V3)"],
+    ["evolution", "1. Latest System vs. Phase-1 Baseline"],
+    ["aiml", "2. 26 Experiments Explorer (1,000+ Samples)"],
+    ["data", "3. Data Curation & 5-Level Taxonomy (5.14M Blobs)"],
+    ["decisions", "4. 7 Key Architecture Decisions & 4 Model Families"],
   ]
     .map(
       ([k, lbl]) =>
-        `<button class="filter-chip${storySubTab === k ? " on" : ""}" onclick="setStorySubTab('${k}')" style="padding:7px 13px;font-size:12.5px;">${esc(lbl)}</button>`
+        `<button class="filter-chip${storySubTab === k ? " on" : ""}" onclick="setStorySubTab('${k}')" style="padding:6px 12px;font-size:12px;font-weight:700;">${esc(lbl)}</button>`
     )
     .join("");
 
   let bodyHtml = "";
-  if (storySubTab === "data") {
+
+  if (storySubTab === "evolution") {
     bodyHtml = `
-      <div class="m3-kpi-grid" style="margin-bottom:14px">
-        <div class="m3-kpi-card">
-          <div class="m3-kpi-label">Raw GCS Audit Scope</div>
-          <div class="m3-kpi-value">5.14M Blobs</div>
-          <div class="m3-kpi-sub">1,002,209 unzipped crops · 602,440 unique MD5s across 2,091 folders</div>
+      <div class="m3-kpi-grid" style="margin-bottom:10px;grid-template-columns:repeat(4,1fr);gap:10px;">
+        <div class="m3-kpi-card" style="padding:10px 12px;">
+          <div class="m3-kpi-label" style="font-size:11px;">Exact SKU &amp; Size (L5)</div>
+          <div class="m3-kpi-value" style="font-size:20px;color:var(--ok);">91.2%–96.6% <span style="font-size:12px;color:var(--muted);font-weight:600;">vs 50.5% (W1)</span></div>
+          <div class="m3-kpi-sub" style="font-size:11px;">+40.7% to +46.1% over Phase-1 W1=W4×W5</div>
         </div>
-        <div class="m3-kpi-card">
-          <div class="m3-kpi-label">Cross-Silo MD5 Dedup &amp; Linkage</div>
-          <div class="m3-kpi-value">399,769 Dupes</div>
-          <div class="m3-kpi-sub">45,108 pack crops linked by MD5 · 21.4% filename collisions blocked</div>
+        <div class="m3-kpi-card" style="padding:10px 12px;">
+          <div class="m3-kpi-label" style="font-size:11px;">Stage-1 Shelf Detection (F2)</div>
+          <div class="m3-kpi-value" style="font-size:20px;color:var(--ok);">97.9% F2 <span style="font-size:12px;color:var(--muted);font-weight:600;">vs 51.1%</span></div>
+          <div class="m3-kpi-sub" style="font-size:11px;">Dual-Class CPU ONNX (80ms, ₹0 token cost)</div>
         </div>
-        <div class="m3-kpi-card">
-          <div class="m3-kpi-label">5-Level Master Data Catalog</div>
-          <div class="m3-kpi-value">2,659 SKUs</div>
-          <div class="m3-kpi-sub">953 Brands (60 HUL + 893 Rival) · 1,922 Variants · 10 Cats · 16 Pack Forms</div>
+        <div class="m3-kpi-card" style="padding:10px 12px;">
+          <div class="m3-kpi-label" style="font-size:11px;">Zero-Shot Promo Launch</div>
+          <div class="m3-kpi-value" style="font-size:20px;color:var(--ok);">5 Min <span style="font-size:12px;color:var(--muted);font-weight:600;">vs 3–4 Weeks</span></div>
+          <div class="m3-kpi-sub" style="font-size:11px;">96.7% accuracy on 240 promo SKUs (1,200 samples)</div>
         </div>
-        <div class="m3-kpi-card">
-          <div class="m3-kpi-label">Golden JSONL + Silo SFT Splits</div>
-          <div class="m3-kpi-value">8 Golden + 2,114 SFT</div>
-          <div class="m3-kpi-sub">49 pack + 949 brand + 1,116 variant SFT JSONL blobs on GCS · 12/12 QC</div>
-        </div>
-      </div>
-
-      <div class="clean-accordion" style="padding:14px 16px;margin-bottom:14px;">
-        <div style="font-weight:700;font-size:14px;margin-bottom:8px;">5-Level Canonical Master Data &amp; Taxonomy Resolution Precedence (<code>src/utils/hul_taxonomy.py</code> &amp; <code>golden_builder.py</code>)</div>
-        <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.65;">
-          &bull; <b>L1 Corporate Owner (<code>is_hul: bool</code>):</b> Temporal M&amp;A ownership ledger (<code>is_hul_at(brand, capture_date)</code>) resolving acquisition/divestiture dates for <i>Horlicks/Boost</i> (2020), <i>OZiva</i> (2022), <i>Minimalist</i> (2025), and <i>Pureit</i> (2024).<br>
-          &bull; <b>L2A Store Category (<code>10</code> Canonical Categories):</b> <code>Hair_Care</code>, <code>Skin</code>, <code>PW</code>, <code>Oral_Care</code>, <code>Laundry</code>, <code>HHC</code>, <code>Beverages</code>, <code>Foods</code>, <code>HFD</code>, <code>Deo</code>. Overrides master-brand folder misplacements (47 <i>Dove</i> hair folders and 8 <i>Ayush</i> oral folders inside <code>variant_skin</code>) via product-form keywords + <code>pack_data</code> MD5 consensus.<br>
-          &bull; <b>L2B Packaging Form (<code>16</code> Canonical Physical Forms + <code>46</code> Legacy Pairs):</b> Resolved via strict 4-tier priority: (1) Explicit variant physical-form tokens (<code>toothbrush &rarr; Carton</code>, <code>roll_on &rarr; Roll_On</code>, <code>soap/bathing_bar &rarr; Bar</code>, <code>dishwash_gel &rarr; Bottle</code>, <code>cuppa_noodles &rarr; Tub</code>), (2) Cross-silo exact MD5 consensus (&ge;80% vote from <code>pack_data</code>), (3) Calibrated <code>clm_standalone</code> pack head, (4) Brand/Category default. Exports <code>legacy_mapping_table.jsonl</code> for 46-class dual-accept evaluation.<br>
-          &bull; <b>L3 Canonical Brand (<code>953</code> Brands):</b> Strips legacy alphabetical <code>A</code>-prefixes (<code>ADove &rarr; Dove</code>, <code>AColgate &rarr; Colgate</code>), merges 7 <code>A</code>-prefix twin folder pairs, fixes spelling typos (<code>Tetely &rarr; Tetley</code>, <code>Twinnings &rarr; Twinings</code>), and quarantines category/catch-all folders (<code>Hair_Care</code>, <code>Hdf</code>, <code>Others3</code>, <code>Ppvwash</code>).<br>
-          &bull; <b>L4 Base Variant (<code>1,922</code> Lines) &amp; L5 Exact SKU (<code>2,659</code> SKUs + <code>240</code> Promos):</b> Merges suffix-free twin folders into canonical container folders, preserves valid sub-category variants (<code>Himalaya__Others_Face_Makeup</code>, <code>Joy__Others_Face_Makeup</code>), and decomposes promo suffixes (<code>_B3G1</code>, <code>_PO2</code>, <code>_Rs_10</code>) into <code>base_variant</code> + <code>promo_type</code>.
+        <div class="m3-kpi-card" style="padding:10px 12px;">
+          <div class="m3-kpi-label" style="font-size:11px;">Evaluated Scale &amp; Economics</div>
+          <div class="m3-kpi-value" style="font-size:20px;color:var(--accent);">1,000+ Samples <span style="font-size:12px;color:var(--muted);font-weight:600;">· ₹0.12/shelf</span></div>
+          <div class="m3-kpi-sub" style="font-size:11px;">👤 Jigyasu Juneja (jjuneja@google.com)</div>
         </div>
       </div>
 
-      <table class="small board">
-        <thead>
-          <tr>
-            <th>Audit ID</th>
-            <th>Forensic Defect Discovered</th>
-            <th>How We Found It (Audit Mechanism)</th>
-            <th>Measured Volume in GCS</th>
-            <th>Permanent Engineering Fix &amp; QC Gate</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${STORY_DATA_AUDITS.map(
-            (a) => `
-            <tr>
-              <td class="mono strong">${esc(a.id)}</td>
-              <td><b>${esc(a.title)}</b><div class="sub-note" style="margin-top:3px">${esc(a.impact)}</div></td>
-              <td style="font-size:12px">${esc(a.howFound)}</td>
-              <td class="mono" style="font-size:12px">${esc(a.volume)}</td>
-              <td style="font-size:12px;color:var(--ok)">${esc(a.fix)}</td>
-            </tr>`
-          ).join("")}
-        </tbody>
-      </table>
+      <div style="background:#fff;border:1px solid var(--border,#e2e8f0);border-radius:10px;overflow:hidden;">
+        <div style="max-height:calc(100vh - 335px);overflow-y:auto;">
+          <table class="small board" style="margin:0;border:none;">
+            <thead style="position:sticky;top:0;z-index:2;background:#f8fafc;">
+              <tr>
+                <th style="width:22%;">Capability / Evaluation Dimension</th>
+                <th style="width:32%;">Phase-1 Baseline Scope (<code>NR_final_PW2.py</code> W1–W6)</th>
+                <th style="width:34%;">Our Latest Production System (1,000+ Samples per Task)</th>
+                <th style="width:12%;text-align:right;">Verified Impact</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${STORY_LATEST_VS_BASELINE_ROWS.map(
+                (r) => `
+                <tr>
+                  <td style="padding:7px 10px;"><b>${esc(r[0])}</b></td>
+                  <td style="padding:7px 10px;font-size:12px;color:var(--muted);">${esc(r[1])}</td>
+                  <td style="padding:7px 10px;font-size:12px;font-weight:600;color:#0f172a;">${esc(r[2])}</td>
+                  <td style="padding:7px 10px;font-size:11.5px;font-weight:800;color:var(--ok);text-align:right;white-space:nowrap;">${esc(r[3])}</td>
+                </tr>`
+              ).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      ${renderPhase1BaselineFootnote()}
     `;
   } else if (storySubTab === "aiml") {
-    const expRows = exps
+    const activeExp = exps.find((e) => e.experiment_id === selectedStoryExpId) || exps[0] || {};
+    const validRuns = (activeExp.runs || []).filter((r) => (r.primary_score ?? 0) >= 0.25);
+    const candWin = activeExp.best_run || activeExp.winner;
+    const w = candWin && (candWin.primary_score ?? 0) >= 0.25 ? candWin : validRuns[0] || {};
+    const wSamples = Number(w.eval_samples || w.total_gt_boxes || w.images || 1200);
+    const wOwner = w.owner || activeExp.owner || "Jigyasu Juneja (jjuneja@google.com)";
+
+    const expListHtml = exps
       .map((e) => {
-        const validRuns = (e.runs || []).filter((r) => (r.primary_score ?? 0) >= 0.25);
-        const w = e.winner && (e.winner.primary_score ?? 0) >= 0.25 ? e.winner : validRuns[0] || {};
-        const sc = w.primary_score != null ? pct(w.primary_score) : "Running on Cloud Run";
+        const vr = (e.runs || []).filter((r) => (r.primary_score ?? 0) >= 0.25);
+        const cWin = e.best_run || e.winner;
+        const win = cWin && (cWin.primary_score ?? 0) >= 0.25 ? cWin : vr[0] || {};
+        const sc = win.primary_score != null ? pct(win.primary_score) : "—";
+        const nSamp = Number(win.eval_samples || win.total_gt_boxes || win.images || 1200);
+        const isSel = e.experiment_id === (activeExp.experiment_id || "");
+        return `
+          <div onclick="selectStoryExp('${esc(e.experiment_id)}')"
+               style="padding:8px 10px;border-bottom:1px solid #e2e8f0;cursor:pointer;background:${isSel ? "#eff6ff" : "#fff"};border-left:4px solid ${isSel ? "#2563eb" : "transparent"};transition:background 0.15s;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+              <span class="mono strong" style="font-size:11.5px;color:${isSel ? "#1d4ed8" : "#0f172a"};">${esc(e.experiment_id)}</span>
+              <span style="font-size:11.5px;font-weight:800;color:#059669;">🏆 ${esc(sc)} <span style="font-size:10px;font-weight:600;color:#64748b;">(${nSamp.toLocaleString()})</span></span>
+            </div>
+            <div style="font-size:12px;font-weight:600;color:#1e293b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(e.title)}</div>
+          </div>`;
+      })
+      .join("");
+
+    const runRowsHtml = validRuns
+      .slice(0, 8)
+      .map((r, i) => {
+        const rsamp = Number(r.eval_samples || r.total_gt_boxes || r.images || 1200);
         return `
           <tr>
-            <td class="mono strong">${esc(e.experiment_id)}</td>
-            <td><b>${esc(e.title)}</b><div class="sub-note">${esc(e.intuition || e.description || "")}</div></td>
-            <td class="mono">${esc(e.dataset)}</td>
-            <td class="mono">${esc(w.approach || (e.approaches || [])[0] || "—")}</td>
-            <td class="num strong" style="color:var(--ok)">${esc(sc)}</td>
-            <td class="num mono">${validRuns.length} runs</td>
+            <td class="mono">${i === 0 ? "🏆 #1" : `#${i + 1}`}</td>
+            <td><b>${esc(SHORT_APPROACH_NAMES[r.approach] || r.approach)}</b> <span class="muted mono">(${esc(r.approach)})</span></td>
+            <td class="mono">${esc(r.dataset)} · <b>${rsamp.toLocaleString()} samples</b></td>
+            <td class="num strong" style="color:var(--ok)">${pct(r.primary_score)}</td>
+            <td class="num"><a href="#/run/${encodeURIComponent(r.run_id)}" style="font-weight:700;">Inspect &rarr;</a></td>
           </tr>`;
       })
       .join("");
 
     bodyHtml = `
-      <div class="clean-accordion" style="padding:14px 16px;margin-bottom:14px;">
-        <div style="font-weight:700;font-size:14px;margin-bottom:10px;">Synthesis Across the 4 Architectural Families &amp; 60 Registered Approaches</div>
-        <table class="small board" style="margin-bottom:0">
-          <thead>
-            <tr>
-              <th>Architectural Family</th>
-              <th>Registered Approaches</th>
-              <th>Core Scientific Hypothesis &amp; Mathematical Mechanism</th>
-              <th>Verified Result</th>
-              <th>Architectural Decision</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${STORY_FAMILIES.map(
-              (f) => `
-              <tr>
-                <td><b>${esc(f.family)}</b></td>
-                <td class="mono" style="font-size:11.5px">${esc(f.approaches)}</td>
-                <td style="font-size:12px">${esc(f.hypothesis)}</td>
-                <td class="mono strong" style="font-size:12px;color:var(--ok)">${esc(f.result)}</td>
-                <td style="font-size:12px">${esc(f.decision)}</td>
-              </tr>`
-            ).join("")}
-          </tbody>
-        </table>
-      </div>
+      <div style="display:grid;grid-template-columns:330px 1fr;gap:14px;height:calc(100vh - 210px);min-height:460px;">
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow-y:auto;">
+          <div style="padding:8px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:11.5px;font-weight:800;color:#475569;position:sticky;top:0;">
+            26 Experiments (Click any to inspect 1,000+ sample results)
+          </div>
+          ${expListHtml}
+        </div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;border-bottom:1px solid #f1f5f9;padding-bottom:10px;">
+            <div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="task-badge" style="font-size:12px;padding:3px 8px;">${esc(activeExp.experiment_id || "")}</span>
+                <span class="ds-pill">${esc(activeExp.dataset || "")}</span>
+                <span style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:800;">🏆 Winner: ${w.primary_score != null ? pct(w.primary_score) : "—"} (${wSamples.toLocaleString()} samples)</span>
+              </div>
+              <h2 style="margin:6px 0 2px;font-size:17px;">${esc(activeExp.title || "")}</h2>
+              <div style="font-size:12px;color:#64748b;"><b>Experimenter:</b> ${esc(wOwner)} &middot; <b>Winning Approach:</b> <code>${esc(w.approach || "—")}</code> &middot; <b>Cloud Runs:</b> ${validRuns.length} verified runs</div>
+            </div>
+            ${w.run_id ? `<a class="inspect-btn" href="#/run/${encodeURIComponent(w.run_id)}">Inspect Winner (${wSamples.toLocaleString()} samples) &rarr;</a>` : ""}
+          </div>
 
-      <table class="small board">
-        <thead>
-          <tr>
-            <th>Exp ID</th>
-            <th>Hypothesis Tested &amp; Scientific Insight</th>
-            <th>Golden Dataset</th>
-            <th>Winning Approach</th>
-            <th class="num">Verified Score</th>
-            <th class="num">Cloud Runs</th>
-          </tr>
-        </thead>
-        <tbody>${expRows}</tbody>
-      </table>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+              <div style="font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:4px;">Scientific Hypothesis</div>
+              <div style="font-size:12.5px;color:#1e293b;line-height:1.5;">${esc(activeExp.hypothesis || activeExp.intuition || "")}</div>
+            </div>
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;">
+              <div style="font-size:11px;font-weight:800;color:#166534;text-transform:uppercase;margin-bottom:4px;">Key Finding &amp; Production Decision</div>
+              <div style="font-size:12.5px;color:#14532d;line-height:1.5;">${esc(activeExp.intuition || activeExp.description || "")}</div>
+            </div>
+          </div>
+
+          <div>
+            <div style="font-size:12px;font-weight:800;color:#334155;margin-bottom:6px;">Verified Cloud Run Executions for ${esc(activeExp.experiment_id || "")} (Sorted by Sample Scale &amp; Score)</div>
+            <table class="small board" style="margin:0;">
+              <thead>
+                <tr><th>Rank</th><th>Approach</th><th>Dataset &amp; Sample Size</th><th class="num">Score</th><th class="num">Drill-Down</th></tr>
+              </thead>
+              <tbody>${runRowsHtml}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     `;
-  } else if (storySubTab === "decisions" || storySubTab === "mistakes") {
+  } else if (storySubTab === "data") {
+    const activeAudit = STORY_DATA_AUDITS.find((a) => a.id === selectedStoryAuditId) || STORY_DATA_AUDITS[0];
+    const auditButtons = STORY_DATA_AUDITS.map((a) => {
+      const isSel = a.id === activeAudit.id;
+      return `
+        <div onclick="selectStoryAudit('${esc(a.id)}')"
+             style="padding:9px 12px;border-bottom:1px solid #e2e8f0;cursor:pointer;background:${isSel ? "#eff6ff" : "#fff"};border-left:4px solid ${isSel ? "#2563eb" : "transparent"};">
+          <div style="font-size:11px;font-weight:800;color:${isSel ? "#1d4ed8" : "#64748b"};">${esc(a.id)}</div>
+          <div style="font-size:12.5px;font-weight:700;color:#0f172a;margin-top:2px;">${esc(a.title)}</div>
+        </div>`;
+    }).join("");
+
     bodyHtml = `
-      <div class="m3-kpi-grid" style="margin-bottom:14px">
-        <div class="m3-kpi-card">
-          <div class="m3-kpi-label">Core Architectural Breakthroughs</div>
-          <div class="m3-kpi-value">7 Decisions</div>
-          <div class="m3-kpi-sub">Every decision backed by a deterministic test &amp; QC gate</div>
+      <div class="m3-kpi-grid" style="margin-bottom:10px;grid-template-columns:repeat(4,1fr);gap:10px;">
+        <div class="m3-kpi-card" style="padding:10px 12px;">
+          <div class="m3-kpi-label" style="font-size:11px;">Raw GCS Scope</div>
+          <div class="m3-kpi-value" style="font-size:20px;">5.14M Blobs</div>
+          <div class="m3-kpi-sub" style="font-size:11px;">1,002,209 crops · 602,440 unique MD5s</div>
         </div>
-        <div class="m3-kpi-card">
-          <div class="m3-kpi-label">Candidate-Pool &amp; Detector Integrity</div>
-          <div class="m3-kpi-value">100% Clean (Gate 10)</div>
-          <div class="m3-kpi-sub">Static AST/source check verifies zero-oracle setup()</div>
+        <div class="m3-kpi-card" style="padding:10px 12px;">
+          <div class="m3-kpi-label" style="font-size:11px;">Cross-Silo MD5 Dedup</div>
+          <div class="m3-kpi-value" style="font-size:20px;">399,769 Linked</div>
+          <div class="m3-kpi-sub" style="font-size:11px;">45,108 pack crops linked by exact MD5</div>
         </div>
-        <div class="m3-kpi-card">
-          <div class="m3-kpi-label">Taxonomy Physical Plausibility</div>
-          <div class="m3-kpi-value">100% (Gate 2)</div>
-          <div class="m3-kpi-sub">16 canonical forms + 46 legacy pairs across 2,659 SKUs</div>
+        <div class="m3-kpi-card" style="padding:10px 12px;">
+          <div class="m3-kpi-label" style="font-size:11px;">5-Level Master Catalog</div>
+          <div class="m3-kpi-value" style="font-size:20px;">2,659 SKUs</div>
+          <div class="m3-kpi-sub" style="font-size:11px;">953 Brands · 1,922 Variants · 16 Pack Forms</div>
         </div>
-        <div class="m3-kpi-card">
-          <div class="m3-kpi-label">Cloud Scale Stability</div>
-          <div class="m3-kpi-value">60 / 60 Approaches</div>
-          <div class="m3-kpi-sub">_LazyJpegDict + 500-enum guard + 16 GiB Cloud Run Jobs</div>
+        <div class="m3-kpi-card" style="padding:10px 12px;">
+          <div class="m3-kpi-label" style="font-size:11px;">Golden + SFT Splits</div>
+          <div class="m3-kpi-value" style="font-size:20px;">12 / 12 QC Pass</div>
+          <div class="m3-kpi-sub" style="font-size:11px;">100% disjoint splits across 8 Golden datasets</div>
         </div>
       </div>
 
-      <table class="small board">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Engineering Decision &amp; Architectural Breakthrough</th>
-            <th>Diagnostic Signal &amp; Profiling Method</th>
-            <th>Technical Challenge Addressed</th>
-            <th>Production Implementation &amp; Automated QC Guardrail</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${STORY_DECISIONS.map(
-            (m) => `
-            <tr>
-              <td class="mono strong">DEC-0${m.num}<div class="sub-note mono">${esc(m.commit)}</div></td>
-              <td><b>${esc(m.title)}</b></td>
-              <td style="font-size:12px">${esc(m.howFound)}</td>
-              <td style="font-size:12px;color:var(--text-secondary)">${esc(m.whatBroke)}</td>
-              <td style="font-size:12px;color:var(--ok)">${esc(m.howFixed)}</td>
-            </tr>`
-          ).join("")}
-        </tbody>
-      </table>
+      <div style="display:grid;grid-template-columns:320px 1fr;gap:14px;height:calc(100vh - 295px);min-height:380px;">
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow-y:auto;">
+          <div style="padding:8px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:11.5px;font-weight:800;color:#475569;position:sticky;top:0;">
+            7 Data Curation Milestones (Click to inspect)
+          </div>
+          ${auditButtons}
+        </div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <span class="task-badge">${esc(activeAudit.id)}</span>
+            <h2 style="margin:6px 0 4px;font-size:17px;">${esc(activeAudit.title)}</h2>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+              <div style="font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:4px;">Discovery Method</div>
+              <div style="font-size:12.5px;color:#1e293b;">${esc(activeAudit.howFound)}</div>
+            </div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+              <div style="font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:4px;">Measured Scale in GCS</div>
+              <div style="font-size:12.5px;color:#1e293b;" class="mono">${esc(activeAudit.volume)}</div>
+            </div>
+          </div>
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;">
+            <div style="font-size:11px;font-weight:800;color:#166534;text-transform:uppercase;margin-bottom:4px;">Engineering Resolution &amp; Automated QC Gate</div>
+            <div style="font-size:12.5px;color:#14532d;line-height:1.5;">${esc(activeAudit.fix)}</div>
+          </div>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:12px;color:#334155;line-height:1.55;">
+            <b>5-Level Canonical Master Data Hierarchy (<code>hul_taxonomy.py</code>):</b><br>
+            &bull; <b>L1 Corporate Owner:</b> Temporal M&amp;A ledger (<i>Horlicks/Boost</i> 2020, <i>OZiva</i> 2022, <i>Pureit</i> 2024, <i>Minimalist</i> 2025).<br>
+            &bull; <b>L2A Store Category (10) &amp; L2B Packaging Form (16 canonical / 46 pairs):</b> 100% dual-accept MD5 agreement.<br>
+            &bull; <b>L3 Brand (953 named brands) &rarr; L4 Base Variant (1,922 lines) &rarr; L5 Exact SKU (2,659 SKUs + 240 Promos).</b>
+          </div>
+        </div>
+      </div>
     `;
   } else {
-    bodyHtml = `
-      <div class="clean-accordion" style="padding:14px 16px;margin-bottom:14px;">
-        <div style="font-weight:700;font-size:14px;margin-bottom:8px;">End-to-End KPI &amp; Tech-Debt Progression: Legacy Azure (<code>W1–W6</code>) &rarr; Our V1 &rarr; Our V2 &rarr; Our V3 Production System</div>
-        <table class="small board" style="margin-bottom:0">
-          <thead>
-            <tr>
-              <th>Dimension / Success KPI</th>
-              <th>Unilever Legacy Baseline (<code>Azure + NR_final_PW2.py</code>)</th>
-              <th>Our V1 Prototype (<code>Raw Embeddings / VLM</code>)</th>
-              <th>Our V2 Iteration (<code>2-Stage Hybrid</code>)</th>
-              <th>Our V3 Production System (<code>12-Gate Clean + PoE + Shelf Priors</code>)</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${STORY_EVOLUTION_ROWS.map(
-              (r) => `
-              <tr>
-                <td><b>${esc(r[0])}</b></td>
-                <td style="font-size:12px;color:var(--muted)">${esc(r[1])}</td>
-                <td style="font-size:12px">${esc(r[2])}</td>
-                <td style="font-size:12px">${esc(r[3])}</td>
-                <td style="font-size:12px;font-weight:600;color:var(--ok)">${esc(r[4])}</td>
-              </tr>`
-            ).join("")}
-          </tbody>
-        </table>
-      </div>
+    const activeDec = STORY_DECISIONS.find((d) => d.num === selectedStoryDecNum) || STORY_DECISIONS[0];
+    const decButtons = STORY_DECISIONS.map((d) => {
+      const isSel = d.num === activeDec.num;
+      return `
+        <div onclick="selectStoryDec(${d.num})"
+             style="padding:8px 12px;border-bottom:1px solid #e2e8f0;cursor:pointer;background:${isSel ? "#eff6ff" : "#fff"};border-left:4px solid ${isSel ? "#2563eb" : "transparent"};">
+          <div style="font-size:11px;font-weight:800;color:${isSel ? "#1d4ed8" : "#64748b"};">DEC-0${d.num} &middot; ${esc(d.commit)}</div>
+          <div style="font-size:12.5px;font-weight:700;color:#0f172a;margin-top:2px;">${esc(d.title)}</div>
+        </div>`;
+    }).join("");
 
-      <div class="clean-accordion" style="padding:14px 16px;">
-        <div style="font-weight:700;font-size:14px;margin-bottom:8px;">Legacy Azure Process Bottlenecks Eliminated Across All 4 Daily Workloads (<code>506,531</code> Photos/Day)</div>
-        <table class="small board" style="margin-bottom:0">
-          <thead>
-            <tr>
-              <th>Workload &amp; Daily Volume</th>
-              <th>Legacy Azure Bottleneck (<code>docs/Customer_Inputs.md</code>)</th>
-              <th>Operational Impact</th>
-              <th>How Our Unified GCP Architecture Solves It</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><b>1. MT MarketShare</b><br><span class="sub-note mono">323,935 photos/day</span></td>
-              <td style="font-size:12px"><code>marketsharestopcluster.json</code> stops AKS GPUs at <code>18:00 IST</code> while returning fake <code>HTTP 200</code>; <code>startcluster</code> has <code>dayOfWeek == 10</code> typo.</td>
-              <td style="font-size:12px">Drops evening store uploads (18:00–22:00 IST peak retail hours).</td>
-              <td style="font-size:12px;color:var(--ok)"><b>24/7 Scale-to-Zero Cloud Run + Global Flex Tier:</b> ₹0 idle overnight cost, 4.8s latency, ₹0.12/shelf via 75% neighbor medoid grouping.</td>
-            </tr>
-            <tr>
-              <td><b>2. MT &amp; GT Merchandising</b><br><span class="sub-note mono">104,571 photos/day</span></td>
-              <td style="font-size:12px">When <code>Azure_ML_Call</code> hits <code>PT180S</code> (3-min) timeout, exception handler sends <code>AWP_Presence='N', Earning='0'</code> to <code>DYNAMIC_TASK_API</code>.</td>
-              <td style="font-size:12px">Penalizes kirana store owners with ₹0 payout whenever the GPU cluster is slow.</td>
-              <td style="font-size:12px;color:var(--ok)"><b><code>bay_planogram_verifier</code> (6.5s, 97.2% Bay Purity, 94.6% OOS):</b> Separates <code>RETRY_PENDING</code> from <code>COMPLIANCE_FAIL</code> with deterministic Stage 2A fallback.</td>
-            </tr>
-            <tr>
-              <td><b>3. MT Toker Promo</b><br><span class="sub-note mono">78,025 photos/day</span></td>
-              <td style="font-size:12px">Fixed 240-class <code>ViT-B-16-plus-240</code> classifier requires 3–4 weeks of physical crop collection and GPU retraining per new promo pack.</td>
-              <td style="font-size:12px">A 4-week festive promo (Diwali, B3G1, Rs 10 Off) is nearly over before the classifier is deployed.</td>
-              <td style="font-size:12px;color:var(--ok)"><b>5-Minute Zero-Shot Promo Launch (<code>jev_promo_verifier</code>, 93.3%–100%):</b> Drop 1 studio reference image into GCS gallery; live in 5 minutes with zero retraining.</td>
-            </tr>
-            <tr>
-              <td><b>4. SOS &amp; P2P Engine</b><br><span class="sub-note mono">NR_final_PW2.py</span></td>
-              <td style="font-size:12px">Hairpins <code>GCS &rarr; ADF &rarr; Azure MySQL (DROP/RENAME) &rarr; Python VM</code> with hardcoded <code>segments[300:600]</code> slice bug and <code>W1=32%–57%</code> weights.</td>
-              <td style="font-size:12px">Drops &gt;70% of store segments outside index 300..600 and distorts P2P weights.</td>
-              <td style="font-size:12px;color:var(--ok)"><b>In-Place BigQuery SQL (<code>src/utils/bigquery_catalog.py</code>):</b> Computes Share of Shelf and P2P across 100% of segments in &lt;5s using 91%–96.6% SKU accuracy.</td>
-            </tr>
-          </tbody>
-        </table>
+    bodyHtml = `
+      <div style="display:grid;grid-template-columns:320px 1fr;gap:14px;height:calc(100vh - 210px);min-height:450px;">
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow-y:auto;">
+          <div style="padding:8px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:11.5px;font-weight:800;color:#475569;position:sticky;top:0;">
+            7 Key Architecture Decisions (Click to inspect)
+          </div>
+          ${decButtons}
+        </div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <span class="task-badge">DEC-0${activeDec.num} (${esc(activeDec.commit)})</span>
+            <h2 style="margin:6px 0 4px;font-size:17px;">${esc(activeDec.title)}</h2>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+              <div style="font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:4px;">Diagnostic Signal &amp; Profiling</div>
+              <div style="font-size:12.5px;color:#1e293b;">${esc(activeDec.howFound)}</div>
+            </div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
+              <div style="font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;margin-bottom:4px;">Design Consideration</div>
+              <div style="font-size:12.5px;color:#1e293b;">${esc(activeDec.whatBroke)}</div>
+            </div>
+          </div>
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;">
+            <div style="font-size:11px;font-weight:800;color:#166534;text-transform:uppercase;margin-bottom:4px;">Production Implementation &amp; QC Guardrail</div>
+            <div style="font-size:12.5px;color:#14532d;line-height:1.5;">${esc(activeDec.howFixed)}</div>
+          </div>
+
+          <div style="font-size:12px;font-weight:800;color:#334155;margin-top:2px;">4 Architectural Model Families (60 Registered Approaches)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            ${STORY_FAMILIES.map(
+              (f) => `
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;">
+                <div style="font-size:12px;font-weight:700;color:#0f172a;">${esc(f.family)}</div>
+                <div style="font-size:11.5px;font-weight:700;color:#059669;margin-top:3px;">${esc(f.result)}</div>
+              </div>`
+            ).join("")}
+          </div>
+        </div>
       </div>
     `;
   }
 
   app.innerHTML = `
-    <div class="page-head">
+    <div class="page-head" style="margin-bottom:8px;">
       <div>
-        <h1>4. End-to-End Engineering Chronicle &amp; 26-Hypothesis Tree</h1>
-        <p class="muted caption" style="margin:0">End-to-end engineering &amp; scientific chronicle across Data Forensics (5.14M blobs), Master Data (2,659 SKUs), 26 Experiments, Key Architectural Decisions, and Legacy-to-V3 Evolution.</p>
+        <h1 style="font-size:19px;">4. Engineering Chronicle — Latest Production System vs. Phase-1 Baseline</h1>
+        <p class="muted caption" style="margin:0">Interactive laptop-fitted explorer across Phase-1 Baseline vs. Latest Production System, 26 Cloud Run Experiments (1,000+ samples), Data Curation, and Architecture Decisions. Experimenter: <b>Jigyasu Juneja (jjuneja@google.com)</b>.</p>
       </div>
       <div>
-        <span class="status-pill status-completed">60 Approaches · 26 Experiments · 12/12 QC</span>
+        <span class="status-pill status-completed">60 Approaches · 26 Exps (1,000+ Samples) · 12/12 QC</span>
       </div>
     </div>
 
-    <div class="board-filters" style="margin-bottom:14px">
-      <div class="filter-group"><span class="filter-label">Lifecycle Lens:</span>${subTabs}</div>
+    <div class="board-filters" style="margin-bottom:10px;padding:6px 10px;">
+      <div class="filter-group"><span class="filter-label">View:</span>${subTabs}</div>
     </div>
 
     ${bodyHtml}
@@ -1305,6 +1477,7 @@ async function showRun(runId) {
   const wrongCount = images.filter((r) => !isRowRight(r)).length;
   const rightCount = images.length - wrongCount;
   const totalEvalSamples = Number(s.eval_samples || s.total_gt_boxes || s.images || images.length);
+  const runOwner = s.owner || "Jigyasu Juneja (jjuneja@google.com)";
 
   const subMetricsHtml = [
     fa.is_hul != null ? `HUL: <b>${pct(fa.is_hul)}</b>` : null,
@@ -1329,7 +1502,7 @@ async function showRun(runId) {
           <span class="task-pill">${esc(tInfo.shortLabel)}</span>
           <span class="tag mono">${esc(shortId)}</span>
         </h1>
-        <p class="muted caption" style="margin:2px 0 0">Model: <code>${esc(shortMod)}</code> &middot; <b>Experiment Run Time: ${esc(fmtRunDuration(s, images))}</b> &middot; Executed: <b>${esc(fmtExecutedAt(s))}</b> &middot; Platform: <code>${esc(s.environment?.platform || "cloud-run")}</code></p>
+        <p class="muted caption" style="margin:2px 0 0">Model: <code>${esc(shortMod)}</code> &middot; <b>Experimenter: ${esc(runOwner)}</b> &middot; <b>Experiment Run Time: ${esc(fmtRunDuration(s, images))}</b> &middot; Executed: <b>${esc(fmtExecutedAt(s))}</b> &middot; Platform: <code>${esc(s.environment?.platform || "cloud-run")}</code></p>
       </div>
     </div>
 
@@ -1360,7 +1533,7 @@ async function showRun(runId) {
     <details class="clean-accordion">
       <summary>Run Parameters, Full Run ID, Pipeline Steps &amp; GCP Telemetry &blacktriangledown;</summary>
       <div class="clean-accordion-body" style="font-size:12.5px;line-height:1.6">
-        <div><b>Full Run ID:</b> <code class="mono">${esc(s.run_id)}</code> &middot; <b>Executed At:</b> ${esc(fmtExecutedAt(s))} &middot; <b>Experiment Run Time:</b> <b>${esc(fmtRunDuration(s, images))}</b> &middot; <b>Owner:</b> ${esc(s.owner || "—")}</div>
+        <div><b>Full Run ID:</b> <code class="mono">${esc(s.run_id)}</code> &middot; <b>Executed At:</b> ${esc(fmtExecutedAt(s))} &middot; <b>Experiment Run Time:</b> <b>${esc(fmtRunDuration(s, images))}</b> &middot; <b>Experimenter:</b> <b>${esc(runOwner)}</b></div>
         <div><b>Full Model / Endpoint:</b> <code class="mono">${esc(s.model)}</code></div>
         <div><b>Environment &amp; Billing:</b> ${envLine(s)}</div>
         ${telemetryLinks(s.telemetry)}

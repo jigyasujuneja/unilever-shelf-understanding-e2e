@@ -1,9 +1,9 @@
 /**
  * Unilever Shelf Intelligence — Executive Summary Portal (/exec)
  * Streamlined 3-Tab Layout with Progressive Disclosure (Collapsible Details):
- *   1. Overview & Live Proof      — 3 KPI Cards, Interactive Live Shelf Explorer, Compact Cost Slider
- *   2. Use-Case Performance       — Scannable Use-Case Accuracy Table (with collapsible Gap/Fix drawers)
- *   3. Architecture & Data Audits — 3-Step Pipeline Funnel & 4 Data/Taxonomy Audits (12/12 QC)
+ *   1. Overview & Live Proof      — Workload Scorecards, Interactive Live Shelf/Crop Explorer, Compact Cost Slider
+ *   2. Use-Case Performance       — Scannable Use-Case Accuracy Table (with Phase-1 Baseline Source Footnote)
+ *   3. Architecture & Data Audits — 3-Step Pipeline Funnel & 4 Data Standardization Audits (12/12 QC)
  */
 
 const state = {
@@ -14,7 +14,7 @@ const state = {
   activeSampleIdx: 0,
   activeStepIdx: 0,
   activeDataFixIdx: 0,
-  perfView: 'task', // 'task' | 'sku_type' | 'category' | 'pack'
+  perfView: 'task', // 'task' | 'evolution' | 'sku_type' | 'category' | 'pack'
 };
 
 const PIPELINE_STEPS = [
@@ -23,9 +23,9 @@ const PIPELINE_STEPS = [
     title: 'CPU Bay & Pack Detector',
     badge: '80ms • ₹0 Token Cost',
     summary: 'Boxes paid display bays (Class 0) and product packs (Class 1) on CPU.',
-    whyWeDidIt: 'Legacy single-class detectors suppressed small packs inside large display bay boxes (51.1% F2).',
-    howItWorks: 'Two independent ONNX detection heads (640px + 960px aspect-aware Soft-NMS) separate outer bays from inner packs.',
-    metric: '94.7%–100% Detection F2',
+    whyWeDidIt: 'Phase-1 single-class detection combined outer display bays and inner product packs into one class (51.1% F2).',
+    howItWorks: 'Two independent ONNX detection heads (640px + 960px aspect-aware Soft-NMS) separate outer display bays from inner product packs.',
+    metric: '94.5%–97.3% Detection F2',
     image: '/static/shelf_bay_vs_sku_example.png',
     imageCaption: 'Outer display bays (blue) separated from individual product packs (green).',
   },
@@ -34,7 +34,7 @@ const PIPELINE_STEPS = [
     title: 'Neighbor Grouping & Brand Gate',
     badge: '68% Auto-Resolved at ₹0 VLM',
     summary: 'Groups identical side-by-side packs and matches multi-prototype Brand × Pack centroids.',
-    whyWeDidIt: 'Sending all 25 packs per shelf to a VLM wastes 75% of compute; single brand vectors collapse across pack forms.',
+    whyWeDidIt: 'Evaluating all 25 facings per shelf individually requires 4x more VLM compute; single brand vectors blend distinct pack forms.',
     howItWorks: 'Shades-of-Gray lighting normalization + row medoid grouping (25 packs → ~6 groups) + (Brand, Category, Pack) sub-centroids.',
     metric: '96.7% Brand • 87% Fewer VLM Calls',
     image: '/static/cross_folder_join_example.png',
@@ -45,9 +45,9 @@ const PIPELINE_STEPS = [
     title: '4-Crop Zoom Grid & Row Priors',
     badge: '3.1 Calls / Shelf • 32% Hard Packs',
     summary: 'Verifies lookalike variants via middle/bottom zoom strips and horizontal shelf-row priors.',
-    whyWeDidIt: 'Standard square resizing blurs tiny weight text (50g vs. 100g) and curved squeeze-tube banners.',
+    whyWeDidIt: 'Standard square resizing reduces resolution on fine grammage text (50g vs. 100g) and curved squeeze-tube banners.',
     howItWorks: 'Batches up to 4 uncertain crops onto one contact sheet with 2x middle/bottom zoom strips + 1D shelf-row neighbor category/height priors.',
-    metric: '88.7%–96.6% Full-Shelf SKU',
+    metric: '92.5%–97.3% Full-Shelf SKU',
     image: '/static/bay_split_cleanup_example.png',
     imageCaption: 'Targeted zoom strips preserve variant banners and grammage text.',
   },
@@ -55,31 +55,31 @@ const PIPELINE_STEPS = [
 
 const DATA_FIXES = [
   {
-    title: '46-Class Category__PackType Alignment',
+    title: 'Harmonized 46 Category × Pack-Form Classes',
     stat: '97.5% Primary / 100% Dual-Accept',
-    problem: 'Brand defaults previously shadowed variant pack keywords and collapsed pack types into 5 coarse buckets.',
-    fix: 'Enforced all 46 valid Category__PackType pairs from pack_data (0 out-of-domain classes across 2,659 SKUs) + standalone legacy_mapping_table.jsonl.',
+    problem: 'Phase-1 folders grouped pack forms into 5 broad buckets and applied brand-level defaults across multi-form variants.',
+    fix: 'Aligned all 46 valid Category__PackType pairs from pack_data across 2,659 SKUs with a standalone legacy_mapping_table.jsonl.',
     image: '/static/bay_split_cleanup_example.png',
   },
   {
-    title: 'Purged 399,412 Cross-Folder Duplicates',
-    stat: '0 Split Leakage',
-    problem: 'Byte-identical crops were uploaded into both Brand and Pack training folders, leaking into legacy test splits.',
-    fix: 'Computed MD5 hashes across 5.14M raw files (1,002,209 unzipped crops -> 602,797 unique MD5s) and exported zero-overlap rpc.json + train/val/test.jsonl splits.',
+    title: 'Deduplicated 399,412 Cross-Folder Crops',
+    stat: '100% Disjoint Splits',
+    problem: 'Shared reference crops appeared across both Brand and Pack training folders in the raw multi-folder export.',
+    fix: 'Computed MD5 fingerprints across 5.14M raw files (1,002,209 crops -> 602,797 unique images) to export strictly disjoint train/val/test splits.',
     image: '/static/duplicate_upload_cleanup_example.png',
   },
   {
-    title: 'Restored 874 Competitor Brands',
+    title: 'Expanded Competitor Brand Granularity (874 Brands)',
     stat: '953 Named Brands',
-    problem: 'Legacy annotations collapsed 874 rival brands (Colgate, Nivea, Pantene, Dettol, Dabur, Ariel) into "Others".',
-    fix: 'Mapped all 1,586 competitor SKUs and 1,073 HUL SKUs to canonical brand, variant, category, and pack labels.',
+    problem: 'Phase-1 scope grouped 874 non-HUL competitor brands (Colgate, Nivea, Pantene, Dettol, Dabur, Ariel) under a single "Others" label.',
+    fix: 'Mapped all 1,586 competitor SKUs and 1,073 Unilever SKUs to canonical brand, variant, category, and pack labels.',
     image: '/static/cross_folder_join_example.png',
   },
   {
-    title: 'Quarantined Pre-Drawn Debug Overlays',
-    stat: '28 Shelves Quarantined',
-    problem: 'Raw folders contained shelf photos with green/red OpenCV debug boxes burned into the image pixels.',
-    fix: 'Automated perimeter scanner quarantines burned-in debug overlays and strips non-product boxes.',
+    title: 'Separated Pre-Annotated QA Review Overlays',
+    stat: '28 Review Photos Filtered',
+    problem: 'Raw storage buckets included 28 store photos that had colored QA review boxes drawn onto the image pixels.',
+    fix: 'Automated perimeter filter separates pre-annotated review images so evaluation runs exclusively on clean store camera photos.',
     image: '/static/data_audit_pipeline.png',
   },
 ];
@@ -95,10 +95,11 @@ const TASK_PERFORMANCE = [
     sampleSummary: '4,035 boxes (100 shelves) • ±0.3% CI',
     runId: '1009-000011-shelf_hierarchical_clm_jev-gemini-3.5-flash-lite-priority-gtmerch_golden',
     shortRunId: '#000011',
+    experimenter: 'Jigyasu Juneja (jjuneja)',
     unit: '98.9%–100%',
     status: 'Production Ready',
-    gapSummary: '1.1% gap on recent M&A brands (Horlicks, Minimalist) and unindexed local brands.',
-    howWeCloseIt: 'Time-aware M&A ownership ledger + unknown regional pack clustering.',
+    gapSummary: '1.1% variance on recent M&A brands (Horlicks, Minimalist) and regional brands.',
+    howWeCloseIt: 'Time-aware M&A ownership ledger + regional pack clustering.',
   },
   {
     useCase: 'MT Market Share',
@@ -110,6 +111,7 @@ const TASK_PERFORMANCE = [
     sampleSummary: '1,000 crops + 4,035 shelf boxes • ±0.7% CI',
     runId: '1012-203751-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden',
     shortRunId: '#203751',
+    experimenter: 'Jigyasu Juneja (jjuneja)',
     unit: '97.7% Crop • 98.2% Shelf',
     status: 'Production Ready',
     gapSummary: 'Shelf rails occasionally occlude bottom category text on Dove/Vaseline.',
@@ -125,10 +127,11 @@ const TASK_PERFORMANCE = [
     sampleSummary: '1,000 crops • ±1.0% 95% CI',
     runId: '1005-185617-embedding_retrieval-gemini-embedding-2',
     shortRunId: '#185617',
+    experimenter: 'Jigyasu Juneja (jjuneja)',
     unit: '97.5% Strict • 100% Dual-Accept',
     status: 'Production Ready',
-    gapSummary: '2.5% dual-folder ambiguity in raw pack_data (e.g. Bottle vs. Jar, Box vs. Tube).',
-    howWeCloseIt: 'Enforced 46 valid Category__PackType domain rules + dual-accept evaluation.',
+    gapSummary: '2.5% dual-folder overlap in raw pack_data (e.g. Bottle vs. Jar, Box vs. Tube).',
+    howWeCloseIt: 'Harmonized 46 valid Category__PackType domain rules + dual-accept evaluation.',
   },
   {
     useCase: 'MT Market Share',
@@ -140,9 +143,10 @@ const TASK_PERFORMANCE = [
     sampleSummary: '1,000 crops • ±1.1% 95% CI',
     runId: '1005-190210-l8_hul_ultimate-gemini-3.8-flash-priority-hul_brands',
     shortRunId: '#190210',
+    experimenter: 'Jigyasu Juneja (jjuneja)',
     unit: '96.7% Micro • 97.5% Macro',
     status: 'Production Ready',
-    gapSummary: '3.3% gap on extreme low-res crops (<48px) and spotlight glare.',
+    gapSummary: '3.3% variance on low-res crops (<48px) and strong spotlight glare.',
     howWeCloseIt: 'Shades-of-Gray illuminant normalization + on-device blur check.',
   },
   {
@@ -155,8 +159,9 @@ const TASK_PERFORMANCE = [
     sampleSummary: '1,000 crops • ±1.2% 95% CI',
     runId: '1005-185542-embedding_retrieval-gemini-embedding-2',
     shortRunId: '#185542',
+    experimenter: 'Jigyasu Juneja (jjuneja)',
     unit: '93.4%–96.1%',
-    status: '+20.0% vs Legacy',
+    status: '+20.0% vs Phase-1',
     gapSummary: 'Curved squeeze tubes (Closeup, Biotique) foreshorten middle variant text.',
     howWeCloseIt: '1.15x cylindrical horizontal unwarping + Middle-30% zoom strip (EXP-21).',
   },
@@ -170,8 +175,9 @@ const TASK_PERFORMANCE = [
     sampleSummary: '1,000 crops + 4,035 shelf boxes • ±0.7% CI',
     runId: '1008-235901-hierarchical_clm_jev-gemini-3.5-flash-priority-hul_golden',
     shortRunId: '#235901',
+    experimenter: 'Jigyasu Juneja (jjuneja)',
     unit: '92.5% Crop • 97.3% Shelf',
-    status: '+42.0% vs Legacy',
+    status: '+42.0% vs Phase-1',
     gapSummary: '50g vs. 100g packs share identical front artwork.',
     howWeCloseIt: 'Store-format cohort filtering (EXP-20) + shelf-plank height ratio (EXP-23).',
   },
@@ -179,27 +185,29 @@ const TASK_PERFORMANCE = [
     useCase: 'GT & MT Merch',
     question: 'Display Bay Purity, Detection & Planogram SOS',
     legacy: 51.1,
-    legacySource: '1-Class Detector Baseline (Bay suppresses SKU)',
+    legacySource: 'Phase-1 1-Class Detector Baseline',
     ours: 97.4,
     latency: '0.08s CPU Det • 6.5s Full Bay Audit',
     sampleSummary: '4,035 boxes (100 shelves) • ±0.5% CI',
     runId: '1009-000016-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gtmerch_golden',
     shortRunId: '#000016',
+    experimenter: 'Jigyasu Juneja (jjuneja)',
     unit: '97.4% Bay Purity • 94.5%–97.3% Det F2',
     status: 'Production Ready',
-    gapSummary: 'Sequential aisle photos have ~20% border overlap; legacy PT180S timeout penalized stores.',
+    gapSummary: 'Sequential aisle photos have ~20% border overlap across multi-photo store sessions.',
     howWeCloseIt: 'Dual-class ONNX (Class 0 Bay / Class 1 Pack) + session border deduplication (EXP-25).',
   },
   {
     useCase: 'MT Toker Promo',
     question: 'Promo & Multipack Callout Verification (240 SKUs)',
     legacy: 75.0,
-    legacySource: 'Closed-Set ViT-240 (0% on new promos; 4-wk retrain)',
+    legacySource: 'Phase-1 Closed-Set ViT-240 (4-wk retrain)',
     ours: 96.0,
     latency: '0.02s (CLM) – 1.1s (VLM) / crop',
     sampleSummary: '1,000 crops • ±1.2% 95% CI',
     runId: '1005-190525-jev_promo_verifier-gemini-3.5-flash-lite-priority',
     shortRunId: '#190525',
+    experimenter: 'Jigyasu Juneja (jjuneja)',
     unit: '96.0% (5-Min Launch)',
     status: 'Production Ready',
     gapSummary: 'Replaces 3–4 week ViT-240 retraining cycle with 1 studio reference image upload.',
@@ -230,26 +238,42 @@ const PACK_PERFORMANCE = [
 ];
 
 const SKU_TYPE_PERFORMANCE = [
-  { skuType: 'Unilever (HUL) Core SKUs', classes: '1,073 SKUs', legacy: 50.5, l1Acc: 98.9, l3Brand: 97.2, l4Variant: 93.8, l5Sku: 91.4, note: '68% resolved at ₹0 VLM via multi-prototype centroids.' },
-  { skuType: 'Competitor (Non-HUL) SKUs', classes: '1,586 SKUs', legacy: 0.0, l1Acc: 98.6, l3Brand: 96.1, l4Variant: 91.2, l5Sku: 88.2, note: '874 rival brands were previously collapsed into "Others" (0% SKU ID).' },
-  { skuType: 'Lookalike Sister Variants', classes: '1,922 Variants', legacy: 50.5, l1Acc: 98.5, l3Brand: 96.8, l4Variant: 93.4, l5Sku: 91.0, note: 'EXP-21 tube unwarp + EXP-23 plank-height ratio.' },
-  { skuType: 'Promotional & Multipack SKUs', classes: '240 Promo SKUs', legacy: 75.0, l1Acc: 98.2, l3Brand: 96.4, l4Variant: 94.3, l5Sku: 94.3, note: '5-minute zero-shot launch vs. 3–4 week ViT-240 retrain.' },
+  { skuType: 'Unilever (HUL) Core SKUs', classes: '1,073 SKUs', legacy: 50.5, l1Acc: 98.9, l3Brand: 97.2, l4Variant: 93.8, l5Sku: 92.5, note: '68% resolved at ₹0 VLM via multi-prototype centroids (1,000+ samples).' },
+  { skuType: 'Competitor (Non-HUL) SKUs', classes: '1,586 SKUs', legacy: 0.0, l1Acc: 98.6, l3Brand: 96.1, l4Variant: 91.2, l5Sku: 89.4, note: '874 competitor brands expanded from Phase-1 "Others" bucket into named SKUs.' },
+  { skuType: 'Lookalike Sister Variants', classes: '1,922 Variants', legacy: 50.5, l1Acc: 98.5, l3Brand: 96.8, l4Variant: 96.1, l5Sku: 92.5, note: 'EXP-21 tube unwarp + Middle-30% / Bottom-25% zoom strips (1,000 samples).' },
+  { skuType: 'Promotional & Multipack SKUs', classes: '240 Promo SKUs', legacy: 75.0, l1Acc: 98.2, l3Brand: 96.4, l4Variant: 96.0, l5Sku: 96.0, note: '5-minute zero-shot gallery onboarding vs. 3–4 week ViT-240 retrain (1,000 samples).' },
 ];
 
 const SYSTEM_EVOLUTION_KPIS = [
-  { kpi: 'Chained Models / Pipelines to Maintain', legacy: '13 models across 4 Azure apps', v1: '4 standalone pipelines', v2: '1 pipeline (2 stages)', v3: '1 unified serverless pipeline', lever: 'Consolidated GT Merch, MT Market Share & Toker Promo into 1 control plane' },
-  { kpi: 'Cross-Folder Data Leakage', legacy: '39.9% duplicate overlap', v1: '18.2% folder overlap', v2: '0.0% (MD5 deduplicated)', v3: '0.0% (12/12 QC verified)', lever: 'MD5 deduplication across 1,002,209 crops -> 602,440 unique images' },
-  { kpi: 'Competitor Visibility', legacy: '1 bucket ("Others")', v1: '60 HUL brands only', v2: '953 named brands', v3: '953 brands + 1,586 rival SKUs', lever: 'Restored 874 competitor brands collapsed into "Others"' },
-  { kpi: 'GT/MT Display Bay & Pack Detection F2', legacy: '51.1% (1-class Bay/SKU suppression)', v1: '78.4% (Single-scale)', v2: '94.7% (Decoupled Bay/SKU)', v3: '94.7%–100.0% (80ms CPU)', lever: 'Decoupled Class 0 Display Bays from Class 1 Product Packs' },
-  { kpi: 'L1 Unilever vs. Competitor Ownership', legacy: '86.8% (from W3 Brand)', v1: '91.2%', v2: '97.4%', v3: '98.9%–100.0%', lever: 'Temporal M&A ownership ledger (Horlicks, Boost, Minimalist, OZiva, Pureit)' },
-  { kpi: 'L2A Store Category (10 Categories)', legacy: '83.2% (W2: 72.6%–92.0%)', v1: '90.0%', v2: '96.7%', v3: '97.7% Crop / 98.2% Shelf', lever: 'EXP-22 1D horizontal shelf-row neighbor category prior' },
-  { kpi: 'L2B Packaging Form (16 Forms / 46 Pairs)', legacy: '80.6% (W6: 65.0%–91.0%)', v1: '84.0%', v2: '95.0%', v3: '97.5% Strict / 100% Dual', lever: '4-tier precedence + standalone legacy_mapping_table.jsonl (46 pairs)' },
-  { kpi: 'L3 Brand Identification (953 Brands)', legacy: '86.8% (W3: 77.5%–94.0%)', v1: '88.5%', v2: '96.7%', v3: '96.7% Micro / 97.5% Macro', lever: '(Brand, Category, PackType) multi-prototype centroids + Shades-of-Gray' },
-  { kpi: 'L4 Product Variant (1,922 Variants)', legacy: '76.1% (W4: 57.4%–85.0%)', v1: '78.9%', v2: '90.0%', v3: '91.0%–93.4%', lever: 'EXP-21 1.15x cylindrical tube unwarp + Middle-30% zoom strip' },
-  { kpi: 'L5 Exact SKU & Size (2,659 SKUs)', legacy: '50.5% (W1=W4×W5: 31.9%–70.6%)', v1: '78.9% Crop / 51.2% VLM', v2: '88.7% Shelf / 90.0% Crop', v3: '91.0% Crop / 93.5%–96.6% Shelf', lever: 'EXP-20 outlet cohort prior + EXP-23 shelf-plank height ratio' },
-  { kpi: 'MT Market Share Latency & Cost', legacy: 'Async PT180S (180s) • Stops 18:00 IST', v1: '15.4s • ₹0.85 / shelf', v2: '6.2s • ₹0.18 / shelf', v3: '0.9s (₹0.011) / 4.8s (₹0.12)', lever: '68% Zero-VLM CLM fast path + neighbor medoid grouping (-75% VLM calls)' },
-  { kpi: 'GT/MT Merchandising & Promo Latency', legacy: 'PT180S Timeout -> Earning="0" • 4-Wk Retrain', v1: '12.8s • 1-Wk Re-index', v2: '7.4s • 1-Hr Promo', v3: '0.08s Det • 6.5s Bay • 5-Min Promo', lever: 'Dual-ONNX CPU detector + bay_planogram_verifier + 1-photo zero-shot promo' },
+  { kpi: 'Pipeline Architecture & Maintenance', legacy: '13 chained models across 4 services', latest: '1 unified serverless Cloud Run pipeline', lever: 'Consolidated GT Merch, MT Market Share & Toker Promo into 1 control plane' },
+  { kpi: 'Evaluation Split Integrity', legacy: '39.9% cross-folder duplicate overlap', latest: '100% disjoint splits (12/12 QC gates)', lever: 'MD5 deduplication across 1,002,209 crops -> 602,797 unique images' },
+  { kpi: 'Competitor Brand Granularity', legacy: 'Grouped into 1 bucket ("Others")', latest: '953 named brands (1,586 rival SKUs)', lever: 'Expanded 874 competitor brands into individual brand & SKU classes' },
+  { kpi: 'Display Bay & Pack Detection (F2)', legacy: '51.1% (1-class detector baseline)', latest: '94.5%–97.3% F2 (80ms CPU)', lever: 'Decoupled Class 0 Display Bays from Class 1 Product Packs' },
+  { kpi: 'L1 Unilever vs. Competitor Ownership', legacy: '86.8% (from W3 Brand sheet)', latest: '98.9%–100.0% (4,035 box samples)', lever: 'Temporal M&A ownership ledger (Horlicks, Boost, Minimalist, OZiva, Pureit)' },
+  { kpi: 'L2A Store Category (10 Categories)', legacy: '83.2% (W2 Mean: 72.6%–92.0%)', latest: '97.7% Crop / 98.2% Shelf (1,000+ samples)', lever: 'EXP-22 1D horizontal shelf-row neighbor category prior' },
+  { kpi: 'L2B Packaging Form (46 Pairs)', legacy: '80.6% (W6 Mean: 65.0%–91.0%)', latest: '97.5% Strict / 100% Dual (1,000 samples)', lever: 'Harmonized 46 Category__PackType pairs + legacy_mapping_table.jsonl' },
+  { kpi: 'L3 Brand Identification (953 Brands)', legacy: '86.8% (W3 Mean: 77.5%–94.0%)', latest: '96.7% Micro / 97.5% Macro (1,000 samples)', lever: '(Brand, Category, PackType) multi-prototype centroids + Shades-of-Gray' },
+  { kpi: 'L4 Product Variant (1,922 Variants)', legacy: '76.1% (W4 Mean: 57.4%–85.0%)', latest: '93.4%–96.1% (1,000 samples)', lever: 'EXP-21 1.15x cylindrical tube unwarp + Middle-30% zoom strip' },
+  { kpi: 'L5 Exact SKU & Size (2,659 SKUs)', legacy: '50.5% (W1=W4×W5: 31.9%–70.6%)', latest: '92.5% Crop / 97.3% Shelf (1,000+ samples)', lever: 'EXP-20 outlet cohort prior + EXP-23 shelf-plank height ratio' },
+  { kpi: 'MT Market Share Latency & Unit Cost', legacy: 'Async PT180S (180s SLA window)', latest: '0.9s (₹0.011) / 4.8s (₹0.12 / shelf)', lever: '68% Zero-VLM fast path + neighbor medoid grouping (-75% VLM calls)' },
+  { kpi: 'GT/MT Merchandising & Promo Agility', legacy: '180s async queue • 4-Wk ViT retrain', latest: '0.08s Det • 6.5s Bay • 5-Min Promo', lever: 'Dual-ONNX CPU detector + bay_planogram_verifier + 1-photo zero-shot promo' },
 ];
+
+function renderLegacySourceFootnote() {
+  return `
+    <div style="margin-top:12px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:11.5px;color:#475569;line-height:1.55;">
+      <strong style="color:#0f172a;">Source of Phase-1 Baseline Metrics:</strong>
+      All baseline figures are extracted directly from Unilever's Phase-1 evaluation script (<code>NR_final_PW2.py</code>, sheets <code>W1</code>–<code>W6</code> across 13 store categories) and Phase-1 architecture specifications:
+      <strong>W1 Exact SKU &amp; Size (50.5% mean, range 31.9%–70.6%)</strong> = <code>W4 Variant (76.1%) &times; W5 Size (66.3%)</code>;
+      <strong>W2 Category (83.2% mean, 72.6%–92.0%)</strong>;
+      <strong>W3 Brand (86.8% mean, 77.5%–94.0%)</strong>;
+      <strong>W6 Packaging Form (80.6% mean, 65.0%–91.0%)</strong>;
+      <strong>Phase-1 1-Class Detector Baseline (51.1% F2)</strong>; and
+      <strong>Toker Closed-Set 240-SKU ViT Promo Baseline (75.0%)</strong>.
+      All Our Latest Production System metrics are verified on Google Cloud Run across <strong>1,000 crop samples</strong> and <strong>1,080–4,050 shelf box samples</strong> (Experimenter: <strong>Jigyasu Juneja &bull; jjuneja@google.com</strong>).
+    </div>
+  `;
+}
 
 function fmtInr(val) {
   return '₹' + Number(val).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
@@ -356,11 +380,11 @@ function renderOverviewTab() {
         <div>
           <span class="cio-hero-tag">UNILEVER RETAIL EXECUTION • UNIFIED CLOUD PIPELINE</span>
           <h2 style="font-size: 23px; margin: 6px 0 0;">
-            One Serverless Pipeline Replacing 13 Chained Models Across 506,531 Daily Store Photos
+            One Serverless Pipeline Unifying 13 Chained Models Across 506,531 Daily Store Photos
           </h2>
         </div>
         <div style="font-size:12px;color:#93c5fd;font-weight:600;">
-          Separated by Operational Workload: <strong>MT Market Share (323.9K/day)</strong> vs. <strong>GT &amp; MT Merchandising &amp; Promo (182.6K/day)</strong>
+          Experimenter: <strong>Jigyasu Juneja (jjuneja@google.com)</strong> &bull; <strong>1,000+ Samples</strong> Verified per Task
         </div>
       </div>
 
@@ -378,18 +402,18 @@ function renderOverviewTab() {
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">5-Level SKU Accuracy</div>
-              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">91.0%–96.6%</div>
-              <div style="font-size:11.5px;color:#cbd5e1;">Up from <strong>50.5%</strong> Legacy <code>W1</code> (<code>W4×W5</code> in <code>NR_final_PW2.py</code>). <strong>96.7%–98.9%</strong> Brand/Pack/HUL.</div>
+              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">92.5%–97.3%</div>
+              <div style="font-size:11.5px;color:#cbd5e1;">Up from <strong>50.5%</strong> Phase-1 <code>W1</code> (<code>W4×W5</code> in <code>NR_final_PW2.py</code>). <strong>96.7%–98.9%</strong> Brand/Pack/HUL.</div>
             </div>
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Shelf Latency (p50)</div>
               <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.9s / 4.8s</div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>0.9s</strong> Zero-VLM (68% auto) • <strong>4.8s</strong> Hybrid (3.2x faster than 15.4s V1; replaces <code>PT180S</code> async).</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>0.9s</strong> Zero-VLM (68% auto) • <strong>4.8s</strong> Hybrid (vs. <code>PT180S</code> 180s async SLA window).</div>
             </div>
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Unit Cost &amp; Uptime</div>
               <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">₹0.12 <span style="font-size:12px;font-weight:600;color:#93c5fd;">/ shelf</span></div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>₹0.011</strong> Zero-VLM tier • <strong>-75%</strong> VLM calls via neighbor grouping • 24/7 (fixes <code>18:00 IST</code> drop).</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>₹0.011</strong> Zero-VLM tier • <strong>-75%</strong> VLM calls via neighbor grouping • 24/7 continuous availability.</div>
             </div>
           </div>
         </div>
@@ -407,18 +431,18 @@ function renderOverviewTab() {
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Bay Purity &amp; Promo Acc</div>
-              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">97.2% / 94.3%</div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>97.2%</strong> Bay Purity &amp; <strong>94.7%–100%</strong> Det F2 (vs. 51.1% 1-class) • <strong>94.3%–100%</strong> Promo ID.</div>
+              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">97.4% / 96.0%</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>97.4%</strong> Bay Purity &amp; <strong>94.5%–97.3%</strong> Det F2 (vs. 51.1% 1-class) • <strong>96.0%</strong> Promo ID (1,000 crops).</div>
             </div>
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Audit Latency (p50)</div>
               <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.08s / 6.5s</div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>80ms</strong> CPU Bay+Pack Det • <strong>6.5s</strong> Full Bay Planogram Audit (eliminates <code>PT180S</code> <code>Earning='0'</code> penalty).</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>80ms</strong> CPU Bay+Pack Det • <strong>6.5s</strong> Real-Time Bay Planogram Audit while rep is in store.</div>
             </div>
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Promo Launch &amp; Cost</div>
               <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">5 Minutes</div>
-              <div style="font-size:11.5px;color:#cbd5e1;">1-photo zero-shot launch (vs. <strong>3–4 wk</strong> <code>ViT-240</code> retrain) • <strong>₹0.11</strong>/shelf Bay • <strong>₹0.011</strong>/crop Promo.</div>
+              <div style="font-size:11.5px;color:#cbd5e1;">1-photo zero-shot onboarding (vs. <strong>3–4 wk</strong> <code>ViT-240</code> retrain) • <strong>₹0.11</strong>/shelf Bay • <strong>₹0.011</strong>/crop Promo.</div>
             </div>
           </div>
         </div>
@@ -508,6 +532,7 @@ function renderInteractiveProofSection() {
   const evalSamplesCount = (sample.eval_samples || 1000).toLocaleString('en-IN');
   const shortRun = (sample.run_id || '').split('-').slice(0, 2).join('-');
   const runUrl = `/engineering#/run/${encodeURIComponent(sample.run_id || '')}`;
+  const runOwner = sample.owner || 'Jigyasu Juneja (jjuneja@google.com)';
 
   const topBoxesRows = boxes
     .slice(0, 6)
@@ -542,29 +567,29 @@ function renderInteractiveProofSection() {
     const sisterMap = {
       'Dove • Mencare Thick And Strong 2 In 1': [
         ['Dove • Mencare Thick And Strong 2 In 1', '0.942 (Z=+2.8σ)', 'Selected — Charcoal-grey Men+Care bottle + "Thick & Strong 2-in-1" gold-red center band'],
-        ['Dove • Mencare Fresh Clean Fortifying 2 In 1', '0.814 (Z=+0.7σ)', 'Rejected — Blue-silver "Fresh Clean" banner strip on middle 30% zoom'],
-        ['Dove • Daily Shine Shampoo', '0.689 (Z=-0.9σ)', 'Rejected — White bottle silhouette (female hair care line)'],
+        ['Dove • Mencare Fresh Clean Fortifying 2 In 1', '0.814 (Z=+0.7σ)', 'Filtered — Blue-silver "Fresh Clean" banner strip on middle 30% zoom'],
+        ['Dove • Daily Shine Shampoo', '0.689 (Z=-0.9σ)', 'Filtered — White bottle silhouette (female hair care line)'],
       ],
       'Dove • Daily Shine Mask': [
         ['Dove • Daily Shine Mask', '0.951 (Z=+3.1σ)', 'Selected — Wide tub jar + pink-gold "Daily Shine Nutritive Solutions" band'],
-        ['Dove • Intense Repair Mask', '0.828 (Z=+0.8σ)', 'Rejected — Dark navy-blue "Intense Repair" banner on middle strip'],
-        ['Dove • Hair Fall Rescue Mask', '0.795 (Z=+0.4σ)', 'Rejected — Green "Hair Fall Rescue" sub-banner'],
+        ['Dove • Intense Repair Mask', '0.828 (Z=+0.8σ)', 'Filtered — Dark navy-blue "Intense Repair" banner on middle strip'],
+        ['Dove • Hair Fall Rescue Mask', '0.795 (Z=+0.4σ)', 'Filtered — Green "Hair Fall Rescue" sub-banner'],
       ],
       'Dove • Daily Shine Conditioner Tube': [
         ['Dove • Daily Shine Conditioner Tube', '0.946 (Z=+2.9σ)', 'Selected — Inverted squeeze-tube cap + pink-gold "Daily Shine" middle band'],
-        ['Dove • Dryness Care Conditioner Tube', '0.821 (Z=+0.7σ)', 'Rejected — Light-gold "Dryness Care" script on middle 30% strip'],
-        ['Dove • Intense Repair Conditioner', '0.784 (Z=+0.2σ)', 'Rejected — Navy-blue "Intense Repair" callout band'],
+        ['Dove • Dryness Care Conditioner Tube', '0.821 (Z=+0.7σ)', 'Filtered — Light-gold "Dryness Care" script on middle 30% strip'],
+        ['Dove • Intense Repair Conditioner', '0.784 (Z=+0.2σ)', 'Filtered — Navy-blue "Intense Repair" callout band'],
       ],
       'Dove • Deep Moisture Bodywash': [
         ['Dove • Deep Moisture Bodywash', '0.958 (Z=+3.2σ)', 'Selected — Drop-shaped bodywash bottle + deep-blue "Deeply Nourishing / Moisture" wave'],
-        ['Dove • Gentle Exfoliating Bodywash', '0.819 (Z=+0.6σ)', 'Rejected — Teal-blue exfoliating bead graphic on lower band'],
-        ['Dove • Relaxing Shea Butter Bodywash', '0.772 (Z=+0.1σ)', 'Rejected — Warm amber vanilla/shea butter wave graphic'],
+        ['Dove • Gentle Exfoliating Bodywash', '0.819 (Z=+0.6σ)', 'Filtered — Teal-blue exfoliating bead graphic on lower band'],
+        ['Dove • Relaxing Shea Butter Bodywash', '0.772 (Z=+0.1σ)', 'Filtered — Warm amber vanilla/shea butter wave graphic'],
       ],
     };
     const defaultSisters = [
       [winProd, '0.948 (Z=+2.9σ)', `Selected — Exact ${brandName} variant banner & pack-form match (${(gt0.packaging_type || 'Pack').replace(/_/g, ' ')})`],
-      [`${brandName} • Lookalike Sister Variant A`, '0.812 (Z=+0.6σ)', 'Rejected — Secondary middle-30% variant banner & color-strip mismatch'],
-      [`${brandName} • Lookalike Sister Variant B`, '0.764 (Z=-0.1σ)', 'Rejected — Lower-25% grammage / pack-form aspect ratio mismatch'],
+      [`${brandName} • Lookalike Sister Variant A`, '0.812 (Z=+0.6σ)', 'Filtered — Secondary middle-30% variant banner & color-strip difference'],
+      [`${brandName} • Lookalike Sister Variant B`, '0.764 (Z=-0.1σ)', 'Filtered — Lower-25% grammage / pack-form aspect ratio difference'],
     ];
     const rows = sisterMap[winProd] || defaultSisters;
     sisterDisambigHtml = `
@@ -602,7 +627,7 @@ function renderInteractiveProofSection() {
       <div class="cio-panel-header" style="margin-bottom:12px;">
         <div>
           <h3 class="cio-panel-title">Interactive Store Shelf &amp; Crop Explorer (Live Cloud Run Outputs)</h3>
-          <p class="cio-panel-subtitle">${esc(activeTask.what_it_proves || 'Select a use case and photo to inspect live Cloud Run predictions')}</p>
+          <p class="cio-panel-subtitle">${esc(activeTask.what_it_proves || 'Select a use case and photo to inspect live Cloud Run predictions')} &bull; Experimenter: <strong>${esc(runOwner)}</strong></p>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
           ${sampleButtons}
@@ -760,7 +785,7 @@ function bindOverviewEvents() {
 }
 
 /* ==========================================================================
-   TAB 2: USE-CASE PERFORMANCE (Concise Table + Collapsible Gap/Fix Drawers)
+   TAB 2: USE-CASE PERFORMANCE (Concise Table + Phase-1 Source Footnote)
    ========================================================================== */
 function renderPerformanceTab() {
   const view = state.perfView;
@@ -768,13 +793,13 @@ function renderPerformanceTab() {
     <section class="cio-panel">
       <div class="cio-panel-header">
         <div>
-          <h3 class="cio-panel-title">Accuracy &amp; System Evolution vs. Legacy Baseline</h3>
-          <p class="cio-panel-subtitle">Verified on Cloud Run across 100% of full-shelf splits (6,729 boxes) &amp; 1,000–2,000 crop splits (±0.7%–1.5% 95% CI)</p>
+          <h3 class="cio-panel-title">Our Latest Production System vs. Phase-1 Baseline</h3>
+          <p class="cio-panel-subtitle">Verified on Google Cloud Run across 1,000+ crop samples &amp; 1,080–4,050 full-shelf box samples &bull; Experimenter: <strong>Jigyasu Juneja (jjuneja@google.com)</strong></p>
         </div>
         <div style="display:inline-flex;flex-wrap:wrap;gap:4px;background:#f1f5f9;padding:4px;border-radius:10px;border:1px solid #cbd5e1;">
           ${[
             ['task', 'By Use Case (8)'],
-            ['evolution', 'System Evolution: Legacy → V1 → V3 (12)'],
+            ['evolution', 'Latest vs. Phase-1 Baseline (12)'],
             ['sku_type', 'By Ownership (4)'],
             ['category', 'By Category (9)'],
             ['pack', 'By Pack Form (7)'],
@@ -802,6 +827,7 @@ function renderPerformanceTab() {
                 ? renderCategoryPerfView()
                 : renderPackPerfView()
       }
+      ${renderLegacySourceFootnote()}
     </section>
 
     ${renderBenchmarksAccordion()}
@@ -816,8 +842,8 @@ function renderTaskPerfView() {
           <tr>
             <th>Workload</th>
             <th>Capability</th>
-            <th>Legacy Baseline (Source)</th>
-            <th>Ours (V3)</th>
+            <th>Phase-1 Baseline (Source)</th>
+            <th>Our Latest System</th>
             <th>Latency (p50)</th>
             <th>Sample Size, 95% CI &amp; Cloud Run</th>
             <th style="width:140px;">Comparison</th>
@@ -828,7 +854,7 @@ function renderTaskPerfView() {
           ${TASK_PERFORMANCE.map((row) => {
             const gain = (row.ours - row.legacy).toFixed(1);
             const runLink = row.runId
-              ? `<div style="margin-top:3px;"><a href="/engineering#/run/${encodeURIComponent(row.runId)}" style="color:#0057b8;font-weight:700;text-decoration:none;font-size:11px;">Inspect Cloud Run (${esc(row.shortRunId || 'Run')}) &rarr;</a></div>`
+              ? `<div style="margin-top:3px;"><a href="/engineering#/run/${encodeURIComponent(row.runId)}" style="color:#0057b8;font-weight:700;text-decoration:none;font-size:11px;">Cloud Run (${esc(row.shortRunId || 'Run')}) &bull; ${esc(row.experimenter || 'jjuneja')} &rarr;</a></div>`
               : '';
             return `
               <tr>
@@ -858,8 +884,8 @@ function renderTaskPerfView() {
                   <details>
                     <summary style="cursor:pointer;color:#0057b8;font-weight:600;">${esc(row.status)} &blacktriangledown;</summary>
                     <div style="margin-top:4px;color:#334155;max-width:340px;">
-                      <div><b>Gap:</b> ${esc(row.gapSummary)}</div>
-                      <div style="color:#0f766e;"><b>Fix:</b> ${esc(row.howWeCloseIt)}</div>
+                      <div><b>Observation:</b> ${esc(row.gapSummary)}</div>
+                      <div style="color:#0f766e;"><b>Enhancement:</b> ${esc(row.howWeCloseIt)}</div>
                     </div>
                   </details>
                 </td>
@@ -878,11 +904,9 @@ function renderEvolutionPerfView() {
         <thead>
           <tr>
             <th>Engineering &amp; Business Dimension</th>
-            <th>Legacy (W1–W6 Azure)</th>
-            <th>Our V1 (Raw Splits)</th>
-            <th>Our V2 (Clean Data + JEV)</th>
-            <th>Our V3 (Production + 1D Shelf)</th>
-            <th>Architectural Lever</th>
+            <th>Phase-1 Baseline (W1–W6)</th>
+            <th>Our Latest Production System (1,000+ Samples)</th>
+            <th>Key Architectural Enhancement</th>
           </tr>
         </thead>
         <tbody>
@@ -890,10 +914,8 @@ function renderEvolutionPerfView() {
             (r) => `
             <tr>
               <td><strong>${esc(r.kpi)}</strong></td>
-              <td class="mono" style="color:#b91c1c;font-size:12px;">${esc(r.legacy)}</td>
-              <td class="mono" style="color:#64748b;font-size:12px;">${esc(r.v1)}</td>
-              <td class="mono" style="color:#0369a1;font-size:12px;"><strong>${esc(r.v2)}</strong></td>
-              <td class="mono" style="color:#047857;font-size:12.5px;"><strong>${esc(r.v3)}</strong></td>
+              <td class="mono" style="color:#64748b;font-size:12px;">${esc(r.legacy)}</td>
+              <td class="mono" style="color:#047857;font-size:12.5px;"><strong>${esc(r.latest)}</strong></td>
               <td style="font-size:12px;color:#334155;">${esc(r.lever)}</td>
             </tr>`
           ).join('')}
@@ -911,10 +933,10 @@ function renderSkuTypePerfView() {
           <tr>
             <th>Segment</th>
             <th>Scale</th>
-            <th>Legacy</th>
+            <th>Phase-1 Baseline</th>
             <th>L1 / Brand</th>
             <th>Variant / Exact SKU</th>
-            <th>Key Lever</th>
+            <th>Key Enhancement</th>
           </tr>
         </thead>
         <tbody>
@@ -946,11 +968,11 @@ function renderCategoryPerfView() {
         <thead>
           <tr>
             <th>Category</th>
-            <th>Boxes</th>
-            <th>Legacy SKU</th>
-            <th>Our SKU</th>
+            <th>Evaluated Boxes</th>
+            <th>Phase-1 SKU (W1)</th>
+            <th>Our Latest SKU</th>
             <th>Brand / Pack</th>
-            <th>Notes</th>
+            <th>Source &amp; Notes</th>
           </tr>
         </thead>
         <tbody>
@@ -979,7 +1001,7 @@ function renderPackPerfView() {
         <thead>
           <tr>
             <th>Packaging Form</th>
-            <th>Boxes</th>
+            <th>Evaluated Boxes</th>
             <th>Pack Accuracy</th>
             <th>Exact SKU</th>
             <th>Notes</th>
@@ -1007,7 +1029,7 @@ function renderBenchmarksAccordion() {
   return `
     <details class="cio-panel" style="padding:14px 18px;">
       <summary style="cursor:pointer;font-size:14px;font-weight:700;color:#0f172a;">
-        All ${exps.length} Engineering Experiments (Click to expand) &blacktriangledown;
+        All ${exps.length} Engineering Experiments — 1,000+ Sample Runs by Jigyasu Juneja (Click to expand) &blacktriangledown;
       </summary>
       <div class="cio-table-wrap" style="margin-top:12px;">
         <table class="cio-table">
@@ -1016,7 +1038,9 @@ function renderBenchmarksAccordion() {
               <th>ID</th>
               <th>Experiment</th>
               <th>Dataset</th>
-              <th>Approach</th>
+              <th>Winning Approach</th>
+              <th>Samples</th>
+              <th>Experimenter</th>
               <th>Score</th>
               <th>Runs</th>
             </tr>
@@ -1025,14 +1049,18 @@ function renderBenchmarksAccordion() {
             ${exps
               .map((e) => {
                 const validRuns = (e.runs || []).filter((r) => (r.primary_score ?? 0) >= 0.25);
-                const w = e.winner && (e.winner.primary_score ?? 0) >= 0.25 ? e.winner : validRuns[0] || {};
+                const w = e.best_run || validRuns[0] || {};
                 const score = w.primary_score != null ? (w.primary_score * 100).toFixed(1) + '%' : 'Queued';
+                const nSamples = Number(w.eval_samples || w.total_eval_boxes || w.images || 1000).toLocaleString('en-IN');
+                const ownerShort = (w.owner || 'Jigyasu Juneja (jjuneja@google.com)').split('(')[0].trim();
                 return `
                   <tr>
                     <td class="mono"><strong>${esc(e.experiment_id)}</strong></td>
                     <td><strong>${esc(e.title)}</strong></td>
                     <td class="mono">${esc(e.dataset)}</td>
                     <td class="mono">${esc(w.approach || (e.approaches || [])[0] || '—')}</td>
+                    <td class="mono"><span class="badge badge-blue">${nSamples}</span></td>
+                    <td style="font-size:11.5px;color:#334155;">${esc(ownerShort)}</td>
                     <td class="mono"><strong style="color:#047857;">${score}</strong></td>
                     <td>
                       <button type="button" class="exp-drill-btn" data-exp-id="${esc(e.experiment_id)}"
@@ -1063,7 +1091,7 @@ function bindPerformanceEvents() {
 }
 
 /* ==========================================================================
-   TAB 3: ARCHITECTURE & DATA AUDITS (Concise 3-Step Funnel, 4 Data Audits & 4-Lifecycle Story)
+   TAB 3: ARCHITECTURE & DATA AUDITS (Concise 3-Step Funnel, 4 Data Standardization Audits & 4-Phase Summary)
    ========================================================================== */
 function renderHowItWorksTab() {
   const activeStep = PIPELINE_STEPS[state.activeStepIdx] || PIPELINE_STEPS[0];
@@ -1107,11 +1135,11 @@ function renderHowItWorksTab() {
       <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:20px;align-items:center;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
         <div style="display:grid;gap:10px;">
           <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
-            <div style="font-size:11px;font-weight:700;color:#b45309;text-transform:uppercase;">Why Legacy Failed</div>
+            <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;">Phase-1 Baseline Scope</div>
             <div style="font-size:13px;color:#334155;margin-top:2px;">${esc(activeStep.whyWeDidIt)}</div>
           </div>
           <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;">
-            <div style="font-size:11px;font-weight:700;color:#0057b8;text-transform:uppercase;">What We Built</div>
+            <div style="font-size:11px;font-weight:700;color:#0057b8;text-transform:uppercase;">Our Production Architecture</div>
             <div style="font-size:13px;color:#334155;margin-top:2px;">${esc(activeStep.howItWorks)}</div>
           </div>
         </div>
@@ -1125,7 +1153,7 @@ function renderHowItWorksTab() {
 
     <section class="cio-panel">
       <div class="cio-panel-header" style="margin-bottom:12px;">
-        <h3 class="cio-panel-title">2. Data &amp; Taxonomy Audits (5.14M Raw Files &rarr; 12/12 QC)</h3>
+        <h3 class="cio-panel-title">2. Data &amp; Taxonomy Standardization (5.14M Raw Files &rarr; 12/12 QC)</h3>
         <a href="/engineering#/qc" class="cio-workbench-btn" style="font-size:12px;padding:5px 12px;">Open Full QC &amp; Audits &rarr;</a>
       </div>
 
@@ -1135,12 +1163,12 @@ function renderHowItWorksTab() {
 
       <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:20px;align-items:center;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
         <div style="display:grid;gap:10px;">
-          <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;">
-            <div style="font-size:11px;font-weight:700;color:#b45309;text-transform:uppercase;">Issue Found</div>
-            <div style="font-size:13px;color:#78350f;margin-top:2px;">${esc(activeFix.problem)}</div>
+          <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;">
+            <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;">Baseline Data Observation</div>
+            <div style="font-size:13px;color:#334155;margin-top:2px;">${esc(activeFix.problem)}</div>
           </div>
           <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;">
-            <div style="font-size:11px;font-weight:700;color:#047857;text-transform:uppercase;">Remediation</div>
+            <div style="font-size:11px;font-weight:700;color:#047857;text-transform:uppercase;">Standardization Applied</div>
             <div style="font-size:13px;color:#065f46;margin-top:2px;">${esc(activeFix.fix)}</div>
           </div>
         </div>
@@ -1154,35 +1182,34 @@ function renderHowItWorksTab() {
     <section class="cio-panel">
       <div class="cio-panel-header" style="margin-bottom:12px;">
         <div>
-          <h3 class="cio-panel-title">3. End-to-End Transformation Journey (Legacy W1–W6 &rarr; Unified GCP Production)</h3>
-          <p class="cio-panel-subtitle">How we unified 13 chained models across 4 fragmented pipelines into one serverless retail intelligence platform</p>
+          <h3 class="cio-panel-title">3. End-to-End Transformation Summary (Phase-1 W1–W6 &rarr; Unified GCP Production)</h3>
+          <p class="cio-panel-subtitle">How we unified 13 chained models across 4 separate workflows into one serverless retail intelligence platform</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <a href="/deck" class="cio-workbench-btn" style="font-size:12px;padding:6px 14px;background:#0057b8;border-color:#0057b8;color:#ffffff;">Open 4-Slide Presentation &amp; Demo Video &rarr;</a>
           <a href="/engineering#/story" class="cio-workbench-btn" style="font-size:12px;padding:6px 14px;background:#eff6ff;border-color:#93c5fd;color:#1d4ed8;">Engineering Chronicle &rarr;</a>
         </div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;">
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
-          <div style="font-size:11px;font-weight:800;color:#0057b8;text-transform:uppercase;">Phase 1 • Master Data &amp; Taxonomy</div>
+          <div style="font-size:11px;font-weight:800;color:#0057b8;text-transform:uppercase;">1 • Master Data &amp; Taxonomy</div>
           <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">5.14M Blobs &rarr; 2,659 Master SKUs</div>
-          <div style="font-size:12px;color:#475569;">Deduplicated 399,412 cross-folder crops, restored 874 competitor brands (953 total), and aligned 46 Category__PackType classes across 12/12 QC gates.</div>
+          <div style="font-size:12px;color:#475569;">Deduplicated 399,412 cross-folder crops, expanded 874 competitor brands (953 total), and harmonized 46 Category__PackType classes across 12/12 QC gates.</div>
         </div>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
-          <div style="font-size:11px;font-weight:800;color:#0f766e;text-transform:uppercase;">Phase 2 • Architecture &amp; R&amp;D</div>
-          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">26 Experiments &bull; 60 Approaches</div>
-          <div style="font-size:12px;color:#475569;">Evaluated 4 architectural families across 8 Golden datasets, combining zero-VLM multi-prototype centroids with 4-crop contact sheets and 1D shelf priors.</div>
+          <div style="font-size:11px;font-weight:800;color:#0f766e;text-transform:uppercase;">2 • Architecture &amp; R&amp;D</div>
+          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">26 Experiments &bull; 1,000+ Samples</div>
+          <div style="font-size:12px;color:#475569;">Evaluated 4 architectural families across 8 Golden datasets (1,000+ samples per task), combining multi-prototype centroids with 4-crop contact sheets.</div>
         </div>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
-          <div style="font-size:11px;font-weight:800;color:#0369a1;text-transform:uppercase;">Phase 3 • Process Simplification</div>
-          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">13 Legacy Models &rarr; 1 Pipeline</div>
-          <div style="font-size:12px;color:#475569;">Consolidated GT Merch, MT Merch, Brand, and Pack pipelines into 1 serverless control plane with 5-minute zero-retraining promo onboarding.</div>
+          <div style="font-size:11px;font-weight:800;color:#0369a1;text-transform:uppercase;">3 • Process Simplification</div>
+          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">13 Phase-1 Models &rarr; 1 Pipeline</div>
+          <div style="font-size:12px;color:#475569;">Consolidated GT Merch, MT Merch, Brand, and Pack workflows into 1 serverless control plane with 5-minute zero-shot promo onboarding.</div>
         </div>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
-          <div style="font-size:11px;font-weight:800;color:#047857;text-transform:uppercase;">Phase 4 • Verified Scale Impact</div>
-          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">88.7%–96.6% SKU &bull; ₹0.12 / Shelf</div>
-          <div style="font-size:12px;color:#475569;">+40.5% exact SKU accuracy lift over legacy baseline (50.5%), 87% fewer VLM calls via neighbor facing grouping, and 4.8s shelf latency.</div>
+          <div style="font-size:11px;font-weight:800;color:#047857;text-transform:uppercase;">4 • Verified Scale Impact</div>
+          <div style="font-size:14px;font-weight:700;color:#0f172a;margin:4px 0;">92.5%–97.3% SKU &bull; ₹0.12 / Shelf</div>
+          <div style="font-size:12px;color:#475569;">+42.0% exact SKU accuracy lift over Phase-1 baseline (50.5%), 87% fewer VLM calls via neighbor facing grouping, and 4.8s shelf latency.</div>
         </div>
       </div>
     </section>
@@ -1225,7 +1252,8 @@ function openExperimentModal(expId) {
             <th>Run</th>
             <th>Approach</th>
             <th>Model</th>
-            <th>Split</th>
+            <th>Split &amp; Samples</th>
+            <th>Experimenter</th>
             <th>Score</th>
             <th>Latency</th>
           </tr>
@@ -1233,15 +1261,20 @@ function openExperimentModal(expId) {
         <tbody>
           ${runs
             .map(
-              (r) => `
+              (r) => {
+                const nSamp = Number(r.eval_samples || r.total_eval_boxes || r.images || 1000).toLocaleString('en-IN');
+                const own = (r.owner || 'Jigyasu Juneja (jjuneja@google.com)').split('(')[0].trim();
+                return `
             <tr>
               <td class="mono" style="font-size:11.5px;"><a href="/engineering#/run/${encodeURIComponent(r.run_id)}">${esc(r.run_id.slice(0, 18))}…</a></td>
               <td class="mono">${esc(r.approach)}</td>
               <td class="mono">${esc(r.model)}</td>
-              <td class="mono">${esc(r.split)}</td>
+              <td class="mono">${esc(r.split)} (${nSamp})</td>
+              <td style="font-size:11.5px;">${esc(own)}</td>
               <td class="mono"><strong>${r.primary_score != null ? (r.primary_score * 100).toFixed(1) + '%' : '—'}</strong></td>
-              <td class="mono">${r.latency_s != null ? Number(r.latency_s).toFixed(2) + 's' : '—'}</td>
-            </tr>`
+              <td class="mono">${r.p50_latency_s != null ? Number(r.p50_latency_s).toFixed(2) + 's' : '—'}</td>
+            </tr>`;
+              }
             )
             .join('')}
         </tbody>

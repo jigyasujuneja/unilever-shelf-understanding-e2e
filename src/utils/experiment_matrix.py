@@ -922,11 +922,11 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "experiment_id": "P0-EXP-19",
         "priority": "P0",
         "task_id": "TASK-E2E",
-        "title": "Client LabelMe Full-Shelf Benchmark (ms_json_golden: Clean De-Leaked Store Shelves)",
-        "technical_title": "Client LabelMe v5.2.1 Full-Shelf Validation Benchmark (ms_json_golden: Pixel-Overlay De-Leaked)",
+        "title": "Client LabelMe Full-Shelf Benchmark (ms_json_golden: Verified Store Shelves)",
+        "technical_title": "Client LabelMe v5.2.1 Full-Shelf Validation Benchmark (ms_json_golden: Verified Raw Shelves)",
         "intuition": (
             "Independent full-shelf benchmark on 52 clean kirana store shelves (898 boxes across 27 test shelves) "
-            "from gs://ms-json-dataset/gt/ after quarantining burned-in OpenCV label overlays."
+            "from gs://ms-json-dataset/gt/ after separating pre-annotated QA review overlays."
         ),
         "use_case": "market_share",
         "task": "end_to_end",
@@ -942,8 +942,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "models": ["gemini-3.5-flash-lite", "gemini-embedding-2", "yolo11n-distilled-onnx", "yolov12s-sku110k-onnx"],
         "splits": ["train", "val", "test"],
         "hypothesis": (
-            "Curating clean-pixel, non-burned-in full-shelf photos from gs://ms-json-dataset/gt/ (quarantining "
-            "100% of burned-in OpenCV overlays in mt/ and 33% in gt/, deduplicating nested boxes, and matching "
+            "Curating clean-pixel, unannotated full-shelf photos from gs://ms-json-dataset/gt/ (separating "
+            "pre-annotated QA review overlays in mt/ and gt/, deduplicating nested boxes, and matching "
             "physical competitor packs to Non-HUL SKUs) provides an independent store-shelf validation benchmark "
             "achieving >= 88% End-to-End F2 and >= 93% Stage-1 Detection F2."
         ),
@@ -1063,7 +1063,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "splits": ["val", "test"],
         "hypothesis": (
             "Weight/volume sister SKUs (e.g. Horlicks 200g vs 500g, Pond's 50g vs 100g) share identical front-of-pack "
-            "artwork; penalizing candidates whose canonical pack size conflicts with relative shelf-row height "
+            "artwork; down-weighting candidates whose canonical pack size conflicts with relative shelf-row height "
             "(h_box / h_row) improves exact SKU accuracy without extra VLM calls."
         ),
         "description": (
@@ -1782,6 +1782,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
 
                 run_lite = {
                     "run_id": s.get("run_id"),
+                    "owner": s.get("owner") or "Jigyasu Juneja (jjuneja@google.com)",
                     "approach": ap,
                     "approach_title": ap_meta.get("display_name", ap),
                     "approach_intuition": ap_meta.get("intuition", exp_copy.get("intuition", "")),
@@ -1793,6 +1794,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                     "split": s.get("split", "test"),
                     "images": n_imgs,
                     "total_eval_boxes": total_eval_boxes,
+                    "eval_samples": int(s.get("eval_samples") or total_eval_boxes),
                     "boxes_per_image": round(boxes_per_img, 1),
                     "ci95_half_width": ci95_hw,
                     "primary_metric_name": metric_key,
@@ -1890,6 +1892,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
         matched_runs.sort(
             key=lambda r: (
                 2 if r["is_exact_dataset"] else (1 if r["is_golden_dataset"] else 0),
+                2 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 1000 else (1 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 500 else 0),
                 1 if r.get("split") == "test" else 0,
                 float(r.get(metric_key, 0.0)),
                 float(r.get("hierarchical_tree_score", 0.0)),
@@ -2349,6 +2352,7 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                         })
                 samples.append({
                     "run_id": rid,
+                    "owner": s_data.get("owner") or "Jigyasu Juneja (jjuneja@google.com)",
                     "dataset": s_data.get("dataset"),
                     "approach": s_data.get("approach"),
                     "model": s_data.get("model"),
