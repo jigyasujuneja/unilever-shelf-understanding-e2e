@@ -2207,10 +2207,10 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "identifies brand, variant, and pack form, and calculates Unilever vs. Competitor Share of Shelf."
             ),
             "preferred_runs": [
-                "1005-190410-shelf_hierarchical_clm_jev-gemini-3.8-flash-priority-shelves",
-                "1005-190425-shelf_clm_standalone-gemini-embedding-2-shelves",
-                "1012-204345-stitched_e2e-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
                 "1013-012348-stitched_e2e-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
+                "1013-020910-stitched_e2e-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
+                "1012-204345-stitched_e2e-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
+                "1012-171856-gemini_e2e-gemini-3.5-flash-lite-priority-ms_json_golden",
             ],
         },
         {
@@ -2223,10 +2223,8 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "and flags empty out-of-stock gaps."
             ),
             "preferred_runs": [
-                "1009-012034-bay_planogram_verifier-gemini-3.8-flash-priority-hul_sessions",
-                "1009-012338-bay_planogram_verifier-gemini-3.8-flash-priority-hul_sessions-val",
-                "1005-190625-bay_planogram_verifier-gemini-3.8-flash-priority",
-                "1005-190610-bay_planogram_verifier-gemini-3.5-flash-lite-priority",
+                "1013-022245-bay_planogram_verifier-gemini-3.8-flash-priority",
+                "1013-022245-bay_planogram_verifier-gemini-3.5-flash-lite-priority",
             ],
         },
         {
@@ -2239,11 +2237,14 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "side-by-side using zoomed variant and weight strips."
             ),
             "preferred_runs": [
+                "1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden",
                 "1013-013248-l8_hul_ultimate-gemini-3.8-flash-priority-hul_golden",
-                "1013-013248-jev_laya_zscore_lid-gemini-3.8-flash-priority-hul_golden",
+                "1013-025000-clef_standalone-gemini-3.5-flash-lite-priority-hul_golden",
+                "1013-025000-l8_hul_ultimate-gemini-3.8-flash-priority-hul_variants",
+                "1013-031440-l8_hul_ultimate-gemini-3.8-flash-priority-hul_packs",
+                "1013-034650-l8_hul_ultimate-gemini-3.8-flash-priority-hul_brands",
                 "1013-013246-hierarchical_clm_jev-gemini-3.8-flash-priority-hul_golden",
                 "1013-013248-hierarchical_clm_jev-gemini-3.5-flash-lite-priority-hul_golden",
-                "1012-021922-tube_midband_jev-gemini-3.5-flash-lite-priority-hul_variants-val",
             ],
         },
         {
@@ -2258,6 +2259,8 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
             "preferred_runs": [
                 "1013-013249-hierarchy_classify-gemini-3.8-flash-priority-hul_golden",
                 "1013-013247-hierarchy_classify-gemini-3.5-flash-lite-priority-hul_golden",
+                "1013-021828-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
+                "1013-015833-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
                 "1012-203751-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
                 "1012-124906-gemini_classify-marketshare-hul-golden-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
             ],
@@ -2272,9 +2275,11 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "cutting new campaign launch time from 4 weeks to 5 minutes."
             ),
             "preferred_runs": [
-                "1005-190540-jev_promo_verifier-gemini-3.8-flash-priority",
-                "1005-190525-jev_promo_verifier-gemini-3.5-flash-lite-priority",
-                "1005-190510-clm_promo_matcher-gemini-embedding-2",
+                "1013-025000-jev_promo_verifier-gemini-3.8-flash-priority-hul_promos",
+                "1013-025000-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos",
+                "1013-024958-clm_promo_matcher-gemini-embedding-2-hul_promos",
+                "1013-022245-jev_promo_verifier-gemini-3.8-flash-priority",
+                "1013-022246-jev_promo_verifier-gemini-3.5-flash-lite-priority",
             ],
         },
         {
@@ -2287,9 +2292,10 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "without large bay frames suppressing the small packs inside them."
             ),
             "preferred_runs": [
-                "1009-132251-distilled_yolo_onnx-yolo11n-distilled-onnx-gtmerch_golden",
-                "1009-132227-distilled_yolo_onnx-yolo11n-distilled-onnx-ms_json_golden",
-                "1009-010247-distilled_yolo_onnx-yolo11n-distilled-onnx-gtmerch_golden-val",
+                "1013-032240-distilled_yolo_onnx-yolo11n-distilled-onnx-sku110k",
+                "1013-031926-distilled_yolo_onnx-yolo11n-distilled-onnx-gtmerch_golden",
+                "1013-024028-distilled_yolo_onnx-yolo11n-distilled-onnx-ms_json_golden",
+                "1012-191529-cv_detect-yolov12s-ul-base-ms_json_golden",
             ],
         },
     ]

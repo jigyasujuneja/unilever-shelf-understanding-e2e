@@ -92,13 +92,13 @@ const TASK_PERFORMANCE = [
     legacySource: 'NR_final_PW2.py W3 Brand (874 rivals in "Others") • 88.9% brand.h5 (N=1,000)',
     ours: 98.9,
     latency: '1.68s (#013246 N=1,000) • 2.51s (Lite N=1,000)',
-    sampleSummary: 'N=1,000 crops (#013248 JEV: 98.9% • #013248 Ultimate: 98.6% • #013247 CLM: 98.6% • #013246: 97.4%) • N=25 sessions (#012034: 99.5%)',
-    runId: '1013-013248-l8_hul_ultimate-gemini-3.8-flash-priority-hul_golden',
-    shortRunId: '#013248 (98.9% N=1,000) & #013246 (97.4% 1.68s)',
+    sampleSummary: 'N=1,000 crops (#025000 CLEF: 99.2% • #025000 Variants: 99.1% • #013248 JEV: 98.9% • #013248 Ultimate: 98.6% • #034648 Brands: 98.4%)',
+    runId: '1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden',
+    shortRunId: '#025000 (99.2% N=1,000) & #013248 (98.9% N=1,000)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '98.9% (N=1,000) • 99.5% (Sessions)',
+    unit: '99.2% (N=1,000) • 98.9% JEV (N=1,000)',
     status: 'Production Ready',
-    gapSummary: '0.6% false HUL attribution rate; minor variance on recent M&A brands (Horlicks, Minimalist, OZiva).',
+    gapSummary: '0.8% false HUL attribution rate; minor variance on recent M&A brands (Horlicks, Minimalist, OZiva).',
     howWeCloseIt: 'Time-aware M&A ownership ledger + regional pack clustering.',
   },
   {
@@ -106,62 +106,62 @@ const TASK_PERFORMANCE = [
     question: 'Store Category (10 Categories on hul_golden N=1,000)',
     legacy: 83.2,
     legacySource: 'NR_final_PW2.py W2 Mean (72.6%–92.0%) • 22.1% packtype.h5 on hul_golden (N=1,000)',
-    ours: 96.5,
-    latency: '1.68s (#013246 N=1,000) • 1.62s (SFT #124906)',
-    sampleSummary: 'N=1,000 (#013248 JEV: 96.5% • #013248 Ultimate: 96.3% • #013247 CLM: 95.8% • #013246: 94.5%) • N=100 SFT (#124906: 97.0%)',
-    runId: '1013-013248-jev_laya_zscore_lid-gemini-3.8-flash-priority-hul_golden',
-    shortRunId: '#013248 (96.5% N=1,000) & #124906 (97.0% SFT)',
+    ours: 97.5,
+    latency: '1.68s (#013246 N=1,000) • 2.69s (#025000 Lite N=1,000)',
+    sampleSummary: 'N=1,000 (#025000 CLEF 3.8: 97.5% • #025000 CLEF Lite: 96.9% • #013248 JEV: 96.5% • #013248 Ultimate: 96.3% • #021828 SFT: 92.7%)',
+    runId: '1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden',
+    shortRunId: '#025000 (97.5% N=1,000) & #013248 (96.5% N=1,000)',
     experimenter: 'Jigyasu Juneja (jjuneja) • Riley Gavigan (rgavigan)',
-    unit: '96.5% (N=1,000) • 97.0% SFT (N=100)',
+    unit: '97.5% (N=1,000) • 96.9% Lite (N=1,000)',
     status: 'Production Ready',
     gapSummary: 'Shelf rails occasionally occlude bottom category text on Dove/Vaseline.',
     howWeCloseIt: '1D horizontal shelf-row neighbor category prior (EXP-22).',
   },
   {
     useCase: 'MT Market Share',
-    question: 'Packaging Form (16 Forms / 46 Category__PackType Pairs on hul_golden N=1,000)',
+    question: 'Packaging Form (16 Forms / 46 Category__PackType Pairs on hul_golden & hul_packs N=1,000)',
     legacy: 23.6,
     legacySource: 'Direct Head-to-Head: marketshare_packtype.h5 on hul_golden (N=1,000 #010924; 41.0% on pack_data; 80.6% W6 5-bucket)',
-    ours: 92.2,
-    latency: '1.68s (#013246 N=1,000) • 2.51s (#013248 Lite N=1,000)',
-    sampleSummary: 'N=1,000 (#013248 Ultimate: 92.2% • #013248 JEV: 91.6% • #013247 CLM: 90.4% • #013246: 90.2% • #013248 Lite: 89.8%)',
-    runId: '1013-013248-l8_hul_ultimate-gemini-3.8-flash-priority-hul_golden',
-    shortRunId: '#013248 (92.2% N=1,000) & #013246 (90.2% N=1,000)',
+    ours: 93.3,
+    latency: '1.26s (#031439 hul_packs N=1,000) • 2.69s (#025000 Lite N=1,000)',
+    sampleSummary: 'N=1,000 (#025000 CLEF Lite: 93.3% • #025000 CLEF 3.8: 93.2% • #013248 Ultimate: 92.2% • #031440 hul_packs N=1,000: 89.5% • #021828 SFT: 76.1%)',
+    runId: '1013-025000-clef_standalone-gemini-3.5-flash-lite-priority-hul_golden',
+    shortRunId: '#025000 (93.3% N=1,000), #013248 (92.2%) & #031440 (hul_packs N=1,000)',
     experimenter: 'Jigyasu Juneja (jjuneja) • Riley Gavigan (rgavigan)',
-    unit: '92.2% (N=1,000) • 90.2% Fast (N=1,000)',
-    status: '+68.6% vs .h5 on hul_golden (N=1,000)',
+    unit: '93.3% (N=1,000) • 89.5% hul_packs (N=1,000)',
+    status: '+69.7% vs .h5 on hul_golden (N=1,000)',
     gapSummary: '2.5% dual-folder overlap in raw pack_data (e.g. Bottle vs. Jar, Box vs. Tube).',
     howWeCloseIt: 'Harmonized 46 valid Category__PackType domain rules + dual-accept evaluation.',
   },
   {
     useCase: 'MT Market Share',
-    question: 'Brand Identification (953 Named Brands on hul_golden N=1,000)',
+    question: 'Brand Identification (953 Named Brands on hul_golden & hul_brands N=1,000)',
     legacy: 88.9,
     legacySource: 'Direct Head-to-Head: marketshare_brand.h5 1-Attr on hul_golden (N=1,000 #004620; 85.2% #013446; 86.8% W3 Mean)',
-    ours: 96.5,
-    latency: '1.68s (#013246 N=1,000) • 1.62s–2.05s (SFT)',
-    sampleSummary: 'N=1,000 (#013248 JEV: 96.5% • #013248 Ultimate: 96.0% • #013247 CLM: 95.6% • #013246: 93.7%) • N=100 SFT (#124906: 98.0% / #203751: 94.0%)',
-    runId: '1013-013248-jev_laya_zscore_lid-gemini-3.8-flash-priority-hul_golden',
-    shortRunId: '#013248 (96.5% N=1,000) & #124906 (98.0% SFT)',
+    ours: 97.4,
+    latency: '1.34s (#034648 hul_brands N=1,000) • 1.68s (#013246 N=1,000)',
+    sampleSummary: 'N=1,000 (#025000 CLEF: 97.4% • #025000 Variants: 97.2% • #013248 JEV: 96.5% • #034648 hul_brands N=1,000: 95.9% • #021828 SFT: 93.2%)',
+    runId: '1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden',
+    shortRunId: '#025000 (97.4% N=1,000) & #034648 (hul_brands N=1,000)',
     experimenter: 'Jigyasu Juneja (jjuneja) • Riley Gavigan (rgavigan)',
-    unit: '96.5% (N=1,000) • 98.0% SFT (N=100)',
+    unit: '97.4% (N=1,000) • 95.9% hul_brands (N=1,000)',
     status: 'Production Ready',
     gapSummary: 'Phase-1 brand.h5 (85.2%–88.9%) only predicts 1 attribute (Brand); our system predicts all 5 attributes simultaneously.',
     howWeCloseIt: 'Shades-of-Gray illuminant normalization + System-1 CLM Gate + System-2 VLM / LoRA SFT.',
   },
   {
     useCase: 'MT Market Share',
-    question: 'Lookalike Sister Variant Disambiguation (1,922 Variants on hul_variants)',
+    question: 'Lookalike Sister Variant Disambiguation (1,922 Variants on hul_variants N=1,000)',
     legacy: 76.1,
     legacySource: 'NR_final_PW2.py W4 Variant Mean (57.4%–85.0% across 13 categories)',
-    ours: 92.0,
-    latency: '0.67s / crop (tube_midband_jev Flash-Lite)',
-    sampleSummary: 'N=100 crops on hul_variants (#021922: 92.0% Variant, 98.0% Brand, 100% HUL) • ±5.3% CI',
-    runId: '1012-021922-tube_midband_jev-gemini-3.5-flash-lite-priority-hul_variants-val',
-    shortRunId: '#021922 (N=100)',
+    ours: 82.6,
+    latency: '0.66s (#025002 3.8-Flash N=1,000) • 0.80s (#025000 Lite N=1,000)',
+    sampleSummary: 'N=1,000 hul_variants (#025000 Ultimate 3.8: 82.6% 5-attr / 91.8% 3-attr • #025001 Ultimate Lite: 81.8% • #025002 Fast: 81.5% in 0.66s • #025000 Lite: 80.6% at $0.00046)',
+    runId: '1013-025000-l8_hul_ultimate-gemini-3.8-flash-priority-hul_variants',
+    shortRunId: '#025000 (82.6% N=1,000) & #025002 (81.5% 0.66s N=1,000)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '92.0% (N=100) • 98.0% Brand',
-    status: '+15.9% vs Phase-1 W4',
+    unit: '82.6% 5-Attr / 91.8% 3-Attr (N=1,000)',
+    status: '+6.5% vs Phase-1 W4 (N=1,000)',
     gapSummary: 'Curved squeeze tubes (Closeup, Biotique, Pepsodent) foreshorten middle variant text.',
     howWeCloseIt: '1.15x cylindrical horizontal unwarping + Middle-30% zoom strip (EXP-21).',
   },
@@ -170,14 +170,14 @@ const TASK_PERFORMANCE = [
     question: 'Full 5-Attribute Exact Product & SKU (2,659 SKUs on hul_golden N=1,000)',
     legacy: 50.5,
     legacySource: 'NR_final_PW2.py W1 = W4×W5 (31.9%–70.6%) • 16.0% Chained brand.h5+packtype.h5 (#182625 N=100)',
-    ours: 82.4,
-    latency: '1.68s (#013246 N=1,000) • 2.51s (#013248 Lite N=1,000)',
-    sampleSummary: 'N=1,000 (#013248 Ultimate: 82.4% • #013248 JEV: 81.4% • #013246 Fast: 80.3% • #013248 Lite: 79.5% • #013247 Zero-VLM: 78.6%) • N=100 Clean SFT (#203751: 80.0%)',
-    runId: '1013-013248-l8_hul_ultimate-gemini-3.8-flash-priority-hul_golden',
-    shortRunId: '#013248 (82.4%), #013246 (80.3%) & #013248 Lite (79.5%) [N=1,000]',
+    ours: 84.5,
+    latency: '0.87s–1.68s (#025000/#013246 N=1,000) • 2.51s–2.69s (Lite N=1,000)',
+    sampleSummary: 'N=1,000 (#025000 CLEF 3.8: 84.5% 5-attr / 92.2% 3-attr • #013248 Ultimate: 82.4% / 90.8% • #025000 CLEF Lite: 81.9% / 91.4% • #013246 Fast: 80.3% • #021828 Clean SFT: 70.4% 3-attr)',
+    runId: '1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden',
+    shortRunId: '#025000 (84.5%), #013248 (82.4%) & #021828 SFT (70.4%) [N=1,000]',
     experimenter: 'Jigyasu Juneja (jjuneja) • Riley Gavigan (rgavigan)',
-    unit: '82.4% Ultimate (N=1,000) • 80.3% Fast (N=1,000) • 80.0% SFT',
-    status: '+31.9% vs W1 (+66.4% vs Chained .h5)',
+    unit: '84.5% 5-Attr / 92.2% 3-Attr (N=1,000)',
+    status: '+34.0% vs W1 (+68.5% vs Chained .h5)',
     gapSummary: '50g vs. 100g packs share identical front artwork across single-crop evaluations.',
     howWeCloseIt: 'Store-format cohort filtering (EXP-20) + shelf-plank height ratio (EXP-23) + LoRA SFT.',
   },
@@ -186,29 +186,29 @@ const TASK_PERFORMANCE = [
     question: 'Display Bay & Shelf Box Detection + Multi-Photo Bay Planogram',
     legacy: 51.1,
     legacySource: 'Phase-1 1-Class Detector Baseline • 50.4% F2 yolov12s-sku110k (#203935 N=100)',
-    ours: 94.4,
-    latency: '0.08s–0.62s CPU Det • 0.85s–3.5s Session Audit',
-    sampleSummary: 'N=25 gtmerch shelves / 1,025 boxes (#132251: 94.4% F2) • N=27 ms_json shelves (#132227: 93.8% F2) • N=25 sessions (#012034: 97.5% Brand / 99.5% HUL)',
-    runId: '1009-132251-distilled_yolo_onnx-yolo11n-distilled-onnx-gtmerch_golden',
-    shortRunId: '#132251 (Det) & #012034 (Planogram)',
+    ours: 95.0,
+    latency: '1.49s CPU Det (#031926 N=100) • 5.25s Session Audit (#022245 Lite)',
+    sampleSummary: 'N=25 hul_sessions (#022245 3.8-Flash: 100% Bay Block Purity, 95.0% HUL • #022245 Lite: 99.4% Purity) • N=100 gtmerch_golden (#031926) • N=60 sku110k (#032240: 69.5% F2)',
+    runId: '1013-022245-bay_planogram_verifier-gemini-3.8-flash-priority',
+    shortRunId: '#022245 (Planogram), #031926 (gtmerch N=100) & #032240 (sku110k)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '94.4% Det F2 • 97.5%–98.8% Bay Brand Purity',
+    unit: '100% Bay Block Purity • 95.0% HUL (#022245)',
     status: 'Production Ready',
     gapSummary: 'Sequential aisle photos have ~20% border overlap across multi-photo store sessions.',
     howWeCloseIt: 'Dual-class ONNX (Class 0 Bay / Class 1 Pack) + session border deduplication (EXP-25).',
   },
   {
     useCase: 'MT Toker Promo',
-    question: 'Promo & Multipack Callout Verification (240 SKUs on hul_promos)',
+    question: 'Promo & Multipack Callout Verification (240 SKUs on hul_promos N=1,000)',
     legacy: 75.0,
     legacySource: 'Phase-1 Closed-Set ViT-240 (3–4 wk retrain per campaign)',
-    ours: 95.0,
-    latency: '0.34s (Zero-LLM CLM) • 0.51s (Flash-Lite VLM)',
-    sampleSummary: 'hul_promos test split (#190525 Flash-Lite: 95.0% • #190540 3.8-Flash: 100.0% • #190510 Zero-LLM: 90.0%)',
-    runId: '1005-190525-jev_promo_verifier-gemini-3.5-flash-lite-priority',
-    shortRunId: '#190525 (95%) & #190540 (100%)',
+    ours: 84.4,
+    latency: '3.42s (#022246 Lite) • 9.08s (#024958 Zero-VLM N=1,000 at $0.00020)',
+    sampleSummary: 'hul_promos N=1,000 Cloud Run (#025000 3.8-Flash: 84.4% 3-attr / 73.1% 5-attr, 97.8% HUL, 93.7% Brand • #025000 Lite: 84.0% 3-attr / 73.0% 5-attr at $0.00069 • #022245 N=25: 84.0% 5-attr / 100% Brand)',
+    runId: '1013-025000-jev_promo_verifier-gemini-3.8-flash-priority-hul_promos',
+    shortRunId: '#025000 (N=1,000: 84.4% 3-Attr / 93.7% Brand) & #022245 (N=25: 84% 5-Attr)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '95.0%–100% (5-Min Launch)',
+    unit: '84.4% 3-Attr • 93.7% Brand (N=1,000)',
     status: 'Production Ready',
     gapSummary: 'Replaces 3–4 week ViT-240 retraining cycle with 1 studio reference image upload.',
     howWeCloseIt: 'Top/bottom 25% promotional flash-banner zoom strip + zero-shot gallery onboarding.',
@@ -233,30 +233,30 @@ const PACK_PERFORMANCE = [
   { form: 'Jar / Tub', boxes: 174, packAcc: 91.4, skuAcc: 85.6, note: 'Vaseline, Ponds & Horlicks wide-mouth containers.' },
   { form: 'Bottle / Roll-On', boxes: 1549, packAcc: 90.8, skuAcc: 84.5, note: '54% of volume; shampoos, lotions & deo roll-ons.' },
   { form: 'Sachet (Single-Use Strip)', boxes: 154, packAcc: 89.6, skuAcc: 83.8, note: 'Clinic Plus, Sunsilk & Bru hanging strips.' },
-  { form: 'Tube (Squeeze Tube)', boxes: 318, packAcc: 88.4, skuAcc: 82.1, note: '+15.9% Variant lift (92.0% on hul_variants #021922) via EXP-21 1.15x unwarp + Middle-30% zoom.' },
+  { form: 'Tube (Squeeze Tube)', boxes: 318, packAcc: 92.7, skuAcc: 82.6, note: '82.6% 5-Attr / 91.8% 3-Attr on hul_variants (N=1,000 #025000) via EXP-21 1.15x unwarp + Middle-30% zoom.' },
   { form: 'Bar (Soap / Detergent Bar)', boxes: 159, packAcc: 87.4, skuAcc: 80.5, note: 'Stacked soap bars resolved via Soft-NMS + variant token rules.' },
 ];
 
 const SKU_TYPE_PERFORMANCE = [
-  { skuType: 'Unilever (HUL) Core SKUs', classes: '1,073 SKUs', legacy: 50.5, l1Acc: 98.9, l3Brand: 97.0, l4Variant: 92.0, l5Sku: 82.4, note: '82.4% Ultimate (#013248 N=1,000, jjuneja) • 80.3% Fast Hybrid (#013246 N=1,000 at 1.68s) • 80.0% Clean SFT (#203751, rgavigan).' },
-  { skuType: 'Competitor (Non-HUL) SKUs', classes: '1,586 SKUs', legacy: 0.0, l1Acc: 98.6, l3Brand: 95.0, l4Variant: 88.0, l5Sku: 81.4, note: '874 competitor brands expanded from Phase-1 "Others" bucket into named SKUs across hul_golden (N=1,000).' },
-  { skuType: 'Lookalike Sister Variants', classes: '1,922 Variants', legacy: 76.1, l1Acc: 100.0, l3Brand: 98.0, l4Variant: 92.0, l5Sku: 92.0, note: 'EXP-21 tube unwarp + Middle-30% / Bottom-25% zoom strips (#021922 on N=100 hul_variants, jjuneja).' },
-  { skuType: 'Promotional & Multipack SKUs', classes: '240 Promo SKUs', legacy: 75.0, l1Acc: 100.0, l3Brand: 100.0, l4Variant: 95.0, l5Sku: 95.0, note: '5-minute zero-shot gallery onboarding vs. 3–4 week ViT-240 retrain (#190525 95% & #190540 100%, jjuneja).' },
+  { skuType: 'Unilever (HUL) Core SKUs', classes: '1,073 SKUs', legacy: 50.5, l1Acc: 99.2, l3Brand: 97.4, l4Variant: 84.5, l5Sku: 84.5, note: '84.5% 5-Attr / 92.2% 3-Attr (#025000 N=1,000) • 82.4% Ultimate (#013248 N=1,000) • 80.3% Fast Hybrid (#013246 N=1,000 at 1.68s).' },
+  { skuType: 'Competitor (Non-HUL) SKUs', classes: '1,586 SKUs', legacy: 0.0, l1Acc: 98.6, l3Brand: 95.9, l4Variant: 81.4, l5Sku: 81.4, note: '874 competitor brands expanded from Phase-1 "Others" bucket into named SKUs across hul_golden & hul_brands (N=1,000 #034650).' },
+  { skuType: 'Lookalike Sister Variants', classes: '1,922 Variants', legacy: 76.1, l1Acc: 99.1, l3Brand: 97.2, l4Variant: 82.6, l5Sku: 82.6, note: '82.6% 5-Attr / 91.8% 3-Attr on N=1,000 hul_variants (#025000 3.8-Flash & 81.5% in 0.66s #025002, jjuneja).' },
+  { skuType: 'Promotional & Multipack SKUs', classes: '240 Promo SKUs', legacy: 75.0, l1Acc: 97.8, l3Brand: 93.7, l4Variant: 84.4, l5Sku: 84.0, note: '5-minute zero-shot gallery onboarding vs. 3–4 week ViT-240 retrain (N=1,000 #025000: 84.4% 3-Attr / 93.7% Brand; N=25 #022245: 84% 5-Attr / 100% Brand).' },
 ];
 
 const SYSTEM_EVOLUTION_KPIS = [
   { kpi: 'Pipeline Architecture & Maintenance', legacy: '13 chained models across 4 services', latest: '1 unified serverless Cloud Run pipeline', lever: 'Consolidated GT Merch, MT Market Share & Toker Promo into 1 control plane' },
   { kpi: 'Evaluation Split Integrity', legacy: '39.9% cross-folder duplicate overlap', latest: '100% disjoint splits (12/12 QC gates)', lever: 'MD5 deduplication across 1,002,209 crops -> 602,797 unique images' },
   { kpi: 'Competitor Brand Granularity', legacy: 'Grouped into 1 bucket ("Others")', latest: '953 named brands (1,586 rival SKUs)', lever: 'Expanded 874 competitor brands into individual brand & SKU classes' },
-  { kpi: 'Display Bay & Pack Detection (F2)', legacy: '51.1% (1-class) • 50.4% (yolov12s-sku110k)', latest: '94.4% gtmerch (#132251) • 93.8% ms_json (#132227)', lever: 'Decoupled Class 0 Display Bays from Class 1 Product Packs on CPU (0.08s–0.6s)' },
-  { kpi: 'L1 Unilever vs. Competitor Ownership', legacy: '86.8% (W3 Brand sheet)', latest: '98.9% (N=1,000 #013248) • 99.5% (#012034)', lever: 'Temporal M&A ownership ledger (Horlicks, Boost, Minimalist, OZiva, Pureit)' },
-  { kpi: 'L2A Store Category (10 Categories)', legacy: '83.2% (W2 Mean) • 22.1% packtype.h5 (N=1,000)', latest: '96.5% (N=1,000 #013248) • 97.0% SFT (#124906)', lever: 'System-1 CLM Gate + System-2 JEV (jjuneja) & LoRA SFT (rgavigan)' },
-  { kpi: 'L2B Packaging Form (46 Pairs)', legacy: '23.6% packtype.h5 on hul_golden (N=1,000 #010924)', latest: '92.2% (N=1,000 #013248) • 90.2% Fast (N=1,000 #013246)', lever: 'Harmonized 46 Category__PackType pairs + legacy_mapping_table.jsonl' },
-  { kpi: 'L3 Brand Identification (953 Brands)', legacy: '88.9% (#004620) / 85.2% (#013446) brand.h5 (N=1,000)', latest: '96.5% (N=1,000 #013248) • 98.0% SFT (#124906)', lever: 'Multi-attribute Hybrid & SFT beat 1-attribute .h5 while predicting all 5 levels' },
-  { kpi: 'L4 Product Variant (1,922 Variants)', legacy: '76.1% (W4 Mean: 57.4%–85.0%)', latest: '92.0% Variant / 98.0% Brand (N=100 #021922)', lever: 'EXP-21 1.15x cylindrical tube unwarp + Middle-30% zoom strip (0.67s)' },
-  { kpi: 'L5 Exact 5-Attr SKU (2,659 SKUs)', legacy: '50.5% W1 (W4×W5) • 16.0% Chained .h5 (#182625)', latest: '82.4% (#013248 N=1,000) • 80.3% Fast (#013246 N=1,000) • 80.0% SFT', lever: 'System-1 CLM Brand Gate + System-2 JEV Contact Sheet & LoRA SFT on N=1,000' },
-  { kpi: 'Full-Shelf End-to-End Pipeline (F2 / Acc)', legacy: '67.9%–76.7% F2 (16.8s–71.7s legacy VLM det)', latest: '86.9% F2 shelves (#190410 2.4s) • 97.1% F2 rpc (#103526)', lever: 'Stage-1 CPU ONNX detector + Stage-2A CLM gate + Stage-2B batched VLM' },
-  { kpi: 'GT/MT Merchandising & Promo Agility', legacy: '180s async queue • 4-Wk ViT-240 retrain (75.0%)', latest: '0.51s Promo (95%–100% #190525/#190540) • 5-Min Launch', lever: 'Dual-ONNX CPU detector + bay_planogram_verifier + 1-photo zero-shot promo' },
+  { kpi: 'Display Bay & Pack Detection (F2)', legacy: '51.1% (1-class) • 50.4% (yolov12s-sku110k)', latest: '69.5% F2 sku110k (#032240) • 100% Bay Block Purity (#022245)', lever: 'Decoupled Class 0 Display Bays from Class 1 Product Packs on CPU ($0.00004/shelf)' },
+  { kpi: 'L1 Unilever vs. Competitor Ownership', legacy: '86.8% (W3 Brand sheet)', latest: '99.2% (N=1,000 #025000) • 98.9% (N=1,000 #013248)', lever: 'Temporal M&A ownership ledger (Horlicks, Boost, Minimalist, OZiva, Pureit)' },
+  { kpi: 'L2A Store Category (10 Categories)', legacy: '83.2% (W2 Mean) • 22.1% packtype.h5 (N=1,000)', latest: '97.5% (N=1,000 #025000) • 96.5% (N=1,000 #013248)', lever: 'System-1 CLM Gate + System-2 JEV/CLEF (jjuneja) & LoRA SFT (rgavigan)' },
+  { kpi: 'L2B Packaging Form (46 Pairs)', legacy: '23.6% packtype.h5 on hul_golden (N=1,000 #010924)', latest: '93.3% (N=1,000 #025000) • 92.2% (N=1,000 #013248)', lever: 'Harmonized 46 Category__PackType pairs + legacy_mapping_table.jsonl' },
+  { kpi: 'L3 Brand Identification (953 Brands)', legacy: '88.9% (#004620) / 85.2% (#013446) brand.h5 (N=1,000)', latest: '97.4% (N=1,000 #025000) • 95.9% hul_brands (N=1,000 #034648)', lever: 'Multi-attribute Hybrid & SFT beat 1-attribute .h5 while predicting all 5 levels' },
+  { kpi: 'L4 Product Variant (1,922 Variants)', legacy: '76.1% (W4 Mean: 57.4%–85.0%)', latest: '82.6% 5-Attr / 91.8% 3-Attr (N=1,000 #025000 hul_variants)', lever: 'EXP-21 1.15x cylindrical tube unwarp + Middle-30% zoom strip (0.66s #025002)' },
+  { kpi: 'L5 Exact 5-Attr SKU (2,659 SKUs)', legacy: '50.5% W1 (W4×W5) • 16.0% Chained .h5 (#182625)', latest: '84.5% 5-Attr / 92.2% 3-Attr (#025000 N=1,000) • 82.4% (#013248 N=1,000)', lever: 'System-1 CLM Brand Gate + System-2 JEV/CLEF Contact Sheet & LoRA SFT on N=1,000' },
+  { kpi: 'Full-Shelf End-to-End Pipeline (F2 / Acc)', legacy: '67.9%–76.7% F2 (16.8s–71.7s legacy VLM det)', latest: '59.0% Stitched E2E (N=1,000 #012348) • 97.1% F2 rpc (#103526)', lever: 'Stage-1 CPU ONNX detector + Stage-2A CLM gate + Stage-2B batched VLM' },
+  { kpi: 'GT/MT Merchandising & Promo Agility', legacy: '180s async queue • 4-Wk ViT-240 retrain (75.0%)', latest: '84.4% 3-Attr / 93.7% Brand (N=1,000 #025000) • 5-Min Launch', lever: 'Dual-ONNX CPU detector + bay_planogram_verifier (#022245) + 1-photo zero-shot promo' },
 ];
 
 function renderLegacySourceFootnote() {
@@ -395,19 +395,19 @@ function renderOverviewTab() {
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
             <div>
-              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">5-Level SKU &amp; Shelf E2E</div>
-              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">80%–84% <span style="font-size:13px;color:#93c5fd;">(86.9%–97.1% E2E)</span></div>
-              <div style="font-size:11.5px;color:#cbd5e1;">Up from <strong>16.0%</strong> chained <code>.h5</code> / <strong>50.5%</strong> <code>W1</code>. <strong>94%–98%</strong> Brand • <strong>92%</strong> Variant (<code>#021922</code>).</div>
+              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">5-Level SKU &amp; 3-Attr Exact</div>
+              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">84.5% <span style="font-size:13px;color:#93c5fd;">(92.2% 3-Attr)</span></div>
+              <div style="font-size:11.5px;color:#cbd5e1;">Up from <strong>16.0%</strong> chained <code>.h5</code> / <strong>50.5%</strong> <code>W1</code>. <strong>97.4%</strong> Brand • <strong>82.6%</strong> Variant (N=1,000 <code>#025000</code>).</div>
             </div>
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Latency (p50)</div>
-              <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.9s / 2.0s–2.4s</div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>0.92s</strong> Zero-VLM Shelf (<code>#190425</code>) • <strong>1.99s</strong> Crop (N=1,000 <code>#013247</code>) • <strong>2.41s</strong> Hybrid Shelf (vs. 180s SLA).</div>
+              <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.66s–1.68s</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>0.66s</strong> Variant Hybrid (N=1,000 <code>#025002</code>) • <strong>1.68s</strong> Golden Hybrid (N=1,000 <code>#013246</code> vs. 180s SLA).</div>
             </div>
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Unit Cost &amp; Efficiency</div>
-              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">₹0.05–₹0.12 <span style="font-size:12px;font-weight:600;color:#93c5fd;">/ shelf</span></div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>₹0.049</strong> Zero-VLM shelf • <strong>₹0.12</strong> Hybrid Flash-Lite shelf • <strong>-75%</strong> VLM calls via neighbor grouping.</div>
+              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">$0.00023–$0.00051 <span style="font-size:12px;font-weight:600;color:#93c5fd;">/ crop</span></div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>$0.00023</strong> Zero-VLM CLM (N=1,000 <code>#013247</code>) • <strong>$0.00051</strong> Flash-Lite Hybrid (N=1,000 <code>#013248</code>).</div>
             </div>
           </div>
         </div>
@@ -424,19 +424,19 @@ function renderOverviewTab() {
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
             <div>
-              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Bay Detection &amp; Promo Acc</div>
-              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">94.4% / 95%–100%</div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>94.4%</strong> Det F2 (<code>#132251</code> vs. 51.1% 1-class) • <strong>97.5%–98.8%</strong> Bay Brand Purity • <strong>95%–100%</strong> Promo ID.</div>
+              <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Bay Purity &amp; Promo Acc</div>
+              <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">100% / 84.4%–93.7%</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>100%</strong> Bay Block Purity (<code>#022245</code>) • <strong>93.7%</strong> Promo Brand / <strong>84.4%</strong> 3-Attr (N=1,000 <code>#025000</code>).</div>
             </div>
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Audit Latency (p50)</div>
-              <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.08s–0.6s / 0.51s</div>
-              <div style="font-size:11.5px;color:#cbd5e1;"><strong>80ms–620ms</strong> CPU Bay+Pack Det (<code>₹0</code> token cost) • <strong>0.51s</strong> Promo Zoom Verifier (<code>#190525</code>).</div>
+              <div style="font-size:21px;font-weight:800;color:#6ee7b7;margin:2px 0;">0.97s–1.49s / 3.42s</div>
+              <div style="font-size:11.5px;color:#cbd5e1;"><strong>0.97s–1.49s</strong> CPU Bay+Pack Det (<code>#024028</code> / <code>#031926</code>) • <strong>3.42s</strong> Promo Verifier (<code>#022246</code>).</div>
             </div>
             <div>
               <div style="font-size:10.5px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Promo Launch &amp; Cost</div>
               <div style="font-size:21px;font-weight:800;color:#fff;margin:2px 0;">5 Minutes</div>
-              <div style="font-size:11.5px;color:#cbd5e1;">1-photo zero-shot onboarding (vs. <strong>3–4 wk</strong> <code>ViT-240</code> retrain) • <strong>₹0.011</strong> Zero-LLM Promo (<code>#190510</code>).</div>
+              <div style="font-size:11.5px;color:#cbd5e1;">1-photo zero-shot onboarding (vs. <strong>3–4 wk</strong> <code>ViT-240</code> retrain) • <strong>$0.00020</strong> Zero-LLM Promo (N=1,000 <code>#024958</code>).</div>
             </div>
           </div>
         </div>
