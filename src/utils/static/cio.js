@@ -15,6 +15,7 @@ const state = {
   activeStepIdx: 0,
   activeDataFixIdx: 0,
   perfView: 'task', // 'task' | 'evolution' | 'sku_type' | 'category' | 'pack'
+  sys2EscalationPct: 32, // % of crops/groups escalating from System 1 (Stage 2A) to System 2 (Stage 2B)
 };
 
 const PIPELINE_STEPS = [
@@ -726,40 +727,81 @@ function renderInteractiveProofSection() {
 function renderCompactCostSimulator() {
   const daily = state.dailyPhotos;
   const monthly = daily * 30;
-  const costHybrid = 0.1204;
-  const costFlash = 0.3510;
-  const costEmbed = 0.0485;
-  const usdHybridShelf = 0.00139;
-  const usdFlashShelf = 0.00410;
-  const usdEmbedShelf = 0.00059;
+  const escPct = state.sys2EscalationPct ?? 32;
+  const sys1Pct = 100 - escPct;
+  const alpha = escPct / 100.0;
+
+  // Individual stage unit costs (USD)
+  // Stage 1: CPU ONNX Detector (#031926)
+  const stg1CropUsd = 0.0000011;
+  const stg1ShelfUsd = 0.00004;
+  // Stage 2A (System 1): gemini-embedding-2 + Z-Score/LID (#013247)
+  // On a 35-pack shelf, 3.2x neighbor medoid grouping reduces 35 packs -> ~11 unique medoid groups
+  const sys1CropUsd = 0.00020;
+  const sys1ShelfUsd = 0.00055;
+  // Stage 2B (System 2): VLM Contact Sheet when 100% escalated (alpha = 1.0)
+  const sys2LitePerEscalatedCropUsd = 0.00090;
+  const sys2LiteFullShelfEscalatedUsd = 0.00250; // 11 medoid groups batched on 3.5 Flash-Lite
+  const sys2FlashPerEscalatedCropUsd = 0.00980;
+  const sys2FlashFullShelfEscalatedUsd = 0.01100; // 11 medoid groups batched on 3.8 Flash
+
+  // Dynamic blended costs at current System-2 escalation rate (alpha)
+  const usdHybridCrop = stg1CropUsd + sys1CropUsd + alpha * sys2LitePerEscalatedCropUsd;
+  const usdHybridShelf = stg1ShelfUsd + sys1ShelfUsd + alpha * sys2LiteFullShelfEscalatedUsd;
+  const usdHybridBay = usdHybridShelf * 3;
+  const costHybrid = usdHybridShelf * 86.5;
+
+  const usdFlashCrop = stg1CropUsd + sys1CropUsd + alpha * sys2FlashPerEscalatedCropUsd;
+  const usdFlashShelf = stg1ShelfUsd + sys1ShelfUsd + alpha * sys2FlashFullShelfEscalatedUsd;
+  const usdFlashBay = usdFlashShelf * 3;
+  const costFlash = usdFlashShelf * 86.5;
+
+  const usdEmbedShelf = stg1ShelfUsd + sys1ShelfUsd;
+  const costEmbed = usdEmbedShelf * 86.5;
 
   return `
     <section class="cio-panel">
       <div class="cio-panel-header" style="margin-bottom:12px;">
         <div>
-          <h3 class="cio-panel-title">Scale &amp; Cost Simulator: Per-Shelf (~35 Packs), Per-Bay (3 Shelves) &amp; Per-Crop Economics</h3>
-          <p class="cio-panel-subtitle">Real Cloud Run token &amp; CPU telemetry across single-crop (~1 pack), full-shelf (~35 packs), and store bay session (3 shelves / ~105 packs)</p>
+          <h3 class="cio-panel-title">Scale &amp; Stage-Level Cost Simulator: Stage 1 &bull; System 1 (Fast Path) &bull; System 2 (VLM Escalation)</h3>
+          <p class="cio-panel-subtitle">Individual stage costing across single-crop (~1 pack), full-shelf (~35 packs &rarr; ~11 unique medoid groups), and 3-shelf store bay (~105 packs)</p>
         </div>
-        <span class="mono" style="color:#0057b8;font-size:14px;font-weight:700;">
-          ${daily.toLocaleString('en-IN')} shelf photos/day (${(monthly / 1000000).toFixed(1)}M / mo)
+        <span class="mono" style="color:#0057b8;font-size:13.5px;font-weight:700;">
+          ${daily.toLocaleString('en-IN')} shelves/day &bull; Sys-1 Capture: ${sys1Pct}% / Sys-2 Escalation: ${escPct}%
         </span>
       </div>
 
-      <input id="cio-volume-slider" type="range" min="50000" max="1000000" step="10000" value="${daily}"
-        style="width:100%;accent-color:#0057b8;cursor:pointer;margin-bottom:14px;" />
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:14px;margin-bottom:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#0f172a;margin-bottom:4px;">
+            <span>1. Daily Shelf Photo Volume</span>
+            <span class="mono" style="color:#0057b8;">${daily.toLocaleString('en-IN')} / day (${(monthly / 1000000).toFixed(1)}M / mo)</span>
+          </div>
+          <input id="cio-volume-slider" type="range" min="50000" max="1000000" step="10000" value="${daily}"
+            style="width:100%;accent-color:#0057b8;cursor:pointer;" />
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#0f172a;margin-bottom:4px;">
+            <span>2. System 2 (Stage 2B VLM) Escalation Rate</span>
+            <span class="mono" style="color:#0057b8;">${escPct}% Sys-2 (${sys1Pct}% Sys-1 Fast Path)${escPct === 32 ? ' [Measured Default]' : ''}</span>
+          </div>
+          <input id="cio-escalation-slider" type="range" min="0" max="100" step="1" value="${escPct}"
+            style="width:100%;accent-color:#0057b8;cursor:pointer;" />
+        </div>
+      </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:14px;">
         <div style="border:2px solid #0057b8;background:#eff6ff;border-radius:10px;padding:14px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-            <span class="badge badge-blue">Recommended Production Default</span>
+            <span class="badge badge-blue">Recommended Production (${escPct}% Sys-2)</span>
             <span class="mono" style="font-size:12px;font-weight:700;color:#0057b8;">2.5s–4.8s</span>
           </div>
           <div style="font-weight:700;color:#0f172a;">Hybrid + Gemini 3.5 Flash-Lite</div>
           <div style="font-size:21px;font-weight:800;color:#0057b8;margin:4px 0;">
-            $0.00114–$0.00145 <span style="font-size:12px;font-weight:600;color:#334155;">/ shelf (${fmtInr(costHybrid)})</span>
+            $${usdHybridShelf.toFixed(5)} <span style="font-size:12px;font-weight:600;color:#334155;">/ shelf (${fmtInr(costHybrid)})</span>
           </div>
           <div style="font-size:11.5px;color:#1e3a8a;margin-bottom:4px;">
-            <strong>$0.00341 / 3-shelf bay</strong> (<code>#022245</code>) &bull; <strong>$0.00046–$0.00051 / crop</strong> (<code>#025000</code>/<code>#013248</code>)
+            <strong>$${usdHybridBay.toFixed(5)} / 3-shelf bay</strong> &bull; <strong>$${usdHybridCrop.toFixed(5)} / crop</strong> (<code>#025000</code>/<code>#013248</code>)
           </div>
           <div style="font-size:12px;color:#0f172a;font-weight:700;">
             $${Math.round(daily * usdHybridShelf).toLocaleString('en-US')}/day (${fmtCompactInr(daily * costHybrid)}) &bull; $${Math.round(monthly * usdHybridShelf).toLocaleString('en-US')}/mo (${fmtCompactInr(monthly * costHybrid)})
@@ -768,15 +810,15 @@ function renderCompactCostSimulator() {
 
         <div style="border:1px solid #e2e8f0;background:#ffffff;border-radius:10px;padding:14px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-            <span class="badge badge-pass">Peak-Accuracy Cosmetics &amp; Tubes</span>
+            <span class="badge badge-pass">Peak-Accuracy (${escPct}% Sys-2)</span>
             <span class="mono" style="font-size:12px;font-weight:700;color:#475569;">1.68s–5.4s</span>
           </div>
           <div style="font-weight:700;color:#0f172a;">Hybrid + Gemini 3.8 Flash</div>
           <div style="font-size:21px;font-weight:800;color:#0f172a;margin:4px 0;">
-            $0.00410–$0.00658 <span style="font-size:12px;font-weight:600;color:#64748b;">/ shelf (${fmtInr(costFlash)})</span>
+            $${usdFlashShelf.toFixed(5)} <span style="font-size:12px;font-weight:600;color:#64748b;">/ shelf (${fmtInr(costFlash)})</span>
           </div>
           <div style="font-size:11.5px;color:#475569;margin-bottom:4px;">
-            <strong>$0.0123–$0.0197 / 3-shelf bay</strong> &bull; <strong>$0.00330–$0.00636 / crop</strong> (<code>#025002</code>/<code>#025000</code>)
+            <strong>$${usdFlashBay.toFixed(5)} / 3-shelf bay</strong> &bull; <strong>$${usdFlashCrop.toFixed(5)} / crop</strong> (<code>#025002</code>/<code>#025000</code>)
           </div>
           <div style="font-size:12px;color:#334155;font-weight:700;">
             $${Math.round(daily * usdFlashShelf).toLocaleString('en-US')}/day (${fmtCompactInr(daily * costFlash)}) &bull; $${Math.round(monthly * usdFlashShelf).toLocaleString('en-US')}/mo (${fmtCompactInr(monthly * costFlash)})
@@ -785,15 +827,15 @@ function renderCompactCostSimulator() {
 
         <div style="border:1px solid #e2e8f0;background:#ffffff;border-radius:10px;padding:14px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-            <span class="badge badge-amber">Zero-VLM Edge / Vector Mode</span>
+            <span class="badge badge-amber">100% System-1 Fast Path (0% Sys-2)</span>
             <span class="mono" style="font-size:12px;font-weight:700;color:#475569;">0.9s–1.5s</span>
           </div>
-          <div style="font-weight:700;color:#0f172a;">CPU Detector + Embeddings Only</div>
+          <div style="font-weight:700;color:#0f172a;">Stage 1 ONNX + System 1 Embeddings Only</div>
           <div style="font-size:21px;font-weight:800;color:#0f172a;margin:4px 0;">
             $0.00059 <span style="font-size:12px;font-weight:600;color:#64748b;">/ shelf (${fmtInr(costEmbed)})</span>
           </div>
           <div style="font-size:11.5px;color:#475569;margin-bottom:4px;">
-            <strong>$0.00004/shelf</strong> CPU Det Only (<code>#031926</code>) &bull; <strong>$0.00177 / bay</strong> &bull; <strong>$0.00020–$0.00023 / crop</strong>
+            <strong>$0.00004/shelf</strong> Stage 1 CPU (<code>#031926</code>) + <strong>$0.00055/shelf</strong> Sys 1 Embed &bull; <strong>$0.00020 / crop</strong>
           </div>
           <div style="font-size:12px;color:#334155;font-weight:700;">
             $${Math.round(daily * usdEmbedShelf).toLocaleString('en-US')}/day (${fmtCompactInr(daily * costEmbed)}) &bull; $${Math.round(monthly * usdEmbedShelf).toLocaleString('en-US')}/mo (${fmtCompactInr(monthly * costEmbed)})
@@ -803,66 +845,100 @@ function renderCompactCostSimulator() {
 
       <details open style="margin-top:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">
         <summary style="cursor:pointer;font-size:12.5px;font-weight:700;color:#0057b8;">
-          Why Full-Shelf Image Cost ($0.00114–$0.00145 / shelf) Is 9x–29x Lower Than Naive Per-Crop VLM Calling &blacktriangledown;
+          Individual Stage Costing (Stage 1 &bull; System 1 &bull; System 2) &amp; What Happens If System 2 Escalation Increases &blacktriangledown;
         </summary>
         <div style="margin-top:8px;font-size:12px;color:#334155;line-height:1.5;">
-          A retail shelf photo contains <strong>~35 product packs</strong> (<code>32.4</code> on <code>gtmerch_golden</code>, <code>41.0</code> on <code>ms_json_golden</code>), and a store bay session captures <strong>3 shelf photos (~105 packs)</strong>. Instead of invoking a VLM 35 separate times per shelf, our 3-stage funnel runs:
-          <strong>(1) Stage 1 CPU ONNX Detector</strong> (<code>$0.00004/shelf</code>, <code>#031926</code>) &rarr;
-          <strong>(2) Stage 2A 3.2x Spatial Neighbor Medoid Grouping + <code>gemini-embedding-2</code> CLM Gate</strong> (resolves ~68% of packs in vector space for <code>$0.00055/shelf</code>) &rarr;
-          <strong>(3) Stage 2B 1 Batched Contact Sheet VLM Call</strong> on only the ~11 ambiguous lookalike variants (<code>$0.00055–$0.00086/shelf</code> on Flash-Lite).
+          Every shelf image (~35 product packs) is costed across <strong>3 individual stages</strong>. Crucially, even if <strong>System 1 (Stage 2A)</strong> cannot resolve a newly launched variant or small icon directly and <strong>System 2 (Stage 2B) escalation increases up to 100%</strong>, <strong>System 1's 3.2x Spatial Neighbor Medoid Dedup still groups identical adjacent packs on the shelf</strong> (<code>35 facings &rarr; ~11 unique product groups</code>) and prunes the catalog from <code>2,659 SKUs &rarr; Top 5 candidates</code>, capping worst-case 100% System-2 shelf cost at <strong>$0.00309/shelf</strong> on Flash-Lite (still <strong>11x–128x cheaper</strong> than naive per-crop VLM calling).
         </div>
         <div class="cio-table-wrap" style="margin-top:8px;">
           <table class="cio-table" style="font-size:11.5px;">
             <thead>
               <tr>
-                <th>Architecture Tier &amp; Verified Cloud Run ID</th>
-                <th>Per-Crop Cost (1 Pack)</th>
-                <th>Full Shelf Image (~35 Packs)</th>
-                <th>3-Shelf Store Bay (~105 Packs)</th>
-                <th>506,531 Photos/Day</th>
-                <th>Accuracy (N=1,000)</th>
+                <th>Individual Pipeline Stage / Escalation Scenario</th>
+                <th>Standalone Cost (If 100% Invoked)</th>
+                <th>Per-Crop Blended (${escPct}% Sys-2)</th>
+                <th>Full Shelf (~35 Packs &rarr; 11 Groups)</th>
+                <th>3-Shelf Bay (~105 Packs)</th>
+                <th>${daily.toLocaleString('en-IN')} Photos/Day</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td><strong>Stage 1 CPU ONNX Detector Only</strong> (<code>#031926</code> N=100 / <code>#032240</code> N=60)</td>
-                <td class="mono">$0.000001 / box</td>
+                <td><strong>Stage 1: CPU ONNX Spatial Detector</strong> (<code>yolo11n-distilled-onnx</code>, <code>#031926</code>)<br/><span style="font-size:10.5px;color:#64748b;">Runs on 100% of shelves; boxes Display Bays (Class 0) &amp; SKUs (Class 1) on CPU</span></td>
+                <td class="mono">$0.000001 / box<br/>$0.000040 / shelf</td>
+                <td class="mono">$0.000001 / crop</td>
                 <td class="mono"><strong>$0.00004 / shelf</strong> (₹0.003)</td>
                 <td class="mono"><strong>$0.00012 / bay</strong> (₹0.01)</td>
-                <td class="mono">$20 / day</td>
-                <td><strong>69.5% Det F2</strong> (1.49s CPU)</td>
+                <td class="mono">$${Math.round(daily * stg1ShelfUsd).toLocaleString('en-US')} / day</td>
               </tr>
               <tr>
-                <td><strong>Zero-VLM CLM Vector Search</strong> (<code>#013247</code> golden / <code>#024958</code> promos N=1,000)</td>
-                <td class="mono">$0.00020–$0.00023 / crop</td>
-                <td class="mono"><strong>$0.00059 / shelf</strong> (₹0.05)</td>
-                <td class="mono"><strong>$0.00177 / bay</strong> (₹0.15)</td>
-                <td class="mono">$299 / day</td>
-                <td><strong>78.6% 5-Attr / 89.5% 3-Attr</strong></td>
-              </tr>
-              <tr style="background:#eff6ff;">
-                <td><strong>Recommended: Hybrid + 3.5 Flash-Lite</strong> (<code>#013248</code> / <code>#025000</code> N=1,000 &bull; <code>#022245</code> Bay)</td>
-                <td class="mono"><strong>$0.00046–$0.00051 / crop</strong></td>
-                <td class="mono"><strong style="color:#0057b8;">$0.00114–$0.00145 / shelf</strong> (₹0.10–₹0.13)</td>
-                <td class="mono"><strong style="color:#0057b8;">$0.00341 / bay</strong> (₹0.30)</td>
-                <td class="mono"><strong>$577–$704 / day</strong></td>
-                <td><strong>79.5%–81.9% 5-Attr / 91.4% 3-Attr / 99.4% Bay</strong></td>
+                <td><strong>Stage 2A (System 1 — Fast Path): <code>gemini-embedding-2</code> + Z-Score/LID</strong> (<code>#013247</code>)<br/><span style="font-size:10.5px;color:#64748b;">3.2x neighbor medoid dedup (35 packs &rarr; 11 groups); resolves <strong>${sys1Pct}%</strong> of packs at $0 VLM cost</span></td>
+                <td class="mono">$0.000200 / crop<br/>$0.000550 / shelf</td>
+                <td class="mono">$0.000200 / crop</td>
+                <td class="mono"><strong>$0.00055 / shelf</strong> (₹0.048)</td>
+                <td class="mono"><strong>$0.00165 / bay</strong> (₹0.14)</td>
+                <td class="mono">$${Math.round(daily * sys1ShelfUsd).toLocaleString('en-US')} / day</td>
               </tr>
               <tr>
-                <td><strong>Peak-Accuracy: Hybrid + 3.8 Flash</strong> (<code>#025000</code> CLEF / <code>#013248</code> Ultimate N=1,000)</td>
-                <td class="mono">$0.00330–$0.00636 / crop</td>
-                <td class="mono"><strong>$0.00410–$0.00658 / shelf</strong> (₹0.35–₹0.57)</td>
-                <td class="mono"><strong>$0.0123–$0.0197 / bay</strong></td>
-                <td class="mono">$2,077 / day</td>
-                <td><strong>82.4%–84.5% 5-Attr / 92.2% 3-Attr / 100% Bay</strong></td>
+                <td><strong>Stage 2B (System 2 — Slow Path VLM): <code>d-JEV / CLEF</code> Contact Sheet (3.5 Flash-Lite)</strong><br/><span style="font-size:10.5px;color:#64748b;">Invoked only on the <strong>${escPct}%</strong> low-margin lookalike / small-icon / new-variant ties</span></td>
+                <td class="mono">$0.000900 / escalated crop<br/>$0.002500 / 100% shelf</td>
+                <td class="mono">$${(alpha * sys2LitePerEscalatedCropUsd).toFixed(6)} / crop</td>
+                <td class="mono"><strong>$${(alpha * sys2LiteFullShelfEscalatedUsd).toFixed(5)} / shelf</strong> (${fmtInr(alpha * sys2LiteFullShelfEscalatedUsd * 86.5)})</td>
+                <td class="mono"><strong>$${(alpha * sys2LiteFullShelfEscalatedUsd * 3).toFixed(5)} / bay</strong></td>
+                <td class="mono">$${Math.round(daily * alpha * sys2LiteFullShelfEscalatedUsd).toLocaleString('en-US')} / day</td>
+              </tr>
+              <tr style="background:#eff6ff;font-weight:700;">
+                <td><strong>Total All 3 Stages Combined (at ${sys1Pct}% Sys-1 Capture / ${escPct}% Sys-2 Escalation)</strong></td>
+                <td class="mono">Stage 1 + Sys 1 + ${escPct}% Sys 2</td>
+                <td class="mono" style="color:#0057b8;">$${usdHybridCrop.toFixed(5)} / crop</td>
+                <td class="mono" style="color:#0057b8;">$${usdHybridShelf.toFixed(5)} / shelf (${fmtInr(costHybrid)})</td>
+                <td class="mono" style="color:#0057b8;">$${usdHybridBay.toFixed(5)} / bay (${fmtInr(costHybrid * 3)})</td>
+                <td class="mono" style="color:#0057b8;">$${Math.round(daily * usdHybridShelf).toLocaleString('en-US')} / day</td>
+              </tr>
+              <tr style="background:#f8fafc;">
+                <td colspan="6" style="font-size:11px;font-weight:700;color:#475569;padding-top:8px;">
+                  Sensitivity Reference: What Happens If System 1 Captures Less &amp; System 2 Escalation Rises in Production?
+                </td>
+              </tr>
+              <tr>
+                <td>&bull; <strong>68% Sys-1 Capture / 32% Sys-2 Escalation</strong> (Measured N=1,000 Benchmark Default)</td>
+                <td class="mono">3.5 / 11 groups escalate</td>
+                <td class="mono">$0.00049 / crop</td>
+                <td class="mono"><strong>$0.00139 / shelf</strong> (₹0.12)</td>
+                <td class="mono"><strong>$0.00417 / bay</strong> (₹0.36)</td>
+                <td class="mono">$704 / day</td>
+              </tr>
+              <tr>
+                <td>&bull; <strong>50% Sys-1 Capture / 50% Sys-2 Escalation</strong> (Dense Lookalike Variant / Tube Shelves)</td>
+                <td class="mono">5.5 / 11 groups escalate</td>
+                <td class="mono">$0.00065 / crop</td>
+                <td class="mono"><strong>$0.00184 / shelf</strong> (₹0.16)</td>
+                <td class="mono"><strong>$0.00552 / bay</strong> (₹0.48)</td>
+                <td class="mono">$932 / day</td>
+              </tr>
+              <tr>
+                <td>&bull; <strong>25% Sys-1 Capture / 75% Sys-2 Escalation</strong> (Major New Artwork / Promo Launch Wave)</td>
+                <td class="mono">8.3 / 11 groups escalate</td>
+                <td class="mono">$0.00088 / crop</td>
+                <td class="mono"><strong>$0.00247 / shelf</strong> (₹0.21)</td>
+                <td class="mono"><strong>$0.00740 / bay</strong> (₹0.64)</td>
+                <td class="mono">$1,249 / day</td>
+              </tr>
+              <tr>
+                <td>&bull; <strong>0% Sys-1 Capture / 100% Sys-2 Escalation</strong> (Worst-Case: Every Medoid Group Escalates)</td>
+                <td class="mono">11 / 11 groups escalate</td>
+                <td class="mono">$0.00110 / crop</td>
+                <td class="mono"><strong>$0.00309 / shelf</strong> (₹0.27)</td>
+                <td class="mono"><strong>$0.00927 / bay</strong> (₹0.80)</td>
+                <td class="mono">$1,565 / day</td>
               </tr>
               <tr style="color:#64748b;">
-                <td><em>Baseline Comparison: Naive 35x Single-Crop SFT / VLM</em> (<code>#021828</code> / <code>#013249</code> N=1,000)</td>
+                <td>&bull; <em>Naive Un-Grouped 35x Single-Crop SFT / VLM Baseline</em> (<code>#021828</code> / <code>#013249</code>)</td>
+                <td class="mono">35 / 35 raw crops call VLM</td>
                 <td class="mono">$0.00095–$0.01129 / crop</td>
-                <td class="mono">$0.03325–$0.39515 / shelf (₹2.88–₹34.22)</td>
+                <td class="mono">$0.03325–$0.39515 / shelf</td>
                 <td class="mono">$0.0998–$1.185 / bay</td>
                 <td class="mono">$16,842 / day</td>
-                <td>70.4% 3-Attr SFT (29x costlier per shelf)</td>
               </tr>
             </tbody>
           </table>
@@ -890,6 +966,13 @@ function bindOverviewEvents() {
   if (slider) {
     slider.oninput = (e) => {
       state.dailyPhotos = Number(e.target.value);
+      render();
+    };
+  }
+  const escSlider = document.getElementById('cio-escalation-slider');
+  if (escSlider) {
+    escSlider.oninput = (e) => {
+      state.sys2EscalationPct = Number(e.target.value);
       render();
     };
   }
