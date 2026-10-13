@@ -153,14 +153,23 @@ def main(argv: list[str] | None = None) -> int:
                    choices=("shelves", "rpc", "pack", "brand", "variant", "hul_golden", "gtmerch_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos"))
     s.add_argument("--task", default="all3", choices=("all3", "category", "brand", "variant"),
                    help="target task when --dataset=variant")
+    s.add_argument("--fields", type=int, default=5, choices=(3, 5),
+                   help="HUL Golden SFT attribute count: 5 (product, brand, base_variant, packaging_type, category) or 3 (brand, packaging_type, category)")
     s.add_argument("--base-model", default="gemini-3.5-flash-lite")
     s.add_argument("--display-name", default="shelf-bench-jev-laya-sft")
+    s.add_argument("--region", default=None, help="Vertex AI region for SFT job (e.g. us-central1, europe-west4)")
     s.add_argument("--epochs", type=int, default=4)
     s.add_argument("--adapter-size", type=int, default=4, choices=(1, 4, 8, 16))
     s.add_argument("--lr-multiplier", type=float, default=1.0)
     s.add_argument("--out-dir", default="data/tuning")
     s.add_argument("--build-only", action="store_true", help="only build local train/val JSONL files")
     s.add_argument("--upload-only", action="store_true", help="build and upload SFT JSONL files to GCS without launching a tuning job")
+    s.add_argument("--launch-only", action="store_true", help="launch Vertex AI SFT job directly from pre-built GCS JSONL URIs")
+    s.add_argument("--train-uri", default=None, help="override GCS train.jsonl URI when launching SFT")
+    s.add_argument("--val-uri", default=None, help="override GCS val.jsonl URI when launching SFT")
+    s.add_argument("--max-train", type=int, default=None, help="create a temporary GCS subset of at most N training examples before launching SFT")
+    s.add_argument("--max-val", type=int, default=None, help="create a temporary GCS subset of at most M validation examples before launching SFT")
+    s.add_argument("--clean-hul-golden", action="store_true", help="clean and stratify hul_golden train/val/test splits in GCS (zero local files) and optionally launch SFT")
     s.add_argument("--clean-local", action="store_true", help="remove local JSONL output dir after uploading to GCS")
     s.add_argument("--status", action="store_true", help="list Vertex AI tuning jobs and endpoints")
 
@@ -331,31 +340,72 @@ def main(argv: list[str] | None = None) -> int:
 
         cloud.bootstrap()
     elif a.cmd == "tune":
-        from utils import tuning
+        import json
+
+        from utils.gemini_fine_tuning import tuning
 
         if a.status:
-            for j in tuning.list_sft_jobs(cfg):
+            for j in tuning.list_sft_jobs(cfg, region=a.region):
                 print(f"  {j['name']}  state={j['state']}  base={j['base_model']}  endpoint={j['endpoint']}")
             return 0
-        built = tuning.build_sft_jsonl(
-            a.dataset,
-            a.out_dir,
-            upload=not a.build_only,
-            task=a.task,
-            clean_local=a.clean_local,
-        )
-        print(f"Built {built['train_count']} train / {built['val_count']} val examples in {built['out_dir']}")
-        if a.build_only or a.upload_only:
+        if a.clean_hul_golden:
+            from utils.gemini_fine_tuning.hul_golden_sft import (
+                DEFAULT_5ATTR_PROMPT_TEXT,
+                DEFAULT_PROMPT_TEXT,
+                HulGoldenSftConfig,
+                build_clean_splits_in_gcp,
+            )
+
+            f_mode = int(getattr(a, "fields", 5) or 5)
+            out_pref = "derived_manifests/hul_golden/sft_5attr" if f_mode >= 5 else "derived_manifests/hul_golden/sft_3attr"
+            default_disp = (
+                "marketshare-hul-golden-5attr-sft-euw4-gemini-3-5-flash-lite"
+                if f_mode >= 5
+                else "marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite"
+            )
+            hcfg = HulGoldenSftConfig(
+                output_prefix=out_pref,
+                fields_mode=f_mode,
+                region=a.region or HulGoldenSftConfig.region,
+                base_model=a.base_model,
+                tuned_model_display_name=a.display_name if a.display_name != "shelf-bench-jev-laya-sft" else default_disp,
+                epoch_count=a.epochs,
+                learning_rate_multiplier=a.lr_multiplier,
+                adapter_size=a.adapter_size,
+                prompt_text=DEFAULT_5ATTR_PROMPT_TEXT if f_mode >= 5 else DEFAULT_PROMPT_TEXT,
+            )
+            stats = build_clean_splits_in_gcp(hcfg, launch_sft=not (a.build_only or a.upload_only), app_config=cfg)
+            print(json.dumps(stats, indent=2))
             return 0
+        if a.launch_only or a.train_uri:
+            resolved = {} if a.train_uri else tuning.resolve_sft_dataset_uris(a.dataset, task=a.task)
+            train_uri = a.train_uri or resolved["train_uri"]
+            val_uri = a.val_uri or resolved.get("val_uri")
+        else:
+            built = tuning.build_sft_jsonl(
+                a.dataset,
+                a.out_dir,
+                upload=not a.build_only,
+                task=a.task,
+                clean_local=a.clean_local,
+            )
+            print(f"Built {built['train_count']} train / {built['val_count']} val examples in {built['out_dir']}")
+            if a.build_only or a.upload_only:
+                return 0
+            train_uri, val_uri = built["train_uri"], built["val_uri"]
+        if a.max_train or a.max_val:
+            sub_res = tuning.subset_gcs_sft_jsonl(train_uri, val_uri, max_train=a.max_train, max_val=a.max_val)
+            train_uri, val_uri = sub_res["train_uri"], sub_res["val_uri"]
         job = tuning.launch_sft_job(
-            built["train_uri"],
-            built["val_uri"],
+            train_uri,
+            val_uri,
             base_model=a.base_model,
             display_name=a.display_name,
             epochs=a.epochs,
             adapter_size=a.adapter_size,
             learning_rate_multiplier=a.lr_multiplier,
             config=cfg,
+            region=a.region,
         )
         print(f"Launched Vertex AI SFT job: {job['name']} (state={job['state']}, endpoint={job['endpoint']})")
     elif a.cmd == "sync-brands":

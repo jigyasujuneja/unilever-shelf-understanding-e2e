@@ -57,6 +57,14 @@ TUNABLE_DATASETS = (
 )
 
 MARKETSHARE_BUCKET = "gs://marketshare-datasets"
+# GCS folders and per-task (train, val) file names of the build_marketshare_*_jsonl outputs.
+SFT_JSONL_DIRS = {"pack": "pack_data/pack/jsonl", "brand": "brand_data/brand/jsonl", "variant": "input_data/jsonl"}
+SFT_SPLIT_FILES = {
+    "all3": ("train_stratified.jsonl", "val_stratified.jsonl"),
+    "category": ("train_category_stratified.jsonl", "val_category_stratified.jsonl"),
+    "brand": ("train_brand_stratified.jsonl", "val_brand_stratified.jsonl"),
+    "variant": ("train_variant_stratified.jsonl", "val_variant_stratified.jsonl"),
+}
 
 PACK_CATEGORIES = (
     "Beverages", "DMT", "Foods", "HFD", "HHC",
@@ -324,7 +332,7 @@ def build_marketshare_pack_jsonl(
     """Build per-folder, full, and stratified SFT JSONL files for `pack_data/pack/train`."""
 
     train_prefix = f"{gcs_bucket.rstrip('/')}/pack_data/pack/train/"
-    gcs_dest = f"{gcs_bucket.rstrip('/')}/pack_data/pack/jsonl"
+    gcs_dest = f"{gcs_bucket.rstrip('/')}/{SFT_JSONL_DIRS['pack']}"
     if uris is None:
         blobs_map = list_gcs_image_blobs(train_prefix)
         raw_uris = sorted(blobs_map)
@@ -379,8 +387,7 @@ def build_marketshare_pack_jsonl(
     (out_p / "train.jsonl").write_text(
         "\n".join(full_train_records) + ("\n" if full_train_records else ""), encoding="utf-8"
     )
-    train_f = out_p / "train_stratified.jsonl"
-    val_f = out_p / "val_stratified.jsonl"
+    train_f, val_f = (out_p / f for f in SFT_SPLIT_FILES["all3"])
     train_f.write_text("\n".join(train_stratified) + ("\n" if train_stratified else ""), encoding="utf-8")
     val_f.write_text("\n".join(val_stratified) + ("\n" if val_stratified else ""), encoding="utf-8")
 
@@ -397,8 +404,8 @@ def build_marketshare_pack_jsonl(
         "val_count": len(val_stratified),
         "class_count": len(by_folder),
         "gcs_prefix": gcs_dest,
-        "train_uri": f"{gcs_dest}/train_stratified.jsonl",
-        "val_uri": f"{gcs_dest}/val_stratified.jsonl",
+        "train_uri": f"{gcs_dest}/{train_f.name}",
+        "val_uri": f"{gcs_dest}/{val_f.name}",
     }
 
 
@@ -416,7 +423,7 @@ def build_marketshare_brand_jsonl(
     """Build per-brand, full, and stratified SFT JSONL files for `brand_data/brand/brand_data`."""
 
     train_prefix = f"{gcs_bucket.rstrip('/')}/brand_data/brand/brand_data/"
-    gcs_dest = f"{gcs_bucket.rstrip('/')}/brand_data/brand/jsonl"
+    gcs_dest = f"{gcs_bucket.rstrip('/')}/{SFT_JSONL_DIRS['brand']}"
     if uris is None:
         blobs_map = list_gcs_image_blobs(train_prefix)
         raw_uris = sorted(blobs_map)
@@ -475,8 +482,7 @@ def build_marketshare_brand_jsonl(
     (out_p / "train.jsonl").write_text(
         "\n".join(full_train_records) + ("\n" if full_train_records else ""), encoding="utf-8"
     )
-    train_f = out_p / "train_stratified.jsonl"
-    val_f = out_p / "val_stratified.jsonl"
+    train_f, val_f = (out_p / f for f in SFT_SPLIT_FILES["all3"])
     train_f.write_text("\n".join(train_stratified) + ("\n" if train_stratified else ""), encoding="utf-8")
     val_f.write_text("\n".join(val_stratified) + ("\n" if val_stratified else ""), encoding="utf-8")
 
@@ -504,8 +510,8 @@ def build_marketshare_brand_jsonl(
         "val_count": len(val_stratified),
         "class_count": len(by_brand),
         "gcs_prefix": gcs_dest,
-        "train_uri": f"{gcs_dest}/train_stratified.jsonl",
-        "val_uri": f"{gcs_dest}/val_stratified.jsonl",
+        "train_uri": f"{gcs_dest}/{train_f.name}",
+        "val_uri": f"{gcs_dest}/{val_f.name}",
     }
 
 
@@ -524,7 +530,7 @@ def build_marketshare_variant_jsonl(
     """Build per-folder, full, and multi-task stratified SFT JSONL files for `input_data/variant_*`."""
 
     input_prefix = f"{gcs_bucket.rstrip('/')}/input_data/"
-    gcs_dest = f"{gcs_bucket.rstrip('/')}/input_data/jsonl"
+    gcs_dest = f"{gcs_bucket.rstrip('/')}/{SFT_JSONL_DIRS['variant']}"
     if uris is None:
         blobs_map: dict[str, str] = {}
         for cat in VARIANT_CATEGORIES:
@@ -631,10 +637,10 @@ def build_marketshare_variant_jsonl(
         "\n".join(full_train_records) + ("\n" if full_train_records else ""), encoding="utf-8"
     )
     files_by_task = {
-        "all3": ("train_stratified.jsonl", "val_stratified.jsonl", train_all3, val_all3),
-        "category": ("train_category_stratified.jsonl", "val_category_stratified.jsonl", train_cat, val_cat),
-        "brand": ("train_brand_stratified.jsonl", "val_brand_stratified.jsonl", train_brand, val_brand),
-        "variant": ("train_variant_stratified.jsonl", "val_variant_stratified.jsonl", train_var, val_var),
+        "all3": (*SFT_SPLIT_FILES["all3"], train_all3, val_all3),
+        "category": (*SFT_SPLIT_FILES["category"], train_cat, val_cat),
+        "brand": (*SFT_SPLIT_FILES["brand"], train_brand, val_brand),
+        "variant": (*SFT_SPLIT_FILES["variant"], train_var, val_var),
     }
     for t_name, v_name, tr, vl in files_by_task.values():
         (out_p / t_name).write_text("\n".join(tr) + ("\n" if tr else ""), encoding="utf-8")
@@ -657,6 +663,68 @@ def build_marketshare_variant_jsonl(
         "gcs_prefix": gcs_dest,
         "train_uri": f"{gcs_dest}/{sel_train_name}",
         "val_uri": f"{gcs_dest}/{sel_val_name}",
+    }
+
+
+def resolve_sft_dataset_uris(
+    dataset_name: str = "pack",
+    task: str = "all3",
+    gcs_bucket: str = MARKETSHARE_BUCKET,
+) -> dict[str, Any]:
+    """GCS ``train_uri`` / ``val_uri`` of already-built SFT JSONL (``tune --launch-only``)."""
+    bkt = gcs_bucket.rstrip("/")
+    ds = dataset_name.strip().lower()
+    if ds == "hul_golden":  # hul_golden_sft.build_clean_splits_in_gcp
+        from utils.gemini_fine_tuning.hul_golden_sft import HulGoldenSftConfig
+
+        dest = f"{bkt}/{HulGoldenSftConfig.output_prefix}"
+        return {"train_uri": f"{dest}/train_clean.jsonl", "val_uri": f"{dest}/val_clean.jsonl"}
+    if ds not in SFT_JSONL_DIRS:
+        raise ValueError(f"Unsupported marketshare SFT dataset {dataset_name!r}")
+    train_name, val_name = SFT_SPLIT_FILES[task if ds == "variant" and task in SFT_SPLIT_FILES else "all3"]
+    dest = f"{bkt}/{SFT_JSONL_DIRS[ds]}"
+    return {"train_uri": f"{dest}/{train_name}", "val_uri": f"{dest}/{val_name}"}
+
+
+def _subset_single_gcs_jsonl(src_uri: str, max_lines: int, dest_uri: str | None = None) -> tuple[str, int]:
+    """Slice the first `max_lines` JSONL records from `src_uri` and upload to `dest_uri` in GCS without local disk writes."""
+    bucket_name, obj_path = dataset._split_gs(src_uri)
+    if not dest_uri:
+        parent = obj_path.rsplit("/", 1)[0] if "/" in obj_path else ""
+        stem = Path(obj_path).stem
+        dest_obj = f"{parent}/temp_{stem}_{max_lines}.jsonl" if parent else f"temp_{stem}_{max_lines}.jsonl"
+        dest_uri = f"gs://{bucket_name}/{dest_obj}"
+    dest_bucket_name, dest_obj_path = dataset._split_gs(dest_uri)
+    client = dataset._gcs()
+    src_blob = client.bucket(bucket_name).blob(obj_path)
+    raw_text = src_blob.download_as_text(encoding="utf-8")
+    lines = [ln for ln in raw_text.splitlines() if ln.strip()][:max_lines]
+    payload = "\n".join(lines) + ("\n" if lines else "")
+    dest_blob = client.bucket(dest_bucket_name).blob(dest_obj_path)
+    dest_blob.upload_from_string(payload, content_type="application/jsonl")
+    return dest_uri, len(lines)
+
+
+def subset_gcs_sft_jsonl(
+    train_uri: str,
+    val_uri: str | None = None,
+    max_train: int | None = None,
+    max_val: int | None = None,
+) -> dict[str, Any]:
+    """Create temporary subset SFT JSONL files directly in GCS from existing `train_uri` and `val_uri`."""
+    out_train_uri = train_uri
+    train_count = None
+    if max_train is not None and max_train > 0:
+        out_train_uri, train_count = _subset_single_gcs_jsonl(train_uri, max_train)
+    out_val_uri = val_uri
+    val_count = None
+    if val_uri and max_val is not None and max_val > 0:
+        out_val_uri, val_count = _subset_single_gcs_jsonl(val_uri, max_val)
+    return {
+        "train_uri": out_train_uri,
+        "val_uri": out_val_uri,
+        "train_count": train_count,
+        "val_count": val_count,
     }
 
 
@@ -822,6 +890,7 @@ def launch_sft_job(
     adapter_size: int = 4,
     learning_rate_multiplier: float = 1.0,
     config: dict | None = None,
+    region: str | None = None,
 ) -> dict:
     """Submit a real parameter-efficient LoRA Supervised Fine-Tuning job on Vertex AI."""
     os.environ.setdefault("GOOGLE_API_USE_CLIENT_CERTIFICATE", "false")
@@ -834,8 +903,8 @@ def launch_sft_job(
         )
     cfg = (config or load_config()).get("gcp", {})
     project = cfg.get("project", "ul-fs-s-sandbx-16-prj")
-    region = cfg.get("region", "us-central1")
-    client = genai.Client(vertexai=True, project=project, location=region)
+    target_region = region or cfg.get("region", "us-central1")
+    client = genai.Client(vertexai=True, project=project, location=target_region)
 
     adapter_map = {
         1: types.AdapterSize.ADAPTER_SIZE_ONE,
@@ -866,33 +935,36 @@ def launch_sft_job(
         "state": getattr(job.state, "name", str(job.state)),
         "base_model": base_model,
         "display_name": display_name,
-        "region": region,
+        "region": target_region,
         "train_uri": train_uri,
         "val_uri": val_uri,
         "endpoint": endpoint,
     }
 
 
-def list_sft_jobs(config: dict | None = None) -> list[dict]:
-    """List Vertex AI Supervised Fine-Tuning jobs in the configured GCP project and region."""
+def list_sft_jobs(config: dict | None = None, region: str | None = None) -> list[dict]:
+    """List Vertex AI Supervised Fine-Tuning jobs in the configured GCP project and region(s)."""
     os.environ.setdefault("GOOGLE_API_USE_CLIENT_CERTIFICATE", "false")
     from google import genai
 
     cfg = (config or load_config()).get("gcp", {})
-    client = genai.Client(
-        vertexai=True,
-        project=cfg.get("project", "ul-fs-s-sandbx-16-prj"),
-        location=cfg.get("region", "us-central1"),
-    )
+    project = cfg.get("project", "ul-fs-s-sandbx-16-prj")
+    regions = [region] if region else [cfg.get("region", "us-central1"), "us-east4", "europe-west4"]
     out: list[dict] = []
-    for job in client.tunings.list():
-        tm = getattr(job, "tuned_model", None)
-        out.append({
-            "name": job.name,
-            "display_name": getattr(job, "tuned_model_display_name", None),
-            "base_model": getattr(job, "base_model", None),
-            "state": getattr(job.state, "name", str(job.state)),
-            "endpoint": getattr(tm, "endpoint", None) if tm else None,
-            "model": getattr(tm, "model", None) if tm else None,
-        })
+    seen_regions: set[str] = set()
+    for reg in regions:
+        if reg in seen_regions:
+            continue
+        seen_regions.add(reg)
+        client = genai.Client(vertexai=True, project=project, location=reg)
+        for job in client.tunings.list():
+            tm = getattr(job, "tuned_model", None)
+            out.append({
+                "name": job.name,
+                "display_name": getattr(job, "tuned_model_display_name", None),
+                "base_model": getattr(job, "base_model", None),
+                "state": getattr(job.state, "name", str(job.state)),
+                "endpoint": getattr(tm, "endpoint", None) if tm else None,
+                "model": getattr(tm, "model", None) if tm else None,
+            })
     return out

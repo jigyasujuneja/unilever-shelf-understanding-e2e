@@ -87,6 +87,14 @@ tuned_models:
     base_model: gemini-3.5-flash-lite
     location: global
     endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/ENDPOINT_ID
+  marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite:
+    base_model: gemini-3.5-flash-lite
+    location: eu
+    endpoint: projects/663686437672/locations/eu/endpoints/5662995056441688064
+  marketshare-hul-golden-5attr-sft-euw4-gemini-3-5-flash-lite:
+    base_model: gemini-3.5-flash-lite
+    location: eu
+    endpoint: projects/663686437672/locations/eu/endpoints/5662995056441688064
   gemini-3.5-flash-sft:
     base_model: gemini-3.5-flash
     location: global
