@@ -2207,8 +2207,10 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "identifies brand, variant, and pack form, and calculates Unilever vs. Competitor Share of Shelf."
             ),
             "preferred_runs": [
-                "1009-000011-shelf_hierarchical_clm_jev-gemini-3.5-flash-lite-priority-gtmerch_golden",
-                "1008-235958-shelf_clm_standalone-gemini-embedding-2-gtmerch_golden-val",
+                "1005-190410-shelf_hierarchical_clm_jev-gemini-3.8-flash-priority-shelves",
+                "1005-190425-shelf_clm_standalone-gemini-embedding-2-shelves",
+                "1012-204345-stitched_e2e-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
+                "1013-012348-stitched_e2e-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
             ],
         },
         {
@@ -2221,8 +2223,10 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "and flags empty out-of-stock gaps."
             ),
             "preferred_runs": [
-                "1009-000016-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gtmerch_golden",
+                "1009-012034-bay_planogram_verifier-gemini-3.8-flash-priority-hul_sessions",
+                "1009-012338-bay_planogram_verifier-gemini-3.8-flash-priority-hul_sessions-val",
                 "1005-190625-bay_planogram_verifier-gemini-3.8-flash-priority",
+                "1005-190610-bay_planogram_verifier-gemini-3.5-flash-lite-priority",
             ],
         },
         {
@@ -2235,8 +2239,11 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "side-by-side using zoomed variant and weight strips."
             ),
             "preferred_runs": [
-                "1005-185542-embedding_retrieval-gemini-embedding-2",
-                "1008-235901-hierarchical_clm_jev-gemini-3.5-flash-priority-hul_golden",
+                "1013-013248-l8_hul_ultimate-gemini-3.8-flash-priority-hul_golden",
+                "1013-013248-jev_laya_zscore_lid-gemini-3.8-flash-priority-hul_golden",
+                "1013-013246-hierarchical_clm_jev-gemini-3.8-flash-priority-hul_golden",
+                "1013-013248-hierarchical_clm_jev-gemini-3.5-flash-lite-priority-hul_golden",
+                "1012-021922-tube_midband_jev-gemini-3.5-flash-lite-priority-hul_variants-val",
             ],
         },
         {
@@ -2249,8 +2256,10 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "(Bottle, Pouch, Tube, Jar, Bar, Sachet), Brand, and Variant."
             ),
             "preferred_runs": [
+                "1013-013249-hierarchy_classify-gemini-3.8-flash-priority-hul_golden",
+                "1013-013247-hierarchy_classify-gemini-3.5-flash-lite-priority-hul_golden",
                 "1012-203751-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
-                "1009-000105-clm_standalone_classify-gemini-embedding-2-hul_brands",
+                "1012-124906-gemini_classify-marketshare-hul-golden-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
             ],
         },
         {
@@ -2263,8 +2272,9 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "cutting new campaign launch time from 4 weeks to 5 minutes."
             ),
             "preferred_runs": [
+                "1005-190540-jev_promo_verifier-gemini-3.8-flash-priority",
                 "1005-190525-jev_promo_verifier-gemini-3.5-flash-lite-priority",
-                "1009-000050-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos-val",
+                "1005-190510-clm_promo_matcher-gemini-embedding-2",
             ],
         },
         {
@@ -2277,17 +2287,39 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "without large bay frames suppressing the small packs inside them."
             ),
             "preferred_runs": [
-                "1009-132227-distilled_yolo_onnx-yolo11n-distilled-onnx-ms_json_golden",
                 "1009-132251-distilled_yolo_onnx-yolo11n-distilled-onnx-gtmerch_golden",
+                "1009-132227-distilled_yolo_onnx-yolo11n-distilled-onnx-ms_json_golden",
+                "1009-010247-distilled_yolo_onnx-yolo11n-distilled-onnx-gtmerch_golden-val",
             ],
         },
     ]
 
+    all_summaries = _load_all_summaries(res_p)
     out: list[dict[str, Any]] = []
     for spec in task_specs:
         samples: list[dict[str, Any]] = []
         seen_imgs: set[str] = set()
-        for rid in spec["preferred_runs"]:
+        candidate_rids = list(spec["preferred_runs"])
+        # Also append any high-scoring large-sample modern run for this task dynamically
+        dyn_runs = [
+            s for s in all_summaries
+            if s.get("task") == spec["task"]
+            and s.get("approach") != "cv_classify"
+            and max(float(s.get("accuracy") or 0.0), float(s.get("f2") or 0.0)) >= 0.50
+        ]
+        dyn_runs.sort(
+            key=lambda s: (
+                1 if int(s.get("images") or 0) >= 500 else 0,
+                max(float(s.get("accuracy") or 0.0), float(s.get("f2") or 0.0)),
+                int(s.get("images") or 0),
+            ),
+            reverse=True,
+        )
+        for ds_r in dyn_runs:
+            rid_d = str(ds_r.get("run_id") or "")
+            if rid_d and rid_d not in candidate_rids:
+                candidate_rids.append(rid_d)
+        for rid in candidate_rids:
             img_p = Path(res_p) / rid / "images.jsonl"
             sum_p = Path(res_p) / rid / "summary.json"
             if not (img_p.exists() and sum_p.exists()):

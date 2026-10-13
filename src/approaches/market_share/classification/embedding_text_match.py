@@ -29,7 +29,7 @@ def scoped_catalog_for_ctx(dataset_name: str, ctx: Context) -> dict[int, dict]:
     import os
 
     cat = dataset.catalog(name=dataset_name)
-    max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "400"))
+    max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "0"))
     if max_skus > 0 and len(cat) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
         by_brand: dict[str, list[int]] = {}
         for pid in sorted(cat):
