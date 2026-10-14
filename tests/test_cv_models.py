@@ -212,3 +212,92 @@ def test_deploy_cv_endpoints_uses_vertex_operations_only(monkeypatch):
     assert {"name": "SHELF_BENCH_CV_ROLE", "value": "brand"} in upload["containerSpec"]["env"]
     posts = [url.rsplit(":", 1)[-1] for verb, url, _ in calls if verb == "POST"]
     assert posts == ["upload", "deployModel", "undeployModel"] * 2
+
+
+def test_variant_routing_and_brand_onehot(monkeypatch):
+    wash_classes = ("Dove__Dove_Bar", "Lifebuoy__Lifebuoy_Total", "St_Ives__St_Ives_Oatmeal")
+    skin_classes = ("Dove__Dove_Lotion", "Lakme__Lakme_9to5", "Vaseline__Vaseline_Cocoa")
+    p5_classes = ("Bru__Bru_Gold", "Knorr__Knorr_Soup", "Taj_Mahal__Taj_Mahal_Tea")
+    oral_classes = ("Close_Up__Close_Up_Red", "Oral_B__Oral_B_Fresh", "Pepsodent__Pepsodent_2in1")
+    nh_p6_classes = ("Dettol__Dettol_Liquid", "Maggi__Maggi_Noodles", "Savlon__Savlon_Spray")
+    nh_gen_classes = ("Colgate__Colgate_Strong", "Dettol__Dettol_Soap", "Nivea__Nivea_Soft")
+    class_map = {
+        "gs://b/wash_variant.h5": wash_classes,
+        "gs://b/skin_variant.h5": skin_classes,
+        "gs://b/p5_variant.h5": p5_classes,
+        "gs://b/oral_variant.h5": oral_classes,
+        "gs://b/nonhul_p6_variant.h5": nh_p6_classes,
+        "gs://b/nonhul_gen_variant.h5": nh_gen_classes,
+    }
+    monkeypatch.setattr(cv_models, "load_classes", lambda uri: class_map.get(uri, ()))
+    cv_models.variant_brands.cache_clear()
+    runners = {
+        r: cv_models.KerasClassifier(r, f"gs://b/{r}.h5", class_map[f"gs://b/{r}.h5"])
+        for r in cv_models.VARIANT_ROLES
+    }
+
+    # Category + ownership routing and brand-silo disambiguation
+    assert cv_models.route_variant_role(category="Oral_Care", brand="Pepsodent", is_hul=True, runners=runners) == "oral_variant"
+    assert cv_models.route_variant_role(category="Oral_Care", brand="Colgate", is_hul=False, runners=runners) == "nonhul_gen_variant"
+    assert cv_models.route_variant_role(category="Foods", brand="Knorr", is_hul=True, runners=runners) == "p5_variant"
+    assert cv_models.route_variant_role(category="Foods", brand="Maggi", is_hul=False, runners=runners) == "nonhul_p6_variant"
+    assert cv_models.route_variant_role(category="Household_Care", brand="Dettol", is_hul=False, runners=runners) == "nonhul_p6_variant"
+    assert cv_models.route_variant_role(category="Personal_Wash", brand="Dettol", is_hul=False, runners=runners) == "nonhul_gen_variant"
+
+    # KerasClassifier 2-input brand one-hot conditioning for variant models
+    clf = cv_models.KerasClassifier("oral_variant", "gs://b/oral_variant.h5", oral_classes)
+    clf._model = FakeKeras(winner=2, n=3, inputs=((None, 3), (None, None, None, 3)))
+    img = Image.new("RGB", (100, 100), (128, 128, 128))
+    label, conf = clf.predict_class(img, brand="Pepsodent")
+    assert label == "Pepsodent__Pepsodent_2in1" and conf == pytest.approx(0.9)
+    assert clf._model.feeds[0][0].tolist() == [0.0, 0.0, 1.0]
+    assert cv_models.parse_label("oral_variant", label) == {
+        "brand": "Pepsodent",
+        "base_variant": "Pepsodent_2in1",
+        "variant": "Pepsodent_2in1",
+        "category": "Oral_Care",
+        "packaging_type": "Tube",
+        "product": "Pepsodent__Pepsodent_2in1",
+    }
+
+
+def test_coupled_3_stage_pipeline_with_variant_endpoints(monkeypatch):
+    var_cfg = {
+        "cv_models": {
+            **CFG["cv_models"],
+            "oral_variant_model": "gs://b/oral_variant/oral_variant.h5",
+            "oral_variant_endpoint": "projects/p/locations/us-central1/endpoints/333",
+            "wash_variant_model": "gs://b/wash_variant/wash_variant.h5",
+            "wash_variant_endpoint": "projects/p/locations/us-central1/endpoints/444",
+        }
+    }
+    sess = FakeSession({
+        "111": (200, {"predictions": [{"raw_class": "APepsodent", "confidence": 0.96}]}),
+        "222": (200, {"predictions": [{"raw_class": "Oral_Care__Tube", "confidence": 0.88}]}),
+        "333": (200, {"predictions": [{"raw_class": "Pepsodent__Pepsodent_Germicheck", "confidence": 0.91}]}),
+    })
+    monkeypatch.setattr(cv_models, "_session", lambda: sess)
+    monkeypatch.setattr(cv_models, "load_classes", lambda uri: (
+        ("Close_Up__Close_Up_Red", "Oral_B__Oral_B_Fresh", "Pepsodent__Pepsodent_Germicheck")
+        if "oral_variant" in str(uri) else ("Dove__Dove_Bar", "Lifebuoy__Lifebuoy_Total")
+    ))
+    cv_models.variant_brands.cache_clear()
+
+    a = CVClassify()
+    a.dataset, a.evaluated_fields = "hul_golden", None
+    ctx = Context(model="keras-h5")
+    a.setup(var_cfg, ctx)
+    assert a.evaluated_fields == ("product", "brand", "base_variant", "packaging_type", "category")
+    assert sorted(a.pipeline.runners) == ["brand", "oral_variant", "pack", "wash_variant"]
+
+    pred = a.identify(Image.new("RGB", (64, 64)), ctx)
+    assert pred == {
+        "product": "Pepsodent__Pepsodent_Germicheck",
+        "brand": "Pepsodent",
+        "base_variant": "Pepsodent_Germicheck",
+        "packaging_type": "Tube",
+        "category": "Oral_Care",
+    }
+    assert sess.calls[2][1]["instances"][0]["role"] == "oral_variant"
+    assert sess.calls[2][1]["instances"][0]["brand"] == "Pepsodent"
+

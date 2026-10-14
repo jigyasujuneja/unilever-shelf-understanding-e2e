@@ -466,7 +466,11 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 predictions.append({"error": "missing image_b64 or image_uri"})
                 continue
-            label, conf = model.predict_class(Image.open(io.BytesIO(data)), category=inst.get("category"))
+            label, conf = model.predict_class(
+                Image.open(io.BytesIO(data)),
+                category=inst.get("category"),
+                brand=inst.get("brand"),
+            )
             predictions.append({"raw_class": label, "confidence": round(conf, 6),
                                 "model_uri": model.source_uri, **cv_models.parse_label(role, label)})
         return self._json({"predictions": predictions})

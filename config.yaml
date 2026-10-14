@@ -23,12 +23,24 @@ gcp:
 
 # Legacy InceptionV3 Keras classifiers for `-a cv_classify`. The .h5 files are registered in Vertex AI
 # Model Registry and served on these Vertex AI Endpoints (`shelf-bench deploy-cv-endpoints` prints them).
-# The brand model's class names are in <model>_classes.json next to its .h5.
+# The brand and variant models' class names are in <model>_classes.json next to their .h5 files.
 cv_models:
   brand_model: gs://sos-datasets/legacy-models/mt_brand/marketshare_brand.h5
   pack_model: gs://sos-datasets/legacy-models/mt_pack/marketshare_packtype.h5
+  wash_variant_model: gs://sos-datasets/legacy-models/wash_variant/wash_variant.h5
+  skin_variant_model: gs://sos-datasets/legacy-models/skin_variant/skin_variant.h5
+  p5_variant_model: gs://sos-datasets/legacy-models/p5_variant/p5_variant.h5
+  oral_variant_model: gs://sos-datasets/legacy-models/oral_variant/oral_variant.h5
+  nonhul_p6_variant_model: gs://sos-datasets/legacy-models/nonhul_p6_variant/nonhul_p6_variant.h5
+  nonhul_gen_variant_model: gs://sos-datasets/legacy-models/nonhul_gen_variant/nonhul_gen_variant.h5
   brand_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/4323610123659378688
   pack_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/5408977633855668224
+  wash_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/1656353244349202432
+  skin_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/649235777678475264
+  p5_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/5038556564504444928
+  oral_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/6078888078427029504
+  nonhul_p6_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/4700786592451657728
+  nonhul_gen_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/5604884217646284800
 
 # Cloud Run job that executes benchmark runs (shelf-bench cloud-run). One task per
 # approach x tier x model. Its compute is priced from the Billing Catalog API (Jobs CPU/Memory

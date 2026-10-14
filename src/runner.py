@@ -386,6 +386,7 @@ def run(
 
                 by_brand_ok: dict[str, list[int]] = defaultdict(list)
                 by_var_ok: dict[str, list[int]] = defaultdict(list)
+                by_cat_boxes: dict[str, list[dict]] = defaultdict(list)
                 hul_boxes = []
                 comp_boxes = []
                 for lab in boxes:
@@ -393,15 +394,37 @@ def run(
                     corr_d = lab.get("correct") or {}
                     b_name = str(gt_d.get("brand") or "")
                     v_name = str(gt_d.get("base_variant") or gt_d.get("product") or "")
+                    c_name = str(gt_d.get("category") or "")
                     if b_name:
                         by_brand_ok[b_name].append(int(bool(corr_d.get("brand"))))
                     if v_name:
                         by_var_ok[v_name].append(int(bool(corr_d.get("base_variant", corr_d.get("product")))))
+                    if c_name:
+                        by_cat_boxes[c_name].append(lab)
                     if "is_hul" in gt_d:
                         if gt_d.get("is_hul"):
                             hul_boxes.append(lab)
                         else:
                             comp_boxes.append(lab)
+                if by_cat_boxes:
+                    summary["category_breakdown"] = {
+                        cat_k: {
+                            "count": len(c_labs),
+                            "accuracy": round(
+                                sum(all(bool((lb.get("correct") or {}).get(f)) for f in eval_fields) for lb in c_labs)
+                                / max(1, len(c_labs)),
+                                4,
+                            ),
+                            "field_accuracy": {
+                                f: round(
+                                    sum(bool((lb.get("correct") or {}).get(f)) for lb in c_labs) / max(1, len(c_labs)),
+                                    4,
+                                )
+                                for f in eval_fields
+                            },
+                        }
+                        for cat_k, c_labs in sorted(by_cat_boxes.items())
+                    }
                 summary["macro_accuracy"] = {
                     "macro_brand_accuracy": round(
                         sum(sum(v) / len(v) for v in by_brand_ok.values()) / max(1, len(by_brand_ok)), 4
