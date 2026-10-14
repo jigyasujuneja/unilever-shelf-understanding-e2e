@@ -304,10 +304,10 @@ def route_variant_role(
     runners: Mapping[str, Any] | None = None,
 ) -> str:
     """Route an image to the appropriate variant model role using ``gt-mapping.yml`` brand tables and category."""
-    direct = normalize_role(category)
-    if direct in VARIANT_ROLES:
-        return direct
-    cat = str(category or "").strip()
+    cat_raw = str(category or "").strip()
+    if not brand and cat_raw.lower() in (set(VARIANT_ROLES) | set(VARIANT_SILOS.values())):
+        return normalize_role(cat_raw)
+    cat = cat_raw
     if is_hul is None and brand:
         from utils.legacy_benchmark import normalize_legacy_prediction
 
@@ -734,11 +734,13 @@ class EndpointClassifier:
     def classes(self) -> tuple[str, ...]:
         if self.role == "pack":
             return pack_classes()
+        if self.role in VARIANT_ROLES:
+            gt_cls = gt_variant_classes(self.role, size=367 if self.role == "nonhul_p6_variant" else None)
+            if gt_cls:
+                return gt_cls
         loaded = load_classes(self.model_uri)
         if loaded:
             return loaded
-        if self.role in VARIANT_ROLES:
-            return gt_variant_classes(self.role)
         return ()
 
     def predict_class(
@@ -903,13 +905,17 @@ class CVPipeline:
                     out["product"] = v["product"]
 
                 # If gt-mapping.yml specifies a variant-level category that differs from the initial
-                # umbrella-brand category hint, update category and re-condition the pack model.
+                # umbrella-brand category hint (and the predicted variant belongs to the routed brand),
+                # update category and re-condition the pack model.
                 var_gt_cat = str(v.get("gt_category") or "")
                 var_canon_cat = str(v.get("category") or "")
+                var_brand_matches = not routed_brand or (
+                    _norm_brand_key(v.get("gt_brand") or v.get("brand")) == _norm_brand_key(routed_brand)
+                )
                 init_leg_cat = CANONICAL_TO_LEGACY_PACK_CATEGORY.get(
                     str(initial_pack_hint or ""), str(initial_pack_hint or "")
                 )
-                if var_gt_cat and var_gt_cat in pack_categories() and var_gt_cat != init_leg_cat:
+                if var_brand_matches and var_gt_cat and var_gt_cat in pack_categories() and var_gt_cat != init_leg_cat:
                     if with_pack and "pack" in self.runners:
                         pack_cls2, pack_conf2 = self.runners["pack"].predict_class(image, var_gt_cat)
                         p2 = parse_label("pack", pack_cls2)

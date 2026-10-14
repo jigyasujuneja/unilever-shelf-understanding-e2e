@@ -304,6 +304,13 @@ def test_gt_mapping_ground_truth_and_gen_variant(monkeypatch):
         ("product", "brand", "base_variant"),
     )["tp"] == 1
 
+    # Ensure category="Skin" does not short-circuit Non-HUL Skin brands or LBP to skin_variant
+    assert cv_models.route_variant_role(category="Skin", brand="Garnier", is_hul=False) == "nonhul_gen_variant"
+    assert cv_models.route_variant_role(category="Skin", brand="Nivea", is_hul=False) == "nonhul_gen_variant"
+    assert cv_models.route_variant_role(category="Skin", brand="Johnsons", is_hul=False) == "nonhul_gen_variant"
+    assert cv_models.route_variant_role(category="Skin", brand="Love_Beauty_And_Planet", is_hul=True) == "gen_variant"
+    assert cv_models.route_variant_role(category="Skin", brand="Ponds", is_hul=True) == "skin_variant"
+
 
 
 def test_coupled_3_stage_pipeline_with_variant_endpoints(monkeypatch):
