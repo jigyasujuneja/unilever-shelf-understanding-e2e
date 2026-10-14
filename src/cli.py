@@ -68,11 +68,14 @@ def main(argv: list[str] | None = None) -> int:
                    choices=("sku110k", "products", *dataset.RPC_FORMAT_SETS),
                    help="override dataset for approaches (e.g. hul_golden, gtmerch_golden, hul_variants, hul_brands, hul_packs, hul_promos)")
     s.add_argument("--fields", default=None,
-                   help="score only these attributes: 1 / 2 / 3 (HUL presets) or names, e.g. brand,packaging_type")
+                   help="score only these attributes: 1 / 2 / 3 / 4 / 5 (HUL presets) or names, e.g. brand,packaging_type")
     s.add_argument("--brand-model", default=None,
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.brand_endpoint")
     s.add_argument("--pack-model", default=None,
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.pack_endpoint")
+    for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
+        s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
+                       help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
@@ -90,11 +93,14 @@ def main(argv: list[str] | None = None) -> int:
                    choices=("sku110k", "products", *dataset.RPC_FORMAT_SETS),
                    help="override dataset for approaches (e.g. hul_golden, gtmerch_golden, hul_variants, hul_brands, hul_packs, hul_promos)")
     s.add_argument("--fields", default=None,
-                   help="score only these attributes: 1 / 2 / 3 (HUL presets) or names, e.g. brand,packaging_type")
+                   help="score only these attributes: 1 / 2 / 3 / 4 / 5 (HUL presets) or names, e.g. brand,packaging_type")
     s.add_argument("--brand-model", default=None,
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.brand_endpoint")
     s.add_argument("--pack-model", default=None,
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.pack_endpoint")
+    for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
+        s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
+                       help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
@@ -108,6 +114,11 @@ def main(argv: list[str] | None = None) -> int:
                        help="register the legacy .h5 models in Vertex AI Model Registry and deploy their Vertex AI Endpoints")
     s.add_argument("--brand-model", default=None, help="gs:// .h5 (default: config cv_models.brand_model)")
     s.add_argument("--pack-model", default=None, help="gs:// .h5 (default: config cv_models.pack_model)")
+    for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
+        s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
+                       help=f"gs:// .h5 (default: config cv_models.{v_role}_model)")
+    s.add_argument("--roles", nargs="*", default=None,
+                   help="subset of roles to deploy (e.g. wash_variant skin_variant p5_variant oral_variant nonhul_p6_variant nonhul_gen_variant)")
     s.add_argument("--image", default=None, help="reuse a pre-built image (must include the cv extra)")
 
     sub.add_parser("pull", help="copy finished Cloud Run results from GCS into results/")
@@ -202,8 +213,10 @@ def main(argv: list[str] | None = None) -> int:
             if set(a.approach) != {"cv_classify"}:
                 p.error("the following arguments are required: -m/--model")
             a.model = ["keras-h5"]
-        for role in ("brand", "pack"):  # read by utils/cv_models.CVPipeline.from_config
-            if getattr(a, f"{role}_model"):
+        from utils.cv_models import ROLES
+
+        for role in ROLES:  # read by utils/cv_models.CVPipeline.from_config
+            if getattr(a, f"{role}_model", None):
                 os.environ[f"SHELF_BENCH_CV_{role.upper()}_MODEL"] = getattr(a, f"{role}_model")
 
     if a.cmd == "download":
@@ -249,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if failed or not combos else 0
     elif a.cmd == "cloud-run":
         from utils import cloud
+        from utils.cv_models import VARIANT_ROLES
 
         return cloud.run_on_cloud(
             a.approach, a.model, a.tier, a.split, a.limit, a.seed, a.workers,
@@ -259,13 +273,21 @@ def main(argv: list[str] | None = None) -> int:
             pack_model=a.pack_model,
             image=a.image,
             pull_local=bool(a.pull and not a.no_pull),
+            **{f"{r}_model": getattr(a, f"{r}_model", None) for r in VARIANT_ROLES},
         )
     elif a.cmd == "deploy-cv-endpoints":
         import json
 
         from utils import cloud
+        from utils.cv_models import VARIANT_ROLES
 
-        print(json.dumps(cloud.deploy_cv_endpoints(a.brand_model, a.pack_model, a.image), indent=2))
+        print(json.dumps(cloud.deploy_cv_endpoints(
+            a.brand_model,
+            a.pack_model,
+            a.image,
+            roles=a.roles,
+            **{r: getattr(a, f"{r}_model", None) for r in VARIANT_ROLES},
+        ), indent=2))
     elif a.cmd == "pull":
         print(f"Pulled {runner.pull(cfg['gcp']['results'])} new run(s) into results/")
     elif a.cmd == "push":

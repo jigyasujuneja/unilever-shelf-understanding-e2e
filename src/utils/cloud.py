@@ -183,6 +183,7 @@ def run_on_cloud(
     image: str | None = None,
     pull_local: bool = False,
     log=print,
+    **variant_models: str | None,
 ) -> int:
     cfg = load_config()
     gcp = cfg["gcp"]
@@ -198,6 +199,7 @@ def run_on_cloud(
         *(["--fields", fields] if fields else []),
         *(["--brand-model", brand_model] if brand_model else []),
         *(["--pack-model", pack_model] if pack_model else []),
+        *[x for k, v in variant_models.items() if v for x in (f"--{k.replace('_', '-')}", v)],
         "--split", split, "--limit", str(limit),
         "--seed", str(seed), "--workers", str(workers), "--owner", owner,
         "--root", gcp["data"], "--results", gcp["results"],
@@ -340,12 +342,32 @@ def _wait_vertex_op(s, region: str, name: str, log=print, every: int = 15) -> di
         time.sleep(every)
 
 
-def deploy_cv_endpoints(brand_model: str | None = None, pack_model: str | None = None,
-                        image: str | None = None, log=print) -> dict:
-    """Register the legacy .h5 brand / pack classifiers in Vertex AI Model Registry and deploy each
-    to its Vertex AI Endpoint, served by this repo's image (``shelf-bench serve``, /api/cv/predict).
-    A redeploy moves all traffic to the new model and undeploys the old one. Put the endpoints in
-    config.yaml ``cv_models.{brand,pack}_endpoint``."""
+_CV_ENDPOINT_NAMES = {
+    "brand": "marketshare-brand",
+    "pack": "marketshare-packtype",
+    "wash_variant": "marketshare-wash-variant",
+    "skin_variant": "marketshare-skin-variant",
+    "p5_variant": "marketshare-p5-variant",
+    "oral_variant": "marketshare-oral-variant",
+    "nonhul_p6_variant": "marketshare-nonhul-p6-variant",
+    "nonhul_gen_variant": "marketshare-nonhul-gen-variant",
+}
+
+
+def deploy_cv_endpoints(
+    brand_model: str | None = None,
+    pack_model: str | None = None,
+    image: str | None = None,
+    roles: list[str] | tuple[str, ...] | None = None,
+    log=print,
+    **variant_models: str | None,
+) -> dict:
+    """Register the legacy .h5 brand / pack / variant classifiers in Vertex AI Model Registry and
+    deploy each to its Vertex AI Endpoint, served by this repo's image (``shelf-bench serve``,
+    /api/cv/predict). A redeploy moves all traffic to the new model and undeploys the old one.
+    Put the endpoints in config.yaml ``cv_models.<role>_endpoint``."""
+    from concurrent.futures import ThreadPoolExecutor
+
     cfg = load_config()
     gcp, cv = cfg["gcp"], cfg.get("cv_models") or {}
     project, region = gcp["project"], gcp["region"]
@@ -354,10 +376,19 @@ def deploy_cv_endpoints(brand_model: str | None = None, pack_model: str | None =
     api = f"https://{region}-aiplatform.googleapis.com/v1"
     base = f"{api}/projects/{project}/locations/{region}"
     out: dict = {"image": image}
-    for role, name, model_uri in (("brand", "marketshare-brand", brand_model or cv["brand_model"]),
-                                  ("pack", "marketshare-packtype", pack_model or cv["pack_model"])):
+    overrides = {"brand": brand_model, "pack": pack_model, **variant_models}
+    target_roles = [r for r in (roles or _CV_ENDPOINT_NAMES) if r in _CV_ENDPOINT_NAMES]
+    items = [
+        (r, _CV_ENDPOINT_NAMES[r], overrides.get(r) or cv.get(f"{r}_model"))
+        for r in target_roles
+        if overrides.get(r) or cv.get(f"{r}_model")
+    ]
+
+    def _deploy_one(item: tuple[str, str, str], sess=None) -> tuple[str, dict]:
+        role, name, model_uri = item
+        ws = sess or _session()
         log(f"Uploading {model_uri} to Vertex AI Model Registry ...")
-        op = _ok(s.post(f"{base}/models:upload", timeout=60, json={"model": {
+        op = _ok(ws.post(f"{base}/models:upload", timeout=60, json={"model": {
             "displayName": f"{name}-h5",
             "description": f"Legacy InceptionV3 Keras classifier ({model_uri})",
             "artifactUri": model_uri.rsplit("/", 1)[0],  # Vertex copies it to AIP_STORAGE_URI
@@ -373,26 +404,36 @@ def deploy_cv_endpoints(brand_model: str | None = None, pack_model: str | None =
                 "healthRoute": "/api/cv/health",
             },
         }}))
-        model = _wait_vertex_op(s, region, op["name"], log)["model"]
+        model = _wait_vertex_op(ws, region, op["name"], log)["model"]
         ep_name = f"{name}-vertex-endpoint"
-        eps = _ok(s.get(f"{base}/endpoints", timeout=30)).get("endpoints", [])
+        eps = _ok(ws.get(f"{base}/endpoints", timeout=30)).get("endpoints", [])
         endpoint = next((e["name"] for e in eps if e.get("displayName") == ep_name), None)
         if endpoint is None:
-            op = _ok(s.post(f"{base}/endpoints", json={"displayName": ep_name}, timeout=60))
-            endpoint = _wait_vertex_op(s, region, op["name"], log)["name"]
-        old = [d["id"] for d in _ok(s.get(f"{api}/{endpoint}", timeout=30)).get("deployedModels", [])]
+            op = _ok(ws.post(f"{base}/endpoints", json={"displayName": ep_name}, timeout=60))
+            endpoint = _wait_vertex_op(ws, region, op["name"], log)["name"]
+        old = [d["id"] for d in _ok(ws.get(f"{api}/{endpoint}", timeout=30)).get("deployedModels", [])]
         log(f"Deploying {model} to {endpoint} (15-30 min) ...")
-        op = _ok(s.post(f"{api}/{endpoint}:deployModel", timeout=60, json={
+        op = _ok(ws.post(f"{api}/{endpoint}:deployModel", timeout=60, json={
             "deployedModel": {"model": model, "displayName": f"{name}-h5", "dedicatedResources": {
                 "machineSpec": {"machineType": "n1-standard-4"}, "minReplicaCount": 1, "maxReplicaCount": 2}},
             "trafficSplit": {"0": 100},
         }))
-        _wait_vertex_op(s, region, op["name"], log, every=30)
+        _wait_vertex_op(ws, region, op["name"], log, every=30)
         for dm_id in old:
-            op = _ok(s.post(f"{api}/{endpoint}:undeployModel", json={"deployedModelId": dm_id}, timeout=60))
-            _wait_vertex_op(s, region, op["name"], log)
-        out[role] = {"model_uri": model_uri, "vertex_model": model, "endpoint": endpoint}
+            op = _ok(ws.post(f"{api}/{endpoint}:undeployModel", json={"deployedModelId": dm_id}, timeout=60))
+            _wait_vertex_op(ws, region, op["name"], log)
+        res = {"model_uri": model_uri, "vertex_model": model, "endpoint": endpoint}
         log(f"  cv_models.{role}_endpoint: {endpoint}")
+        return role, res
+
+    if len(items) <= 2:
+        for item in items:
+            role, res = _deploy_one(item, sess=s)
+            out[role] = res
+    else:
+        with ThreadPoolExecutor(max_workers=len(items)) as pool:
+            for role, res in pool.map(_deploy_one, items):
+                out[role] = res
     return out
 
 

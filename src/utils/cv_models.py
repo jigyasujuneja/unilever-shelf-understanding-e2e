@@ -1,6 +1,6 @@
-"""Legacy InceptionV3 Keras (``.h5``) brand and pack classifiers, used by ``-a cv_classify``.
+"""Legacy InceptionV3 Keras (``.h5``) brand, pack, and category-routed variant classifiers (``-a cv_classify``).
 
-The two ``.h5`` files (``cv_models`` in config.yaml) are registered in Vertex AI Model Registry
+The ``.h5`` files (``cv_models`` in config.yaml) are registered in Vertex AI Model Registry
 and deployed to Vertex AI Endpoints (``shelf-bench deploy-cv-endpoints``). On an endpoint, this
 repo's image runs ``shelf-bench serve``, and its ``/api/cv/predict`` route runs the model with
 ``KerasClassifier``. The benchmark calls the endpoints through ``EndpointClassifier``.
@@ -9,8 +9,13 @@ repo's image runs ``shelf-bench serve``, and its ``/api/cv/predict`` route runs 
   stored next to the weights in ``<model>_classes.json``.
 - pack model: a 46-way softmax over the legacy ``Category__PackType`` pack_data folders. It has a
   second input, a 10-d one-hot of the legacy category; all zeros means the category is unknown.
+- 6 category-routed variant models (``wash_variant``, ``skin_variant``, ``p5_variant``,
+  ``oral_variant``, ``nonhul_p6_variant``, ``nonhul_gen_variant``): each predicts ``Brand__Variant``
+  folders for its category/ownership silo and takes a one-hot vector of the silo's sorted brands
+  as its first input alongside the 299x299 InceptionV3 image tensor.
 
-Class names become benchmark fields through ``legacy_benchmark.normalize_legacy_prediction``.
+Class names become benchmark fields through ``legacy_benchmark.normalize_legacy_prediction`` and
+``taxonomy.filenames.parse_variant_folder``.
 """
 
 from __future__ import annotations
@@ -32,17 +37,76 @@ from PIL import Image
 
 from utils import dataset
 
-ROLES = ("brand", "pack")
-# Model overrides: set by `run --brand-model/--pack-model` and by the serving container's env.
-MODEL_ENV = {"brand": "SHELF_BENCH_CV_BRAND_MODEL", "pack": "SHELF_BENCH_CV_PACK_MODEL"}
+VARIANT_ROLES = (
+    "wash_variant",
+    "skin_variant",
+    "p5_variant",
+    "oral_variant",
+    "nonhul_p6_variant",
+    "nonhul_gen_variant",
+)
+ROLES = ("brand", "pack", *VARIANT_ROLES)
+# Model overrides: set by `run --brand-model/--pack-model/--<variant>-model` and by the serving container's env.
+MODEL_ENV = {r: f"SHELF_BENCH_CV_{r.upper()}_MODEL" for r in ROLES}
+VARIANT_SILOS = {
+    "wash_variant": "variant_wash",
+    "skin_variant": "variant_skin",
+    "p5_variant": "variant_p5",
+    "oral_variant": "variant_oral",
+    "nonhul_p6_variant": "variant_NH_P6",
+    "nonhul_gen_variant": "variant_NH_gen",
+}
+_ROLE_ALIASES = {
+    "brand": "brand",
+    "pack": "pack",
+    "pack_type": "pack",
+    "packaging_type": "pack",
+    "wash_variant": "wash_variant",
+    "variant_wash": "wash_variant",
+    "wash": "wash_variant",
+    "skin_variant": "skin_variant",
+    "variant_skin": "skin_variant",
+    "skin": "skin_variant",
+    "p5_variant": "p5_variant",
+    "variant_p5": "p5_variant",
+    "p5": "p5_variant",
+    "oral_variant": "oral_variant",
+    "variant_oral": "oral_variant",
+    "oral": "oral_variant",
+    "nonhul_p6_variant": "nonhul_p6_variant",
+    "variant_nh_p6": "nonhul_p6_variant",
+    "nonhul_p6": "nonhul_p6_variant",
+    "nh_p6": "nonhul_p6_variant",
+    "nonhul_gen_variant": "nonhul_gen_variant",
+    "variant_nh_gen": "nonhul_gen_variant",
+    "nonhul_gen": "nonhul_gen_variant",
+    "nh_gen": "nonhul_gen_variant",
+}
+_P5_P6_CATEGORIES = {
+    "Foods",
+    "Beverages",
+    "Health_Food_Drinks",
+    "Household_Care",
+    "Home_Care",
+    "HHC",
+    "HFD",
+    "Food",
+    "Tea",
+    "Coffee",
+    "Dishwash",
+}
+_ORAL_CATEGORIES = {"Oral_Care", "Oral"}
+_WASH_CATEGORIES = {"Laundry", "Personal_Wash", "Fabric_Wash", "Wash"}
 _ENDPOINT_RE = re.compile(r"^projects/[^/]+/locations/([^/]+)/endpoints/[^/]+$")
 _RETRY_STATUS = (429, 500, 502, 503, 504)
 
 
 def normalize_role(role: str | None) -> str:
-    """``brand`` / ``pack`` (``pack_type`` and ``packaging_type`` mean ``pack``), else ``""``."""
+    """``brand``, ``pack``, or one of ``VARIANT_ROLES`` (aliases mapped), else ``""``."""
     r = str(role or "").strip().lower()
-    return "pack" if r.startswith("pack") else "brand" if r == "brand" else ""
+    if r in _ROLE_ALIASES:
+        return _ROLE_ALIASES[r]
+    return "pack" if r.startswith("pack") else ""
 
 
 @lru_cache(maxsize=1)
@@ -59,7 +123,7 @@ def pack_categories() -> tuple[str, ...]:
     return tuple(sorted({c.split("__", 1)[0] for c in pack_classes()}))
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=16)
 def load_classes(model_uri: str | None) -> tuple[str, ...]:
     """Class names stored as ``<model>_classes.json`` next to a ``.h5`` (local or gs://), else ()."""
     from google.api_core.exceptions import NotFound
@@ -72,43 +136,152 @@ def load_classes(model_uri: str | None) -> tuple[str, ...]:
         return ()
 
 
+@lru_cache(maxsize=16)
+def variant_brands(classes: tuple[str, ...]) -> tuple[str, ...]:
+    """The sorted legacy brand prefixes ``<Brand>`` from ``<Brand>__<Variant>`` class folders."""
+    return tuple(sorted({c.split("__", 1)[0] for c in classes if "__" in c}))
+
+
+def brand_index(brand: str | None, classes: Sequence[str]) -> int | None:
+    """Index of ``brand`` (canonical or raw legacy folder prefix) in ``variant_brands(classes)``."""
+    from utils.taxonomy.brands import canonicalize_brand_name
+
+    raw = str(brand or "").strip()
+    if not raw or not classes:
+        return None
+    brands = variant_brands(tuple(classes))
+    low = raw.lower()
+    for i, b in enumerate(brands):
+        if b.lower() == low:
+            return i
+    canon = canonicalize_brand_name(raw).lower()
+    for i, b in enumerate(brands):
+        if canonicalize_brand_name(b).lower() == canon:
+            return i
+    return None
+
+
+def route_variant_role(
+    category: str | None = None,
+    brand: str | None = None,
+    is_hul: bool | None = None,
+    runners: Mapping[str, Any] | None = None,
+) -> str:
+    """Route an image to the appropriate variant model role based on category, brand, and HUL ownership."""
+    direct = normalize_role(category)
+    if direct in VARIANT_ROLES:
+        return direct
+    cat = str(category or "").strip()
+    if is_hul is None and brand:
+        from utils.legacy_benchmark import normalize_legacy_prediction
+
+        norm_b = normalize_legacy_prediction(brand_pred=brand)
+        if norm_b.get("brand") != "Unknown":
+            is_hul = bool(norm_b.get("is_hul"))
+            if not cat and norm_b.get("category") != "Unknown":
+                cat = str(norm_b["category"])
+
+    if is_hul is False:
+        cat_role = "nonhul_p6_variant" if cat in _P5_P6_CATEGORIES else "nonhul_gen_variant"
+    elif cat in _ORAL_CATEGORIES:
+        cat_role = "oral_variant"
+    elif cat in _P5_P6_CATEGORIES:
+        cat_role = "p5_variant"
+    elif cat in _WASH_CATEGORIES:
+        cat_role = "wash_variant"
+    else:
+        cat_role = "skin_variant"
+
+    if brand and runners:
+        matches = [
+            r for r in VARIANT_ROLES
+            if r in runners and brand_index(brand, runners[r].classes) is not None
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            return cat_role if cat_role in matches else matches[0]
+
+    if runners:
+        available = [r for r in VARIANT_ROLES if r in runners]
+        if available:
+            return cat_role if cat_role in available else available[0]
+    return cat_role
+
+
+def configured_variant_roles(config: dict) -> list[str]:
+    """Variant roles that have an endpoint or CLI override configured in ``config`` / env."""
+    cv = (config or {}).get("cv_models") or {}
+    return [r for r in VARIANT_ROLES if os.environ.get(MODEL_ENV[r]) or cv.get(f"{r}_endpoint")]
+
+
+def has_configured_variants(config: dict) -> bool:
+    """Return True if at least one variant endpoint or CLI model override is configured."""
+    return bool(configured_variant_roles(config))
+
+
 def parse_label(role: str, label: str) -> dict[str, str]:
-    """Benchmark fields for one model class (a brand_data folder or a ``Category__PackType``)."""
+    """Benchmark fields for one model class (brand_data, Category__PackType, or Brand__Variant)."""
     from utils.legacy_benchmark import normalize_legacy_prediction
+    from utils.taxonomy.filenames import parse_variant_folder
 
     if not label or label.isdigit():
         return {}
-    if normalize_role(role) == "brand":
+    r = normalize_role(role)
+    if r == "brand":
         p = normalize_legacy_prediction(brand_pred=label)
         keys = ("brand", "category")
-    else:
-        p = normalize_legacy_prediction(pack_pred=label)
-        keys = ("category", "packaging_type")
+        return {k: str(p[k]) for k in keys if p.get(k) and p[k] != "Unknown"}
+    if r in VARIANT_ROLES:
+        silo = VARIANT_SILOS.get(r, "variant_skin")
+        p = parse_variant_folder(silo, str(label).strip())
+        out: dict[str, str] = {}
+        for k in ("brand", "base_variant", "variant", "category", "packaging_type"):
+            if p.get(k) and p[k] != "Unknown":
+                out[k] = str(p[k])
+        if out.get("brand") and out.get("base_variant"):
+            out["product"] = f"{out['brand']}__{out['base_variant']}"
+        return out
+    p = normalize_legacy_prediction(pack_pred=label)
+    keys = ("category", "packaging_type")
     return {k: str(p[k]) for k in keys if p.get(k) and p[k] != "Unknown"}
 
 
 def resolve_evaluated_fields(
     dataset_name: str,
     requested: str | Sequence[str] | None = None,
+    with_variants: bool = False,
 ) -> tuple[str, ...]:
-    """The attributes to score. ``requested`` is ``--fields``: '1', '2', '3' or names like
+    """The attributes to score. ``requested`` is ``--fields``: '1', '2', '3', '4', '5' or names like
     'brand,packaging_type'. Without it: what the legacy models predict on ``dataset_name``."""
     packs_only = dataset_name == "hul_packs"
     presets = {
         "1": ("packaging_type",) if packs_only else ("brand",),
         "2": ("packaging_type", "category") if packs_only else ("brand", "packaging_type"),
         "3": ("brand", "packaging_type", "category"),
+        "4": ("brand", "base_variant", "packaging_type", "category"),
+        "5": ("product", "brand", "base_variant", "packaging_type", "category"),
     }
     if requested is None or requested == "" or requested == ():
         if dataset_name == "hul_brands":
             return ("brand",)
-        return presets["2"] if packs_only else presets["3"]
+        if packs_only:
+            return presets["2"]
+        if dataset_name == "hul_variants" or with_variants:
+            return presets["5"]
+        return presets["3"]
     if isinstance(requested, str):
         if requested.strip() in presets:
             return presets[requested.strip()]
         requested = re.split(r"[,+/\s]+", requested)
-    aliases = {"pack": "packaging_type", "pack_type": "packaging_type", "packtype": "packaging_type",
-               "packaging": "packaging_type", "cat": "category", "brands": "brand"}
+    aliases = {
+        "pack": "packaging_type",
+        "pack_type": "packaging_type",
+        "packtype": "packaging_type",
+        "packaging": "packaging_type",
+        "cat": "category",
+        "brands": "brand",
+    }
     out = [aliases.get(f.strip().lower(), f.strip().lower()) for f in requested if f and f.strip()]
     if not out:
         raise ValueError(f"--fields {requested!r} names no attribute")
@@ -120,14 +293,19 @@ def _find_models(model_dir: str) -> dict[str, str]:
     root = str(model_dir).rstrip("/")
     if root.startswith("gs://"):
         bucket, prefix = dataset._split_gs(root)
-        names = [f"gs://{bucket}/{b.name}" for b in dataset._gcs().list_blobs(bucket, prefix=f"{prefix}/" if prefix else "")]
+        names = [
+            f"gs://{bucket}/{b.name}"
+            for b in dataset._gcs().list_blobs(bucket, prefix=f"{prefix}/" if prefix else "")
+        ]
     else:
         names = [str(p) for p in Path(root).rglob("*.h5")]
     found: dict[str, str] = {}
     for uri in sorted(names):
-        stem = Path(uri).name.lower()
-        role = "pack" if "pack" in stem else "brand" if "brand" in stem else ""
-        if uri.endswith(".h5") and role:
+        if not uri.endswith(".h5"):
+            continue
+        stem = Path(uri).stem.lower()
+        role = normalize_role(stem) or ("pack" if "pack" in stem else "brand" if "brand" in stem else "")
+        if role:
             found.setdefault(role, uri)
     return found
 
@@ -168,12 +346,14 @@ class KerasClassifier:
                 model = tf_keras.models.load_model(path, compile=False)
             if not self.classes:
                 self.classes = list(load_classes(self.source_uri))
+            if not self.classes and self.role in MODEL_ENV:
+                self.classes = list(load_classes(os.environ.get(MODEL_ENV[self.role])))
             if not self.classes and self.role == "pack" and int(model.output_shape[-1]) == len(pack_classes()):
                 self.classes = list(pack_classes())
             self._model = model
             return model
 
-    def _inputs(self, image: Image.Image, category: str | None) -> list:
+    def _inputs(self, image: Image.Image, category: str | None = None, brand: str | None = None) -> list:
         import numpy as np
 
         feeds = []
@@ -183,9 +363,20 @@ class KerasClassifier:
                 h, w = (shape[1] or 299), (shape[2] or 299)
                 rgb = image.convert("RGB").resize((int(w), int(h)), Image.Resampling.NEAREST)
                 feeds.append(np.asarray(rgb, dtype=np.float32)[None] / 127.5 - 1.0)
+            elif self.role in VARIANT_ROLES:  # variant model's one-hot brand conditioning vector
+                feeds.append(self._brand_onehot(brand or category, int(shape[-1])))
             else:  # the pack model's one-hot legacy category
                 feeds.append(self._category_onehot(category, int(shape[-1])))
         return feeds
+
+    def _brand_onehot(self, brand: str | None, size: int):
+        import numpy as np
+
+        vec = np.zeros((1, size), dtype=np.float32)
+        idx = brand_index(brand, self.classes)
+        if idx is not None and len(variant_brands(tuple(self.classes))) == size and idx < size:
+            vec[0, idx] = 1.0
+        return vec
 
     @staticmethod
     def _category_onehot(category: str | None, size: int):
@@ -200,12 +391,17 @@ class KerasClassifier:
             vec[0, cats.index(legacy)] = 1.0
         return vec
 
-    def predict_class(self, image: Image.Image, category: str | None = None) -> tuple[str, float]:
+    def predict_class(
+        self,
+        image: Image.Image,
+        category: str | None = None,
+        brand: str | None = None,
+    ) -> tuple[str, float]:
         """``(class name, softmax probability)``; the class index as a string if names are unknown."""
         import numpy as np
 
         model = self._load()
-        feeds = self._inputs(image, category)
+        feeds = self._inputs(image, category=category, brand=brand)
         with self._lock:
             probs = np.asarray(model.predict(feeds if len(feeds) > 1 else feeds[0], verbose=0))[0]
         idx = int(np.argmax(probs))
@@ -228,7 +424,13 @@ def _session():
         return _SESSION
 
 
-def call_cv_endpoint(endpoint: str, image: Image.Image, role: str, category: str | None = None) -> dict:
+def call_cv_endpoint(
+    endpoint: str,
+    image: Image.Image,
+    role: str,
+    category: str | None = None,
+    brand: str | None = None,
+) -> dict:
     """POST one image to a Vertex AI Endpoint serving ``/api/cv/predict``; returns its prediction."""
     m = _ENDPOINT_RE.match(endpoint)
     if not m:
@@ -238,6 +440,8 @@ def call_cv_endpoint(endpoint: str, image: Image.Image, role: str, category: str
     inst = {"image_b64": base64.b64encode(buf.getvalue()).decode("ascii"), "role": role}
     if category:
         inst["category"] = category
+    if brand:
+        inst["brand"] = brand
     url = f"https://{m.group(1)}-aiplatform.googleapis.com/v1/{endpoint}:predict"
     for attempt in range(4):
         r = _session().post(url, json={"instances": [inst]}, timeout=120)
@@ -265,10 +469,15 @@ class EndpointClassifier:
 
     @property
     def classes(self) -> tuple[str, ...]:
-        return load_classes(self.model_uri) if self.role == "brand" else pack_classes()
+        return pack_classes() if self.role == "pack" else load_classes(self.model_uri)
 
-    def predict_class(self, image: Image.Image, category: str | None = None) -> tuple[str, float]:
-        pred = call_cv_endpoint(self.endpoint, image, self.role, category)
+    def predict_class(
+        self,
+        image: Image.Image,
+        category: str | None = None,
+        brand: str | None = None,
+    ) -> tuple[str, float]:
+        pred = call_cv_endpoint(self.endpoint, image, self.role, category=category, brand=brand)
         label = str(pred.get("raw_class") or "").strip()
         if label.isdigit():  # the server had no class list (no <model>_classes.json in its artifacts)
             classes = self.classes
@@ -283,30 +492,32 @@ def _classifier(role: str, ref: str, model_uri: str | None = None) -> KerasClass
 
 
 class CVPipeline:
-    """The brand and/or pack classifier (in-process ``.h5`` or Vertex AI Endpoint) for one run."""
+    """The brand, pack, and category-routed variant classifiers (in-process ``.h5`` or Vertex AI Endpoints)."""
 
     def __init__(self, refs: Mapping[str, str | None], model_uris: Mapping[str, str | None] | None = None):
         self.runners: dict[str, KerasClassifier | EndpointClassifier] = {
-            normalize_role(role): _classifier(role, ref, (model_uris or {}).get(role))
+            normalize_role(role): _classifier(role, ref, (model_uris or {}).get(normalize_role(role)))
             for role, ref in refs.items() if ref
         }
 
     @classmethod
-    def from_config(cls, config: dict, roles: Iterable[str] = ROLES) -> CVPipeline:
+    def from_config(cls, config: dict, roles: Iterable[str] | None = None) -> CVPipeline:
         """Benchmark side: the Vertex AI Endpoints in ``cv_models``. ``--brand-model`` /
-        ``--pack-model`` override them with another endpoint or a local / gs:// ``.h5``."""
+        ``--pack-model`` / ``--<variant>-model`` override them with another endpoint or ``.h5``."""
         cv = config.get("cv_models") or {}
-        roles = [normalize_role(r) for r in roles]
-        refs = {r: os.environ.get(MODEL_ENV[r]) or cv.get(f"{r}_endpoint") for r in roles}
-        missing = [r for r in roles if not refs[r]]
+        if roles is None:
+            roles = ["brand", "pack", *configured_variant_roles(config)]
+        norm_roles = [normalize_role(r) for r in roles if normalize_role(r)]
+        refs = {r: os.environ.get(MODEL_ENV[r]) or cv.get(f"{r}_endpoint") for r in norm_roles}
+        missing = [r for r in norm_roles if not refs[r]]
         if missing:
             raise ValueError(f"no {', '.join(missing)} model: set cv_models.<role>_endpoint in config.yaml")
-        return cls(refs, {r: cv.get(f"{r}_model") for r in roles})
+        return cls(refs, {r: cv.get(f"{r}_model") for r in norm_roles})
 
     @classmethod
     def for_serving(cls, config: dict) -> CVPipeline:
         """Prediction-server side: the ``.h5`` in the Vertex artifact dir (``AIP_STORAGE_URI``), else
-        ``SHELF_BENCH_CV_{BRAND,PACK}_MODEL`` / ``cv_models.{brand,pack}_model``, limited to
+        ``SHELF_BENCH_CV_<ROLE>_MODEL`` / ``cv_models.<role>_model``, limited to
         ``SHELF_BENCH_CV_ROLE`` when it is set."""
         cv = config.get("cv_models") or {}
         aip = os.environ.get("AIP_STORAGE_URI")
@@ -314,26 +525,107 @@ class CVPipeline:
         role = normalize_role(os.environ.get("SHELF_BENCH_CV_ROLE"))
         return cls({role: refs.get(role)} if role else refs)
 
-    def predict(self, image: Image.Image, fields: Sequence[str]) -> dict[str, str]:
+    def predict(self, image: Image.Image, fields: Sequence[str], category_hint: str | None = None) -> dict[str, str]:
         """The benchmark fields for one product photo (see ``predict_coupled``)."""
-        pred = self.predict_coupled(image, with_pack=bool({"packaging_type", "category"} & set(fields)))
+        fset = set(fields)
+        with_pack = "pack" in self.runners and bool({"packaging_type", "category"} & fset)
+        with_variant = any(r in self.runners for r in VARIANT_ROLES) and (
+            bool({"product", "base_variant", "variant"} & fset) or "brand" not in self.runners
+        )
+        pred = self.predict_coupled(
+            image,
+            with_pack=with_pack,
+            with_variant=with_variant,
+            category_hint=category_hint,
+        )
         return {f: pred.get(f, "") for f in fields}
 
-    def predict_coupled(self, image: Image.Image, with_pack: bool = True) -> dict[str, Any]:
-        """Brand model -> pack model, coupled: the category implied by the predicted brand is the
-        pack model's one-hot category input. ``brand`` comes from the brand model; ``packaging_type``
-        and ``category`` come from the pack model (its ``Category__PackType`` class). The pack
-        model is skipped when only ``brand`` is scored. Also returns both raw classes,
-        confidences and the category hint for the trace."""
-        brand_cls, brand_conf = self.runners["brand"].predict_class(image)
-        b = parse_label("brand", brand_cls)
-        out: dict[str, Any] = {"brand": b.get("brand", ""), "brand_class": brand_cls,
-                               "brand_confidence": round(float(brand_conf), 4)}
-        if with_pack:
-            hint = b.get("category") or None
+    def predict_coupled(
+        self,
+        image: Image.Image,
+        with_pack: bool = True,
+        with_variant: bool | None = None,
+        category_hint: str | None = None,
+    ) -> dict[str, Any]:
+        """Brand model -> pack model -> category-routed variant model, coupled:
+        1. Brand model predicts ``brand`` and implies a category + HUL ownership hint.
+        2. Pack model takes that category as its 10-d one-hot input and predicts ``Category__PackType``.
+        3. The category + brand route the image to one of the 6 variant models (``wash_variant``,
+           ``skin_variant``, ``p5_variant``, ``oral_variant``, ``nonhul_p6_variant``,
+           ``nonhul_gen_variant``), passing the predicted brand as its one-hot brand input to
+           predict ``Brand__Variant`` (``base_variant`` and ``product``).
+        """
+        from utils.legacy_benchmark import normalize_legacy_prediction
+
+        out: dict[str, Any] = {}
+        b: dict[str, str] = {}
+        is_hul_flag: bool | None = None
+
+        if "brand" in self.runners:
+            brand_cls, brand_conf = self.runners["brand"].predict_class(image)
+            b = parse_label("brand", brand_cls)
+            norm_b = normalize_legacy_prediction(brand_pred=brand_cls) if brand_cls and not brand_cls.isdigit() else {}
+            if norm_b.get("brand") and norm_b["brand"] != "Unknown":
+                is_hul_flag = bool(norm_b.get("is_hul"))
+            out.update({
+                "brand": b.get("brand", ""),
+                "brand_class": brand_cls,
+                "brand_confidence": round(float(brand_conf), 4),
+            })
+            if is_hul_flag is not None:
+                out["is_hul"] = is_hul_flag
+
+        if with_pack and "pack" in self.runners:
+            hint = b.get("category") or category_hint or None
             pack_cls, pack_conf = self.runners["pack"].predict_class(image, hint)
             p = parse_label("pack", pack_cls)
-            out.update({"packaging_type": p.get("packaging_type", ""), "category": p.get("category", ""),
-                        "pack_class": pack_cls, "pack_confidence": round(float(pack_conf), 4),
-                        "category_hint": hint or ""})
+            out.update({
+                "packaging_type": p.get("packaging_type", ""),
+                "category": p.get("category", "") or b.get("category", ""),
+                "pack_class": pack_cls,
+                "pack_confidence": round(float(pack_conf), 4),
+                "category_hint": hint or "",
+            })
+        elif b.get("category") or category_hint:
+            out.setdefault("category", b.get("category") or category_hint or "")
+
+        if with_variant is None:
+            with_variant = any(r in self.runners for r in VARIANT_ROLES)
+
+        if with_variant and any(r in self.runners for r in VARIANT_ROLES):
+            routed_cat = category_hint or out.get("category") or b.get("category") or ""
+            routed_brand = out.get("brand") or ""
+            v_role = route_variant_role(
+                category=routed_cat,
+                brand=routed_brand,
+                is_hul=is_hul_flag,
+                runners=self.runners,
+            )
+            if v_role and v_role in self.runners:
+                brand_hint = routed_brand or routed_cat or None
+                var_cls, var_conf = self.runners[v_role].predict_class(
+                    image,
+                    category=routed_cat or None,
+                    brand=brand_hint,
+                )
+                v = parse_label(v_role, var_cls)
+                out.update({
+                    "variant_role": v_role,
+                    "variant_class": var_cls,
+                    "variant_confidence": round(float(var_conf), 4),
+                    "brand_hint": routed_brand,
+                    "routed_category": routed_cat,
+                    "base_variant": v.get("base_variant", ""),
+                    "variant": v.get("variant", ""),
+                })
+                if not out.get("brand") and v.get("brand"):
+                    out["brand"] = v["brand"]
+                if out.get("brand") and out.get("base_variant"):
+                    out["product"] = f"{out['brand']}__{out['base_variant']}"
+                elif v.get("product"):
+                    out["product"] = v["product"]
+                if not out.get("category") and v.get("category"):
+                    out["category"] = v["category"]
+                if not out.get("packaging_type") and v.get("packaging_type"):
+                    out["packaging_type"] = v["packaging_type"]
         return out
