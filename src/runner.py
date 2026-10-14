@@ -162,6 +162,10 @@ def run(
     fields_suffix = "" if eval_fields == default_fields else f"-{len(eval_fields)}attr-{'_'.join(eval_fields)}"
     run_id = (f"{started:%m%d-%H%M%S}-{approach}-{model}"
               + ("" if tier == "standard" else f"-{tier}") + ds_suffix + split_suffix + fields_suffix)
+    if len(run_id) > 240:
+        fields_suffix = "" if eval_fields == default_fields else f"-{len(eval_fields)}attr"
+        run_id = (f"{started:%m%d-%H%M%S}-{approach}-{model}"
+                  + ("" if tier == "standard" else f"-{tier}") + ds_suffix + split_suffix + fields_suffix)[:240]
     log(f"[{run_id}] {len(samples)} images from {appr.dataset} {split} (seed {seed}) on {env['platform']}")
 
     # One trace per run (Cloud Trace), with correlated log entries (Cloud Logging).

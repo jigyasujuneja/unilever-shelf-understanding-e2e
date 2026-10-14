@@ -26,7 +26,7 @@ from utils import dataset
 from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "src", "experiments"]
+SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "gt-mapping.yml", "src", "experiments"]
 
 
 def _session() -> AuthorizedSession:
@@ -349,6 +349,7 @@ _CV_ENDPOINT_NAMES = {
     "skin_variant": "marketshare-skin-variant",
     "p5_variant": "marketshare-p5-variant",
     "oral_variant": "marketshare-oral-variant",
+    "gen_variant": "marketshare-gen-variant",
     "nonhul_p6_variant": "marketshare-nonhul-p6-variant",
     "nonhul_gen_variant": "marketshare-nonhul-gen-variant",
 }

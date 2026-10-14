@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.brand_endpoint")
     s.add_argument("--pack-model", default=None,
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.pack_endpoint")
-    for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
+    for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "gen_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
         s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
                        help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.brand_endpoint")
     s.add_argument("--pack-model", default=None,
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.pack_endpoint")
-    for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
+    for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "gen_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
         s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
                        help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
     s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
                        help="register the legacy .h5 models in Vertex AI Model Registry and deploy their Vertex AI Endpoints")
     s.add_argument("--brand-model", default=None, help="gs:// .h5 (default: config cv_models.brand_model)")
     s.add_argument("--pack-model", default=None, help="gs:// .h5 (default: config cv_models.pack_model)")
-    for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
+    for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "gen_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
         s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
                        help=f"gs:// .h5 (default: config cv_models.{v_role}_model)")
     s.add_argument("--roles", nargs="*", default=None,

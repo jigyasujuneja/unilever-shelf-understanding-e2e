@@ -5,9 +5,9 @@ The ``.h5`` models run on Vertex AI Endpoints (``cv_models`` in config.yaml, see
 1. The brand model runs first, predicting ``brand`` and implying a category + HUL ownership hint.
 2. The pack model takes that category as its 10-d one-hot input to predict ``packaging_type`` and ``category``.
 3. When variant models are configured (``wash_variant``, ``skin_variant``, ``p5_variant``,
-   ``oral_variant``, ``nonhul_p6_variant``, ``nonhul_gen_variant``), each image is routed by its
-   category and brand to the matching variant endpoint (with the predicted brand as its one-hot
-   brand input) to predict ``base_variant`` and ``product``.
+   ``oral_variant``, ``gen_variant``, ``nonhul_p6_variant``, ``nonhul_gen_variant``), each image is
+   routed by its category and brand to the matching variant endpoint (with the predicted brand as
+   its one-hot brand input) to predict ``base_variant`` and ``product``.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ class CVClassify(Approach):
     models = (
         "keras-h5",
         "marketshare_brand.h5+marketshare_packtype.h5",
-        "wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5",
+        "wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5",
     )
     architecture = (
         "Legacy InceptionV3 Keras models on Vertex AI Endpoints: "
@@ -41,7 +41,7 @@ class CVClassify(Approach):
         "Brand Vertex AI Endpoint (legacy .h5): 299x299 InceptionV3 argmax -> brand_data class -> brand",
         "Map the predicted brand to its category and HUL ownership (main's legacy brand taxonomy)",
         "Pack Vertex AI Endpoint (legacy .h5), with that category as its one-hot category input",
-        "Route by category and brand to the matching variant Vertex AI Endpoint (wash, skin, p5, oral, nonhul_p6, nonhul_gen)",
+        "Route by category and brand to the matching variant Vertex AI Endpoint (wash, skin, p5, oral, gen, nonhul_p6, nonhul_gen)",
         "Score brand, packaging_type, category, base_variant, and product from the coupled legacy models",
     ]
 

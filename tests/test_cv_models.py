@@ -215,10 +215,11 @@ def test_deploy_cv_endpoints_uses_vertex_operations_only(monkeypatch):
 
 
 def test_variant_routing_and_brand_onehot(monkeypatch):
-    wash_classes = ("Dove__Dove_Bar", "Lifebuoy__Lifebuoy_Total", "St_Ives__St_Ives_Oatmeal")
+    wash_classes = ("Comfort__Blue_Morning_Fresh", "Lifebuoy__Lifebuoy_Total", "St_Ives__St_Ives_Oatmeal")
     skin_classes = ("Dove__Dove_Lotion", "Lakme__Lakme_9to5", "Vaseline__Vaseline_Cocoa")
     p5_classes = ("Bru__Bru_Gold", "Knorr__Knorr_Soup", "Taj_Mahal__Taj_Mahal_Tea")
     oral_classes = ("Close_Up__Close_Up_Red", "Oral_B__Oral_B_Fresh", "Pepsodent__Pepsodent_2in1")
+    gen_classes = ("Clear__Active_Care", "Clinic_Plus__Strong_And_Long", "Sunsilk__Black_Shine")
     nh_p6_classes = ("Dettol__Dettol_Liquid", "Maggi__Maggi_Noodles", "Savlon__Savlon_Spray")
     nh_gen_classes = ("Colgate__Colgate_Strong", "Dettol__Dettol_Soap", "Nivea__Nivea_Soft")
     class_map = {
@@ -226,6 +227,7 @@ def test_variant_routing_and_brand_onehot(monkeypatch):
         "gs://b/skin_variant.h5": skin_classes,
         "gs://b/p5_variant.h5": p5_classes,
         "gs://b/oral_variant.h5": oral_classes,
+        "gs://b/gen_variant.h5": gen_classes,
         "gs://b/nonhul_p6_variant.h5": nh_p6_classes,
         "gs://b/nonhul_gen_variant.h5": nh_gen_classes,
     }
@@ -236,9 +238,12 @@ def test_variant_routing_and_brand_onehot(monkeypatch):
         for r in cv_models.VARIANT_ROLES
     }
 
-    # Category + ownership routing and brand-silo disambiguation
+    # Category + ownership routing and brand-silo disambiguation (including gen_variant and PW)
     assert cv_models.route_variant_role(category="Oral_Care", brand="Pepsodent", is_hul=True, runners=runners) == "oral_variant"
     assert cv_models.route_variant_role(category="Oral_Care", brand="Colgate", is_hul=False, runners=runners) == "nonhul_gen_variant"
+    assert cv_models.route_variant_role(category="Hair_Care", brand="Clinic_Plus", is_hul=True, runners=runners) == "gen_variant"
+    assert cv_models.route_variant_role(category="PW", brand="Lifebuoy", is_hul=True, runners=runners) == "wash_variant"
+    assert cv_models.route_variant_role(category="PW", brand="Dove", is_hul=True, runners=runners) == "skin_variant"
     assert cv_models.route_variant_role(category="Foods", brand="Knorr", is_hul=True, runners=runners) == "p5_variant"
     assert cv_models.route_variant_role(category="Foods", brand="Maggi", is_hul=False, runners=runners) == "nonhul_p6_variant"
     assert cv_models.route_variant_role(category="Household_Care", brand="Dettol", is_hul=False, runners=runners) == "nonhul_p6_variant"
@@ -259,6 +264,46 @@ def test_variant_routing_and_brand_onehot(monkeypatch):
         "packaging_type": "Tube",
         "product": "Pepsodent__Pepsodent_2in1",
     }
+
+
+def test_gt_mapping_ground_truth_and_gen_variant(monkeypatch):
+    monkeypatch.setattr(cv_models, "load_classes", lambda uri: ())
+    gtm = cv_models.gt_mapping()
+    assert len(gtm["brand_mapping"]) == 227
+    assert len(cv_models.pack_categories()) == 10
+    assert len(cv_models.pack_classes()) == 46
+    assert len(cv_models.gt_brand_classes("gen_variant")) == 7
+    assert len(cv_models.gt_variant_classes("gen_variant")) == 145
+    assert len(cv_models.gt_brand_classes("oral_variant")) == 3
+    assert len(cv_models.gt_variant_classes("oral_variant")) == 57
+    assert len(cv_models.gt_brand_classes("skin_variant")) == 9
+    assert len(cv_models.gt_variant_classes("skin_variant")) == 438
+    assert len(cv_models.gt_brand_classes("wash_variant")) == 14
+    assert len(cv_models.gt_variant_classes("wash_variant")) == 173
+    assert len(cv_models.gt_brand_classes("p5_variant")) == 24
+    assert len(cv_models.gt_variant_classes("p5_variant")) == 291
+    assert len(cv_models.gt_brand_classes("nonhul_gen_variant")) == 106
+    assert len(cv_models.gt_variant_classes("nonhul_gen_variant")) == 595
+    assert len(cv_models.gt_brand_classes("nonhul_p6_variant", size=61)) == 61
+    assert len(cv_models.gt_variant_classes("nonhul_p6_variant", size=367)) == 367
+
+    # 5-part gt-mapping.yml label parsing and brand-consistent argmax masking
+    gen_cls = cv_models.gt_variant_classes("gen_variant")
+    clf = cv_models.KerasClassifier("gen_variant", "gs://b/gen_variant.h5", gen_cls)
+    # Winner 0 is Clear__Active_Care, but conditioning on Clinic_Plus masks argmax to Clinic_Plus classes
+    clf._model = FakeKeras(winner=0, n=145, inputs=((None, 7), (None, None, None, 3)))
+    label, _ = clf.predict_class(Image.new("RGB", (64, 64)), brand="Clinic_Plus")
+    assert "__Clinic_Plus__" in label
+    assert clf._model.feeds[0][0].tolist() == [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    parsed = cv_models.parse_gt_variant_label("gen_variant", "HUL__Hair__Shampoo__Clear__Active_Care")
+    assert parsed["brand"] == "Clear" and parsed["category"] == "Hair_Care" and parsed["is_hul"] is True
+    assert metrics.match_product(
+        {"brand": "Clear", "base_variant": parsed["base_variant"], "product": parsed["product"]},
+        {"brand": "Clear", "base_variant": "Active_Care_Shampoo", "product": "Clear__Active_Care_Shampoo"},
+        ("product", "brand", "base_variant"),
+    )["tp"] == 1
+
 
 
 def test_coupled_3_stage_pipeline_with_variant_endpoints(monkeypatch):

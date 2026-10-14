@@ -31,6 +31,7 @@ cv_models:
   skin_variant_model: gs://sos-datasets/legacy-models/skin_variant/skin_variant.h5
   p5_variant_model: gs://sos-datasets/legacy-models/p5_variant/p5_variant.h5
   oral_variant_model: gs://sos-datasets/legacy-models/oral_variant/oral_variant.h5
+  gen_variant_model: gs://sos-datasets/legacy-models/gen_variant/gen_variant.h5
   nonhul_p6_variant_model: gs://sos-datasets/legacy-models/nonhul_p6_variant/nonhul_p6_variant.h5
   nonhul_gen_variant_model: gs://sos-datasets/legacy-models/nonhul_gen_variant/nonhul_gen_variant.h5
   brand_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/4323610123659378688
@@ -39,6 +40,7 @@ cv_models:
   skin_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/649235777678475264
   p5_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/5038556564504444928
   oral_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/6078888078427029504
+  gen_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/4763274037281423360
   nonhul_p6_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/4700786592451657728
   nonhul_gen_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/5604884217646284800
 

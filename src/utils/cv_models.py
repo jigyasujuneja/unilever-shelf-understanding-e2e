@@ -5,17 +5,17 @@ and deployed to Vertex AI Endpoints (``shelf-bench deploy-cv-endpoints``). On an
 repo's image runs ``shelf-bench serve``, and its ``/api/cv/predict`` route runs the model with
 ``KerasClassifier``. The benchmark calls the endpoints through ``EndpointClassifier``.
 
-- brand model: a 941-way softmax over the sorted ``brand_data`` folder names. The class list is
-  stored next to the weights in ``<model>_classes.json``.
-- pack model: a 46-way softmax over the legacy ``Category__PackType`` pack_data folders. It has a
-  second input, a 10-d one-hot of the legacy category; all zeros means the category is unknown.
-- 6 category-routed variant models (``wash_variant``, ``skin_variant``, ``p5_variant``,
-  ``oral_variant``, ``nonhul_p6_variant``, ``nonhul_gen_variant``): each predicts ``Brand__Variant``
-  folders for its category/ownership silo and takes a one-hot vector of the silo's sorted brands
-  as its first input alongside the 299x299 InceptionV3 image tensor.
-
-Class names become benchmark fields through ``legacy_benchmark.normalize_legacy_prediction`` and
-``taxonomy.filenames.parse_variant_folder``.
+All input conditioning vectors and output class mappings are sanitized against the authoritative
+ground-truth configuration ``gt-mapping.yml``:
+- brand model: a 941-way softmax over ``brand_data`` folder names (``<model>_classes.json``),
+  sanitized against ``brand_mapping`` and ``*_brand_mapping`` in ``gt-mapping.yml``.
+- pack model: a 46-way softmax over ``pack_type_mapping`` (``Category__PackType``) in
+  ``gt-mapping.yml``, conditioned on a 10-d one-hot vector from ``category_mapping`` (``0..9``).
+- 7 variant models (``wash_variant``, ``skin_variant``, ``p5_variant``, ``oral_variant``,
+  ``gen_variant``, ``nonhul_p6_variant``, ``nonhul_gen_variant``): each takes a brand one-hot
+  vector from its ``<role>_brand_mapping`` in ``gt-mapping.yml`` alongside the 299x299 image
+  tensor, and predicts a 5-part ``<HUL|NON_HUL>__<Category>__<SubCategory>__<Brand>__<Variant>``
+  entry from its ``<role>_var_mapping`` / ``<role>_variant_mapping`` in ``gt-mapping.yml``.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ VARIANT_ROLES = (
     "skin_variant",
     "p5_variant",
     "oral_variant",
+    "gen_variant",
     "nonhul_p6_variant",
     "nonhul_gen_variant",
 )
@@ -53,9 +54,33 @@ VARIANT_SILOS = {
     "skin_variant": "variant_skin",
     "p5_variant": "variant_p5",
     "oral_variant": "variant_oral",
+    "gen_variant": "variant_gen",
     "nonhul_p6_variant": "variant_NH_P6",
     "nonhul_gen_variant": "variant_NH_gen",
 }
+_GT_VARIANT_KEYS: dict[str, tuple[str, str]] = {
+    "gen_variant": ("gen_brand_mapping", "gen_var_mapping"),
+    "oral_variant": ("oral_brand_mapping", "oral_var_mapping"),
+    "skin_variant": ("skin_brand_mapping", "skin_var_mapping"),
+    "wash_variant": ("was_brand_mapping", "was_var_mapping"),
+    "p5_variant": ("p5_brand_mapping", "p5_variant_mapping"),
+    "nonhul_gen_variant": ("nh_gen_brand_mapping", "nh_gen_variant_mapping"),
+    "nonhul_p6_variant": ("nh_p6_brand_mapping", "nh_p6_variant_mapping"),
+}
+_DEFAULT_ROLE_MODEL_URIS: dict[str, str] = {
+    "brand": "gs://sos-datasets/legacy-models/mt_brand/marketshare_brand.h5",
+    "pack": "gs://sos-datasets/legacy-models/mt_pack/marketshare_packtype.h5",
+    "wash_variant": "gs://sos-datasets/legacy-models/wash_variant/wash_variant.h5",
+    "skin_variant": "gs://sos-datasets/legacy-models/skin_variant/skin_variant.h5",
+    "p5_variant": "gs://sos-datasets/legacy-models/p5_variant/p5_variant.h5",
+    "oral_variant": "gs://sos-datasets/legacy-models/oral_variant/oral_variant.h5",
+    "gen_variant": "gs://sos-datasets/legacy-models/gen_variant/gen_variant.h5",
+    "nonhul_p6_variant": "gs://sos-datasets/legacy-models/nonhul_p6_variant/nonhul_p6_variant.h5",
+    "nonhul_gen_variant": "gs://sos-datasets/legacy-models/nonhul_gen_variant/nonhul_gen_variant.h5",
+}
+# The 4 single-SKU brands omitted when nonhul_p6_variant.h5 (61 brands, 367 classes) was exported from the 65-brand / 371-class table
+_NH_P6_DROPPED_BRANDS = frozenset({"citricplus", "maxkleen", "nestle", "slurrpfarm"})
+
 _ROLE_ALIASES = {
     "brand": "brand",
     "pack": "pack",
@@ -73,6 +98,9 @@ _ROLE_ALIASES = {
     "oral_variant": "oral_variant",
     "variant_oral": "oral_variant",
     "oral": "oral_variant",
+    "gen_variant": "gen_variant",
+    "variant_gen": "gen_variant",
+    "gen": "gen_variant",
     "nonhul_p6_variant": "nonhul_p6_variant",
     "variant_nh_p6": "nonhul_p6_variant",
     "nonhul_p6": "nonhul_p6_variant",
@@ -86,6 +114,7 @@ _P5_P6_CATEGORIES = {
     "Foods",
     "Beverages",
     "Health_Food_Drinks",
+    "Health_Wellbeing",
     "Household_Care",
     "Home_Care",
     "HHC",
@@ -96,7 +125,25 @@ _P5_P6_CATEGORIES = {
     "Dishwash",
 }
 _ORAL_CATEGORIES = {"Oral_Care", "Oral"}
-_WASH_CATEGORIES = {"Laundry", "Personal_Wash", "Fabric_Wash", "Wash"}
+_WASH_CATEGORIES = {"Laundry", "Personal_Wash", "PW", "Skin_Cleansing", "Fabric_Wash", "Fabric_Care", "Wash"}
+_GEN_CATEGORIES = {"Hair_Care", "Hair", "DMT", "Deodorants", "Deo"}
+_BRAND_KEY_ALIASES: dict[str, str] = {
+    "lovebeautyandplanet": "lbp",
+    "alovebeautyandplanet": "lbp",
+    "fairandlovely": "glowandlovely",
+    "afairandlovely": "glowandlovely",
+    "glowandhandsome": "glowandlovely",
+    "aclinic": "clinicplus",
+    "clinic": "clinicplus",
+    "a3roses": "3roses",
+    "abrookbond": "redlabel",
+    "brookbond": "redlabel",
+    "brookebond": "redlabel",
+    "yippee": "yipee",
+    "tetley": "tetely",
+    "twinings": "twinnings",
+    "hellmanns": "hellmans",
+}
 _ENDPOINT_RE = re.compile(r"^projects/[^/]+/locations/([^/]+)/endpoints/[^/]+$")
 _RETRY_STATUS = (429, 500, 502, 503, 504)
 
@@ -109,9 +156,54 @@ def normalize_role(role: str | None) -> str:
     return "pack" if r.startswith("pack") else ""
 
 
+def _norm_brand_key(brand: str | None) -> str:
+    """Normalize a brand token so ``gt-mapping.yml``, ``brand_data`` ``ABrand`` folders, and v2.2 canonical names align."""
+    raw = str(brand or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith(("A_", "Z_")):
+        raw = raw[2:]
+    elif len(raw) >= 3 and raw[0] == "A" and raw[1].isupper():
+        raw = raw[1:]
+    s = re.sub(r"[^a-z0-9]+", "", raw.replace("&", "and").lower())
+    return _BRAND_KEY_ALIASES.get(s, s)
+
+
+def _class_brand_token(c: str) -> str:
+    """Extract the brand token from a 5-part ``gt-mapping.yml`` class or a 2-part ``Brand__Variant`` class."""
+    parts = str(c).strip().split("__")
+    if len(parts) >= 5 and parts[0].upper() in ("HUL", "NON_HUL"):
+        return parts[3]
+    return parts[0] if len(parts) >= 2 else ""
+
+
+@lru_cache(maxsize=1)
+def gt_mapping() -> dict[str, dict[int, str]]:
+    """Load the authoritative customer ground-truth mapping dictionary from ``gt-mapping.yml``."""
+    import yaml
+
+    candidates = (
+        Path(__file__).resolve().parents[2] / "gt-mapping.yml",
+        Path("gt-mapping.yml"),
+        Path("/app/gt-mapping.yml"),
+    )
+    for path in candidates:
+        if path.exists():
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            return {
+                str(k): {int(idx): str(val) for idx, val in sorted((v or {}).items(), key=lambda kv: int(kv[0]))}
+                for k, v in raw.items()
+                if isinstance(v, Mapping)
+            }
+    return {}
+
+
 @lru_cache(maxsize=1)
 def pack_classes() -> tuple[str, ...]:
-    """The pack model's 46 output classes: the sorted legacy ``Category__PackType`` folders."""
+    """The pack model's 46 output classes from ``gt-mapping.yml`` ``pack_type_mapping``."""
+    gtm = gt_mapping().get("pack_type_mapping")
+    if gtm and len(gtm) == 46:
+        return tuple(gtm[i] for i in sorted(gtm))
     from utils.legacy_benchmark import build_legacy_mapping_table
 
     return tuple(sorted({r["legacy_pack_folder"] for r in build_legacy_mapping_table()["category_packs"]}))
@@ -119,8 +211,41 @@ def pack_classes() -> tuple[str, ...]:
 
 @lru_cache(maxsize=1)
 def pack_categories() -> tuple[str, ...]:
-    """The 10 legacy categories, in the order of the pack model's one-hot category input."""
+    """The 10 legacy categories (indices ``0..9``) from ``gt-mapping.yml`` ``category_mapping``."""
+    gtm = gt_mapping().get("category_mapping")
+    if gtm:
+        cats = tuple(gtm[i] for i in sorted(gtm) if int(i) < 10 and gtm[i] != "Others")
+        if len(cats) == 10:
+            return cats
     return tuple(sorted({c.split("__", 1)[0] for c in pack_classes()}))
+
+
+@lru_cache(maxsize=32)
+def gt_brand_classes(role: str, size: int | None = None) -> tuple[str, ...]:
+    """The brand one-hot vocabulary for ``role`` from ``gt-mapping.yml`` ``<role>_brand_mapping``."""
+    r = normalize_role(role)
+    if r not in _GT_VARIANT_KEYS:
+        return ()
+    b_key, _ = _GT_VARIANT_KEYS[r]
+    b_map = gt_mapping().get(b_key) or {}
+    brands = tuple(b_map[i] for i in sorted(b_map))
+    if r == "nonhul_p6_variant" and size == 61 and len(brands) == 65:
+        brands = tuple(b for b in brands if _norm_brand_key(b) not in _NH_P6_DROPPED_BRANDS)
+    return brands
+
+
+@lru_cache(maxsize=32)
+def gt_variant_classes(role: str, size: int | None = None) -> tuple[str, ...]:
+    """The variant output classes for ``role`` from ``gt-mapping.yml`` ``<role>_var_mapping``."""
+    r = normalize_role(role)
+    if r not in _GT_VARIANT_KEYS:
+        return ()
+    _, v_key = _GT_VARIANT_KEYS[r]
+    v_map = gt_mapping().get(v_key) or {}
+    classes = tuple(v_map[i] for i in sorted(v_map))
+    if r == "nonhul_p6_variant" and size == 367 and len(classes) == 371:
+        classes = tuple(c for c in classes if _norm_brand_key(_class_brand_token(c)) not in _NH_P6_DROPPED_BRANDS)
+    return classes
 
 
 @lru_cache(maxsize=16)
@@ -132,31 +257,42 @@ def load_classes(model_uri: str | None) -> tuple[str, ...]:
         return ()
     try:
         return tuple(str(c) for c in json.loads(dataset.read_bytes(str(model_uri)[:-3] + "_classes.json")))
-    except (FileNotFoundError, NotFound):
+    except (FileNotFoundError, NotFound, Exception):
         return ()
 
 
 @lru_cache(maxsize=16)
 def variant_brands(classes: tuple[str, ...]) -> tuple[str, ...]:
-    """The sorted legacy brand prefixes ``<Brand>`` from ``<Brand>__<Variant>`` class folders."""
-    return tuple(sorted({c.split("__", 1)[0] for c in classes if "__" in c}))
+    """The sorted legacy brand prefixes ``<Brand>`` from ``<Brand>__<Variant>`` or 5-part ``gt-mapping.yml`` classes."""
+    return tuple(sorted({_class_brand_token(c) for c in classes if _class_brand_token(c)}))
 
 
-def brand_index(brand: str | None, classes: Sequence[str]) -> int | None:
-    """Index of ``brand`` (canonical or raw legacy folder prefix) in ``variant_brands(classes)``."""
-    from utils.taxonomy.brands import canonicalize_brand_name
-
-    raw = str(brand or "").strip()
-    if not raw or not classes:
+def brand_index(
+    brand: str | None,
+    classes: Sequence[str] = (),
+    *,
+    role: str | None = None,
+    size: int | None = None,
+) -> int | None:
+    """Index of ``brand`` in ``gt-mapping.yml``'s ``<role>_brand_mapping`` or ``variant_brands(classes)``."""
+    key = _norm_brand_key(brand)
+    if not key:
         return None
-    brands = variant_brands(tuple(classes))
-    low = raw.lower()
-    for i, b in enumerate(brands):
-        if b.lower() == low:
-            return i
-    canon = canonicalize_brand_name(raw).lower()
-    for i, b in enumerate(brands):
-        if canonicalize_brand_name(b).lower() == canon:
+    # If custom classes were provided (e.g. unit test fixtures) whose unique brand count matches `size` (or `role` is unset),
+    # check `variant_brands(classes)` first when `classes` are 2-part strings or when `size` matches `len(cls_brands)`.
+    cls_brands = variant_brands(tuple(classes)) if classes else ()
+    gt_brands = gt_brand_classes(role, size=size) if role else ()
+
+    if classes and (size is None or len(cls_brands) == size) and len(cls_brands) != len(gt_brands):
+        for i, b in enumerate(cls_brands):
+            if _norm_brand_key(b) == key:
+                return i
+    if gt_brands and (size is None or len(gt_brands) == size):
+        for i, b in enumerate(gt_brands):
+            if _norm_brand_key(b) == key:
+                return i
+    for i, b in enumerate(cls_brands):
+        if _norm_brand_key(b) == key:
             return i
     return None
 
@@ -167,7 +303,7 @@ def route_variant_role(
     is_hul: bool | None = None,
     runners: Mapping[str, Any] | None = None,
 ) -> str:
-    """Route an image to the appropriate variant model role based on category, brand, and HUL ownership."""
+    """Route an image to the appropriate variant model role using ``gt-mapping.yml`` brand tables and category."""
     direct = normalize_role(category)
     if direct in VARIANT_ROLES:
         return direct
@@ -181,6 +317,7 @@ def route_variant_role(
             if not cat and norm_b.get("category") != "Unknown":
                 cat = str(norm_b["category"])
 
+    # Determine category-based fallback role
     if is_hul is False:
         cat_role = "nonhul_p6_variant" if cat in _P5_P6_CATEGORIES else "nonhul_gen_variant"
     elif cat in _ORAL_CATEGORIES:
@@ -189,18 +326,29 @@ def route_variant_role(
         cat_role = "p5_variant"
     elif cat in _WASH_CATEGORIES:
         cat_role = "wash_variant"
+    elif cat in _GEN_CATEGORIES and (not runners or "gen_variant" in runners):
+        cat_role = "gen_variant"
     else:
         cat_role = "skin_variant"
 
-    if brand and runners:
-        matches = [
-            r for r in VARIANT_ROLES
-            if r in runners and brand_index(brand, runners[r].classes) is not None
-        ]
+    # Authoritative brand lookup across configured runners (or gt-mapping.yml brand tables)
+    if brand:
+        candidate_roles = [r for r in VARIANT_ROLES if not runners or r in runners]
+        matches: list[str] = []
+        for r in candidate_roles:
+            r_classes = runners[r].classes if (runners and r in runners) else ()
+            if brand_index(brand, r_classes, role=r) is not None:
+                matches.append(r)
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            return cat_role if cat_role in matches else matches[0]
+            if cat_role in matches:
+                return cat_role
+            if is_hul is False:
+                for nh_r in ("nonhul_gen_variant", "nonhul_p6_variant"):
+                    if nh_r in matches:
+                        return nh_r
+            return matches[0]
 
     if runners:
         available = [r for r in VARIANT_ROLES if r in runners]
@@ -220,12 +368,112 @@ def has_configured_variants(config: dict) -> bool:
     return bool(configured_variant_roles(config))
 
 
-def parse_label(role: str, label: str) -> dict[str, str]:
-    """Benchmark fields for one model class (brand_data, Category__PackType, or Brand__Variant)."""
-    from utils.legacy_benchmark import normalize_legacy_prediction
+def parse_gt_variant_label(role: str, label: str) -> dict[str, Any]:
+    """Parse a 5-part ``gt-mapping.yml`` variant label (or 2-part ``Brand__Variant`` folder) with full metadata."""
+    from utils.legacy_benchmark import LEGACY_PACK_CATEGORY_TO_CANONICAL
+    from utils.taxonomy.brands import HUL_BRANDS, canonicalize_brand_name
+    from utils.taxonomy.categories import normalize_category_name
     from utils.taxonomy.filenames import parse_variant_folder
 
-    if not label or label.isdigit():
+    raw = str(label or "").strip()
+    if not raw or raw.isdigit():
+        return {}
+    r = normalize_role(role)
+    silo = VARIANT_SILOS.get(r, "variant_skin")
+    parts = raw.split("__")
+
+    # Check if `raw` is a 5-part `gt-mapping.yml` string: `<HUL|NON_HUL>__<Category>__<SubCategory>__<Brand>__<Variant>`
+    if len(parts) >= 5 and parts[0].upper() in ("HUL", "NON_HUL"):
+        owner_tok, cat_tok, subcat_tok, brand_tok = parts[0].upper(), parts[1], parts[2], parts[3]
+        var_tok = "__".join(parts[4:])
+        is_hul = owner_tok == "HUL"
+        canon_brand = canonicalize_brand_name(brand_tok)
+        if canon_brand == "Unknown" or not canon_brand:
+            canon_brand = brand_tok
+        canon_cat = LEGACY_PACK_CATEGORY_TO_CANONICAL.get(
+            cat_tok.lower(), normalize_category_name(cat_tok)
+        )
+
+        # If `<role>_classes.json` (the GCS training folder list) is available at the same index,
+        # extract its exact `base_variant` so both v2.2 Golden manifests and `gt-mapping.yml` align 100%.
+        folder_entry = f"{brand_tok}__{var_tok}"
+        for sz in (367, None):
+            gt_list = gt_variant_classes(r, size=sz)
+            if raw in gt_list:
+                idx = gt_list.index(raw)
+                uri = os.environ.get(MODEL_ENV.get(r, "")) or _DEFAULT_ROLE_MODEL_URIS.get(r)
+                f_classes = load_classes(uri)
+                if len(f_classes) == len(gt_list) and idx < len(f_classes):
+                    f_cand = f_classes[idx]
+                    if "__" in f_cand and len(f_cand.split("__")) == 2:
+                        folder_entry = f_cand
+                break
+
+        p = parse_variant_folder(silo, folder_entry)
+        base_variant = str(p.get("base_variant") or var_tok)
+        variant_val = str(p.get("variant") or var_tok)
+        pkg_type = str(p.get("packaging_type") or "")
+        return {
+            "brand": canon_brand,
+            "base_variant": base_variant,
+            "variant": variant_val,
+            "category": canon_cat if canon_cat != "Unknown" else str(p.get("category") or ""),
+            "packaging_type": pkg_type if pkg_type != "Unknown" else "",
+            "product": f"{canon_brand}__{base_variant}" if canon_brand and base_variant else "",
+            "is_hul": is_hul,
+            "gt_brand": brand_tok,
+            "gt_category": cat_tok,
+            "gt_subcategory": subcat_tok,
+            "gt_variant": var_tok,
+            "gt_label": raw,
+        }
+
+    # 2-part `<Brand>__<Variant>` folder label (also cross-reference `gt-mapping.yml` at the same class index if present)
+    gt_meta: dict[str, Any] = {}
+    uri = os.environ.get(MODEL_ENV.get(r, "")) or _DEFAULT_ROLE_MODEL_URIS.get(r)
+    f_classes = load_classes(uri)
+    if f_classes and raw in f_classes:
+        idx = f_classes.index(raw)
+        gt_list = gt_variant_classes(r, size=len(f_classes))
+        if idx < len(gt_list):
+            gt_raw = gt_list[idx]
+            gt_parts = gt_raw.split("__")
+            if len(gt_parts) >= 5 and gt_parts[0].upper() in ("HUL", "NON_HUL"):
+                gt_cat = gt_parts[1]
+                gt_meta = {
+                    "is_hul": gt_parts[0].upper() == "HUL",
+                    "gt_brand": gt_parts[3],
+                    "gt_category": gt_cat,
+                    "gt_subcategory": gt_parts[2],
+                    "gt_variant": "__".join(gt_parts[4:]),
+                    "gt_label": gt_raw,
+                    "category_override": LEGACY_PACK_CATEGORY_TO_CANONICAL.get(
+                        gt_cat.lower(), normalize_category_name(gt_cat)
+                    ),
+                }
+
+    p = parse_variant_folder(silo, raw)
+    brand_val = str(p.get("brand") or "")
+    bv_val = str(p.get("base_variant") or "")
+    cat_val = str(gt_meta.get("category_override") or p.get("category") or "")
+    pkg_val = str(p.get("packaging_type") or "")
+    return {
+        "brand": brand_val if brand_val != "Unknown" else "",
+        "base_variant": bv_val if bv_val != "Unknown" else "",
+        "variant": str(p.get("variant") or bv_val),
+        "category": cat_val if cat_val != "Unknown" else "",
+        "packaging_type": pkg_val if pkg_val != "Unknown" else "",
+        "product": f"{brand_val}__{bv_val}" if brand_val and bv_val else "",
+        "is_hul": bool(gt_meta["is_hul"]) if "is_hul" in gt_meta else (brand_val.lower() in HUL_BRANDS),
+        **{k: v for k, v in gt_meta.items() if k != "category_override"},
+    }
+
+
+def parse_label(role: str, label: str) -> dict[str, str]:
+    """Benchmark fields for one model class (brand_data, Category__PackType, or Brand__Variant / gt-mapping.yml)."""
+    from utils.legacy_benchmark import normalize_legacy_prediction
+
+    if not label or str(label).isdigit():
         return {}
     r = normalize_role(role)
     if r == "brand":
@@ -233,14 +481,11 @@ def parse_label(role: str, label: str) -> dict[str, str]:
         keys = ("brand", "category")
         return {k: str(p[k]) for k in keys if p.get(k) and p[k] != "Unknown"}
     if r in VARIANT_ROLES:
-        silo = VARIANT_SILOS.get(r, "variant_skin")
-        p = parse_variant_folder(silo, str(label).strip())
+        info = parse_gt_variant_label(r, str(label).strip())
         out: dict[str, str] = {}
-        for k in ("brand", "base_variant", "variant", "category", "packaging_type"):
-            if p.get(k) and p[k] != "Unknown":
-                out[k] = str(p[k])
-        if out.get("brand") and out.get("base_variant"):
-            out["product"] = f"{out['brand']}__{out['base_variant']}"
+        for k in ("brand", "base_variant", "variant", "category", "packaging_type", "product"):
+            if info.get(k) and info[k] != "Unknown":
+                out[k] = str(info[k])
         return out
     p = normalize_legacy_prediction(pack_pred=label)
     keys = ("category", "packaging_type")
@@ -315,6 +560,7 @@ class KerasClassifier:
 
     Preprocessing matches ``keras.preprocessing.image.load_img(target_size=(299, 299))``
     (nearest-neighbour resize) followed by ``inception_v3.preprocess_input`` (x / 127.5 - 1).
+    Input conditioning vectors and output classes are sanitized via ``gt-mapping.yml``.
     """
 
     def __init__(self, role: str, model_uri: str, classes: Sequence[str] = ()):
@@ -344,11 +590,16 @@ class KerasClassifier:
                 import tf_keras
 
                 model = tf_keras.models.load_model(path, compile=False)
+            n_out = int(model.output_shape[-1])
+            if not self.classes and self.role in VARIANT_ROLES:
+                gt_cls = gt_variant_classes(self.role, size=n_out)
+                if len(gt_cls) == n_out:
+                    self.classes = list(gt_cls)
             if not self.classes:
                 self.classes = list(load_classes(self.source_uri))
             if not self.classes and self.role in MODEL_ENV:
                 self.classes = list(load_classes(os.environ.get(MODEL_ENV[self.role])))
-            if not self.classes and self.role == "pack" and int(model.output_shape[-1]) == len(pack_classes()):
+            if not self.classes and self.role == "pack" and n_out == len(pack_classes()):
                 self.classes = list(pack_classes())
             self._model = model
             return model
@@ -373,8 +624,8 @@ class KerasClassifier:
         import numpy as np
 
         vec = np.zeros((1, size), dtype=np.float32)
-        idx = brand_index(brand, self.classes)
-        if idx is not None and len(variant_brands(tuple(self.classes))) == size and idx < size:
+        idx = brand_index(brand, self.classes, role=self.role, size=size)
+        if idx is not None and 0 <= idx < size:
             vec[0, idx] = 1.0
         return vec
 
@@ -397,13 +648,25 @@ class KerasClassifier:
         category: str | None = None,
         brand: str | None = None,
     ) -> tuple[str, float]:
-        """``(class name, softmax probability)``; the class index as a string if names are unknown."""
+        """``(class name, softmax probability)``; masks variant outputs to the conditioned brand's classes."""
         import numpy as np
 
         model = self._load()
         feeds = self._inputs(image, category=category, brand=brand)
         with self._lock:
             probs = np.asarray(model.predict(feeds if len(feeds) > 1 else feeds[0], verbose=0))[0]
+        # Brand-consistent output masking for variant models: restrict argmax to classes belonging to `brand`
+        if self.role in VARIANT_ROLES and brand and self.classes:
+            b_key = _norm_brand_key(brand)
+            if b_key:
+                limit = min(len(self.classes), len(probs))
+                valid_idxs = [
+                    i for i in range(limit)
+                    if _norm_brand_key(_class_brand_token(self.classes[i])) == b_key
+                ]
+                if valid_idxs:
+                    idx = max(valid_idxs, key=lambda i: float(probs[i]))
+                    return self.classes[idx], float(probs[idx])
         idx = int(np.argmax(probs))
         return (self.classes[idx] if idx < len(self.classes) else str(idx)), float(probs[idx])
 
@@ -469,7 +732,14 @@ class EndpointClassifier:
 
     @property
     def classes(self) -> tuple[str, ...]:
-        return pack_classes() if self.role == "pack" else load_classes(self.model_uri)
+        if self.role == "pack":
+            return pack_classes()
+        loaded = load_classes(self.model_uri)
+        if loaded:
+            return loaded
+        if self.role in VARIANT_ROLES:
+            return gt_variant_classes(self.role)
+        return ()
 
     def predict_class(
         self,
@@ -547,15 +817,19 @@ class CVPipeline:
         with_variant: bool | None = None,
         category_hint: str | None = None,
     ) -> dict[str, Any]:
-        """Brand model -> pack model -> category-routed variant model, coupled:
+        """Brand model -> pack model -> ``gt-mapping.yml``-routed variant model, coupled:
         1. Brand model predicts ``brand`` and implies a category + HUL ownership hint.
-        2. Pack model takes that category as its 10-d one-hot input and predicts ``Category__PackType``.
-        3. The category + brand route the image to one of the 6 variant models (``wash_variant``,
-           ``skin_variant``, ``p5_variant``, ``oral_variant``, ``nonhul_p6_variant``,
-           ``nonhul_gen_variant``), passing the predicted brand as its one-hot brand input to
-           predict ``Brand__Variant`` (``base_variant`` and ``product``).
+        2. Pack model takes that category as its 10-d one-hot input (``category_mapping``) and
+           predicts ``Category__PackType`` (``pack_type_mapping``).
+        3. The brand + category route the image to one of the 7 variant models (``wash_variant``,
+           ``skin_variant``, ``p5_variant``, ``oral_variant``, ``gen_variant``,
+           ``nonhul_p6_variant``, ``nonhul_gen_variant``) using ``gt-mapping.yml``'s
+           ``*_brand_mapping`` tables. If the predicted variant's ``gt-mapping.yml`` category
+           differs from the initial brand category hint (for multi-category umbrella brands like
+           Dove, Ayush, Lux, LBP, Tata), the pack model is re-conditioned with the variant's true
+           ``gt-mapping.yml`` category.
         """
-        from utils.legacy_benchmark import normalize_legacy_prediction
+        from utils.legacy_benchmark import CANONICAL_TO_LEGACY_PACK_CATEGORY, normalize_legacy_prediction
 
         out: dict[str, Any] = {}
         b: dict[str, str] = {}
@@ -575,19 +849,19 @@ class CVPipeline:
             if is_hul_flag is not None:
                 out["is_hul"] = is_hul_flag
 
+        initial_pack_hint = b.get("category") or category_hint or None
         if with_pack and "pack" in self.runners:
-            hint = b.get("category") or category_hint or None
-            pack_cls, pack_conf = self.runners["pack"].predict_class(image, hint)
+            pack_cls, pack_conf = self.runners["pack"].predict_class(image, initial_pack_hint)
             p = parse_label("pack", pack_cls)
             out.update({
                 "packaging_type": p.get("packaging_type", ""),
                 "category": p.get("category", "") or b.get("category", ""),
                 "pack_class": pack_cls,
                 "pack_confidence": round(float(pack_conf), 4),
-                "category_hint": hint or "",
+                "category_hint": initial_pack_hint or "",
             })
-        elif b.get("category") or category_hint:
-            out.setdefault("category", b.get("category") or category_hint or "")
+        elif initial_pack_hint:
+            out.setdefault("category", initial_pack_hint)
 
         if with_variant is None:
             with_variant = any(r in self.runners for r in VARIANT_ROLES)
@@ -608,7 +882,7 @@ class CVPipeline:
                     category=routed_cat or None,
                     brand=brand_hint,
                 )
-                v = parse_label(v_role, var_cls)
+                v = parse_gt_variant_label(v_role, var_cls)
                 out.update({
                     "variant_role": v_role,
                     "variant_class": var_cls,
@@ -618,14 +892,38 @@ class CVPipeline:
                     "base_variant": v.get("base_variant", ""),
                     "variant": v.get("variant", ""),
                 })
+                for meta_k in ("gt_brand", "gt_category", "gt_subcategory", "gt_variant", "gt_label"):
+                    if v.get(meta_k):
+                        out[meta_k] = v[meta_k]
                 if not out.get("brand") and v.get("brand"):
                     out["brand"] = v["brand"]
                 if out.get("brand") and out.get("base_variant"):
                     out["product"] = f"{out['brand']}__{out['base_variant']}"
                 elif v.get("product"):
                     out["product"] = v["product"]
-                if not out.get("category") and v.get("category"):
-                    out["category"] = v["category"]
+
+                # If gt-mapping.yml specifies a variant-level category that differs from the initial
+                # umbrella-brand category hint, update category and re-condition the pack model.
+                var_gt_cat = str(v.get("gt_category") or "")
+                var_canon_cat = str(v.get("category") or "")
+                init_leg_cat = CANONICAL_TO_LEGACY_PACK_CATEGORY.get(
+                    str(initial_pack_hint or ""), str(initial_pack_hint or "")
+                )
+                if var_gt_cat and var_gt_cat in pack_categories() and var_gt_cat != init_leg_cat:
+                    if with_pack and "pack" in self.runners:
+                        pack_cls2, pack_conf2 = self.runners["pack"].predict_class(image, var_gt_cat)
+                        p2 = parse_label("pack", pack_cls2)
+                        out.update({
+                            "packaging_type": p2.get("packaging_type", "") or out.get("packaging_type", ""),
+                            "category": p2.get("category", "") or var_canon_cat or out.get("category", ""),
+                            "pack_class": pack_cls2,
+                            "pack_confidence": round(float(pack_conf2), 4),
+                            "category_hint": var_gt_cat,
+                        })
+                    elif var_canon_cat:
+                        out["category"] = var_canon_cat
+                elif not out.get("category") and var_canon_cat:
+                    out["category"] = var_canon_cat
                 if not out.get("packaging_type") and v.get("packaging_type"):
                     out["packaging_type"] = v["packaging_type"]
         return out

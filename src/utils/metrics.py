@@ -94,6 +94,53 @@ def _brand_matches(pred: dict, gt: dict) -> bool:
     return False
 
 
+def _variant_tokens_match(p_var: str, g_var: str, brand: str = "") -> bool:
+    """Compare predicted vs GT variant strings across ``gt-mapping.yml`` and v2.2 folder conventions."""
+    import re
+
+    from utils.taxonomy.filenames import STRIP_PROMO_ART_SUFFIX_RE
+
+    if not p_var or not g_var:
+        return False
+
+    def _extract_var(s: str) -> str:
+        s = s.strip()
+        parts = s.split("__")
+        if len(parts) >= 5 and parts[0].upper() in ("HUL", "NON_HUL"):
+            return "__".join(parts[4:])
+        if len(parts) == 2:
+            return parts[1]
+        return s
+
+    pv = _extract_var(str(p_var))
+    gv = _extract_var(str(g_var))
+    if pv.lower() == gv.lower():
+        return True
+
+    b_alnum = re.sub(r"[^a-z0-9]+", "", str(brand or "").replace("&", "and").lower())
+    subcat_re = re.compile(
+        r"^(?:shampoo|conditioner|toothpaste|paste|soaps?|bodywash|body|facewash|face|handwash|wash|hair|oil)$"
+    )
+
+    def _norm(v: str, strip_subcat: bool = False) -> str:
+        base = STRIP_PROMO_ART_SUFFIX_RE.sub("", v) or v
+        toks = [t for t in re.split(r"[^a-z0-9]+", base.replace("&", "and").lower()) if t]
+        if strip_subcat and len(toks) > 1:
+            filtered = [t for t in toks if not subcat_re.match(t)]
+            if filtered:
+                toks = filtered
+        joined = "".join(toks)
+        if b_alnum and joined.startswith(b_alnum) and len(joined) > len(b_alnum):
+            joined = joined[len(b_alnum) :]
+        return joined
+
+    if _norm(pv, False) and _norm(pv, False) == _norm(gv, False):
+        return True
+    if _norm(pv, True) and _norm(pv, True) == _norm(gv, True):
+        return True
+    return False
+
+
 def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
     """Granularity-aware, legacy-alias-aware, and multi-modal packaging-aware field matcher."""
     if pred is None:
@@ -193,12 +240,21 @@ def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
         if gt_lpf and g_val == gt_lpf:
             if _field_matches(pred, gt, "category") and _field_matches(pred, gt, "packaging_type"):
                 return True
-        # 3. Variant/Product string with legacy `ABrand__Variant` prefix
+        # 3. Variant/Product string with legacy `ABrand__Variant` prefix or `gt-mapping.yml` 5-part label
         if p_val and g_val and "__" in str(p_val) and "__" in str(g_val):
             p_b, p_v = str(p_val).split("__", 1)
             g_b, g_v = str(g_val).split("__", 1)
-            if p_v.lower() == g_v.lower() and _brand_matches({"brand": p_b}, {"brand": g_b, "is_hul": gt.get("is_hul")}):
+            if (p_v.lower() == g_v.lower() or _variant_tokens_match(p_v, g_v, g_b)) and _brand_matches(
+                {"brand": p_b}, {"brand": g_b, "is_hul": gt.get("is_hul")}
+            ):
                 return True
+        if _brand_matches(pred, gt):
+            p_cands = [pred.get(k) for k in (field, "base_variant", "variant", "gt_variant", "product") if pred.get(k)]
+            g_cands = [gt.get(k) for k in (field, "base_variant", "variant", "product") if gt.get(k)]
+            for pc in p_cands:
+                for gc in g_cands:
+                    if _variant_tokens_match(str(pc), str(gc), gt_brand):
+                        return True
         # 4. If ground truth is a brand-only competitor record or catch-all `<Brand>__Others`
         # and the model predicts a specific variant of the exact same brand & category, credit it.
         if (
