@@ -219,12 +219,13 @@ def normalize_hul_golden_variant(
             for c in cands:
                 if c.lower() == cleaned.lower():
                     return c
-            pred_toks = set(normalize_variant_tokens(cleaned, norm_b))
+            b_toks = {t for t in normalize_variant_tokens(norm_b).split("_") if t}
+            pred_toks = {t for t in normalize_variant_tokens(cleaned).split("_") if t} - b_toks
             best_cand: str | None = None
             best_score: tuple[int, float, int] = (0, 0.0, 0)
             for c in cands:
                 is_tok_match = int(_variant_tokens_match(cleaned, c, norm_b))
-                c_toks = set(normalize_variant_tokens(c, norm_b))
+                c_toks = {t for t in normalize_variant_tokens(c).split("_") if t} - b_toks
                 if pred_toks and c_toks:
                     inter = len(pred_toks & c_toks)
                     f1 = (2.0 * inter) / (len(pred_toks) + len(c_toks))

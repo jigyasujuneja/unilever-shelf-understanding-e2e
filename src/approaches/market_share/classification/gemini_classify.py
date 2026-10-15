@@ -138,13 +138,16 @@ class GeminiClassify(Approach):
     task = "classification"
     dataset = "hul_golden"
     architecture = (
-        "Gemini single-pass 5-attribute classification (product, brand, base_variant, packaging_type, category) "
-        "with catalog-grounded variant canonicalization and taxonomy consistency"
+        "Single-Pass Structured 5-Attribute VLM Classifier on Vertex AI: 1-Call JSON Schema Extraction "
+        "(product, brand, base_variant, packaging_type, category) -> Fuzzy Token Jaccard Variant Canonicalization "
+        "(gt-mapping.yml) -> 46-Class Category x Pack Taxonomy Projection"
     )
     steps = [
-        "Single Gemini call with the image and structured 5-attribute JSON schema",
-        "Normalize brand and snap base_variant to canonical catalog/gt-mapping.yml SKU variant",
-        "Enforce (brand, base_variant, category, packaging_type) taxonomy consistency",
+        "Stage 1 · Single-Pass Structured VLM Extraction: Sends the product crop to Gemini (base or 5-attribute LoRA SFT endpoint) with a strict 5-field JSON schema (product, brand, base_variant, packaging_type, category)",
+        "Stage 2 · Brand Canonicalization & Ownership Lookup: Resolves legacy A-prefix folder aliases (e.g., ADove → Dove) and maps the predicted brand to its canonical HUL/Competitor ownership",
+        "Stage 3 · Catalog-Grounded Variant Matching (normalize_hul_golden_variant): Matches the predicted base_variant against the brand's valid SKU vocabulary in gt-mapping.yml via exact and token-Jaccard similarity",
+        "Stage 4 · 46-Class Category × Pack Projection (project_to_valid_category_pack): Reconciles (category, packaging_type) against the SKU's allowed packaging forms and the 46 valid pack_data pairs",
+        "Stage 5 · 5-Attribute Composite SKU Assembly: Synthesizes canonical product = Brand__Variant and scores all 5 attributes jointly",
     ]
 
     def setup(self, config: dict, ctx: Context) -> None:
