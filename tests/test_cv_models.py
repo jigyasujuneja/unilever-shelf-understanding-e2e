@@ -62,11 +62,19 @@ def test_keras_classifier_inception_preprocessing_category_onehot_and_argmax():
     assert clf.predict_class(img) == ("Hair__Bottle", pytest.approx(0.9))
     onehot, x = clf._model.feeds
     assert x.shape == (1, 299, 299, 3)  # InceptionV3 size when the model's input size is free
-    assert x[0, 0, 0].tolist() == pytest.approx([1.0, -1.0, 128 / 127.5 - 1.0], abs=1e-6)  # x / 127.5 - 1
+    assert x[0, 0, 0].tolist() == pytest.approx([128 / 255.0, 0.0, 1.0], abs=1e-6)  # BGR [0, 1] for pack & variant
     assert not onehot.any()  # no category -> zeros (what the deployed endpoint feeds)
 
     clf.predict_class(img, category="Hair_Care")  # canonical name -> legacy "Hair" slot
     assert clf._model.feeds[0][0].tolist() == [float(c == "Hair") for c in cv_models.pack_categories()]
+
+    # Brand classifier uses PIL RGB + NEAREST + x / 127.5 - 1.0
+    b_clf = cv_models.KerasClassifier("brand", "gs://b/mt_brand/marketshare_brand.h5", ("AColgate", "APepsodent"))
+    b_clf._model = FakeKeras(1, n=2, inputs=((None, None, None, 3),))
+    assert b_clf.predict_class(img) == ("APepsodent", pytest.approx(0.9))
+    (bx,) = b_clf._model.feeds
+    assert bx.shape == (1, 299, 299, 3)
+    assert bx[0, 0, 0].tolist() == pytest.approx([1.0, -1.0, 128 / 127.5 - 1.0], abs=1e-6)
 
 
 class FakeSession:

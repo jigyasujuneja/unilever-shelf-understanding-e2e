@@ -558,8 +558,10 @@ def _find_models(model_dir: str) -> dict[str, str]:
 class KerasClassifier:
     """One legacy ``.h5`` classifier run in this process (inside the Vertex serving container).
 
-    Preprocessing matches ``keras.preprocessing.image.load_img(target_size=(299, 299))``
-    (nearest-neighbour resize) followed by ``inception_v3.preprocess_input`` (x / 127.5 - 1).
+    - ``brand`` (``marketshare_brand.h5``): PIL RGB + nearest-neighbour resize to 299x299 +
+      ``inception_v3.preprocess_input`` (``x / 127.5 - 1.0`` in ``[-1, 1]``).
+    - ``pack`` (``marketshare_packtype.h5``) and all 7 ``*_variant.h5`` models: OpenCV BGR channel
+      order + bilinear resize to 299x299 + ``x / 255.0`` in ``[0, 1]``.
     Input conditioning vectors and output classes are sanitized via ``gt-mapping.yml``.
     """
 
@@ -612,8 +614,13 @@ class KerasClassifier:
             shape = tuple(inp.shape)
             if len(shape) == 4:  # the image; InceptionV3's 299 x 299 when the size is not fixed
                 h, w = (shape[1] or 299), (shape[2] or 299)
-                rgb = image.convert("RGB").resize((int(w), int(h)), Image.Resampling.NEAREST)
-                feeds.append(np.asarray(rgb, dtype=np.float32)[None] / 127.5 - 1.0)
+                if self.role == "brand":
+                    rgb = image.convert("RGB").resize((int(w), int(h)), Image.Resampling.NEAREST)
+                    feeds.append(np.asarray(rgb, dtype=np.float32)[None] / 127.5 - 1.0)
+                else:
+                    rgb = image.convert("RGB").resize((int(w), int(h)), Image.Resampling.BILINEAR)
+                    bgr = np.asarray(rgb, dtype=np.float32)[..., ::-1]
+                    feeds.append(bgr[None] / 255.0)
             elif self.role in VARIANT_ROLES:  # variant model's one-hot brand conditioning vector
                 feeds.append(self._brand_onehot(brand or category, int(shape[-1])))
             else:  # the pack model's one-hot legacy category
