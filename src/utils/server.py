@@ -9,13 +9,20 @@
     GET /img/products/<image>              downscaled JPEG from the labelled products set
     GET /img/rpc/<image>                   downscaled RPC checkout photo
     GET /img/rpc-ref/<product id>          a product's first RPC reference photo
+
+On a Vertex AI Endpoint (cloud.deploy_cv_endpoints) the same server serves a legacy .h5 model:
+
+    GET  /api/cv/health                    the models it serves
+    POST /api/cv/predict                   {"instances": [{"image_b64" | "image_uri", "role"?, "category"?}]}
 """
 
 from __future__ import annotations
 
+import base64
 import gzip
 import io
 import json
+import os
 import re
 import threading
 import time
@@ -38,6 +45,8 @@ GALLERY_SETS = dataset.RPC_FORMAT_SETS  # RPC layout: photos with identified box
 PULL_TTL_S = 120.0
 CACHE_TTL_S = 45.0
 _PULL_LOCK = threading.Lock()
+_CV_LOCK = threading.Lock()
+_CV_PIPELINE = None
 _API_CACHE: dict[str, tuple[float, Any]] = {}
 
 
@@ -220,6 +229,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parts = [unquote(p) for p in urlparse(self.path).path.strip("/").split("/") if p]
+        if parts == ["api", "cv", "health"]:  # Vertex AI health route (does not load the models)
+            runners = _cv_pipeline().runners
+            return self._json({"status": "healthy", "models": {r: m.source_uri for r, m in runners.items()}})
         eff_dir = runner.resolve_results_dir(self.results_dir)
         try:
             if not parts:
@@ -422,6 +434,47 @@ class Handler(BaseHTTPRequestHandler):
                 "detail": f"{type(e).__name__}: {e}"[:500],
             }, 503)
 
+    def do_POST(self) -> None:  # noqa: N802
+        parts = [unquote(p) for p in urlparse(self.path).path.strip("/").split("/") if p]
+        if parts != ["api", "cv", "predict"]:
+            return self._json({"error": "not found"}, 404)
+        try:
+            self._cv_predict()
+        except Exception as e:
+            self._json({"error": f"{type(e).__name__}: {e}"[:500]}, 500)
+
+    def _cv_predict(self) -> None:
+        """Vertex AI prediction route: one legacy .h5 class (+ benchmark fields) per instance."""
+        from utils import cv_models
+
+        payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        instances = payload.get("instances") or []
+        if not instances:
+            return self._json({"error": "no instances"}, 400)
+        runners = _cv_pipeline().runners
+        predictions = []
+        for inst in instances:
+            role = cv_models.normalize_role(inst.get("role")) or (next(iter(runners)) if len(runners) == 1 else "")
+            model = runners.get(role)
+            if model is None:
+                predictions.append({"error": f"no {inst.get('role')!r} model here; serving {sorted(runners)}"})
+                continue
+            if inst.get("image_b64"):
+                data = base64.b64decode(inst["image_b64"])
+            elif inst.get("image_uri"):
+                data = dataset.read_bytes(str(inst["image_uri"]))
+            else:
+                predictions.append({"error": "missing image_b64 or image_uri"})
+                continue
+            label, conf = model.predict_class(
+                Image.open(io.BytesIO(data)),
+                category=inst.get("category"),
+                brand=inst.get("brand"),
+            )
+            predictions.append({"raw_class": label, "confidence": round(conf, 6),
+                                "model_uri": model.source_uri, **cv_models.parse_label(role, label)})
+        return self._json({"predictions": predictions})
+
     def _audit(self, run_id: str, image_id: str) -> None:
         """Cloud Trace + Cloud Logging for one image (utils/audit.py), fetched on demand."""
         from utils import audit
@@ -442,9 +495,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": f"{type(e).__name__}: {e}"[:500]}, 502)
 
 
+def _cv_pipeline():
+    """The legacy .h5 classifier(s) this server predicts with (built once, loaded on first use)."""
+    global _CV_PIPELINE
+    with _CV_LOCK:
+        if _CV_PIPELINE is None:
+            from utils import cv_models
+            from utils.llm import load_config
+
+            _CV_PIPELINE = cv_models.CVPipeline.for_serving(load_config())
+        return _CV_PIPELINE
+
+
 def serve(host: str = "127.0.0.1", port: int = 8080, results_dir: Path = runner.RESULTS_DIR,
           data_root: str = dataset.DEFAULT_ROOT, pull_src: str | None = None,
           mode: str = "engineering") -> None:
+    port = int(os.environ.get("AIP_HTTP_PORT") or port)  # Vertex AI serving container
     Handler.results_dir, Handler.data_root = Path(results_dir), str(data_root)
     Handler.pull_src = pull_src
     Handler.default_mode = mode

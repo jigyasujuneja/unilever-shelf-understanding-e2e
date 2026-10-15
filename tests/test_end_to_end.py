@@ -32,6 +32,7 @@ def test_registry_has_builtin_approaches():
         "distilled_yolo_960_softnms",
         "hierarchy_classify", "embedding_text_match", "djev_classify", "coarse_jev_gemini",
         "clef_flash_classify", "clm_classify", "clm_standalone_classify", "clef_standalone_classify",
+        "cv_classify",
         "embedding_retrieval", "tiered_hybrid", "jev_laya_hybrid", "coarse_jev_laya",
         "jev_laya_zscore_lid", "cold_start_lid_discovery", "jev_laya_global_wb", "jev_laya_zoom_strip",
         "clef_flash_decision", "clm_contrastive", "l8_hul_ultimate", "hierarchical_clm_jev",

@@ -26,7 +26,7 @@ from utils import dataset
 from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "src", "experiments"]
+SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "gt-mapping.yml", "src", "experiments"]
 
 
 def _session() -> AuthorizedSession:
@@ -76,7 +76,8 @@ def task_seconds(env: dict, session: AuthorizedSession | None = None) -> float:
     return math.ceil(secs * 10) / 10
 
 
-def build_image(s: AuthorizedSession, project: str, region: str, log=print) -> str:
+def build_image(s: AuthorizedSession, project: str, region: str, log=print, extras: str = "") -> str:
+    """Build and push the repo image with Cloud Build; ``extras`` = pip extras (e.g. ``cv``)."""
     tag = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     image = f"{region}-docker.pkg.dev/{project}/cloud-run-source-deploy/shelf-bench:{tag}"
     buf = io.BytesIO()
@@ -92,7 +93,9 @@ def build_image(s: AuthorizedSession, project: str, region: str, log=print) -> s
     op = _ok(s.post(
         f"https://cloudbuild.googleapis.com/v1/projects/{project}/locations/{region}/builds",
         json={"source": {"storageSource": {"bucket": bucket, "object": obj}},
-              "steps": [{"name": "gcr.io/cloud-builders/docker", "args": ["build", "-t", image, "."]}],
+              "steps": [{"name": "gcr.io/cloud-builders/docker",
+                         "args": ["build", *(["--build-arg", f"EXTRAS={extras}"] if extras else []),
+                                  "-t", image, "."]}],
               "images": [image],
               "options": {"logging": "CLOUD_LOGGING_ONLY"}}))
     build_id = op["metadata"]["build"]["id"]
@@ -174,9 +177,13 @@ def run_on_cloud(
     workers: int,
     owner: str,
     dataset_override: str | None = None,
+    fields: str | None = None,
+    brand_model: str | None = None,
+    pack_model: str | None = None,
     image: str | None = None,
     pull_local: bool = False,
     log=print,
+    **variant_models: str | None,
 ) -> int:
     cfg = load_config()
     gcp = cfg["gcp"]
@@ -189,6 +196,10 @@ def run_on_cloud(
     args = [
         "run", "-a", *approaches, "-m", *models, "-t", *tiers,
         *(["-d", dataset_override] if dataset_override else []),
+        *(["--fields", fields] if fields else []),
+        *(["--brand-model", brand_model] if brand_model else []),
+        *(["--pack-model", pack_model] if pack_model else []),
+        *[x for k, v in variant_models.items() if v for x in (f"--{k.replace('_', '-')}", v)],
         "--split", split, "--limit", str(limit),
         "--seed", str(seed), "--workers", str(workers), "--owner", owner,
         "--root", gcp["data"], "--results", gcp["results"],
@@ -316,6 +327,115 @@ def deploy_ui(image: str | None = None, log=print) -> str:
         if svc_name == primary_name or not primary_uri:
             primary_uri = uri
     return primary_uri
+
+
+def _wait_vertex_op(s, region: str, name: str, log=print, every: int = 15) -> dict:
+    """Poll a Vertex AI long-running operation; return its response, raise on its error."""
+    url = f"https://{region}-aiplatform.googleapis.com/v1/{name}"
+    while True:
+        op = _ok(s.get(url, timeout=30))
+        if op.get("done"):
+            if "error" in op:
+                raise RuntimeError(f"Vertex AI {name}: {op['error']}")
+            return op.get("response", {})
+        log(f"  waiting for {name.rsplit('/operations/', 1)[0].rsplit('/', 1)[-1]} ...")
+        time.sleep(every)
+
+
+_CV_ENDPOINT_NAMES = {
+    "brand": "marketshare-brand",
+    "pack": "marketshare-packtype",
+    "wash_variant": "marketshare-wash-variant",
+    "skin_variant": "marketshare-skin-variant",
+    "p5_variant": "marketshare-p5-variant",
+    "oral_variant": "marketshare-oral-variant",
+    "gen_variant": "marketshare-gen-variant",
+    "nonhul_p6_variant": "marketshare-nonhul-p6-variant",
+    "nonhul_gen_variant": "marketshare-nonhul-gen-variant",
+}
+
+
+def deploy_cv_endpoints(
+    brand_model: str | None = None,
+    pack_model: str | None = None,
+    image: str | None = None,
+    roles: list[str] | tuple[str, ...] | None = None,
+    log=print,
+    **variant_models: str | None,
+) -> dict:
+    """Register the legacy .h5 brand / pack / variant classifiers in Vertex AI Model Registry and
+    deploy each to its Vertex AI Endpoint, served by this repo's image (``shelf-bench serve``,
+    /api/cv/predict). A redeploy moves all traffic to the new model and undeploys the old one.
+    Put the endpoints in config.yaml ``cv_models.<role>_endpoint``."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    cfg = load_config()
+    gcp, cv = cfg["gcp"], cfg.get("cv_models") or {}
+    project, region = gcp["project"], gcp["region"]
+    s = _session()
+    image = image or build_image(s, project, region, log, extras="cv")  # the server needs TensorFlow
+    api = f"https://{region}-aiplatform.googleapis.com/v1"
+    base = f"{api}/projects/{project}/locations/{region}"
+    out: dict = {"image": image}
+    overrides = {"brand": brand_model, "pack": pack_model, **variant_models}
+    target_roles = [r for r in (roles or _CV_ENDPOINT_NAMES) if r in _CV_ENDPOINT_NAMES]
+    items = [
+        (r, _CV_ENDPOINT_NAMES[r], overrides.get(r) or cv.get(f"{r}_model"))
+        for r in target_roles
+        if overrides.get(r) or cv.get(f"{r}_model")
+    ]
+
+    def _deploy_one(item: tuple[str, str, str], sess=None) -> tuple[str, dict]:
+        role, name, model_uri = item
+        ws = sess or _session()
+        log(f"Uploading {model_uri} to Vertex AI Model Registry ...")
+        op = _ok(ws.post(f"{base}/models:upload", timeout=60, json={"model": {
+            "displayName": f"{name}-h5",
+            "description": f"Legacy InceptionV3 Keras classifier ({model_uri})",
+            "artifactUri": model_uri.rsplit("/", 1)[0],  # Vertex copies it to AIP_STORAGE_URI
+            "containerSpec": {
+                "imageUri": image,
+                "command": ["shelf-bench"],
+                # --results outside results/: the prediction server must not pull the leaderboard
+                "args": ["serve", "--host", "0.0.0.0", "--port", "8080", "--results", "/tmp/cv-serving"],
+                "env": [{"name": "SHELF_BENCH_CV_ROLE", "value": role},
+                        {"name": f"SHELF_BENCH_CV_{role.upper()}_MODEL", "value": model_uri}],
+                "ports": [{"containerPort": 8080}],
+                "predictRoute": "/api/cv/predict",
+                "healthRoute": "/api/cv/health",
+            },
+        }}))
+        model = _wait_vertex_op(ws, region, op["name"], log)["model"]
+        ep_name = f"{name}-vertex-endpoint"
+        eps = _ok(ws.get(f"{base}/endpoints", timeout=30)).get("endpoints", [])
+        endpoint = next((e["name"] for e in eps if e.get("displayName") == ep_name), None)
+        if endpoint is None:
+            op = _ok(ws.post(f"{base}/endpoints", json={"displayName": ep_name}, timeout=60))
+            endpoint = _wait_vertex_op(ws, region, op["name"], log)["name"]
+        old = [d["id"] for d in _ok(ws.get(f"{api}/{endpoint}", timeout=30)).get("deployedModels", [])]
+        log(f"Deploying {model} to {endpoint} (15-30 min) ...")
+        op = _ok(ws.post(f"{api}/{endpoint}:deployModel", timeout=60, json={
+            "deployedModel": {"model": model, "displayName": f"{name}-h5", "dedicatedResources": {
+                "machineSpec": {"machineType": "n1-standard-4"}, "minReplicaCount": 1, "maxReplicaCount": 2}},
+            "trafficSplit": {"0": 100},
+        }))
+        _wait_vertex_op(ws, region, op["name"], log, every=30)
+        for dm_id in old:
+            op = _ok(ws.post(f"{api}/{endpoint}:undeployModel", json={"deployedModelId": dm_id}, timeout=60))
+            _wait_vertex_op(ws, region, op["name"], log)
+        res = {"model_uri": model_uri, "vertex_model": model, "endpoint": endpoint}
+        log(f"  cv_models.{role}_endpoint: {endpoint}")
+        return role, res
+
+    if len(items) <= 2:
+        for item in items:
+            role, res = _deploy_one(item, sess=s)
+            out[role] = res
+    else:
+        with ThreadPoolExecutor(max_workers=len(items)) as pool:
+            for role, res in pool.map(_deploy_one, items):
+                out[role] = res
+    return out
 
 
 def proxy_ui(port: int = 8083, host: str = "127.0.0.1", log=print) -> None:
