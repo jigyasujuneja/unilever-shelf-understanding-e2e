@@ -279,3 +279,16 @@ def test_hybrid_accepts_tuned_models_and_rejects_bad_params(monkeypatch):
     inst = type(appr)()
     inst._load_params({"hybrid_classify": {"tau_brand": 0.9, "min_energy": 0.8}})
     assert (inst.stage_b, inst.tau_brand, inst.min_energy) == ("sft", 0.55, 0.8)
+
+
+def test_normalize_hul_golden_variant_fuzzy_token_match():
+    from utils.gemini_fine_tuning.hul_golden_sft import normalize_hul_golden_variant
+
+    variants_by_brand = {"dove": ["Daily_Shine_Shampoo", "Intense_Repair_Shampoo"]}
+    # Non-exact variant string with brand prefix and pack size token should snap cleanly to catalog base_variant
+    snapped = normalize_hul_golden_variant(
+        "Dove__Daily_Shine_Shampoo_180ml",
+        brand="Dove",
+        catalog_variants_by_brand=variants_by_brand,
+    )
+    assert snapped == "Daily_Shine_Shampoo"
