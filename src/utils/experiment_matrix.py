@@ -205,9 +205,38 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
         "task_id": "TASK-CLS",
     },
     "gemini_classify": {
-        "display_name": "Direct Gemini 5-Level Taxonomy Classifier (Single-Crop SFT / Zero-Shot)",
+        "display_name": "Single-Pass Gemini 3.5 Flash-Lite 5-Attribute Classifier (Catalog-Grounded SFT / Base)",
         "intuition": (
-            "Directly predicts Category, Brand, Pack Type, and Variant from a single product crop using Gemini or a fine-tuned Vertex AI SFT endpoint."
+            "Directly predicts all 5 Unilever attributes (product, brand, base_variant, packaging_type, category) in a single "
+            "structured Gemini call per crop, then snaps base_variant to canonical brand vocabulary and projects (category, packaging_type) "
+            "onto the 46 valid pack_data pairs."
+        ),
+        "task_id": "TASK-CLS",
+    },
+    "hybrid_classify": {
+        "display_name": "2-Stage Hybrid Embedding Gate + Gemini 3.5 Flash-Lite Contact-Sheet Verifier (5-Attribute Cascade)",
+        "intuition": (
+            "Resolves 67.9% of store crops in Stage 1 at ₹0 VLM token cost using similarity-weighted kNN voting over 15,937 disjoint "
+            "reference embeddings (91.2% 5-attribute accuracy on gated crops), and escalates only the 32.1% visually ambiguous sister variants "
+            "to a numbered Top-5 Gemini 3.5 Flash-Lite contact sheet—achieving 96.3% Category, 95.3% Brand, 90.8% Pack, and 78.2% Variant/SKU "
+            "accuracy at ₹0.051/crop (4.9× cheaper than the 9-endpoint Legacy InceptionV3 cascade)."
+        ),
+        "task_id": "TASK-CLS",
+    },
+    "hybrid_classify_sft": {
+        "display_name": "2-Stage Hybrid Embedding Gate + LoRA SFT Gemini 3.5 Flash-Lite with Top-5 kNN Hints (5-Attribute Cascade)",
+        "intuition": (
+            "Pairs the 5-attribute gemini-embedding-2 kNN confidence gate (fast-pathing unambiguous crops at ₹0 VLM cost) with a LoRA "
+            "fine-tuned Gemini 3.5 Flash-Lite endpoint prompted with Top-5 kNN candidate hints for product, brand, base_variant, "
+            "packaging_type, and category."
+        ),
+        "task_id": "TASK-CLS",
+    },
+    "hybrid_classify_max": {
+        "display_name": "2-Stage High-Precision Unanimous kNN Gate + Gemini Contact-Sheet Verifier (5-Attribute Cascade)",
+        "intuition": (
+            "High-precision 5-attribute hybrid cascade that requires unanimous Top-5 kNN vote agreement (τ=0.99, energy ≥ 0.85) "
+            "before fast-pathing, escalating all remaining crops to a Top-5 visual contact sheet."
         ),
         "task_id": "TASK-CLS",
     },
@@ -372,6 +401,15 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
             "after Stage-2A CLM InfoNCE gating."
         ),
         "task_id": "TASK-RET",
+    },
+    "cv_classify": {
+        "display_name": "Legacy 3-Stage InceptionV3 Cascade (Brand → Pack → 7 Category-Routed Variant Models)",
+        "intuition": (
+            "Phase-1 baseline cascade of 9 specialized Keras InceptionV3 .h5 models hosted on Vertex AI Endpoints: "
+            "Stage 1 Brand Classifier (67 classes) → Stage 2 Category-Conditioned Pack Classifier (46 classes) → "
+            "Stage 3 Silo-Routed Variant Classifier across 5 HUL endpoints (wash, skin, p5, oral, gen) and 2 Non-HUL endpoints (nonhul_p6, nonhul_gen)."
+        ),
+        "task_id": "TASK-CLS",
     },
 }
 
