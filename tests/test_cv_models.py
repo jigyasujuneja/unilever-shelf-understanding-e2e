@@ -146,6 +146,7 @@ def test_cv_classify_fields_follow_dataset_and_model(monkeypatch):
     assert setup("hul_packs", "keras-h5")[:2] == (("packaging_type", "category"), ["brand", "pack"])
     assert setup("hul_golden", "keras-h5", ("packaging_type",))[:2] == (("packaging_type",), ["brand", "pack"])
     assert setup("hul_golden", "keras-h5", ("brand",))[:2] == (("brand",), ["brand"])
+    assert cv_models.resolve_evaluated_fields("hul_variants") == ("product", "brand", "base_variant")
     assert cv_models.resolve_evaluated_fields("hul_golden", "pack_type,cat") == ("packaging_type", "category")
     assert cv_models.resolve_evaluated_fields("hul_packs", "1") == ("packaging_type",)
 

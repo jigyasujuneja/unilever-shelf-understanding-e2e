@@ -512,7 +512,9 @@ def resolve_evaluated_fields(
             return ("brand",)
         if packs_only:
             return presets["2"]
-        if dataset_name == "hul_variants" or with_variants:
+        if dataset_name == "hul_variants":
+            return ("product", "brand", "base_variant")
+        if with_variants:
             return presets["5"]
         return presets["3"]
     if isinstance(requested, str):
