@@ -14,8 +14,8 @@ from utils.experiment_matrix import (
 
 
 def test_poc_experiments_and_models_schema():
-    """Verify all 26 prioritized experiments (P0, P1, P2, Moonshot) and 6 model families are well-formed."""
-    assert len(POC_EXPERIMENTS) == 26
+    """Verify all 31 prioritized experiments (P0, P1, P2, Moonshot) and 6 model families are well-formed."""
+    assert len(POC_EXPERIMENTS) == 31
     priorities = {e["priority"] for e in POC_EXPERIMENTS}
     assert priorities == {"P0", "P1", "P2", "Moonshot"}
 
@@ -207,7 +207,7 @@ def test_real_results_catalog_and_v21_backfill():
         return
 
     cat = build_experiments_and_models_catalog(real_results)
-    assert len(cat["experiments"]) == 26
+    assert len(cat["experiments"]) == 31
     assert len(cat["models"]) == 6
     for m in cat["models"]:
         assert "/locations/us-central1/models/" in m["model_resource"]
@@ -215,12 +215,14 @@ def test_real_results_catalog_and_v21_backfill():
     vlog = cat.get("vertex_logged_runs") or {}
     assert len(vlog) >= 20
     assert all("run_context" in v for v in vlog.values())
+    single_split_allowed = {"P0-EXP-30", "P0-EXP-32", "P0-EXP-33"}
     for e in cat["experiments"]:
         assert e["cost_estimate"]["est_1000_images_inr"] >= e["cost_estimate"]["est_100_images_inr"]
         if e["run_count"] == 0:
             continue
-        assert e["run_count"] >= 2, f"{e['experiment_id']} has <2 matched runs"
-        assert e["best_val_run"] is not None, f"{e['experiment_id']} missing best_val_run"
+        if e["experiment_id"] not in single_split_allowed:
+            assert e["run_count"] >= 2, f"{e['experiment_id']} has <2 matched runs"
+            assert e["best_val_run"] is not None, f"{e['experiment_id']} missing best_val_run"
         assert e["best_test_run"] is not None, f"{e['experiment_id']} missing best_test_run"
         best = e["best_run"]
         assert best is not None

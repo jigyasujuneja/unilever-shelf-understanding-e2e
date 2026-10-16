@@ -26,7 +26,7 @@ from utils import dataset
 from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "gt-mapping.yml", "src", "experiments"]
+SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "gt-mapping.yml", "src", "experiments", "scripts"]
 
 
 def _session() -> AuthorizedSession:
@@ -310,12 +310,15 @@ def deploy_ui(image: str | None = None, log=print) -> str:
     body = {
         "launchStage": "BETA",
         "iapEnabled": True,
-        "template": {"containers": [{
-            "image": image,
-            "args": ["serve", "--pull", "--host", "0.0.0.0", "--port", "8080"],
-            "ports": [{"containerPort": 8080}],
-            "resources": {"limits": {"cpu": "2", "memory": "4Gi"}},
-        }]},
+        "template": {
+            "scaling": {"minInstanceCount": 1, "maxInstanceCount": 10},
+            "containers": [{
+                "image": image,
+                "args": ["serve", "--pull", "--host", "0.0.0.0", "--port", "8080"],
+                "ports": [{"containerPort": 8080}],
+                "resources": {"limits": {"cpu": "2", "memory": "4Gi"}},
+            }],
+        },
     }
     primary_uri = ""
     for svc_name in services:
