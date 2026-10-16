@@ -117,32 +117,53 @@ class EvalCropDataset(Dataset):
         return img, target_idx, cid
 
 
+GCS_MODEL_PATH = "gs://marketshare-datasets/models/maxvit_variants"
+
+
 def load_model(device: torch.device, num_classes: int, storage_client=None):
-    """Load TorchScript traced model or PyTorch weights from local disk or GCS."""
+    """Load TorchScript traced model or PyTorch weights from gs://marketshare-datasets/models/maxvit_variants/."""
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     traced_path = MODEL_DIR / "traced_maxvit_brand_variant.pt"
     pth_path = MODEL_DIR / "best_maxvit_brand_variant.pth"
 
-    gcs_candidates = [
-        os.environ.get("MAXVIT_GCS_URI", "").rstrip("/"),
-        "gs://ul-fs-s-sandbx-16-prj-shelf-images/models/maxvit_variants",
-        "gs://marketshare-datasets/models/maxvit_variants",
-    ]
-
-    # Try local traced first
-    if traced_path.exists():
-        print(f"Loading TorchScript model from {traced_path}...")
+    # Check local cache first, else download directly from GCS path
+    if not traced_path.exists() and not pth_path.exists():
         try:
+            uri = f"{GCS_MODEL_PATH}/traced_maxvit_brand_variant.pt"
+            print(f"Downloading {uri} ...")
+            raw = read_gcs_bytes(uri, storage_client)
+            traced_path.write_bytes(raw)
+            print(f"Downloaded and cached to {traced_path} ({len(raw)/(1024*1024):.1f} MB)")
+        except Exception:
+            uri = f"{GCS_MODEL_PATH}/best_maxvit_brand_variant.pth"
+            print(f"Downloading {uri} ...")
+            raw = read_gcs_bytes(uri, storage_client)
+            pth_path.write_bytes(raw)
+            print(f"Downloaded and cached to {pth_path} ({len(raw)/(1024*1024):.1f} MB)")
+
+    if traced_path.exists():
+        try:
+            print(f"Loading TorchScript model from {traced_path}...")
             model = torch.jit.load(str(traced_path), map_location=device)
             model.eval()
             return model
         except Exception as e:
-            print(f"Failed to load local TorchScript: {e}")
+            print(f"TorchScript load error ({e}), trying .pth checkpoint...")
 
-    # Try local pth
+    if not pth_path.exists():
+        try:
+            uri = f"{GCS_MODEL_PATH}/best_maxvit_brand_variant.pth"
+            print(f"Downloading {uri} ...")
+            raw = read_gcs_bytes(uri, storage_client)
+            pth_path.write_bytes(raw)
+            print(f"Downloaded and cached to {pth_path} ({len(raw)/(1024*1024):.1f} MB)")
+        except Exception:
+            pass
+
     if pth_path.exists():
         print(f"Loading PyTorch weights from {pth_path}...")
         import timm
+
         model = timm.create_model("maxvit_tiny_tf_224", pretrained=False, num_classes=num_classes)
         state_dict = torch.load(str(pth_path), map_location=device)
         model.load_state_dict(state_dict)
@@ -150,44 +171,8 @@ def load_model(device: torch.device, num_classes: int, storage_client=None):
         model.eval()
         return model
 
-    # If neither exists locally, attempt download from GCS
-    for gcs_root in gcs_candidates:
-        if not gcs_root or not gcs_root.startswith("gs://"):
-            continue
-
-        # Try traced_maxvit_brand_variant.pt
-        try:
-            uri = f"{gcs_root}/traced_maxvit_brand_variant.pt"
-            print(f"Attempting download of {uri} ...")
-            raw = read_gcs_bytes(uri, storage_client)
-            traced_path.write_bytes(raw)
-            print(f"Downloaded and cached to {traced_path} ({len(raw)/(1024*1024):.1f} MB)")
-            model = torch.jit.load(str(traced_path), map_location=device)
-            model.eval()
-            return model
-        except Exception:
-            pass
-
-        # Try best_maxvit_brand_variant.pth
-        try:
-            uri = f"{gcs_root}/best_maxvit_brand_variant.pth"
-            print(f"Attempting download of {uri} ...")
-            raw = read_gcs_bytes(uri, storage_client)
-            pth_path.write_bytes(raw)
-            print(f"Downloaded and cached to {pth_path} ({len(raw)/(1024*1024):.1f} MB)")
-            import timm
-            model = timm.create_model("maxvit_tiny_tf_224", pretrained=False, num_classes=num_classes)
-            state_dict = torch.load(str(pth_path), map_location=device)
-            model.load_state_dict(state_dict)
-            model.to(device)
-            model.eval()
-            return model
-        except Exception:
-            pass
-
     raise FileNotFoundError(
-        f"Could not load MaxViT weights locally or from GCS candidates: {gcs_candidates}. "
-        "Set MAXVIT_GCS_URI='gs://<bucket>/<path>' or place weights in models/maxvit_variants/."
+        f"Could not load MaxViT model from {GCS_MODEL_PATH}."
     )
 
 
@@ -203,9 +188,12 @@ def evaluate(split_name: str = "test", limit: int = 0, batch_size: int = 32, num
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
     # 1. Load Classes & Metadata Mapping
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
     classes_json_path = MODEL_DIR / "variant_classes.json"
     if not classes_json_path.exists():
-        raise FileNotFoundError(f"Missing {classes_json_path}")
+        print(f"Downloading variant_classes.json from {GCS_MODEL_PATH}...")
+        raw_classes = read_gcs_bytes(f"{GCS_MODEL_PATH}/variant_classes.json", storage_client)
+        classes_json_path.write_bytes(raw_classes)
 
     with open(classes_json_path, "r", encoding="utf-8") as f:
         classes_dict = json.load(f)

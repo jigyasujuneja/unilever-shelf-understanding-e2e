@@ -35,5 +35,4 @@ results_experiments/
 private_guides/
 *.pt
 *.pth
-models/**/*.pth
-models/**/*.pt
+models/

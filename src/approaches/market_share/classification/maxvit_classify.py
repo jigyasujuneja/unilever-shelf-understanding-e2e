@@ -12,7 +12,6 @@ Supports:
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -21,51 +20,10 @@ import torch
 from torchvision import transforms
 
 from approaches.base import Approach, Box, Context, crop, register
-from utils import dataset
 
-# Model architecture identifier
+# Model architecture identifier and GCS model storage path
 MODEL_ARCH = "maxvit_tiny_tf_224"
-
-DEFAULT_GCS_ROOTS = [
-    "gs://ul-fs-s-sandbx-16-prj-shelf-images/models/maxvit_variants",
-    "gs://marketshare-datasets/models/maxvit_variants",
-]
-
-
-def _resolve_or_download_artifact(
-    filename: str,
-    local_candidates: list[Path],
-    gcs_candidates: list[str],
-    cache_dir: Path,
-) -> Path | None:
-    """Find file locally or download on-demand from GCP bucket into cache_dir."""
-    # 1. Fast path: check local candidates
-    for cand in local_candidates:
-        if cand.exists():
-            return cand
-
-    # 2. Check if already cached in cache_dir
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    target_cache = cache_dir / filename
-    if target_cache.exists():
-        return target_cache
-
-    # 3. Download from GCS candidates
-    for gcs_root in gcs_candidates:
-        if not gcs_root or not str(gcs_root).startswith("gs://"):
-            continue
-        gcs_uri = f"{str(gcs_root).rstrip('/')}/{filename}"
-        try:
-            print(f"[MaxViT] Downloading {filename} from {gcs_uri} ...")
-            raw = dataset.read_bytes(gcs_uri)
-            target_cache.write_bytes(raw)
-            print(f"[MaxViT] Successfully cached to {target_cache} ({len(raw) / (1024 * 1024):.2f} MB)")
-            return target_cache
-        except Exception as e:
-            # Try next candidate
-            continue
-
-    return None
+GCS_MODEL_PATH = "gs://marketshare-datasets/models/maxvit_variants"
 
 
 @register
@@ -78,7 +36,7 @@ class MaxVitClassify(Approach):
     models = [MODEL_ARCH]
     architecture = (
         "Fine-tuned Google MaxViT Tiny (maxvit_tiny_tf_224) 1,922 Brand__Variant Classifier "
-        "(224x224 RGB, 0 VLM Calls, GCS Auto-Download, Pure PyTorch/TorchScript)"
+        "(224x224 RGB, 0 VLM Calls, Pure PyTorch/TorchScript)"
     )
     steps = [
         "Preprocess crop (Resize 224x224, ImageNet RGB normalization)",
@@ -97,31 +55,16 @@ class MaxVitClassify(Approach):
         self.transform: transforms.Compose | None = None
 
     def setup(self, config: dict, ctx: Context) -> None:
-        """Load fine-tuned model artifacts and class metadata from local disk or GCS bucket."""
+        """Load fine-tuned model artifacts directly from gs://marketshare-datasets/models/maxvit_variants/."""
         cache_dir = Path("models/maxvit_variants")
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Assemble GCS search roots (supports custom MAXVIT_GCS_URI environment variable)
-        gcs_candidates: list[str] = []
-        custom_gcs = os.environ.get("MAXVIT_GCS_URI") or config.get("gcp", {}).get("maxvit_model_gcs")
-        if custom_gcs:
-            gcs_candidates.append(str(custom_gcs))
-        gcs_candidates.extend(DEFAULT_GCS_ROOTS)
-
-        # 2. Resolve deployment class mapping (variant_classes.json)
-        local_meta = [
-            cache_dir / "variant_classes.json",
-            Path("variant_classes.json"),
-            Path(__file__).resolve().parents[4] / "models" / "maxvit_variants" / "variant_classes.json",
-        ]
-        classes_path = _resolve_or_download_artifact(
-            "variant_classes.json", local_meta, gcs_candidates, cache_dir
-        )
-        if classes_path is None or not classes_path.exists():
-            raise FileNotFoundError(
-                "Could not locate 'variant_classes.json' locally or in GCS "
-                f"(checked GCS: {', '.join(gcs_candidates)}). "
-                "Set MAXVIT_GCS_URI='gs://<your-bucket>/<path>' or place file locally."
-            )
+        # 1. Load variant_classes.json mapping (0..1921 -> sku_id, brand, base_variant)
+        classes_path = cache_dir / "variant_classes.json"
+        if not classes_path.exists():
+            print(f"[MaxViT] Downloading variant_classes.json from {GCS_MODEL_PATH}/variant_classes.json ...")
+            raw_meta = dataset.read_bytes(f"{GCS_MODEL_PATH}/variant_classes.json")
+            classes_path.write_bytes(raw_meta)
 
         with open(classes_path, "r", encoding="utf-8") as f:
             raw_meta = json.load(f)
@@ -130,41 +73,47 @@ class MaxVitClassify(Approach):
         self.idx_to_sku = {int(k): int(v["sku_id"]) for k, v in self.idx_to_meta.items()}
         self.sku_to_idx = {sku: idx for idx, sku in self.idx_to_sku.items()}
 
-        # 3. Load model weights (prefer TorchScript traced graph, fallback to .pth state dict)
-        local_pt = [
-            cache_dir / "traced_maxvit_brand_variant.pt",
-            Path("traced_maxvit_brand_variant.pt"),
-            Path(__file__).resolve().parents[4] / "models" / "maxvit_variants" / "traced_maxvit_brand_variant.pt",
-        ]
-        traced_path = _resolve_or_download_artifact(
-            "traced_maxvit_brand_variant.pt", local_pt, gcs_candidates, cache_dir
-        )
+        # 2. Load model weights from gs://marketshare-datasets/models/maxvit_variants/
+        traced_path = cache_dir / "traced_maxvit_brand_variant.pt"
+        pth_path = cache_dir / "best_maxvit_brand_variant.pth"
 
-        if traced_path and traced_path.exists():
+        if not traced_path.exists() and not pth_path.exists():
             try:
-                print(f"[MaxViT] Loading TorchScript graph from {traced_path}...")
+                uri = f"{GCS_MODEL_PATH}/traced_maxvit_brand_variant.pt"
+                print(f"[MaxViT] Downloading model from {uri} ...")
+                raw = dataset.read_bytes(uri)
+                traced_path.write_bytes(raw)
+            except Exception:
+                uri = f"{GCS_MODEL_PATH}/best_maxvit_brand_variant.pth"
+                print(f"[MaxViT] Downloading model from {uri} ...")
+                raw = dataset.read_bytes(uri)
+                pth_path.write_bytes(raw)
+
+        if traced_path.exists():
+            try:
+                print(f"[MaxViT] Loading TorchScript model from {traced_path}...")
                 self.model = torch.jit.load(str(traced_path), map_location=self.device)
                 self.model.eval()
             except Exception as e:
-                print(f"[MaxViT] TorchScript load warning: {e}, attempting .pth fallback...")
+                print(f"[MaxViT] TorchScript load warning ({e}), falling back to PyTorch state dict...")
                 self.model = None
 
         if self.model is None:
-            local_pth = [
-                cache_dir / "best_maxvit_brand_variant.pth",
-                Path("best_maxvit_brand_variant.pth"),
-                Path(__file__).resolve().parents[4] / "models" / "maxvit_variants" / "best_maxvit_brand_variant.pth",
-            ]
-            pth_path = _resolve_or_download_artifact(
-                "best_maxvit_brand_variant.pth", local_pth, gcs_candidates, cache_dir
-            )
-            if pth_path and pth_path.exists():
-                print(f"[MaxViT] Loading PyTorch weights from {pth_path} via timm...")
+            if not pth_path.exists():
+                try:
+                    uri = f"{GCS_MODEL_PATH}/best_maxvit_brand_variant.pth"
+                    print(f"[MaxViT] Downloading model from {uri} ...")
+                    raw = dataset.read_bytes(uri)
+                    pth_path.write_bytes(raw)
+                except Exception:
+                    pass
+
+            if pth_path.exists():
+                print(f"[MaxViT] Loading PyTorch weights from {pth_path}...")
                 import timm
 
-                num_classes = len(self.idx_to_meta)
                 self.model = timm.create_model(
-                    MODEL_ARCH, pretrained=False, num_classes=num_classes
+                    MODEL_ARCH, pretrained=False, num_classes=len(self.idx_to_meta)
                 )
                 state_dict = torch.load(str(pth_path), map_location=self.device)
                 self.model.load_state_dict(state_dict)
@@ -172,14 +121,11 @@ class MaxVitClassify(Approach):
                 self.model.eval()
 
         if self.model is None:
-            raise RuntimeError(
-                "Failed to load MaxViT model weights from local disk or GCP bucket. "
-                f"Checked GCS locations: {', '.join(gcs_candidates)}. "
-                "Please upload 'traced_maxvit_brand_variant.pt' or 'best_maxvit_brand_variant.pth' to GCS, "
-                "or set MAXVIT_GCS_URI='gs://<your-bucket>/<path>'."
+            raise FileNotFoundError(
+                f"Could not load MaxViT model from {GCS_MODEL_PATH}."
             )
 
-        # 4. Standard validation/inference transform matching training Cell 2
+        # 3. Standard validation/inference transform matching training Cell 2
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -188,8 +134,7 @@ class MaxVitClassify(Approach):
                 std=[0.229, 0.224, 0.225],
             ),
         ])
-        print(f"✔ MaxViT model successfully initialized on {self.device} ({len(self.idx_to_sku)} classes)")
-
+        print(f"✔ MaxViT model ready on {self.device} ({len(self.idx_to_sku)} classes)")
 
     def identify(
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None
