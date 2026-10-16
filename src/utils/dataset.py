@@ -462,7 +462,7 @@ def _rpc_split_rows(split: str, root: str) -> list[dict]:
     try:
         return parse_split_jsonl(read_bytes(join(root, f"{split}.jsonl")))
     except Exception:
-        if local_jsonl.exists():
+        if is_gcs and local_jsonl.exists():
             return parse_split_jsonl(local_jsonl.read_bytes())
         return []
 

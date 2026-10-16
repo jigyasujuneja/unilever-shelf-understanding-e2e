@@ -29,12 +29,18 @@ from utils import dataset
 from utils.cv_models import resolve_evaluated_fields
 from utils.gemini_fine_tuning.hul_golden_sft import (
     ALLOWED_CATEGORIES as HUL_GOLDEN_CATEGORIES,
+)
+from utils.gemini_fine_tuning.hul_golden_sft import (
     ALLOWED_PACKAGING_TYPES as HUL_GOLDEN_PACKAGING_TYPES,
+)
+from utils.gemini_fine_tuning.hul_golden_sft import (
     HUL_GOLDEN_5ATTR_INFERENCE_PROMPT,
-    HUL_GOLDEN_INFERENCE_PROMPT as HUL_GOLDEN_SINGLE_PROMPT,
     catalog_variant_lookup,
     normalize_hul_golden_brand,
     normalize_hul_golden_variant,
+)
+from utils.gemini_fine_tuning.hul_golden_sft import (
+    HUL_GOLDEN_INFERENCE_PROMPT as HUL_GOLDEN_SINGLE_PROMPT,
 )
 from utils.gemini_fine_tuning.tuning import (
     VARIANT_BRANDS,
