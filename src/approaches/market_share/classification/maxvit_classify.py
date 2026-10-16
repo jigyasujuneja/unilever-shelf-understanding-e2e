@@ -73,60 +73,88 @@ class MaxVitClassify(Approach):
         self.idx_to_meta = {int(k): v for k, v in raw_meta.items()}
         self.idx_to_sku = {int(k): int(v["sku_id"]) for k, v in self.idx_to_meta.items()}
         self.sku_to_idx = {sku: idx for idx, sku in self.idx_to_sku.items()}
+        num_classes = len(self.idx_to_meta)
 
-        # 2. Load model weights from gs://marketshare-datasets/models/maxvit_variants/
-        traced_path = cache_dir / "traced_maxvit_brand_variant.pt"
-        pth_path = cache_dir / "best_maxvit_brand_variant.pth"
-
-        if not traced_path.exists() and not pth_path.exists():
+        # Helper to validate a candidate model with a dummy forward pass
+        def _test_forward(m: Any) -> bool:
             try:
-                uri = f"{GCS_MODEL_PATH}/traced_maxvit_brand_variant.pt"
-                print(f"[MaxViT] Downloading model from {uri} ...")
-                raw = dataset.read_bytes(uri)
-                traced_path.write_bytes(raw)
-            except Exception:
+                dummy = torch.zeros(1, 3, 224, 224, device=self.device)
+                with torch.no_grad():
+                    out = m(dummy)
+                return out is not None and out.shape[-1] == num_classes
+            except Exception as exc:
+                print(f"[MaxViT] Forward pass check failed: {exc}")
+                return False
+
+        # 2. Primary: Native PyTorch weights (best_maxvit_brand_variant.pth via timm)
+        pth_path = cache_dir / "best_maxvit_brand_variant.pth"
+        if not pth_path.exists():
+            try:
                 uri = f"{GCS_MODEL_PATH}/best_maxvit_brand_variant.pth"
-                print(f"[MaxViT] Downloading model from {uri} ...")
+                print(f"[MaxViT] Downloading PyTorch weights from {uri} ...")
                 raw = dataset.read_bytes(uri)
                 pth_path.write_bytes(raw)
-
-        if traced_path.exists():
-            try:
-                print(f"[MaxViT] Loading TorchScript model from {traced_path}...")
-                self.model = torch.jit.load(str(traced_path), map_location=self.device)
-                self.model.eval()
             except Exception as e:
-                print(f"[MaxViT] TorchScript load warning ({e}), falling back to PyTorch state dict...")
-                self.model = None
+                print(f"[MaxViT] Note: Could not fetch .pth checkpoint ({e})")
 
-        if self.model is None:
-            if not pth_path.exists():
-                try:
-                    uri = f"{GCS_MODEL_PATH}/best_maxvit_brand_variant.pth"
-                    print(f"[MaxViT] Downloading model from {uri} ...")
-                    raw = dataset.read_bytes(uri)
-                    pth_path.write_bytes(raw)
-                except Exception:
-                    pass
-
-            if pth_path.exists():
+        if pth_path.exists():
+            try:
                 print(f"[MaxViT] Loading PyTorch weights from {pth_path}...")
                 import timm
 
-                self.model = timm.create_model(
-                    MODEL_ARCH, pretrained=False, num_classes=len(self.idx_to_meta)
-                )
+                m = timm.create_model(MODEL_ARCH, pretrained=False, num_classes=num_classes)
                 state_dict = torch.load(str(pth_path), map_location=self.device)
-                self.model.load_state_dict(state_dict)
-                self.model.to(self.device)
-                self.model.eval()
+                if isinstance(state_dict, dict):
+                    if "state_dict" in state_dict and isinstance(state_dict["state_dict"], dict):
+                        state_dict = state_dict["state_dict"]
+                    elif "model" in state_dict and isinstance(state_dict["model"], dict):
+                        state_dict = state_dict["model"]
+                state_dict = {(k[7:] if k.startswith("module.") else k): v for k, v in state_dict.items()}
+                m.load_state_dict(state_dict)
+                m.to(self.device)
+                m.eval()
+                if _test_forward(m):
+                    self.model = m
+                    print(f"✔ MaxViT PyTorch state_dict loaded successfully ({num_classes} classes)")
+                else:
+                    print("[MaxViT] PyTorch model forward pass validation failed.")
+            except Exception as e:
+                print(f"[MaxViT] PyTorch state_dict load error: {e}")
+                self.model = None
+
+        # 3. Fallback: TorchScript traced model (traced_maxvit_brand_variant.pt)
+        if self.model is None:
+            traced_path = cache_dir / "traced_maxvit_brand_variant.pt"
+            if not traced_path.exists():
+                try:
+                    uri = f"{GCS_MODEL_PATH}/traced_maxvit_brand_variant.pt"
+                    print(f"[MaxViT] Downloading TorchScript model from {uri} ...")
+                    raw = dataset.read_bytes(uri)
+                    traced_path.write_bytes(raw)
+                except Exception as e:
+                    print(f"[MaxViT] Note: Could not fetch TorchScript model ({e})")
+
+            if traced_path.exists():
+                try:
+                    print(f"[MaxViT] Loading TorchScript model from {traced_path}...")
+                    m = torch.jit.load(str(traced_path), map_location=self.device)
+                    m.eval()
+                    if _test_forward(m):
+                        self.model = m
+                        print(f"✔ MaxViT TorchScript model loaded successfully ({num_classes} classes)")
+                    else:
+                        print("[MaxViT] TorchScript model failed forward pass validation on this runtime.")
+                except Exception as e:
+                    print(f"[MaxViT] TorchScript load error: {e}")
+                    self.model = None
 
         if self.model is None:
-            raise FileNotFoundError(
-                f"Could not load MaxViT model from {GCS_MODEL_PATH}."
+            raise RuntimeError(
+                f"Could not initialize a functional MaxViT model from {GCS_MODEL_PATH}. "
+                "Ensure 'best_maxvit_brand_variant.pth' is uploaded to the bucket and 'timm' is installed."
             )
 
-        # 3. Standard validation/inference transform matching training Cell 2
+        # 4. Standard validation/inference transform matching training Cell 2
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -135,7 +163,7 @@ class MaxVitClassify(Approach):
                 std=[0.229, 0.224, 0.225],
             ),
         ])
-        print(f"✔ MaxViT model ready on {self.device} ({len(self.idx_to_sku)} classes)")
+        print(f"✔ MaxViT pipeline ready on {self.device} ({len(self.idx_to_sku)} classes)")
 
     def identify(
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None

@@ -121,35 +121,22 @@ GCS_MODEL_PATH = "gs://marketshare-datasets/models/maxvit_variants"
 
 
 def load_model(device: torch.device, num_classes: int, storage_client=None):
-    """Load TorchScript traced model or PyTorch weights from gs://marketshare-datasets/models/maxvit_variants/."""
+    """Load PyTorch weights or TorchScript traced model from gs://marketshare-datasets/models/maxvit_variants/."""
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    traced_path = MODEL_DIR / "traced_maxvit_brand_variant.pt"
     pth_path = MODEL_DIR / "best_maxvit_brand_variant.pth"
+    traced_path = MODEL_DIR / "traced_maxvit_brand_variant.pt"
 
-    # Check local cache first, else download directly from GCS path
-    if not traced_path.exists() and not pth_path.exists():
+    def _test_forward(m: Any) -> bool:
         try:
-            uri = f"{GCS_MODEL_PATH}/traced_maxvit_brand_variant.pt"
-            print(f"Downloading {uri} ...")
-            raw = read_gcs_bytes(uri, storage_client)
-            traced_path.write_bytes(raw)
-            print(f"Downloaded and cached to {traced_path} ({len(raw)/(1024*1024):.1f} MB)")
-        except Exception:
-            uri = f"{GCS_MODEL_PATH}/best_maxvit_brand_variant.pth"
-            print(f"Downloading {uri} ...")
-            raw = read_gcs_bytes(uri, storage_client)
-            pth_path.write_bytes(raw)
-            print(f"Downloaded and cached to {pth_path} ({len(raw)/(1024*1024):.1f} MB)")
+            dummy = torch.zeros(1, 3, 224, 224, device=device)
+            with torch.no_grad():
+                out = m(dummy)
+            return out is not None and out.shape[-1] == num_classes
+        except Exception as exc:
+            print(f"Forward pass validation failed: {exc}")
+            return False
 
-    if traced_path.exists():
-        try:
-            print(f"Loading TorchScript model from {traced_path}...")
-            model = torch.jit.load(str(traced_path), map_location=device)
-            model.eval()
-            return model
-        except Exception as e:
-            print(f"TorchScript load error ({e}), trying .pth checkpoint...")
-
+    # 1. Primary: Native PyTorch weights (best_maxvit_brand_variant.pth via timm)
     if not pth_path.exists():
         try:
             uri = f"{GCS_MODEL_PATH}/best_maxvit_brand_variant.pth"
@@ -157,22 +144,57 @@ def load_model(device: torch.device, num_classes: int, storage_client=None):
             raw = read_gcs_bytes(uri, storage_client)
             pth_path.write_bytes(raw)
             print(f"Downloaded and cached to {pth_path} ({len(raw)/(1024*1024):.1f} MB)")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Note: Could not fetch .pth checkpoint ({e})")
 
     if pth_path.exists():
-        print(f"Loading PyTorch weights from {pth_path}...")
-        import timm
+        try:
+            print(f"Loading PyTorch weights from {pth_path}...")
+            import timm
 
-        model = timm.create_model("maxvit_tiny_tf_224", pretrained=False, num_classes=num_classes)
-        state_dict = torch.load(str(pth_path), map_location=device)
-        model.load_state_dict(state_dict)
-        model.to(device)
-        model.eval()
-        return model
+            model = timm.create_model("maxvit_tiny_tf_224", pretrained=False, num_classes=num_classes)
+            state_dict = torch.load(str(pth_path), map_location=device)
+            if isinstance(state_dict, dict):
+                if "state_dict" in state_dict and isinstance(state_dict["state_dict"], dict):
+                    state_dict = state_dict["state_dict"]
+                elif "model" in state_dict and isinstance(state_dict["model"], dict):
+                    state_dict = state_dict["model"]
+            state_dict = {(k[7:] if k.startswith("module.") else k): v for k, v in state_dict.items()}
+            model.load_state_dict(state_dict)
+            model.to(device)
+            model.eval()
+            if _test_forward(model):
+                print(f"✔ PyTorch state_dict loaded successfully ({num_classes} classes)")
+                return model
+            print("PyTorch model forward pass validation failed.")
+        except Exception as e:
+            print(f"PyTorch state_dict load error: {e}")
 
-    raise FileNotFoundError(
-        f"Could not load MaxViT model from {GCS_MODEL_PATH}."
+    # 2. Fallback: TorchScript traced model (traced_maxvit_brand_variant.pt)
+    if not traced_path.exists():
+        try:
+            uri = f"{GCS_MODEL_PATH}/traced_maxvit_brand_variant.pt"
+            print(f"Downloading {uri} ...")
+            raw = read_gcs_bytes(uri, storage_client)
+            traced_path.write_bytes(raw)
+            print(f"Downloaded and cached to {traced_path} ({len(raw)/(1024*1024):.1f} MB)")
+        except Exception as e:
+            print(f"Note: Could not fetch TorchScript model ({e})")
+
+    if traced_path.exists():
+        try:
+            print(f"Loading TorchScript model from {traced_path}...")
+            model = torch.jit.load(str(traced_path), map_location=device)
+            model.eval()
+            if _test_forward(model):
+                print(f"✔ TorchScript model loaded successfully ({num_classes} classes)")
+                return model
+            print("TorchScript model failed forward pass validation on this runtime.")
+        except Exception as e:
+            print(f"TorchScript load error ({e})")
+
+    raise RuntimeError(
+        f"Could not load a functional MaxViT model from {GCS_MODEL_PATH}."
     )
 
 
