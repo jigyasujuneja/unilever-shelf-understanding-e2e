@@ -143,8 +143,40 @@ class CoarseJevLaya(JevLayaHybrid):
         if not boxes:
             return []
         crops = [crop(image, b) for b in boxes]
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            crop_data = list(pool.map(lambda c: self._rank_crop(c, ctx), crops))
+        if len(boxes) > 1:
+            from utils.clm import group_adjacent_shelf_twins
+            from utils.photometry import apply_illuminant, inner_lab_zones, restore_photometry
+
+            gains = getattr(ctx, "shelf_illuminant", None)
+            pre_restored: list[Image.Image] = []
+            pre_labs: list[list[float]] = []
+            for c_im in crops:
+                wb_im = apply_illuminant(c_im, gains) if gains else c_im
+                r_im, _ = restore_photometry(wb_im)
+                pre_restored.append(r_im)
+                pre_labs.append(inner_lab_zones(r_im))
+            twin_clusters, medoid_indices = group_adjacent_shelf_twins(boxes, pre_restored, pre_labs)
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                medoid_data = list(pool.map(lambda m_idx: self._rank_crop(crops[m_idx], ctx), medoid_indices))
+            crop_data: list[tuple[list[tuple[float, int, str]], list[float], Image.Image]] = [
+                ([], [], pre_restored[i]) for i in range(len(boxes))
+            ]
+            for cl, (ranked_m, q_m, _) in zip(twin_clusters, medoid_data, strict=True):
+                for member_idx in cl:
+                    crop_data[member_idx] = (ranked_m, q_m, pre_restored[member_idx])
+            saved_rpc = len(boxes) - len(medoid_indices)
+            if saved_rpc > 0:
+                ctx.trace.step(
+                    "Pre-Embedding Spatial Medoid Dedup",
+                    f"Grouped {len(boxes)} shelf facings into {len(medoid_indices)} unique medoids ({saved_rpc} redundant embedding RPCs saved)",
+                    info={
+                        "total_boxes": len(boxes),
+                        "unique_medoids": len(medoid_indices),
+                        "saved_embedding_rpcs": saved_rpc,
+                    },
+                )
+        else:
+            crop_data = [self._rank_crop(crops[0], ctx)]
 
         ids: list[int | None] = [None] * len(boxes)
         confidences: list[float] = [1.0] * len(boxes)
@@ -173,6 +205,7 @@ class CoarseJevLaya(JevLayaHybrid):
                 "box_index": idx,
                 "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in ranked[:K]],
                 "thresholds": {"min_cosine": self.min_cosine, "min_margin": gate_meta["required_margin"]},
+                "fast_gated_boxes": 1 if confident else 0,
                 **gate_meta,
             }
             if confident:

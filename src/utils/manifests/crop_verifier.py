@@ -147,7 +147,7 @@ def verify_gtmerch_shelf_boxes(
             x1, y1, x2, y2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
             bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
             aspect = bw / bh
-            in_bay = _box_inside_any_asset([x1, y1, x2, y2], asset_boxes)
+            in_bay = _box_inside_any_asset([x1, y1, x2, y2], asset_boxes) or (bay_info is not None and not asset_boxes)
 
             # Extract crop mean RGB if image was downloaded, else deterministic spatial feature
             if img_arr is not None and img_arr.ndim == 3:
@@ -165,6 +165,7 @@ def verify_gtmerch_shelf_boxes(
                 mean_rgb = (float(60 + (h_seed % 160)), float(60 + ((h_seed >> 8) % 160)), float(60 + ((h_seed >> 16) % 160)))
 
             chosen_cid: int | None = None
+            is_inside_campaign_bay = False
             if in_bay and bay_info is not None:
                 b_low = bay_info["brand"].lower()
                 cids = by_brand.get(b_low) or []
@@ -172,6 +173,7 @@ def verify_gtmerch_shelf_boxes(
                     # Pick variant deterministically from crop chromatic hash so multi-variant bays have variant diversity
                     v_off = int(mean_rgb[0] + mean_rgb[1] * 2 + mean_rgb[2] * 3) % len(cids)
                     chosen_cid = cids[v_off]
+                    is_inside_campaign_bay = True
 
             if chosen_cid is None:
                 # Outside-bay box (or shelf with no filename brand token): match against full HUL + Non-HUL prototypes
@@ -200,8 +202,14 @@ def verify_gtmerch_shelf_boxes(
                 v_off = int(mean_rgb[0] + mean_rgb[1] + b_idx) % len(cids)
                 chosen_cid = cids[v_off]
 
-            # Strict catalog parity: sample.labels[k] is ALWAYS an exact copy of v2_classes[str(chosen_cid)]
+            # Strict catalog parity: sample.labels[k] preserves all 5 taxonomy fields from v2_classes[str(chosen_cid)]
             cat_meta = dict(v2_classes[str(chosen_cid)])
+            cat_meta["is_catchall_variant"] = True
+            if is_inside_campaign_bay:
+                cat_meta["is_bay_inferred"] = True
+            else:
+                cat_meta["is_others_catchall"] = True
+                cat_meta["is_unbranded_outside_bay"] = True
             new_products.append(chosen_cid)
             new_labels.append(cat_meta)
 

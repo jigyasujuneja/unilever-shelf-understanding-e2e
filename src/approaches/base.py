@@ -259,12 +259,12 @@ class Approach:
     def accepts(self, model: str) -> bool:
         if self.models is not None:
             return model in self.models
-        return model.startswith("gemini-") and not model.startswith("gemini-embedding")
+        return ("gemini-" in model or "/endpoints/" in model) and not model.startswith("gemini-embedding")
 
     @property
     def uses_gemini(self) -> bool:
         return self.models is None or all(
-            m.startswith("gemini-") and not m.startswith("gemini-embedding") for m in self.models
+            ("gemini-" in m or "/endpoints/" in m) and not m.startswith("gemini-embedding") for m in self.models
         )
 
     def setup(self, config: dict, ctx: Context) -> None:

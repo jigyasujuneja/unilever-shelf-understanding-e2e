@@ -473,3 +473,89 @@ def test_two_tier_gallery_self_calibration_and_poe_fusion():
     assert "c1_confidence" in meta and "c2_confidence" in meta and "poe_weight_w2" in meta
     assert 0.0 <= meta["poe_weight_w2"] <= 1.0
 
+
+def test_priority_fixes_spatial_twin_dedup_and_clef_competitor_guard(monkeypatch):
+    from PIL import Image
+
+    from approaches.market_share.detection.onnx_yolo_detector import (
+        _segment_composite_strip_columns,
+    )
+    from approaches.market_share.retrieval.clef_standalone import resolve_clef_choice
+    from utils.clm import group_adjacent_shelf_twins
+    from utils.photometry import inner_lab_zones
+
+    # 1. Pre-Embedding Spatial Neighbor Medoid Deduplication (group_adjacent_shelf_twins)
+    c_red_1 = Image.new("RGB", (40, 80), (200, 40, 40))
+    c_red_2 = Image.new("RGB", (40, 80), (200, 40, 40))
+    c_blue = Image.new("RGB", (40, 80), (30, 60, 210))
+    boxes = [
+        (10.0, 20.0, 50.0, 100.0),
+        (55.0, 20.0, 95.0, 100.0),
+        (105.0, 20.0, 145.0, 100.0),
+    ]
+    crops = [c_red_1, c_red_2, c_blue]
+    labs = [inner_lab_zones(c) for c in crops]
+    clusters, medoids = group_adjacent_shelf_twins(boxes, crops, labs)
+    assert len(clusters) == 2 and len(medoids) == 2
+    assert clusters[0] == [0, 1] and clusters[1] == [2]
+
+    # 2. 2-Tier Open-Set Competitor Guard + Log-Linear Energy Veto (resolve_clef_choice)
+    top_hi = [(0.84, 101, "a.jpg"), (0.71, 202, "b.jpg")]
+    # Energy veto: choice=2 has 0.13 lower cosine than top-1 and prob < 0.90 -> vetoes back to top-1
+    ans_v, mode_v = resolve_clef_choice(2, 0.62, top_hi, allow_abstain=True)
+    assert ans_v == 101 and mode_v == "energy_veto_top1"
+    # Tier 1: choice=0 when s1 >= 0.72 -> recovers top-1
+    ans_t1, mode_t1 = resolve_clef_choice(0, 0.80, top_hi, allow_abstain=True)
+    assert ans_t1 == 101 and mode_t1 == "tier1_high_cos_top1"
+    # Tier 2: choice=0 when 0.45 <= s1 < 0.72 -> abstains None on open-set competitor shelf
+    top_mid = [(0.58, 101, "a.jpg"), (0.51, 202, "b.jpg")]
+    ans_t2_open, mode_t2_open = resolve_clef_choice(0, 0.85, top_mid, allow_abstain=True)
+    assert ans_t2_open is None and mode_t2_open == "tier2_open_set_competitor_abstain"
+    ans_t2_closed, mode_t2_closed = resolve_clef_choice(0, 0.85, top_mid, allow_abstain=False)
+    assert ans_t2_closed == 101 and mode_t2_closed == "tier2_closed_set_top1"
+
+    # 3. SHELF_BENCH_DISABLE_STRIP_GUTTER toggle
+    strip_im = Image.new("RGB", (320, 100), (240, 240, 240))
+    for x in range(20, 80):
+        for y in range(15, 85):
+            strip_im.putpixel((x, y), (200, 30, 30))
+    for x in range(120, 180):
+        for y in range(15, 85):
+            strip_im.putpixel((x, y), (30, 30, 200))
+    assert _segment_composite_strip_columns(strip_im) is not None
+    monkeypatch.setenv("SHELF_BENCH_DISABLE_STRIP_GUTTER", "1")
+    assert _segment_composite_strip_columns(strip_im) is None
+
+
+def test_exp28_contrastive_metadata_rubric():
+    from approaches.market_share.retrieval.clef_standalone import (
+        ClefContrastiveMetadata,
+        build_contrastive_candidate_rubric,
+    )
+    from approaches.market_share.retrieval.clm_info_nce import SftClmClefCascade
+
+    # EXP-28: Verify build_contrastive_candidate_rubric generates structured panel metadata + pairwise diff tokens
+    top_cands = [
+        (0.88, 10, "gallery/closeup_red_80g.jpg"),
+        (0.86, 11, "gallery/closeup_red_150g.jpg"),
+        (0.81, 12, "gallery/closeup_lemon_mint.jpg"),
+    ]
+    catalog = {
+        10: {"brand": "Closeup", "category": "Oral_Care", "base_variant": "Ever_Fresh_Red_Hot", "packaging_type": "Tube", "pack_size": "80g"},
+        11: {"brand": "Closeup", "category": "Oral_Care", "base_variant": "Ever_Fresh_Red_Hot", "packaging_type": "Tube", "pack_size": "150g"},
+        12: {"brand": "Closeup", "category": "Oral_Care", "base_variant": "Lemon_Mint", "packaging_type": "Tube", "pack_size": "80g"},
+    }
+    rubric = build_contrastive_candidate_rubric(top_cands, catalog)
+    assert "Candidate Reference Panels:" in rubric
+    assert "Panel 1: Brand=Closeup | Variant=Ever_Fresh_Red_Hot | Category=Oral_Care | Pack=Tube | Size=80g" in rubric
+    assert "Key discriminative text/pack differences to check on Q:" in rubric
+    assert ClefContrastiveMetadata.name == "clef_contrastive_metadata"
+
+    # EXP-29: Verify SftClmClefCascade 5-attribute vote share computation
+    appr = SftClmClefCascade()
+    appr.catalog = catalog
+    shares = appr._attribute_vote_shares(top_cands)
+    assert shares["brand"] == 1.0
+    assert shares["category"] == 1.0
+    assert shares["packaging_type"] == 1.0
+    assert 0.85 <= shares["base_variant"] <= 1.0

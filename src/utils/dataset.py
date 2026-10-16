@@ -80,10 +80,11 @@ def _split_gs(uri: str) -> tuple[str, str]:
 
 
 def read_bytes(path: str) -> bytes:
-    if str(path).startswith("gs://"):
-        bucket, name = _split_gs(str(path))
+    clean_p = str(path).split("#", 1)[0]
+    if clean_p.startswith("gs://"):
+        bucket, name = _split_gs(clean_p)
         return _gcs().bucket(bucket).blob(name).download_as_bytes()
-    return Path(path).read_bytes()
+    return Path(clean_p).read_bytes()
 
 
 def join(root: str, *parts: str) -> str:
@@ -203,6 +204,7 @@ RPC_FORMAT_SETS = (
     "hul_packs",
     "hul_promos",
     "hul_sessions",
+    "gt_hul_sessions",
 )
 HUL_FIELDS: dict[str, tuple[str, ...]] = {
     "hul_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
@@ -213,6 +215,7 @@ HUL_FIELDS: dict[str, tuple[str, ...]] = {
     "hul_packs": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
     "hul_promos": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul", "promo_type"),
     "hul_sessions": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "gt_hul_sessions": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
 }
 
 
@@ -359,12 +362,12 @@ def data_root(name: str) -> str:
     local = (
         SHELVES_LOCAL
         if name == "shelves"
-        else (f"data/{name}" if name.startswith(("hul_", "gtmerch", "ms_json")) else RPC_LOCAL)
+        else (f"data/{name}" if name.startswith(("hul_", "gt_hul", "gtmerch", "ms_json")) else RPC_LOCAL)
     )
     return local
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=64)
 def _rpc_json(root: str) -> dict:
     import json
 
@@ -377,6 +380,8 @@ def _rpc_json(root: str) -> dict:
             return json.loads(direct_path.read_bytes())
         if local_mirror.exists():
             return json.loads(local_mirror.read_bytes())
+    elif local_mirror.exists() and os.environ.get("SHELF_BENCH_FORCE_GCS_MANIFEST") != "1":
+        return json.loads(local_mirror.read_bytes())
     try:
         raw = read_bytes(join(root, RPC_JSON))
         return json.loads(raw)
@@ -421,10 +426,12 @@ def export_rpc_splits_jsonl(manifest: dict, output_dir: str | Path) -> dict[str,
     return written
 
 
+@lru_cache(maxsize=64)
 def rpc_catalog(root: str) -> dict[int, dict]:
     return {int(k): v for k, v in _rpc_json(root)["classes"].items()}
 
 
+@lru_cache(maxsize=64)
 def rpc_gallery(root: str) -> dict[int, list[str]]:
     """``{product id: [reference photo path, ...]}``: the product alone, from several angles."""
     return {int(k): [join(root, f) for f in v] for k, v in _rpc_json(root)["gallery"].items()}
@@ -475,9 +482,10 @@ def _rows_to_samples(
                     labels.append(base_lbl)
         else:
             labels = [dict(lbl) for lbl in raw_labels if isinstance(lbl, dict)]
+        uri_str = r.get("source_uri") or r.get("uri")
         out[r["image"]] = Sample(
             r["image"],
-            join(root, r["uri"]) if r.get("uri") else join(root, "images", r["image"]),
+            join(root, uri_str) if uri_str else join(root, "images", r["image"]),
             r["width"],
             r["height"],
             boxes=[tuple(b) for b in r["boxes"]],
@@ -497,7 +505,7 @@ def load_split_jsonl(
     return _rows_to_samples(rows, cat=catalog, root=root)
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=64)
 def load_rpc(split: str, root: str) -> dict[str, Sample]:
     if split not in RPC_SUBSETS:
         raise ValueError(f"the rpc dataset has splits {tuple(RPC_SUBSETS)}, got {split!r}")

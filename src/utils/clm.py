@@ -43,23 +43,20 @@ def compute_zscore_and_lid(scores: list[float]) -> dict[str, float]:
     Computes Amsaleg et al.'s Maximum Likelihood Estimator for LID anchored at the K-th
     neighbor distance ``d_K = max(1e-5, 1.0 - s_K)``.
     """
-    if not scores:
+    if len(scores) < 2:
         return {"z_margin": 0.0, "z_top1": 0.0, "lid": 10.0}
     s1 = scores[0]
-    s2 = scores[1] if len(scores) > 1 else s1 - 0.1
+    s2 = scores[1]
     margin = s1 - s2
     mu = float(np.mean(scores))
     sd = math.sqrt(float(np.var(scores)) + 1e-4)
     z_margin = margin / sd
     z_top1 = (s1 - mu) / sd
-    if len(scores) >= 2:
-        d_all = [max(1e-5, 1.0 - float(s)) for s in scores]
-        d_k = max(d_all[-1], d_all[0] + 1e-6)
-        log_ratios = [max(0.0, math.log(max(d_k / d, 1.0))) for d in d_all[:-1]]
-        mean_log_ratio = float(np.mean(log_ratios)) if log_ratios else 0.0
-        lid = float(min(50.0, 1.0 / (mean_log_ratio + 1e-4)))
-    else:
-        lid = 1.0
+    d_all = [max(1e-5, 1.0 - float(s)) for s in scores]
+    d_k = max(d_all[-1], d_all[0] + 1e-6)
+    log_ratios = [max(0.0, math.log(max(d_k / d, 1.0))) for d in d_all[:-1]]
+    mean_log_ratio = float(np.mean(log_ratios)) if log_ratios else 0.0
+    lid = float(min(50.0, 1.0 / (mean_log_ratio + 1e-4)))
     return {
         "z_margin": round(z_margin, 4),
         "z_top1": round(z_top1, 4),
@@ -68,10 +65,11 @@ def compute_zscore_and_lid(scores: list[float]) -> dict[str, float]:
 
 
 def compute_csls_hubness(index_matrix: np.ndarray, k_nn: int = 10) -> np.ndarray:
-    """Compute Cross-Domain Similarity Local Scaling (CSLS) mean k-NN similarity per gallery vector.
+    """Compute Cross-Domain Similarity Local Scaling (CSLS) out-of-family hubness per gallery vector.
 
-    Penalizes high-dimension 'universal hub' reference images that appear in the top-K shortlist
-    of unrelated shelf crops (Conneau et al., ICLR 2018).
+    Masks out same-SKU views and close sister variants (sim > 0.82) so multi-variant HUL brands
+    are never penalized for catalog variant density, and clamps at >= 0.0 so isolated 1-SKU
+    competitor brands never receive a negative penalty (artificial score boost).
     """
     n = index_matrix.shape[0]
     if n <= 1:
@@ -79,9 +77,12 @@ def compute_csls_hubness(index_matrix: np.ndarray, k_nn: int = 10) -> np.ndarray
     k_eff = min(k_nn, n - 1)
     sim = index_matrix @ index_matrix.T
     np.fill_diagonal(sim, -np.inf)
-    part = np.partition(sim, -k_eff, axis=1)[:, -k_eff:]
-    r_t = part.mean(axis=1).astype(np.float32)
-    return r_t - float(r_t.mean())
+    # Mask same-SKU views and immediate sister variants so only cross-brand background hubness is measured
+    bg_sim = np.where(sim > 0.82, -np.inf, sim)
+    part = np.partition(bg_sim, -k_eff, axis=1)[:, -k_eff:]
+    valid = np.where(np.isfinite(part), part, 0.0)
+    r_t = valid.mean(axis=1).astype(np.float32)
+    return np.maximum(0.0, r_t - float(r_t.mean())).astype(np.float32)
 
 
 def infonce_rerank(
@@ -332,5 +333,83 @@ def calibrate_gallery_geometry(
         "sku_sibling_cosine": sku_sib_cos,
         "sku_required_margin": sku_req_margin,
     }
+
+
+def group_adjacent_shelf_twins(
+    boxes: list[tuple[float, float, float, float]],
+    restored_crops: list[Image.Image],
+    lab_descriptors: list[list[float]],
+    *,
+    lab_thresh: float = 0.985,
+    patch_cos_thresh: float = 0.965,
+) -> tuple[list[list[int]], list[int]]:
+    """Group spatially adjacent identical shelf facings on the same horizontal row before HTTP embedding RPCs.
+
+    Requires four simultaneous invariants before merging facing ``j`` into medoid ``i``:
+      1. Same horizontal shelf row: ``|cy_i - cy_j| <= 0.45 * max(h_i, h_j)``.
+      2. Contiguous horizontal block: ``|cx_i - cx_j| <= 2.4 * max(w_i, w_j)`` and matching box dimensions.
+      3. 3-Zone inner-80% CIELAB + shoulder-taper similarity ``>= lab_thresh`` (0.985).
+      4. 16x16 L2-normalized RGB spatial layout cosine ``>= patch_cos_thresh`` (0.965).
+    """
+    n = len(boxes)
+    if n <= 1:
+        return ([[0]] if n == 1 else []), ([0] if n == 1 else [])
+
+    patches: list[np.ndarray] = []
+    for im in restored_crops:
+        arr = np.asarray(im.convert("RGB").resize((16, 16), Image.Resampling.BILINEAR), dtype=np.float32).reshape(-1)
+        arr = arr - float(np.mean(arr))
+        norm = float(np.linalg.norm(arr))
+        patches.append(arr / norm if norm > 1e-6 else np.zeros_like(arr))
+
+    ordered = sorted(range(n), key=lambda idx: (boxes[idx][0] + boxes[idx][2]) / 2.0)
+    assigned: set[int] = set()
+    clusters: list[list[int]] = []
+    medoids: list[int] = []
+
+    for i in ordered:
+        if i in assigned:
+            continue
+        group = [i]
+        assigned.add(i)
+        x1_i, y1_i, x2_i, y2_i = boxes[i]
+        w_i = max(1.0, x2_i - x1_i)
+        h_i = max(1.0, y2_i - y1_i)
+        cx_i = (x1_i + x2_i) / 2.0
+        cy_i = (y1_i + y2_i) / 2.0
+        last_cx = cx_i
+
+        for j in ordered:
+            if j in assigned:
+                continue
+            x1_j, y1_j, x2_j, y2_j = boxes[j]
+            w_j = max(1.0, x2_j - x1_j)
+            h_j = max(1.0, y2_j - y1_j)
+            cx_j = (x1_j + x2_j) / 2.0
+            cy_j = (y1_j + y2_j) / 2.0
+
+            if abs(cy_i - cy_j) > 0.85 * max(h_i, h_j):
+                continue
+            if abs(cx_j - last_cx) > 3.5 * max(w_i, w_j):
+                continue
+            w_ratio = w_j / w_i
+            h_ratio = h_j / h_i
+            if not (0.75 <= w_ratio <= 1.33 and 0.75 <= h_ratio <= 1.33):
+                continue
+            if lab_similarity(lab_descriptors[i], lab_descriptors[j]) < lab_thresh:
+                continue
+            if float(np.dot(patches[i], patches[j])) < patch_cos_thresh:
+                continue
+            group.append(j)
+            assigned.add(j)
+            last_cx = cx_j
+
+        # Choose the interior/most-centered facing in the group as the medoid
+        med = group[len(group) // 2]
+        clusters.append(group)
+        medoids.append(med)
+
+    return clusters, medoids
+
 
 
