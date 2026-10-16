@@ -37,7 +37,8 @@ def compute_split_hashes(
 ) -> dict[str, str]:
     """Compute immutable SHA-256 cryptographic hashes for ``train``, ``val``, ``test``, and ``gallery``."""
     out: dict[str, str] = {}
-    for sp_name in ("train", "val", "test"):
+    sp_keys = ("train", "val", "test", *(["test_5k"] if splits.get("test_5k") else []))
+    for sp_name in sp_keys:
         uris = sorted(str(r.get("uri") or r.get("image") or "") for r in splits.get(sp_name, []))
         digest = hashlib.sha256("\n".join(uris).encode("utf-8")).hexdigest()
         out[sp_name] = digest[:16]
@@ -709,3 +710,185 @@ def publish_clean_golden_manifests_to_gcs(
         json.dumps(summary, indent=2), content_type="application/json"
     )
     return summary
+
+
+def build_leakage_free_5k_split(
+    manifest: dict[str, Any],
+    excluded_uris: set[str] | frozenset[str],
+    excluded_sessions: set[str] | frozenset[str],
+    target: int = 5000,
+    seed: int = 5000,
+    extra_pool: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Construct a stratified 50/50 HUL/Non-HUL test_5k split with zero overlap against gallery, val, or SFT train."""
+    classes = manifest.get("classes") or {}
+    splits = manifest.get("splits") or {}
+    gallery_uris = {str(u) for g in (manifest.get("gallery") or {}).values() for u in g if u}
+    val_rows = splits.get("val") or []
+    val_uris = {str(r.get("uri") or "") for r in val_rows if r.get("uri")}
+    val_sessions = {str(r.get("session_id") or "") for r in val_rows if r.get("session_id")}
+
+    forbidden_uris = gallery_uris | val_uris | set(excluded_uris)
+    forbidden_sessions = val_sessions | set(excluded_sessions)
+
+    def _is_eligible(r: dict[str, Any]) -> bool:
+        uri = str(r.get("uri") or "")
+        sess = str(r.get("session_id") or "")
+        prods = r.get("products") or []
+        if not uri or not prods or str(prods[0]) not in classes:
+            return False
+        if uri in forbidden_uris:
+            return False
+        if sess and sess in forbidden_sessions:
+            return False
+        cm = classes[str(prods[0])]
+        bv_low = str(cm.get("base_variant") or "").lower()
+        br_low = str(cm.get("brand") or "").lower()
+        if bv_low in ("others", br_low, "standard") or "__" not in str(cm.get("product") or ""):
+            return False
+        return True
+
+    used_uris: set[str] = set()
+    base_test: list[dict[str, Any]] = []
+    for r in splits.get("test") or []:
+        u = str(r.get("uri") or "")
+        if u not in used_uris and _is_eligible(r):
+            used_uris.add(u)
+            base_test.append(r)
+
+    supplement_pool: list[dict[str, Any]] = []
+    for r in [*(splits.get("train") or []), *(extra_pool or [])]:
+        u = str(r.get("uri") or "")
+        if u not in used_uris and _is_eligible(r):
+            used_uris.add(u)
+            supplement_pool.append(r)
+
+    needed = max(0, target - len(base_test))
+    sampled_sup = stratified_hul_non_hul_sample(supplement_pool, classes, needed, seed, "test_5k_sup") if needed > 0 else []
+    combined = base_test + sampled_sup
+    return stratified_hul_non_hul_sample(combined, classes, target, seed, "test_5k")
+
+
+def load_sft_excluded_uris_and_sessions(
+    client: Any,
+    hul_golden_manifest: dict[str, Any],
+    marketshare_bucket: str = "marketshare-datasets",
+    tuning_bucket: str = "ul-fs-s-sandbx-16-prj-shelf-images",
+) -> tuple[set[str], set[str]]:
+    """Collect all URIs and session_ids used in 5-attribute SFT and Contrastive CLEF LoRA tuning."""
+    import re
+
+    b_ms = client.bucket(marketshare_bucket)
+    b_tn = client.bucket(tuning_bucket)
+    excluded_uris: set[str] = set()
+    for bucket_obj, blob_path in (
+        (b_ms, "derived_manifests/hul_golden/sft_5attr/temp_train_clean_3200.jsonl"),
+        (b_ms, "derived_manifests/hul_golden/sft_5attr/temp_val_clean_500.jsonl"),
+        (b_tn, "tuning/hul_golden_clef_contrastive/train.jsonl"),
+        (b_tn, "tuning/hul_golden_clef_contrastive/val.jsonl"),
+    ):
+        bl = bucket_obj.blob(blob_path)
+        if bl.exists():
+            text = bl.download_as_text()
+            for m in re.findall(r"gs://[^\"\s]+", text):
+                excluded_uris.add(m)
+
+    excluded_sessions: set[str] = set()
+    for sp_rows in (hul_golden_manifest.get("splits") or {}).values():
+        for r in sp_rows:
+            if str(r.get("uri") or "") in excluded_uris and r.get("session_id"):
+                excluded_sessions.add(str(r["session_id"]))
+    return excluded_uris, excluded_sessions
+
+
+def publish_test_5k_splits_to_gcs(
+    project: str = "ul-fs-s-sandbx-16-prj",
+    marketshare_bucket: str = "marketshare-datasets",
+    ms_json_bucket: str = "ms-json-dataset",
+    target_crops: int = 5000,
+    target_shelves: int = 150,
+    seed: int = 5000,
+) -> dict[str, Any]:
+    """Non-destructively build and publish test_5k into rpc.json and test_5k.jsonl across Golden datasets."""
+    from google.cloud import storage
+
+    from utils.dataset import format_split_jsonl
+    from utils.llm import ensure_gcloud_auth_fallback
+    from utils.manifests.ms_json_loader import build_ms_json_test_5k_split
+
+    ensure_gcloud_auth_fallback()
+    client = storage.Client(project=project)
+    b_ms = client.bucket(marketshare_bucket)
+
+    hg_mf = json.loads(b_ms.blob("derived_manifests/hul_golden/rpc.json").download_as_bytes())
+    excluded_uris, excluded_sessions = load_sft_excluded_uris_and_sessions(
+        client, hg_mf, marketshare_bucket=marketshare_bucket
+    )
+    hg_train_pool = list((hg_mf.get("splits") or {}).get("train") or [])
+
+    report: dict[str, Any] = {
+        "excluded_sft_uris": len(excluded_uris),
+        "excluded_sft_sessions": len(excluded_sessions),
+        "datasets": {},
+    }
+
+    for ds_idx, ds_name in enumerate(("hul_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos")):
+        mf = hg_mf if ds_name == "hul_golden" else json.loads(
+            b_ms.blob(f"derived_manifests/{ds_name}/rpc.json").download_as_bytes()
+        )
+        extra = hg_train_pool if ds_name in ("hul_packs", "hul_promos", "hul_brands") else None
+        rows_5k = build_leakage_free_5k_split(
+            mf,
+            excluded_uris=excluded_uris,
+            excluded_sessions=excluded_sessions,
+            target=target_crops,
+            seed=seed + ds_idx * 17,
+            extra_pool=extra,
+        )
+        mf["splits"]["test_5k"] = rows_5k
+        st = mf.setdefault("stats", {})
+        st["test_5k_samples"] = len(rows_5k)
+        st["split_hashes"] = compute_split_hashes(mf["splits"], mf.get("gallery"))
+
+        b_ms.blob(f"derived_manifests/{ds_name}/rpc.json").upload_from_string(
+            json.dumps(mf, indent=2), content_type="application/json"
+        )
+        b_ms.blob(f"derived_manifests/{ds_name}/test_5k.jsonl").upload_from_string(
+            format_split_jsonl(rows_5k), content_type="application/jsonl"
+        )
+        report["datasets"][ds_name] = {
+            "test_5k_samples": len(rows_5k),
+            "test_5k_sha256": st["split_hashes"].get("test_5k_sha256"),
+            "test_sha256_preserved": st["split_hashes"].get("test_sha256"),
+        }
+
+    ms_mf = json.loads(b_ms.blob("derived_manifests/ms_json_golden/rpc.json").download_as_bytes())
+    ms_rows_5k = build_ms_json_test_5k_split(
+        client,
+        ms_mf,
+        marketshare_bucket=marketshare_bucket,
+        ms_json_bucket=ms_json_bucket,
+        target_shelves=target_shelves,
+        min_boxes=target_crops,
+        seed=seed,
+    )
+    ms_mf["splits"]["test_5k"] = ms_rows_5k
+    ms_st = ms_mf.setdefault("stats", {})
+    ms_st["test_5k_samples"] = len(ms_rows_5k)
+    ms_st["test_5k_boxes"] = sum(len(r.get("boxes") or []) for r in ms_rows_5k)
+    ms_st["split_hashes"] = compute_split_hashes(ms_mf["splits"], ms_mf.get("gallery"))
+
+    b_ms.blob("derived_manifests/ms_json_golden/rpc.json").upload_from_string(
+        json.dumps(ms_mf, indent=2), content_type="application/json"
+    )
+    b_ms.blob("derived_manifests/ms_json_golden/test_5k.jsonl").upload_from_string(
+        format_split_jsonl(ms_rows_5k), content_type="application/jsonl"
+    )
+    report["datasets"]["ms_json_golden"] = {
+        "test_5k_samples": len(ms_rows_5k),
+        "test_5k_boxes": ms_st["test_5k_boxes"],
+        "test_5k_sha256": ms_st["split_hashes"].get("test_5k_sha256"),
+        "test_sha256_preserved": ms_st["split_hashes"].get("test_sha256"),
+    }
+
+    return report

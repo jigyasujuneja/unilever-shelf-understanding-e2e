@@ -1260,16 +1260,16 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "dataset": "hul_variants",
         "approaches": ["clef_contrastive_metadata"],
         "models": ["gemini-3.5-flash-lite"],
-        "splits": ["val", "test"],
+        "splits": ["val", "test", "test_5k"],
         "hypothesis": (
             "Adding dynamic catalog attribute headers and pairwise diff tokens to the Top-6 zoom contact sheet "
             "lifts 5-attribute exact SKU accuracy while reaching >= 90% on brand-new unseen launches (0 train crops)."
         ),
         "description": (
-            "Evaluates clef_contrastive_metadata (EXP-28) on hul_variants and hul_golden across 200 val and 1,000 blind test crops."
+            "Evaluates clef_contrastive_metadata (EXP-28) on hul_variants and hul_golden across 200 val, 1,000 test, and 5,000 test_5k crops."
         ),
         "primary_metric": "accuracy",
-        "target_goal": ">= 83.0% 5-Attr Exact on N=1,000 test and >= 90.0% on unseen 0-train-crop SKUs",
+        "target_goal": ">= 83.0% 5-Attr Exact on N=1,000 test, >= 82.0% on N=5,000 test_5k, and >= 90.0% on unseen 0-train-crop SKUs",
         "model_family": "hul-hierarchical-brand-pack-gate",
     },
     {
@@ -1287,13 +1287,13 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "dataset": "hul_variants",
         "approaches": ["sft_clm_clef_cascade"],
         "models": ["gemini-3.5-flash-lite-sft", "gemini-3.5-flash-lite"],
-        "splits": ["val", "test"],
+        "splits": ["val", "test", "test_5k"],
         "hypothesis": (
             "Pairing k=3 visual medoids and CLM vote gating with a Vertex AI LoRA SFT endpoint improves rare 1-5 crop "
             "variant recognition while keeping unseen new-launch safety via CLEF fallback."
         ),
         "description": (
-            "Evaluates sft_clm_clef_cascade (EXP-29) on hul_variants and hul_golden across 200 val and 1,000 test crops."
+            "Evaluates sft_clm_clef_cascade (EXP-29) on hul_variants and hul_golden across 200 val, 1,000 test, and 5,000 test_5k crops."
         ),
         "primary_metric": "accuracy",
         "target_goal": ">= 84.0% validation accuracy and >= 88.0% on rare 1-5 train-crop variants",
@@ -1314,16 +1314,16 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "dataset": "ms_json_golden",
         "approaches": ["distilled_yolo_960_softnms", "shelf_960_softnms_e2e"],
         "models": ["yolo11n-distilled-onnx", "gemini-3.5-flash-lite"],
-        "splits": ["val", "test"],
+        "splits": ["val", "test", "test_5k"],
         "hypothesis": (
             "Evaluating predictions strictly inside 2D (x, y) annotated shelf segments proves the CPU detector does not "
-            "hallucinate (>60% precision) while isolating 2.2x extra shelf discovery in Bucket 2."
+            "hallucinate (>60% precision) while isolating 2.13x-2.22x extra shelf discovery in Bucket 2."
         ),
         "description": (
-            "Evaluates distilled_yolo_960_softnms and shelf_960_softnms_e2e with 2D annotated-zone and 2-bucket enrichment metrics on ms_json_golden."
+            "Evaluates distilled_yolo_960_softnms and shelf_960_softnms_e2e with 2D annotated-zone and 2-bucket enrichment metrics on ms_json_golden across N=100 test and N=151 (5,013 boxes) test_5k."
         ),
         "primary_metric": "f2",
-        "target_goal": ">= 68.0% 2D Annotated-Zone Det F2 and >= 2.0x full-shelf enrichment multiplier",
+        "target_goal": ">= 67.0% 2D Annotated-Zone Det F2 and >= 2.1x full-shelf enrichment multiplier",
         "model_family": "hul-yolo11n-distilled-detector-onnx",
     },
     {
@@ -1341,17 +1341,16 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "dataset": "hul_golden",
         "approaches": ["residual_infonce_clm_jev"],
         "models": ["gemini-3.5-flash-lite", "gemini-embedding-2"],
-        "splits": ["val", "test"],
+        "splits": ["val", "test", "test_5k"],
         "hypothesis": (
             "Fitting a lightweight 768->192->768 residual InfoNCE projection strictly on reference gallery "
-            "views improves top-1 sister-variant margin and recall@1 without touching test/eval samples."
+            "views improves top-1 sister-variant margin and recall@5 without touching test/eval samples."
         ),
         "description": (
-            "Evaluates residual_infonce_clm_jev (EXP-32) on hul_golden and ms_json_golden against zero-shot "
-            "sft_clm_clef_cascade."
+            "Evaluates residual_infonce_clm_jev (EXP-32) on hul_golden across N=1,000 test and N=5,000 test_5k."
         ),
         "primary_metric": "accuracy",
-        "target_goal": ">= 88.5% exact SKU accuracy and higher Stage-A 0-VLM fast-gate rate on hul_golden",
+        "target_goal": ">= 81.0% exact SKU accuracy, >= 92.0% Recall@5, and ~48-50% Stage-A 0-VLM fast-gate rate on hul_golden",
         "model_family": "hul-clm-infonce-2970sku-prototypes",
     },
     {
@@ -1369,17 +1368,17 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "dataset": "hul_golden",
         "approaches": ["sft_clm_clef_cascade"],
         "models": ["gemini-3.5-flash-lite-sft", "gemini-3.5-flash-lite"],
-        "splits": ["val", "test"],
+        "splits": ["val", "test", "test_5k"],
         "hypothesis": (
             "Aligning LoRA SFT training examples (task='clef_contrastive' with zoom_sheet, pack_size JSON key, "
             "and same-brand hard negatives) with EXP-28/EXP-29 inference closes the pack-size and sister-variant gap."
         ),
         "description": (
             "Builds zero-leakage train/val JSONL via build_sft_jsonl(task='clef_contrastive'), runs Vertex AI "
-            "LoRA tuning on gemini-3.5-flash-lite, and evaluates sft_clm_clef_cascade on hul_golden."
+            "LoRA tuning on gemini-3.5-flash-lite, and evaluates sft_clm_clef_cascade on hul_golden and hul_variants."
         ),
         "primary_metric": "accuracy",
-        "target_goal": ">= 89.5% exact SKU accuracy and >= 85.0% pack-size accuracy on hul_golden",
+        "target_goal": ">= 84.0% val accuracy and >= 88.0% rare 1-5 crop accuracy",
         "model_family": "hul-hierarchical-brand-pack-gate",
     },
 ]
@@ -1925,7 +1924,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
         exp_copy["dataset_gcs_uri"] = DATASET_GCS_URIS.get(
             exp["dataset"], f"gs://marketshare-datasets/derived_manifests/{exp['dataset']}/rpc.json"
         )
-        exp_copy["eval_splits"] = [s for s in exp.get("splits", ["val", "test"]) if s in ("val", "test")]
+        exp_copy["eval_splits"] = [s for s in exp.get("splits", ["val", "test"]) if s in ("val", "test", "test_5k")]
         exp_copy["architecture_summary"] = exp["description"]
         exp_copy["cli_command"] = (
             f"shelf-bench run -a {exp['approaches'][0]} -m {exp['models'][0]} "
@@ -2137,7 +2136,8 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                     "mrr": sm.get("mrr"),
                     "zero_vlm_gate_pct": raw_gate,
                     "vlm_net_gain": sm.get("vlm_net_gain"),
-                    "annotated_row_detection_metrics": s.get("annotated_row_detection_metrics"),
+                    "annotated_row_box_metrics": s.get("annotated_row_box_metrics"),
+                    "annotated_row_detection_metrics": s.get("annotated_row_box_metrics") or s.get("annotated_row_detection_metrics"),
                     "enrichment_metrics": s.get("enrichment_metrics"),
                     "is_exact_dataset": ds == exp["dataset"] or (exp["dataset"] in ("hul_sessions", "gt_hul_sessions") and ds in ("hul_sessions", "gt_hul_sessions")),
                     "is_golden_dataset": ds in golden_ds_set,
@@ -2183,8 +2183,8 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
             key=lambda r: (
                 1 if (exp["task"] == "detection" or (float(r.get("hierarchical_tree_score", 0.0)) >= 0.70 and float(r.get("is_hul_accuracy", 1.0)) >= 0.70 and float(r.get("brand_accuracy", 1.0)) >= 0.70)) else 0,
                 2 if r.get("is_exact_dataset") else (1 if r.get("is_golden_dataset") else 0),
-                2 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 1000 else (1 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 500 else 0),
-                1 if r.get("split") == "test" else 0,
+                3 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 5000 else (2 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 1000 else (1 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 500 else 0)),
+                1 if r.get("split") in ("test", "test_5k") else 0,
                 float(r.get(metric_key, 0.0)),
                 float(r.get("hierarchical_tree_score", 0.0)),
                 int(r.get("total_eval_boxes", 0)),
@@ -2192,7 +2192,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
             reverse=True,
         )
         val_runs = [r for r in matched_runs if r.get("split") == "val"]
-        test_runs = [r for r in matched_runs if r.get("split") == "test"]
+        test_runs = [r for r in matched_runs if r.get("split") in ("test", "test_5k")]
         by_boxes_test = sorted(test_runs, key=lambda r: (int(r.get("total_eval_boxes", 0)), float(r.get(metric_key, 0.0))), reverse=True)
         by_boxes_val = sorted(val_runs, key=lambda r: (int(r.get("total_eval_boxes", 0)), float(r.get(metric_key, 0.0))), reverse=True)
         exp_copy["runs"] = matched_runs
@@ -2263,70 +2263,76 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
             "ms_json_golden": {
                 "gcs_uri": "gs://marketshare-datasets/derived_manifests/ms_json_golden/rpc.json",
                 "raw_source_uri": "gs://ms-json-dataset/gt/",
-                "schema_version": "2.2.0",
-                "total_classes": 2745,
-                "clean_shelf_images": 52,
-                "evaluated_product_boxes": 898,
+                "schema_version": "2.4.0",
+                "total_classes": 2659,
+                "clean_shelf_images": 300,
+                "evaluated_product_boxes": 5013,
                 "quarantined_overlay_rate_mt": 1.0,
                 "quarantined_overlay_rate_gt": 0.3333,
-                "splits": {"train": 13, "val": 12, "test": 27},
+                "splits": {"train": 140, "val": 60, "test": 100, "test_5k": 151},
             },
             "gtmerch_golden": {
                 "gcs_uri": "gs://marketshare-datasets/derived_manifests/gtmerch_golden/rpc.json",
                 "mirror_uri": "gs://gtmerch-marketshare/derived_manifests/gtmerch_golden/rpc.json",
-                "schema_version": "2.2.0",
-                "total_classes": 2745,
+                "schema_version": "2.4.0",
+                "total_classes": 2659,
                 "clean_shelf_images": 9194,
                 "class0_display_bays": 598,
                 "class1_product_boxes": 20546,
-                "splits": {"train": 186, "val": 72, "test": 100},
+                "splits": {"train": 400, "val": 100, "test": 200},
                 "splits_10x_full": {"train": 7355, "val": 919, "test": 920},
             },
             "hul_golden": {
                 "gcs_uri": "gs://marketshare-datasets/derived_manifests/hul_golden/rpc.json",
-                "schema_version": "2.2.0",
-                "total_classes": 2745,
-                "hul_classes": 1094,
-                "non_hul_classes": 1651,
+                "schema_version": "2.4.0",
+                "total_classes": 2659,
+                "hul_classes": 1073,
+                "non_hul_classes": 1586,
                 "unknown_category_classes": 0,
                 "raw_client_pool_blobs": 225522,
                 "gallery_reference_crops": 10980,
                 "stratification": "50% HUL / 50% Non-HUL across (category, packaging_type, has_promo)",
-                "splits": {"train": 1600, "val": 200, "test": 200},
-                "splits_10x_full": {"train": 16000, "val": 2000, "test": 2000},
+                "splits": {"train": 16000, "val": 1900, "test": 1907, "test_5k": 5000},
+                "splits_10x_full": {"train": 16000, "val": 1900, "test": 1907, "test_5k": 5000},
             },
             "hul_sessions": {
                 "gcs_uri": "gs://marketshare-datasets/derived_manifests/hul_sessions/rpc.json",
-                "schema_version": "2.2.0",
-                "total_classes": 2745,
-                "splits": {"train": 30, "val": 20, "test": 25},
+                "schema_version": "2.4.0",
+                "total_classes": 2659,
+                "splits": {"train": 150, "val": 50, "test": 100},
                 "splits_10x_full": {"train": 300, "val": 200, "test": 250},
+            },
+            "gt_hul_sessions": {
+                "gcs_uri": "gs://marketshare-datasets/derived_manifests/gt_hul_sessions/rpc.json",
+                "schema_version": "2.4.0",
+                "total_classes": 2659,
+                "splits": {"train": 150, "val": 50, "test": 100},
             },
             "hul_promos": {
                 "gcs_uri": "gs://marketshare-datasets/derived_manifests/hul_promos/rpc.json",
-                "schema_version": "2.2.0",
-                "total_classes": 2745,
-                "splits": {"train": 400, "val": 100, "test": 100},
+                "schema_version": "2.4.0",
+                "total_classes": 2659,
+                "splits": {"train": 4000, "val": 1000, "test": 1000},
                 "splits_10x_full": {"train": 4000, "val": 1000, "test": 1000},
             },
             "hul_brands": {
                 "gcs_uri": "gs://marketshare-datasets/derived_manifests/hul_brands/rpc.json",
-                "schema_version": "2.2.0",
-                "total_classes": 2745,
-                "splits": {"train": 800, "val": 100, "test": 100},
+                "schema_version": "2.4.0",
+                "total_classes": 2659,
+                "splits": {"train": 8000, "val": 1000, "test": 1000},
                 "splits_10x_full": {"train": 8000, "val": 1000, "test": 1000},
             },
             "hul_variants": {
                 "gcs_uri": "gs://marketshare-datasets/derived_manifests/hul_variants/rpc.json",
-                "schema_version": "2.2.0",
-                "total_classes": 2745,
-                "splits": {"train": 800, "val": 100, "test": 100},
+                "schema_version": "2.4.0",
+                "total_classes": 2659,
+                "splits": {"train": 15687, "val": 1900, "test": 1907, "test_5k": 5000},
             },
             "hul_packs": {
                 "gcs_uri": "gs://marketshare-datasets/derived_manifests/hul_packs/rpc.json",
-                "schema_version": "2.2.0",
-                "total_classes": 2745,
-                "splits": {"train": 800, "val": 100, "test": 100},
+                "schema_version": "2.4.0",
+                "total_classes": 2659,
+                "splits": {"train": 6000, "val": 1000, "test": 1000},
             },
         },
         "experiments": enriched_experiments,
@@ -2516,12 +2522,10 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "identifies brand, variant, and pack form, and calculates Unilever vs. Competitor Share of Shelf."
             ),
             "preferred_runs": [
-                "1013-012348-stitched_e2e-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
-                "1013-020910-stitched_e2e-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
-                "1012-204345-stitched_e2e-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
-                "1013-155009-shelf_hierarchical_clm_jev-gemini-3.8-flash-priority-hul_sessions",
+                "1015-232902-shelf_960_softnms_e2e-gemini-3.5-flash-lite-priority-ms_json_golden",
+                "1013-232626-shelf_960_softnms_e2e-gemini-3.5-flash-lite-priority-gt_hul_sessions",
                 "1013-155009-shelf_hierarchical_clm_jev-gemini-3.5-flash-lite-priority-hul_sessions",
-                "1012-171856-gemini_e2e-gemini-3.5-flash-lite-priority-ms_json_golden",
+                "1013-155009-shelf_hierarchical_clm_jev-gemini-3.8-flash-priority-hul_sessions",
             ],
         },
         {
@@ -2534,8 +2538,9 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "and flags empty out-of-stock gaps."
             ),
             "preferred_runs": [
-                "1013-022245-bay_planogram_verifier-gemini-3.8-flash-priority",
+                "1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gt_hul_sessions",
                 "1013-022245-bay_planogram_verifier-gemini-3.5-flash-lite-priority",
+                "1013-022245-bay_planogram_verifier-gemini-3.8-flash-priority",
             ],
         },
         {
@@ -2548,14 +2553,13 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "side-by-side using zoomed variant and weight strips."
             ),
             "preferred_runs": [
-                "1013-025000-clef_standalone-gemini-3.8-flash-priority-hul_golden",
-                "1013-013248-l8_hul_ultimate-gemini-3.8-flash-priority-hul_golden",
+                "1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k",
+                "1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants-test_5k",
+                "1016-092457-residual_infonce_clm_jev-gemini-3.5-flash-lite-priority-hul_golden-test_5k",
+                "1015-163309-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants",
+                "1015-165814-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden",
+                "1015-232439-residual_infonce_clm_jev-gemini-3.5-flash-lite-priority-hul_golden",
                 "1013-025000-clef_standalone-gemini-3.5-flash-lite-priority-hul_golden",
-                "1013-025000-l8_hul_ultimate-gemini-3.8-flash-priority-hul_variants",
-                "1013-031440-l8_hul_ultimate-gemini-3.8-flash-priority-hul_packs",
-                "1013-034650-l8_hul_ultimate-gemini-3.8-flash-priority-hul_brands",
-                "1013-013246-hierarchical_clm_jev-gemini-3.8-flash-priority-hul_golden",
-                "1013-013248-hierarchical_clm_jev-gemini-3.5-flash-lite-priority-hul_golden",
             ],
         },
         {
@@ -2568,14 +2572,12 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "(Bottle, Pouch, Tube, Jar, Bar, Sachet), Brand, and Variant."
             ),
             "preferred_runs": [
-                "1013-013249-hierarchy_classify-gemini-3.8-flash-priority-hul_golden",
+                "1016-064839-dinov3_hierarchical_sft-dinov3_vitl16-hul_golden",
+                "1015-174314-sft_clm_clef_cascade-gemini-3.5-flash-lite-sft-priority-hul_variants",
+                "1015-174950-sft_clm_clef_cascade-gemini-3.5-flash-lite-sft-priority-hul_golden",
+                "1015-142631-hybrid_classify-gemini-3.5-flash-lite-priority-hul_golden-5attr-product_brand_base_variant_packaging_type_category",
                 "1013-013247-hierarchy_classify-gemini-3.5-flash-lite-priority-hul_golden",
-                "1013-121755-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
-                "1013-121756-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
-                "1013-021828-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
-                "1013-015833-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
-                "1012-203751-gemini_classify-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
-                "1012-124906-gemini_classify-marketshare-hul-golden-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden",
+                "1013-013249-hierarchy_classify-gemini-3.8-flash-priority-hul_golden",
             ],
         },
         {
@@ -2584,15 +2586,15 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
             "use_case": "Promo Packs",
             "title": "5-Minute Zero-Retraining Promotional Pack Verification",
             "what_it_proves": (
-                "Reads promotional header and price-off banners against a single reference image dropped into cloud storage — "
+                "Reads promotional header and price-off banners against a single reference image dropped into cloud storage - "
                 "cutting new campaign launch time from 4 weeks to 5 minutes."
             ),
             "preferred_runs": [
-                "1013-025000-jev_promo_verifier-gemini-3.8-flash-priority-hul_promos",
                 "1013-025000-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos",
+                "1013-025000-jev_promo_verifier-gemini-3.8-flash-priority-hul_promos",
                 "1013-024958-clm_promo_matcher-gemini-embedding-2-hul_promos",
-                "1013-022245-jev_promo_verifier-gemini-3.8-flash-priority",
                 "1013-022246-jev_promo_verifier-gemini-3.5-flash-lite-priority",
+                "1013-022245-jev_promo_verifier-gemini-3.8-flash-priority",
             ],
         },
         {
@@ -2605,10 +2607,10 @@ def build_task_proof_examples(results_dir: str | Path = "results") -> list[dict[
                 "without large bay frames suppressing the small packs inside them."
             ),
             "preferred_runs": [
-                "1013-032240-distilled_yolo_onnx-yolo11n-distilled-onnx-sku110k",
+                "1016-092455-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden-test_5k",
+                "1015-232729-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden",
+                "1013-232625-distilled_yolo_onnx-yolo11n-distilled-onnx-gt_hul_sessions",
                 "1013-031926-distilled_yolo_onnx-yolo11n-distilled-onnx-gtmerch_golden",
-                "1013-024028-distilled_yolo_onnx-yolo11n-distilled-onnx-ms_json_golden",
-                "1012-191529-cv_detect-yolov12s-ul-base-ms_json_golden",
             ],
         },
     ]

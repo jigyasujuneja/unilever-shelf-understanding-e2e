@@ -422,8 +422,10 @@ def export_rpc_splits_jsonl(manifest: dict, output_dir: str | Path) -> dict[str,
     out_p.mkdir(parents=True, exist_ok=True)
     splits = manifest.get("splits") or {}
     written: dict[str, str] = {}
-    for sp in ("train", "val", "test"):
+    for sp in ("train", "val", "test", "test_5k"):
         rows = splits.get(sp) or []
+        if sp == "test_5k" and not rows:
+            continue
         target = out_p / f"{sp}.jsonl"
         target.write_text(format_split_jsonl(rows), encoding="utf-8")
         written[sp] = str(target)
@@ -460,7 +462,7 @@ def _rpc_split_rows(split: str, root: str) -> list[dict]:
     try:
         return parse_split_jsonl(read_bytes(join(root, f"{split}.jsonl")))
     except Exception:
-        if local_jsonl.exists():
+        if is_gcs and local_jsonl.exists():
             return parse_split_jsonl(local_jsonl.read_bytes())
         return []
 
@@ -511,8 +513,8 @@ def load_split_jsonl(
 
 @lru_cache(maxsize=64)
 def load_rpc(split: str, root: str) -> dict[str, Sample]:
-    if split not in (*RPC_SUBSETS, "test_5k"):
-        raise ValueError(f"the rpc dataset has splits {tuple(RPC_SUBSETS)}, got {split!r}")
+    if split not in SPLITS:
+        raise ValueError(f"the rpc dataset has splits {SPLITS}, got {split!r}")
     cat = rpc_catalog(root)
     rows = _rpc_split_rows(split, root)
     return _rows_to_samples(rows, cat=cat, root=root)

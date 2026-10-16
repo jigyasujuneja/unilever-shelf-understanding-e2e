@@ -97,7 +97,7 @@ def _leaf_sample_index(name: str, root: str) -> dict[str, dataset.Sample]:
     if name not in GALLERY_SETS:
         return idx
     data = dataset.data_root(name)
-    for s in dataset.RPC_SUBSETS:
+    for s in dataset.SPLITS:
         for k, smp in dataset.load_rpc(s, data).items():
             idx[k] = smp
             leaf = Path(str(smp.path)).name
@@ -224,7 +224,7 @@ def _samples(name: str, split: str | None, root: str) -> dict[str, dataset.Sampl
         return dataset.load_products(dataset.products_root())
     if name in GALLERY_SETS:
         data = dataset.data_root(name)
-        splits = [split] if split else list(dataset.RPC_SUBSETS)
+        splits = [split] if split else list(dataset.SPLITS)
         return {k: v for s in splits for k, v in dataset.load_rpc(s, data).items()}
     return dataset.load_split(split, root)
 

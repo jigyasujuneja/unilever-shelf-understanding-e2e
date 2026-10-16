@@ -72,7 +72,7 @@ def test_keras_classifier_inception_preprocessing_category_onehot_and_argmax():
     b_clf = cv_models.KerasClassifier("brand", "gs://b/mt_brand/marketshare_brand.h5", ("AColgate", "APepsodent"))
     b_clf._model = FakeKeras(1, n=2, inputs=((None, None, None, 3),))
     assert b_clf.predict_class(img) == ("APepsodent", pytest.approx(0.9))
-    (bx,) = b_clf._model.feeds
+    bx = b_clf._model.feeds
     assert bx.shape == (1, 299, 299, 3)
     assert bx[0, 0, 0].tolist() == pytest.approx([1.0, -1.0, 128 / 127.5 - 1.0], abs=1e-6)
 

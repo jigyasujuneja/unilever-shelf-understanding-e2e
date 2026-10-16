@@ -190,8 +190,10 @@ def merge_fields(
     return merged
 
 
-def taxonomy_index(catalog: dict[int, dict]) -> tuple[dict[str, set[str]], set[tuple[str, str]]]:
-    """``(brand -> categories, valid (category, packaging_type) pairs)`` seen in the catalog."""
+def taxonomy_index(
+    catalog: dict[int, dict],
+) -> tuple[dict[str, set[str]], set[tuple[str, str]], dict[str, list[str]], dict[tuple[str, str], dict[str, str]]]:
+    """``(brand -> categories, valid (category, packaging_type) pairs, variants_by_brand, sku_meta_by_bv)``."""
     brand_cats: dict[str, set[str]] = defaultdict(set)
     pairs: set[tuple[str, str]] = set()
     for p in catalog.values():
@@ -201,14 +203,14 @@ def taxonomy_index(catalog: dict[int, dict]) -> tuple[dict[str, set[str]], set[t
         for pt in [p.get("packaging_type"), *(p.get("allowed_packaging_types") or [])]:
             if c and pt:
                 pairs.add((c, str(pt)))
-    return dict(brand_cats), pairs
+    variants_by_brand, sku_meta_by_bv = catalog_variant_lookup(catalog)
+    return dict(brand_cats), pairs, variants_by_brand, sku_meta_by_bv
 
 
 def project_taxonomy(
     pred: dict,
     brand_cats: dict[str, set[str]],
     valid_pairs: set[tuple[str, str]],
-    *,
     variants_by_brand: dict[str, list[str]] | None = None,
     sku_meta_by_bv: dict[tuple[str, str], dict[str, str]] | None = None,
 ) -> tuple[dict, list[str]]:
@@ -265,8 +267,7 @@ def hint_prompt(
 ) -> str:
     """The SFT prompt plus up to ``max_hints`` distinct kNN label combinations as short hints."""
     if fields is None:
-        has_5attr = any(bool(lab.get("base_variant") or lab.get("product")) for _, lab in candidates)
-        use_5attr = has_5attr
+        use_5attr = (not candidates) or any(bool(lab.get("base_variant") or lab.get("product")) for _, lab in candidates)
     else:
         use_5attr = bool({"product", "base_variant"} & set(fields))
 
@@ -462,8 +463,7 @@ class HybridClassify(ClmStandaloneRetrieval):
             self.evaluated_fields = tuple(resolve_evaluated_fields(self.dataset, with_variants=True))
         super().setup(config, ctx)
         self.catalog = dataset.catalog(name=self.dataset)
-        self.brand_cats, self.valid_pairs = taxonomy_index(self.catalog)
-        self.variants_by_brand, self.sku_meta_by_bv = catalog_variant_lookup(self.catalog)
+        self.brand_cats, self.valid_pairs, self.variants_by_brand, self.sku_meta_by_bv = taxonomy_index(self.catalog)
         ctx.trace.step(
             "Hybrid setup",
             f"{len(self.index)} gallery vectors, "

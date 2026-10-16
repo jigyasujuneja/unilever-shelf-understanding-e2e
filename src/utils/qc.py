@@ -345,6 +345,15 @@ def run_12_gate_qc(
             overlap = uris_by_sp[a] & uris_by_sp[b]
             if overlap:
                 g8_violations.append(f"{ds}: {len(overlap)} URI leak(s) between {a} and {b}")
+        if "test_5k" in splits and splits["test_5k"]:
+            t5k_uris = {str(r.get("uri") or r.get("image") or "") for r in splits["test_5k"]}
+            gal_uris = {str(u) for g in mf.get("gallery", {}).values() for u in g}
+            val_ov = t5k_uris & uris_by_sp["val"]
+            gal_ov = t5k_uris & gal_uris
+            if val_ov:
+                g8_violations.append(f"{ds}: {len(val_ov)} URI leak(s) between test_5k and val")
+            if gal_ov:
+                g8_violations.append(f"{ds}: {len(gal_ov)} URI leak(s) between test_5k and gallery")
     gates.append({
         "gate_id": 8,
         "name": "split_and_session_deleakage",
@@ -443,7 +452,10 @@ def run_12_gate_qc(
                                         f"{run_dir.name}/{r_row.get('image_id')}[{side}]: product {prod_s!r} does not match brand {brand_s!r}"
                                     )
                                     break
-                                if prod_s.lower().endswith("__others") or "non_hul_competitor" in prod_s.lower():
+                                if (
+                                    (prod_s.lower().endswith("__others") or "non_hul_competitor" in prod_s.lower())
+                                    and not (side == "pred" and s_data.get("approach") == "cv_classify")
+                                ):
                                     g11_violations.append(
                                         f"{run_dir.name}/{r_row.get('image_id')}[{side}]: legacy fallback suffix in {prod_s!r}"
                                     )

@@ -123,7 +123,7 @@ def deploy_job(s, project, region, image, args, tasks, cfg) -> str:
             "parallelism": min(tasks, int(cr.get("parallelism", tasks))),
             "template": {
                 "maxRetries": 0,
-                "timeout": "3600s",
+                "timeout": f"{int(cr.get('timeout_s', 10800))}s",
                 "containers": [{
                     "image": image,
                     "args": args,
@@ -181,6 +181,7 @@ def run_on_cloud(
     brand_model: str | None = None,
     pack_model: str | None = None,
     image: str | None = None,
+    job_name: str | None = None,
     pull_local: bool = False,
     log=print,
     **variant_models: str | None,
@@ -205,6 +206,8 @@ def run_on_cloud(
         "--root", gcp["data"], "--results", gcp["results"],
     ]
     cfg.setdefault("cloud_run", {}).setdefault("parallelism", len(models))
+    if job_name:
+        cfg["cloud_run"]["job"] = job_name
     job_url = deploy_job(s, project, region, image, args, tasks, cfg)
     log(f"Executing {tasks} tasks on Cloud Run job {job_url.rsplit('/', 1)[-1]} ({region}) ...")
     op = _ok(s.post(f"{job_url}:run", json={}))

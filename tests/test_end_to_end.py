@@ -32,6 +32,7 @@ def test_registry_has_builtin_approaches():
         "distilled_yolo_960_softnms",
         "hierarchy_classify", "embedding_text_match", "djev_classify", "coarse_jev_gemini",
         "clef_flash_classify", "clm_classify", "clm_standalone_classify", "clef_standalone_classify",
+        "clef_contrastive_metadata", "residual_infonce_clm_jev", "sft_clm_clef_cascade",
         "cv_classify",
         "gemini_classify", "hybrid_classify", "hybrid_classify_sft", "hybrid_classify_max",
         "embedding_retrieval", "tiered_hybrid", "jev_laya_hybrid", "coarse_jev_laya",
@@ -57,6 +58,7 @@ def test_registry_has_builtin_approaches():
         "single_pass_dedup", "tiled_dedup",
         "hierarchy_classify", "djev_classify", "coarse_jev_gemini",
         "clef_flash_classify", "clm_classify", "clef_standalone_classify",
+        "clef_contrastive_metadata", "residual_infonce_clm_jev", "sft_clm_clef_cascade",
         "gemini_classify", "hybrid_classify", "hybrid_classify_sft", "hybrid_classify_max",
         "tiered_hybrid", "jev_laya_hybrid", "coarse_jev_laya",
         "jev_laya_zscore_lid", "cold_start_lid_discovery", "jev_laya_global_wb", "jev_laya_zoom_strip",
@@ -74,6 +76,18 @@ def test_registry_has_builtin_approaches():
         "shelf_clef_standalone",
         "jev_promo_verifier", "bay_planogram_verifier",
     }
+
+
+def test_match_identified_with_none_fields():
+    from utils import metrics
+
+    catalog = {10: {"sku_id": 10, "product": "Dove__Bar"}}
+    gt_labels = [{"sku_id": 99, "product": "Dove__Bar"}]
+    res = metrics.match_identified(
+        [(0, 0, 10, 10)], [10], [(0, 0, 10, 10)], [99],
+        catalog=catalog, gt_labels=gt_labels, fields=None,
+    )
+    assert res["tp"] == 1 and res["found"] == 1
 
 
 def test_retrieval_template_is_not_registered():

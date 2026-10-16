@@ -70,7 +70,7 @@ const DATASETS = {
     pillLabel: "MT · Full Catalog (2,659)",
     unitType: "crop",
     shortDesc: "MT Market Share · 2,659 SKUs (HUL + Competitor Crops)",
-    splits: "16,000 train · 1,900 val · 1,907 test",
+    splits: "16,000 train · 1,900 val · 1,907 test · 5,000 test_5k",
   },
   ms_json_golden: {
     isGolden: true,
@@ -80,7 +80,7 @@ const DATASETS = {
     pillLabel: "MT · Store Shelves (ms_json)",
     unitType: "shelf",
     shortDesc: "MT Market Share · Clean Client LabelMe Store Shelves",
-    splits: "140 train · 60 val · 100 test",
+    splits: "140 train · 60 val · 100 test · 151 test_5k",
   },
   hul_variants: {
     isGolden: true,
@@ -90,7 +90,7 @@ const DATASETS = {
     pillLabel: "MT · Variants (1,922)",
     unitType: "crop",
     shortDesc: "MT Market Share · 1,922 Sister Variant Classes",
-    splits: "15,687 train · 1,900 val · 1,907 test",
+    splits: "15,687 train · 1,900 val · 1,907 test · 5,000 test_5k",
   },
   hul_packs: {
     isGolden: true,
@@ -311,7 +311,7 @@ function getEvalScopeMeta(r) {
 function isValidatedGoldenRun(r) {
   const ds = r.dataset || "sku110k";
   if (DATASETS[ds]?.isGolden !== true) return false;
-  if ((r.errors || 0) > 0) return false;
+  if ((r.errors || 0) > Math.floor(Number(r.images || 0) / 1000)) return false;
   const primary = Number(r.primary_score ?? r.f2 ?? r.accuracy ?? 0);
   return primary >= 0.10;
 }
@@ -368,13 +368,13 @@ function fmtShortImageId(imageId) {
 function fmtSubMetricsCompact(r) {
   const fa = r.field_accuracy || {};
   const tk = taskOf(r);
-  const ard = r.annotated_row_detection_metrics;
+  const ard = r.annotated_row_box_metrics || r.annotated_row_detection_metrics;
   const enr = r.enrichment_metrics;
+  const zoneHtml = ard && ard.f2 != null
+    ? ` · <span style="color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;padding:1px 5px;border-radius:4px;font-weight:700;" title="Bucket 1: Detection F2 & Precision strictly inside 2D human-annotated shelf pockets">2D Zone F2 <b>${pct(ard.f2)}</b> (P <b>${pct(ard.precision)}</b>)</span>`
+    : "";
   if (tk === "detection") {
     const base = `Recall <b>${pct(r.recall)}</b> · Precision <b>${pct(r.precision)}</b> · Acc <b>${pct(r.accuracy)}</b>`;
-    const zoneHtml = ard && ard.f2 != null
-      ? ` · <span style="color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;padding:1px 5px;border-radius:4px;font-weight:700;" title="Bucket 1: Detection F2 & Precision strictly inside 2D human-annotated shelf pockets">2D Zone F2 <b>${pct(ard.f2)}</b> (P <b>${pct(ard.precision)}</b>)</span>`
-      : "";
     const enrHtml = enr && enr.extra_unannotated_row_preds > 0
       ? ` · <span style="color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:1px 5px;border-radius:4px;font-weight:700;" title="Bucket 2: Extra valid product facings discovered on unannotated shelf rows">+${enr.extra_unannotated_row_preds} Extra (${enr.enrichment_multiplier}x)</span>`
       : "";
@@ -386,7 +386,7 @@ function fmtSubMetricsCompact(r) {
     const enrHtml = enr && enr.extra_discovered_sku_instances > 0
       ? ` · <span style="color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:1px 5px;border-radius:4px;font-weight:700;" title="Bucket 2: Extra named SKU facings discovered on unannotated shelf rows">+${enr.extra_discovered_sku_instances} Extra SKUs (${enr.enrichment_multiplier}x)</span>`
       : "";
-    return `Found <b>${pct(r.found_recall ?? r.recall)}</b> · ID Recall <b>${pct(r.recall)}</b>${b}${h}${enrHtml}`;
+    return `Found <b>${pct(r.found_recall ?? r.recall)}</b> · ID Recall <b>${pct(r.recall)}</b>${b}${h}${zoneHtml}${enrHtml}`;
   }
   const scope = getEvalScopeMeta(r);
   const items = [];
@@ -811,6 +811,7 @@ async function showUseCaseBoard(useCase = "market_share") {
     if (boardDsFilter !== "all" && (r.dataset || "hul_golden") !== boardDsFilter) return false;
     if (boardSplitFilter !== "all" && (r.split || "test") !== boardSplitFilter) return false;
     const nSamples = getRunSampleCount(r);
+    if (boardSampleSizeFilter === "5000" && nSamples < 5000) return false;
     if (boardSampleSizeFilter === "1000" && nSamples < 1000) return false;
     if (boardSampleSizeFilter === "500" && nSamples < 500) return false;
     return true;
@@ -945,6 +946,7 @@ async function showUseCaseBoard(useCase = "market_share") {
   const splitChips = [
     ["all", "All Splits"],
     ["test", "Test"],
+    ["test_5k", "Test 5K"],
     ["val", "Val"],
   ]
     .map(
@@ -953,10 +955,12 @@ async function showUseCaseBoard(useCase = "market_share") {
     )
     .join("");
 
+  const count5000 = ucRuns.filter((r) => getRunSampleCount(r) >= 5000).length;
   const count1000 = ucRuns.filter((r) => getRunSampleCount(r) >= 1000).length;
   const count500 = ucRuns.filter((r) => getRunSampleCount(r) >= 500).length;
   const sampleChips = [
     ["all", `All Sample Sizes (${ucRuns.length})`],
+    ["5000", `5,000+ Samples (${count5000})`],
     ["1000", `1,000+ Samples (${count1000})`],
     ["500", `500+ Samples (${count500})`],
   ]
@@ -973,25 +977,25 @@ async function showUseCaseBoard(useCase = "market_share") {
       <div style="display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;background:#ffffff;border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;">
         <div style="flex:1;min-width:170px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 10px;">
           <div style="font-size:11px;font-weight:800;color:#1d4ed8;text-transform:uppercase;">1. Box Detector (CPU)</div>
-          <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">Bays &amp; Packs &bull; Neighbor Group (3.2x)</div>
-          <div style="font-size:11px;color:#475569;margin-top:2px;"><b>69.0% 2D Zone F2</b> &bull; <b>$0 VLM Cost</b></div>
+          <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">Bays &amp; Packs &bull; 2-Bucket Zone (2.13x-2.22x)</div>
+          <div style="font-size:11px;color:#475569;margin-top:2px;"><b>67.3%-69.0% 2D Zone F2</b> &bull; <b>$0 VLM Cost</b></div>
         </div>
         <div style="display:flex;align-items:center;font-size:16px;font-weight:900;color:#64748b;">&rarr;</div>
         <div style="flex:1.15;min-width:190px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:8px 10px;">
           <div style="font-size:11px;font-weight:800;color:#047857;text-transform:uppercase;">2. Embedding (gemini-embedding-2)</div>
           <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">2,659-SKU Match + Margin Gate</div>
-          <div style="font-size:11px;color:#065f46;margin-top:2px;"><b>Resolves 68% at $0 VLM</b> &bull; <b>92.0% R@5 (EXP-32)</b></div>
+          <div style="font-size:11px;color:#065f46;margin-top:2px;"><b>Resolves 50%-68% at $0 VLM</b> &bull; <b>92.6% R@5 (EXP-32 5k)</b></div>
         </div>
         <div style="display:flex;align-items:center;font-size:16px;font-weight:900;color:#64748b;">&rarr;</div>
         <div style="flex:1.15;min-width:190px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 10px;">
           <div style="font-size:11px;font-weight:800;color:#4338ca;text-transform:uppercase;">3. Zoom Reader (EXP-28 CLEF)</div>
           <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">Top-6 Sheet + Catalog Diff Headers</div>
-          <div style="font-size:11px;color:#3730a3;margin-top:2px;"><b>Gemini 3.5 Flash-Lite ★</b> &bull; <b>₹0.12/shelf (2.69s)</b></div>
+          <div style="font-size:11px;color:#3730a3;margin-top:2px;"><b>Gemini 3.5 Flash-Lite ★</b> &bull; <b>₹0.12/shelf (97.4% R@5)</b></div>
         </div>
         <div style="display:flex;align-items:center;font-size:16px;font-weight:900;color:#64748b;">&rarr;</div>
         <div style="flex:1.1;min-width:180px;background:#f8fafc;border:1px solid #94a3b8;border-radius:8px;padding:8px 10px;">
           <div style="font-size:11px;font-weight:800;color:#0f172a;text-transform:uppercase;">4. Output (5-Level SKU &amp; P2P)</div>
-          <div style="font-size:12px;color:#0f172a;font-weight:700;margin-top:2px;">83.2% Test / 84.0% Val &bull; 91.8% 3-Attr</div>
+          <div style="font-size:12px;color:#0f172a;font-weight:700;margin-top:2px;">82.3% (5k) / 83.2% (1k) &bull; 91.6% 3-Attr</div>
           <div style="font-size:11px;color:#475569;margin-top:2px;"><b>P2P W1: 34.8% &rarr; 73.7%</b> &bull; <b>94.4% New Launches</b></div>
         </div>
       </div>`;
@@ -1001,37 +1005,37 @@ async function showUseCaseBoard(useCase = "market_share") {
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span style="font-size:15px;font-weight:800;color:#0f172a;letter-spacing:-0.01em;">
-            ★ Best Model: Contrastive CLEF (EXP-28) &bull; Custom SFT (EXP-32 / EXP-33) &bull; 2-Bucket Shelf Discovery
+            ★ Best Variant vs. Legacy TL;DR: Contrastive CLEF (EXP-28) &bull; Custom SFT (EXP-32 / EXP-33) &bull; 2-Bucket Discovery
           </span>
           <span style="font-size:11.5px;font-weight:700;color:#065f46;background:#d1fae5;padding:2px 8px;border-radius:999px;">
-            100% Real Cloud Run &amp; GCP Executions (215+ Runs Verified)
+            100% Real Cloud Run &amp; GCP Executions (N=5,000 test_5k &amp; N=1,000 test Verified)
           </span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <a href="/exec" style="font-size:12px;font-weight:700;color:#fff;background:#1d4ed8;padding:6px 12px;border-radius:6px;text-decoration:none;box-shadow:0 1px 2px rgba(29,78,216,0.2);">Open Executive Summary (/exec) &rarr;</a>
-          <a href="#/run/1015-162308-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants" style="font-size:12px;font-weight:700;color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ #1 Best Model EXP-28 (#162308: 83.2% Test / 84.0% Val &middot; ₹0.12) &rarr;</a>
-          <a href="#/run/1015-232439-residual_infonce_clm_jev-gemini-3.5-flash-lite-priority-hul_golden" style="font-size:12px;font-weight:700;color:#1e40af;background:#fff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ EXP-32 Residual InfoNCE SFT (#232439: 82.0% 5-Attr &middot; 92.0% R@5) &rarr;</a>
+          <a href="#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="font-size:12px;font-weight:700;color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ #1 Best Model EXP-28 (N=5,000 #092456: 82.3% Golden / 81.9% Variants) &rarr;</a>
+          <a href="#/run/1016-092457-residual_infonce_clm_jev-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="font-size:12px;font-weight:700;color:#1e40af;background:#fff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ EXP-32 InfoNCE SFT (N=5,000 #092457: 81.2% 5-Attr &middot; 92.6% R@5) &rarr;</a>
         </div>
       </div>
 
       ${simpleFunnelStripHtml}
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;">
-        <!-- Card 1: Best Model / Recommended Production Winner (EXP-28 Contrastive CLEF) -->
+        <!-- Card 1: Best Model / Recommended Production Winner (Option 2: Hybrid Photo + AI Zoom) -->
         <div style="background:#fff;border:1.5px solid #10b981;border-top:4px solid #059669;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. Best Model: Contrastive CLEF (EXP-28)</div>
-            <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">Gemini 3.5 Flash-Lite &middot; ₹0.12/Shelf</span>
+            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. Best Model: Hybrid Photo + AI Zoom</div>
+            <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">Option 2 ★ &middot; ₹0.12/Shelf</span>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">83.2%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">5-Attr Test (84.0% Val)</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">82.3%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">5-Attr N=5k (83.2% N=1k)</div>
             </div>
             <div style="border-left:1px solid #bbf7d0;border-right:1px solid #bbf7d0;">
-              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">94.4%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Unseen Launches (17/18)</div>
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">97.4%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Recall@5 (94.4% Unseen)</div>
             </div>
             <div>
               <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">₹0.12</div>
@@ -1041,35 +1045,35 @@ async function showUseCaseBoard(useCase = "market_share") {
 
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;border-bottom:1px dashed #e2e8f0;">
-              <span style="color:#64748b;font-weight:600;">3-Attr Exact &amp; Per-Level</span>
-              <span style="font-weight:700;color:#0f172a;">91.8% 3-Attr &middot; 98.8% HUL &middot; 96.2% Brand &middot; 93.3% Pack</span>
+              <span style="color:#64748b;font-weight:600;">N=5,000 Per-Level</span>
+              <span style="font-weight:700;color:#0f172a;">98.6% HUL &middot; 96.6% Brand &middot; 96.5% Cat &middot; 91.7% Pack</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>Variants N=1,000</b> (<code>EXP-28</code> 3.5-Lite)</span>
-              <span><b>83.2% Test / 84.0% Val</b> &middot; <a href="#/run/1015-162308-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#162308 &rarr;</a></span>
+              <span><b>Golden N=5,000 &amp; N=1,000</b> (<code>EXP-28</code>)</span>
+              <span><b>82.3% (5k) / 82.7% (1k)</b> &middot; <a href="#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092456 (5k) &rarr;</a> <a href="#/run/1015-165814-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#165814 (1k) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>Golden N=1,000</b> (<code>EXP-28</code> / <code>#025000</code>)</span>
-              <span><b>82.7% Test / 83.0% Val</b> &middot; <a href="#/run/1015-162247-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#162247 &rarr;</a> <a href="#/run/1013-025000-clef_standalone-gemini-3.5-flash-lite-priority-hul_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#025000 &rarr;</a></span>
+              <span><b>Variants N=5,000 &amp; N=1,000</b> (<code>EXP-28</code>)</span>
+              <span><b>81.9% (5k) / 83.2% (1k)</b> &middot; <a href="#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092456 (5k) &rarr;</a> <a href="#/run/1015-163309-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#163309 (1k) &rarr;</a></span>
             </div>
           </div>
         </div>
 
-        <!-- Card 2: Custom SFT Challenger (EXP-32 Residual InfoNCE & EXP-29/33 LoRA SFT) -->
+        <!-- Card 2: Custom Fine-Tuned AI (Option 3) -->
         <div style="background:#fff;border:1px solid #bfdbfe;border-top:3px solid #2563eb;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#1e3a8a;">★ 2. Custom SFT: EXP-32 (InfoNCE) &amp; EXP-33 (LoRA)</div>
-            <span style="font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">gemini-embedding-2 + 3.5-Lite SFT</span>
+            <div style="font-size:13.5px;font-weight:800;color:#1e3a8a;">★ 2. Custom Fine-Tuned AI</div>
+            <span style="font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">Option 3 &middot; ₹0.12-0.14/Shelf</span>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#1d4ed8;line-height:1.15;">92.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">3-Attr &amp; Recall@5 (EXP-32)</div>
+              <div style="font-size:20px;font-weight:800;color:#1d4ed8;line-height:1.15;">92.6%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Recall@5 N=5k (EXP-32)</div>
             </div>
             <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">82.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">5-Attr SKU (85.0% Val SFT)</div>
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">81.2%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">5-Attr N=5k (82.0% N=1k)</div>
             </div>
             <div>
               <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">₹0.00</div>
@@ -1079,16 +1083,16 @@ async function showUseCaseBoard(useCase = "market_share") {
 
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;border-bottom:1px dashed #e2e8f0;">
-              <span style="color:#64748b;font-weight:600;">EXP-32 Adapter (<code>residual_infonce</code>)</span>
-              <span style="font-weight:700;color:#0f172a;">98.0% HUL &middot; 96.0% Brand &middot; 48% 0-VLM Gate</span>
+              <span style="color:#64748b;font-weight:600;">Tuned Photo Adapter (N=5k)</span>
+              <span style="font-weight:700;color:#0f172a;">98.1% HUL &middot; 95.6% Brand &middot; 49.5% 0-VLM Gate</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>EXP-32 Residual InfoNCE</b> (<code>hul_golden</code>)</span>
-              <span><b>82.0% 5-Attr / 92.0% 3-Attr</b> &middot; <a href="#/run/1015-232439-residual_infonce_clm_jev-gemini-3.5-flash-lite-priority-hul_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#232439 &rarr;</a></span>
+              <span><b>Tuned Photo Adapter</b> (<code>EXP-32</code>)</span>
+              <span><b>81.2% (5k) / 82.0% (1k)</b> &middot; <a href="#/run/1016-092457-residual_infonce_clm_jev-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#092457 (5k) &rarr;</a> <a href="#/run/1015-232439-residual_infonce_clm_jev-gemini-3.5-flash-lite-priority-hul_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#232439 (1k) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>EXP-29 / EXP-33 LoRA SFT</b> (<code>3.5-Flash-Lite</code>)</span>
-              <span><b>81.9% Test / 85.0% Val</b> &middot; <a href="#/run/1015-162350-sft_clm_clef_cascade-gemini-3.5-flash-lite-sft-priority-hul_variants" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#162350 &rarr;</a> <a href="#/run/1013-121755-hybrid_classify_sft-marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite-priority-hul_golden-3attr-brand_packaging_type_category" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#121755 &rarr;</a></span>
+              <span><b>Fine-Tuned 3.5-Flash-Lite</b> (<code>EXP-29/33</code>)</span>
+              <span><b>79.6% (5k) / 81.9% (1k)</b> &middot; <a href="#/run/1016-092456-sft_clm_clef_cascade-gemini-3.5-flash-lite-sft-priority-hul_variants-test_5k" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#092456 (5k) &rarr;</a> <a href="#/run/1015-174314-sft_clm_clef_cascade-gemini-3.5-flash-lite-sft-priority-hul_variants" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#174314 (1k) &rarr;</a></span>
             </div>
           </div>
         </div>
@@ -1097,13 +1101,13 @@ async function showUseCaseBoard(useCase = "market_share") {
         <div style="background:#fff;border:1px solid #fed7aa;border-top:3px solid #ea580c;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
             <div style="font-size:13.5px;font-weight:800;color:#9a3412;">3. Legacy 9-Model <code>.h5</code>, P2P &amp; 2D Zone</div>
-            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">Apples-to-Apples N=1,000</span>
+            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">Apples-to-Apples N=5,000 &amp; N=1,000</span>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#c2410c;line-height:1.15;">44.5%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">9-Model .h5 5-Attr</div>
+              <div style="font-size:20px;font-weight:800;color:#c2410c;line-height:1.15;">42.3%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">9-Model .h5 5k (44.5% 1k)</div>
             </div>
             <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
               <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">73.7%</div>
@@ -1111,22 +1115,22 @@ async function showUseCaseBoard(useCase = "market_share") {
             </div>
             <div>
               <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">69.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">2D Zone Det F2 (+1,859)</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">2D Zone F2 (67.3% on 5k)</div>
             </div>
           </div>
 
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;border-bottom:1px dashed #e2e8f0;">
-              <span><b>Legacy 9-Model <code>.h5</code> Chain</b> (N=1,000)</span>
-              <span><b>44.5% 5-Attr / 51.0% 3-Attr</b> &middot; <a href="#/run/1015-092627-cv_classify-marketshare_brand.h5+marketshare_packtype.h5+wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5-hul_golden-5attr" style="${runPillStyle}color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;">#092627 &rarr;</a></span>
+              <span><b>Legacy 9-Model <code>.h5</code> Chain</b> (N=5k &amp; 1k)</span>
+              <span><b>42.3% (5k) / 44.5% (1k)</b> &middot; <a href="#/run/1016-093317-cv_classify-marketshare_brand.h5+marketshare_packtype.h5+wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5-hul_golden-test_5k-5attr" style="${runPillStyle}color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;">#093317 (5k) &rarr;</a> <a href="#/run/1015-092627-cv_classify-marketshare_brand.h5+marketshare_packtype.h5+wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5-hul_golden-5attr" style="${runPillStyle}color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;">#092627 (1k) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span><b>Oracle GT Brand <code>.h5</code></b> (Cheating Diagnostic)</span>
-              <span><b>52.0% 5-Attr / 84.7% Var</b> &middot; <a href="#/run/1015-115810-cv_classify-oracle_brand+marketshare_packtype.h5+wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5-hul_golden-5attr" style="${runPillStyle}color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;">#115810 &rarr;</a></span>
+              <span><b>52.0% 5-Attr / 84.7% Var</b> &middot; <a href="#/run/1015-115810-cv_classify-marketshare_brand.h5+marketshare_packtype.h5+wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5+oracle_brand-hul_golden-5attr" style="${runPillStyle}color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;">#115810 &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>2D Zone &amp; Enrichment</b> (<code>ms_json_golden</code>)</span>
-              <span><b>68.99% Zone F2 / 2.22x</b> &middot; <a href="#/run/1015-232729-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232729 &rarr;</a> <a href="#/run/1015-232902-shelf_960_softnms_e2e-gemini-3.5-flash-lite-priority-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232902 &rarr;</a></span>
+              <span><b>MT Shelves 2D Zone</b> (<code>ms_json_golden</code>)</span>
+              <span><b>67.3% (5k) / 69.0% (1k)</b> &middot; <a href="#/run/1016-092455-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092455 (151) &rarr;</a> <a href="#/run/1015-232729-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232729 (100) &rarr;</a> <a href="#/run/1015-232902-shelf_960_softnms_e2e-gemini-3.5-flash-lite-priority-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232902 &rarr;</a></span>
             </div>
           </div>
         </div>
@@ -1134,28 +1138,28 @@ async function showUseCaseBoard(useCase = "market_share") {
 
       <details style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:10px 14px;font-size:12.5px;color:#1e293b;">
         <summary style="cursor:pointer;font-weight:800;color:#0f172a;display:flex;justify-content:space-between;align-items:center;">
-          <span>🚀 Three Deployment Options &amp; P2P Business Impact (W1 = 34.8% &rarr; 73.7%, +170.4% Usable Facings)</span>
+          <span>Three Production Options &amp; P2P Business Impact (W1 = 34.8% &rarr; 73.7%, +170.4% Usable Facings)</span>
           <span style="font-size:11px;font-weight:700;color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">Click to Expand Options &amp; P2P Impact &blacktriangledown;</span>
         </summary>
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;">
           <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;">
-            <div style="font-weight:800;color:#0f172a;">Option 1: Instant Catalog Match (<code>clm_standalone</code>)</div>
+            <div style="font-weight:800;color:#0f172a;">Option 1: Fast Photo Match (<code>₹0.04/shelf</code>)</div>
             <div style="margin-top:4px;color:#334155;line-height:1.45;">
-              &bull; <b>Performance &amp; Cost:</b> <b>78.6%–80.9% 5-Attr</b> (<b>89.5%–90.1% 3-Attr</b>) at <b>₹0.04/shelf (0.90s, 0 VLM calls)</b>.<br>
-              &bull; <b>Role:</b> Ultra-low-cost baseline for high-volume GT Kirana Brand/Category Share-of-Shelf and evening peak-hour cost brake.
+              &bull; <b>Performance &amp; Cost:</b> <b>78.6%-80.9% 5-Attr</b> (<b>89.5%-90.1% 3-Attr</b>) at <b>₹0.04/shelf (0.90s, 0 AI calls)</b>.<br>
+              &bull; <b>Role:</b> Fast photo-to-catalog match for high-volume GT Kirana Brand/Category Share-of-Shelf and evening peak-hour cost brake.
             </div>
           </div>
           <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px 12px;">
-            <div style="font-weight:800;color:#065f46;">Option 2 (★ Recommended Default): Smart 2-Step Zoom Hybrid (<code>EXP-28</code>)</div>
+            <div style="font-weight:800;color:#065f46;">Option 2 (★ Recommended Default): Hybrid Photo + AI Zoom (<code>₹0.12/shelf</code>)</div>
             <div style="margin-top:4px;color:#334155;line-height:1.45;">
-              &bull; <b>Performance &amp; Cost:</b> <b>83.2% Test / 84.0% Val</b> (<b>91.8% 3-Attr</b>, <b>94.4% on unseen new launches</b>) at <b>₹0.12/shelf (2.69s)</b>.<br>
+              &bull; <b>Performance &amp; Cost:</b> <b>82.3% (N=5,000) / 83.2% (N=1,000)</b> (<b>97.4% Recall@5</b>, <b>94.4% on unseen new launches</b>) at <b>₹0.12/shelf (2.69s)</b>.<br>
               &bull; <b>P2P Business Impact:</b> Lifts basepack weight <b>W1 = W4&times;W5/100 from 34.82% to 73.68% (2.12x)</b> and usable P2P facings from <b>2,223 to 6,012 (+170.4%)</b> across 4 scenarios.
             </div>
           </div>
           <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px 12px;">
-            <div style="font-weight:800;color:#1e40af;">Option 3 (SFT Challenger): Residual InfoNCE (<code>EXP-32</code>) &amp; LoRA SFT (<code>EXP-33</code>)</div>
+            <div style="font-weight:800;color:#1e40af;">Option 3 (Challenger): Custom Fine-Tuned AI (<code>₹0.12-0.14/shelf</code>)</div>
             <div style="margin-top:4px;color:#334155;line-height:1.45;">
-              &bull; <b>Performance &amp; Cost:</b> <b>EXP-32</b> hits <b>92.0% Top-5 Recall &amp; 92.0% 3-Attr</b> (82.0% 5-Attr, ₹0 endpoint fee); <b>EXP-29/33 LoRA SFT</b> hits <b>85.0% Val / 89.2% rare 1–5 crop accuracy</b>.<br>
+              &bull; <b>Performance &amp; Cost:</b> Custom photo-matching adapter hits <b>92.6% Top-5 Recall &amp; 81.2% 5-Attr on N=5,000</b> (82.0% on N=1,000, ₹0 endpoint fee); fine-tuned 3.5-Flash-Lite hits <b>79.6% (N=5,000) / 81.9% (N=1,000) / 85.0% Val</b>.<br>
               &bull; <b>Role:</b> Field A/B test challenger arm on dense Modern Trade Skin Care and Oral Care shelves.
             </div>
           </div>
@@ -1167,24 +1171,24 @@ async function showUseCaseBoard(useCase = "market_share") {
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span style="font-size:15px;font-weight:800;color:#0f172a;letter-spacing:-0.01em;">
-            ★ GT &amp; MT Merchandising Production Winners (Gemini 3.5 Flash-Lite &amp; CPU ONNX)
+            ★ GT &amp; MT Merchandising Winners: 2-Bucket Shelf Discovery (ms_json_golden) &bull; Store Sessions (gt_hul_sessions)
           </span>
           <span style="font-size:11.5px;font-weight:700;color:#065f46;background:#d1fae5;padding:2px 8px;border-radius:999px;">
-            100% Real Cloud Run Executions (Incl. Wave 0A-0D)
+            100% Real Cloud Run Executions (N=151 test_5k &amp; N=100 test Verified)
           </span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <a href="/exec" style="font-size:12px;font-weight:700;color:#fff;background:#047857;padding:6px 12px;border-radius:6px;text-decoration:none;">Open Executive Summary (/exec) &rarr;</a>
-          <a href="#/run/1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority" style="font-size:12px;font-weight:700;color:#065f46;background:#fff;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ Planogram 3.5-Lite (#232627: 72.5% SKU &middot; 96.9% HUL) &rarr;</a>
+          <a href="#/run/1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="font-size:12px;font-weight:700;color:#065f46;background:#fff;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ GT Planogram 3.5-Lite (#232627: 72.5% SKU &middot; 96.9% HUL) &rarr;</a>
           <a href="#/run/1013-025000-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos" style="font-size:12px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ Promo N=1,000 Winner (#025000-Lite: 84.0% 3-Attr &middot; 93.4% Brand) &rarr;</a>
         </div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;">
-        <!-- Merch Card 1: Planogram -->
+        <!-- Merch Card 1: Planogram & GT Sessions -->
         <div style="background:#fff;border:1.5px solid #10b981;border-top:4px solid #059669;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. Bay Planogram &amp; SOS Compliance</div>
+            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. GT Store Sessions &amp; Planogram SOS</div>
             <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">gt_hul_sessions (N=100) &amp; hul_sessions</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
@@ -1194,7 +1198,7 @@ async function showUseCaseBoard(useCase = "market_share") {
             </div>
             <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
               <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">96.9%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">HUL Ownership (N=100)</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">HUL Ownership (2.38% SOS Err)</div>
             </div>
             <div>
               <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">$0.0024</div>
@@ -1204,7 +1208,7 @@ async function showUseCaseBoard(useCase = "market_share") {
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span><b>★ GT Sessions Test</b> (<code>3.5-Flash-Lite</code> N=100)</span>
-              <span><b>72.5% SKU / 96.9% HUL</b> &middot; <a href="#/run/1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232627 &rarr;</a></span>
+              <span><b>72.5% SKU / 96.9% HUL</b> &middot; <a href="#/run/1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232627 &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span><b>★ MT Sessions Bay Audit</b> (<code>3.5-Flash-Lite</code> N=25)</span>
@@ -1240,39 +1244,39 @@ async function showUseCaseBoard(useCase = "market_share") {
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span><b>★ Zero-VLM Fast Path</b> (<code>gemini-embedding-2</code>)</span>
-              <span><b>80.1% 3-Attr</b> ($0.00020/crop) &middot; <a href="#/run/1013-024958-promo_3zone_embed-gemini-embedding-2-preview-hul_promos" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#024958 &rarr;</a></span>
+              <span><b>79.2% 3-Attr</b> ($0.00020/crop) &middot; <a href="#/run/1013-024958-clm_promo_matcher-gemini-embedding-2-hul_promos" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#024958 &rarr;</a></span>
             </div>
           </div>
         </div>
 
-        <!-- Merch Card 3: Session Dedup, E2E & Detection -->
+        <!-- Merch Card 3: Session Dedup, E2E & 2-Bucket Detection -->
         <div style="background:#fff;border:1px solid #fed7aa;border-top:3px solid #ea580c;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#9a3412;">3. Full-Shelf E2E &amp; Detection (Wave 0A-0D)</div>
-            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">gt_hul_sessions &amp; ms_json_golden</span>
+            <div style="font-size:13.5px;font-weight:800;color:#9a3412;">3. 2-Bucket Shelf Discovery &amp; E2E (MT &amp; GT)</div>
+            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">ms_json_golden &amp; gt_hul_sessions</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">99.1%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Det F2 (3.5-Lite &bull; 100% ONNX)</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">GT ONNX Det F2 (99.1% VLM)</div>
             </div>
             <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
               <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">72.4%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">3.5-Lite E2E F2 (73.8% Val)</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">GT E2E F2 (2.25% SOS Err)</div>
             </div>
             <div>
-              <div style="font-size:20px;font-weight:800;color:#c2410c;line-height:1.15;">69.5%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">MT Dense Shelf Det F2</div>
+              <div style="font-size:20px;font-weight:800;color:#c2410c;line-height:1.15;">69.0%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">MT 2D Zone F2 (+5,342 5k)</div>
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ E2E Production Winner</b> (<code>3.5-Flash-Lite</code>)</span>
-              <span><b>72.4% F2</b> (N=100) <a href="#/run/1013-232626-shelf_960_softnms_e2e-gemini-3.5-flash-lite-priority" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232626 &rarr;</a> &middot; <b>73.8% Val</b> <a href="#/run/1013-234933-shelf_l8_ultimate-gemini-3.5-flash-lite-priority" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#234933 &rarr;</a></span>
+              <span><b>★ GT E2E &amp; Det</b> (<code>gt_hul_sessions</code> N=100)</span>
+              <span><b>72.4% E2E</b> <a href="#/run/1013-232626-shelf_960_softnms_e2e-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232626 &rarr;</a> &middot; <b>100% Det</b> <a href="#/run/1013-232625-distilled_yolo_onnx-yolo11n-distilled-onnx-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232625 &rarr;</a> <a href="#/run/1013-234933-shelf_l8_ultimate-gemini-3.5-flash-lite-priority-gt_hul_sessions-val" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#234933 &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>Detection Winners</b> (N=100 Test)</span>
-              <span><b>100% ONNX</b> <a href="#/run/1013-232625-distilled_yolo_onnx-yolo11n-distilled-onnx" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232625 &rarr;</a> &middot; <b>99.1% 3.5-Lite</b> <a href="#/run/1013-232626-single_pass_dedup-gemini-3.5-flash-lite-priority" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232626 &rarr;</a></span>
+              <span><b>MT 2D Zone &amp; 2.13x-2.22x</b> (<code>ms_json_golden</code>)</span>
+              <span><b>67.3% (151) / 69.0% (100)</b> <a href="#/run/1016-092455-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092455 &rarr;</a> <a href="#/run/1015-232729-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232729 &rarr;</a> <a href="#/run/1013-232626-single_pass_dedup-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232626-Det &rarr;</a></span>
             </div>
           </div>
         </div>

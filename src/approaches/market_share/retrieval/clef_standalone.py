@@ -217,7 +217,7 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
         refs = [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
         sheet_im = zoom_sheet(image, refs)
         base_prompt = CLEF_ZOOM_SINGLE_PROMPT.format(k=len(top))
-        if self.use_contrastive_metadata or os.environ.get("SHELF_BENCH_CONTRASTIVE_METADATA") == "1":
+        if getattr(self, "use_contrastive_metadata", False) or os.environ.get("SHELF_BENCH_CONTRASTIVE_METADATA") == "1":
             rubric = build_contrastive_candidate_rubric(top, getattr(self, "catalog", None))
             if rubric:
                 base_prompt = f"{base_prompt}\n\n{rubric}"
@@ -232,7 +232,8 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
         slots = clef_logprob_select(res.meta.get("logprobs"), set(range(0, len(top) + 1)), n_slots=1)
         choice = slots[0]["choice"] if slots else (raw_c if isinstance(raw_c, int) else None)
         prob = slots[0]["top1_prob"] if slots else 1.0
-        ans, guard_mode = resolve_clef_choice(choice, prob, top, allow_abstain=self._allow_abstain())
+        allow_abstain = self._allow_abstain() if hasattr(self, "_allow_abstain") else False
+        ans, guard_mode = resolve_clef_choice(choice, prob, top, allow_abstain=allow_abstain)
         return ans, {
             "choice": choice,
             "clef_prob": prob,

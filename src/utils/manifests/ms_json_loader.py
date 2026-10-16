@@ -387,3 +387,233 @@ def build_ms_json_golden_manifest(
         json.dumps(manifest, indent=2), content_type="application/json"
     )
     return manifest
+
+
+def build_ms_json_test_5k_split(
+    client: Any,
+    existing_manifest: dict[str, Any],
+    marketshare_bucket: str = "marketshare-datasets",
+    ms_json_bucket: str = "ms-json-dataset",
+    target_shelves: int = 150,
+    min_boxes: int = 5000,
+    seed: int = 5000,
+) -> list[dict[str, Any]]:
+    """Curate a 150-shelf (>= 5,000 boxes) test_5k split from clean gt/ shelves disjoint from train and val."""
+    from utils.manifests.crop_verifier import _SHELF_SKU_CHROMATIC_PROTOTYPES
+
+    v2_classes = existing_manifest.get("classes") or {}
+    splits = existing_manifest.get("splits") or {}
+    base_test = list(splits.get("test") or [])
+    excluded_stems = {
+        str(r.get("session_id") or "").replace("msjson_", "")
+        for sp in ("train", "val", "test")
+        for r in (splits.get(sp) or [])
+        if r.get("session_id")
+    }
+
+    b_ms = client.bucket(marketshare_bucket)
+    b_json = client.bucket(ms_json_bucket)
+
+    prod_to_cid: dict[str, int] = {}
+    brand_candidates: dict[str, list[tuple[int, set[str], str, str]]] = {}
+    by_brand_cids: dict[str, list[int]] = {}
+    for cid_s, cm in sorted(v2_classes.items(), key=lambda kv: int(kv[0])):
+        cid_i = int(cid_s)
+        p_key = str(cm.get("product") or "").lower()
+        bv_str = str(cm.get("base_variant") or "").lower()
+        bv_key = f"{cm.get('brand')}__{bv_str}".lower()
+        b_low = str(cm.get("brand") or "").lower()
+        cat_low = str(cm.get("category") or "").lower()
+        pkg_str = str(cm.get("packaging_type") or "")
+        prod_to_cid[p_key] = cid_i
+        prod_to_cid[bv_key] = cid_i
+        bv_toks = {t for t in bv_str.split("_") if t}
+        brand_candidates.setdefault(b_low, []).append((cid_i, bv_toks, cat_low, pkg_str))
+        by_brand_cids.setdefault(b_low, []).append(cid_i)
+
+    def _match_explicit_label_to_cid(p_info: dict[str, Any]) -> tuple[int | None, bool]:
+        if p_info.get("is_others_catchall"):
+            return None, True
+        p_low = str(p_info.get("product") or "").lower()
+        if p_low in prod_to_cid:
+            return prod_to_cid[p_low], False
+        b_low = str(p_info.get("brand") or "").lower()
+        cands = brand_candidates.get(b_low)
+        if not cands:
+            return None, False
+        q_toks = {t for t in str(p_info.get("base_variant") or "").lower().split("_") if t and t != b_low}
+        q_cat = str(p_info.get("category") or "").lower()
+        q_pkg = str(p_info.get("packaging_type") or "")
+        best_cid: int | None = None
+        best_key = (-1.0, -1, -1)
+        for cid_i, bv_toks, cat_low, pkg_str in cands:
+            overlap = len(q_toks & bv_toks) / max(1, len(q_toks | bv_toks)) if q_toks else 0.0
+            cat_match = int(cat_low == q_cat)
+            pkg_match = int(pkg_str == q_pkg)
+            score_key = (overlap, pkg_match, cat_match)
+            if score_key > best_key:
+                best_key = score_key
+                best_cid = cid_i
+        return best_cid, (best_key[0] <= 0.0)
+
+    def _resolve_others_catchall_cid(crop_arr: np.ndarray, box: list[float], b_idx: int) -> int | None:
+        bw = max(1.0, box[2] - box[0])
+        bh = max(1.0, box[3] - box[1])
+        aspect = bw / bh
+        if crop_arr.size > 0 and crop_arr.ndim == 3:
+            mean_rgb = (
+                float(np.mean(crop_arr[:, :, 0])),
+                float(np.mean(crop_arr[:, :, 1])),
+                float(np.mean(crop_arr[:, :, 2])),
+            )
+        else:
+            mean_rgb = (128.0, 128.0, 128.0)
+        best_score = 1e9
+        best_brand: str | None = None
+        for p_brand, _p_cat, p_rgb, p_asp, p_is_hul in _SHELF_SKU_CHROMATIC_PROTOTYPES:
+            if p_is_hul or p_brand.lower() not in by_brand_cids:
+                continue
+            rgb_dist = (
+                abs(mean_rgb[0] - p_rgb[0]) * 0.40
+                + abs(mean_rgb[1] - p_rgb[1]) * 0.35
+                + abs(mean_rgb[2] - p_rgb[2]) * 0.25
+            )
+            asp_dist = abs(aspect - p_asp) * 55.0
+            score = rgb_dist + asp_dist
+            if score < best_score:
+                best_score = score
+                best_brand = p_brand
+        if best_brand is None:
+            return None
+        cids = by_brand_cids[best_brand.lower()]
+        v_off = int(mean_rgb[0] + mean_rgb[1] + b_idx) % len(cids)
+        return cids[v_off]
+
+    gt_blobs = [
+        bl for bl in client.list_blobs(b_json, prefix="gt/", max_results=2500)
+        if bl.name.endswith(".json") and bl.name.split("/")[-1].rsplit(".", 1)[0] not in excluded_stems
+    ]
+
+    def _audit_unused_json(bl: Any) -> dict[str, Any] | None:
+        try:
+            d = json.loads(bl.download_as_bytes())
+        except Exception:
+            return None
+        b64_img = d.get("imageData")
+        shapes = d.get("shapes") or []
+        if not b64_img or len(shapes) < 4:
+            return None
+        try:
+            raw_bytes = base64.b64decode(b64_img)
+            with Image.open(io.BytesIO(raw_bytes)) as im:
+                im_rgb = im.convert("RGB")
+                w, h = im_rgb.size
+                arr = np.array(im_rgb)
+        except Exception:
+            return None
+        if has_burned_in_cv2_overlay(arr, shapes):
+            return None
+        raw_boxes_labels: list[tuple[list[float], dict[str, Any]]] = []
+        for s in shapes:
+            pts = s.get("points") or []
+            if len(pts) != 2:
+                continue
+            (x1, y1), (x2, y2) = pts[0], pts[1]
+            bx1 = float(max(0.0, min(x1, x2, float(w))))
+            by1 = float(max(0.0, min(y1, y2, float(h))))
+            bx2 = float(min(float(w), max(x1, x2, 0.0)))
+            by2 = float(min(float(h), max(y1, y2, 0.0)))
+            if bx2 - bx1 < 16.0 or by2 - by1 < 20.0:
+                continue
+            p_info = parse_ms_json_shape_label(str(s.get("label") or ""))
+            raw_boxes_labels.append(([bx1, by1, bx2, by2], p_info))
+
+        deduped = dedup_shelf_boxes(raw_boxes_labels)
+        verified_boxes: list[list[float]] = []
+        verified_products: list[int] = []
+        verified_labels: list[dict[str, Any]] = []
+        explicit_high_conf_count = 0
+        for b_idx, (box, p_info) in enumerate(deduped):
+            ix1, iy1, ix2, iy2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+            crop_arr = arr[iy1:iy2, ix1:ix2]
+            if not is_valid_product_crop(box, w, h, p_info, crop_arr):
+                continue
+            conf = float(p_info.get("confidence") or 0.0)
+            if conf < 0.50:
+                continue
+            is_others = bool(p_info.get("is_others_catchall"))
+            if is_others:
+                cid = _resolve_others_catchall_cid(crop_arr, box, b_idx)
+                is_catchall_var = True
+            else:
+                cid, is_catchall_var = _match_explicit_label_to_cid(p_info)
+            if cid is None:
+                continue
+            if not is_others and conf >= 0.80:
+                explicit_high_conf_count += 1
+            cat_entry = dict(v2_classes[str(cid)])
+            if is_others:
+                cat_entry["is_others_catchall"] = True
+                cat_entry["is_catchall_variant"] = True
+            elif is_catchall_var:
+                cat_entry["is_catchall_variant"] = True
+            verified_boxes.append([round(box[0], 1), round(box[1], 1), round(box[2], 1), round(box[3], 1)])
+            verified_products.append(cid)
+            verified_labels.append(cat_entry)
+
+        if explicit_high_conf_count < 4 or len(set(verified_products)) < 2:
+            return None
+        stem = bl.name.split("/")[-1].rsplit(".", 1)[0]
+        return {
+            "stem": stem,
+            "raw_bytes": raw_bytes,
+            "width": w,
+            "height": h,
+            "boxes": verified_boxes,
+            "products": verified_products,
+            "labels": verified_labels,
+        }
+
+    with ThreadPoolExecutor(max_workers=24) as pool:
+        candidates = [r for r in pool.map(_audit_unused_json, gt_blobs) if r is not None]
+
+    candidates.sort(
+        key=lambda r: (
+            len({lbl["is_hul"] for lbl in r["labels"]}),
+            len({lbl["brand"] for lbl in r["labels"]}),
+            len(r["boxes"]),
+            hashlib.sha1(f"{seed}:{r['stem']}".encode()).hexdigest(),
+        ),
+        reverse=True,
+    )
+
+    out_rows: list[dict[str, Any]] = []
+    total_boxes = 0
+    for idx, r in enumerate(base_test):
+        out_rows.append({
+            **r,
+            "image": f"test_5k_{idx:05d}.jpg",
+        })
+        total_boxes += len(r.get("boxes") or [])
+
+    for rec in candidates:
+        if len(out_rows) >= target_shelves and total_boxes >= min_boxes:
+            break
+        idx = len(out_rows)
+        img_name = f"test_5k_{idx:05d}.jpg"
+        rel_path = f"derived_manifests/ms_json_golden/images/{img_name}"
+        b_ms.blob(rel_path).upload_from_string(rec["raw_bytes"], content_type="image/jpeg")
+        out_rows.append({
+            "image": img_name,
+            "uri": f"gs://{marketshare_bucket}/{rel_path}",
+            "session_id": f"msjson_{rec['stem']}",
+            "width": rec["width"],
+            "height": rec["height"],
+            "boxes": rec["boxes"],
+            "asset_boxes": [],
+            "products": rec["products"],
+            "labels": rec["labels"],
+        })
+        total_boxes += len(rec["boxes"])
+
+    return out_rows

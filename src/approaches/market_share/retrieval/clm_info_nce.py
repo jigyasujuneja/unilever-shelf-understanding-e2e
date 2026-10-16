@@ -245,7 +245,9 @@ class L8HulUltimate(ClmContrastive):
     def pick_with_confidence(
         self, image: Image.Image, top: list[tuple[float, int, str]], ctx: Context
     ) -> tuple[int | None, float, dict]:
-        from approaches.market_share.retrieval.clef_standalone import build_contrastive_candidate_rubric
+        from approaches.market_share.retrieval.clef_standalone import (
+            build_contrastive_candidate_rubric,
+        )
 
         refs = [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
         sheet_im = zoom_sheet(image, refs)
@@ -294,7 +296,9 @@ class L8HulUltimate(ClmContrastive):
         tops: list[list[tuple[float, int, str]]],
         ctx: Context,
     ) -> list[tuple[int | None, float, dict]]:
-        from approaches.market_share.retrieval.clef_standalone import build_contrastive_candidate_rubric
+        from approaches.market_share.retrieval.clef_standalone import (
+            build_contrastive_candidate_rubric,
+        )
 
         if len(queries) == 1:
             return [self.pick_with_confidence(queries[0], tops[0], ctx)]
