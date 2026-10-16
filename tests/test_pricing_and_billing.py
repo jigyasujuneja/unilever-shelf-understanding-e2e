@@ -339,7 +339,8 @@ def test_cloudsql_helper_runs_sql_and_enforces_parameterized_queries():
 def test_sft_jsonl_builder_and_tuned_endpoint_resolution(rpc_root, tmp_path, monkeypatch):
     from PIL import Image
 
-    from utils import dataset, llm, tuning
+    from utils import dataset, llm
+    from utils.gemini_fine_tuning import tuning
 
     # Add a 2nd gallery view per product + 1 val image so build_sft_jsonl generates both splits
     for pid, colour in ((1, "red"), (2, "green"), (3, "blue")):
