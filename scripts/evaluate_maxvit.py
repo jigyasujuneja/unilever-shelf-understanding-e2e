@@ -120,19 +120,65 @@ class EvalCropDataset(Dataset):
 GCS_MODEL_PATH = "gs://marketshare-datasets/models/maxvit_variants"
 
 
+def _preload_nvidia_libraries() -> None:
+    """Pre-load modular NVIDIA cuDNN v9+ and cuBLAS libraries if installed via pip wheels."""
+    import ctypes
+    import glob
+    import os
+    import site
+    import sys
+
+    search_paths = []
+    try:
+        search_paths.extend(site.getsitepackages())
+    except Exception:
+        pass
+    search_paths.extend(sys.path)
+
+    for p in search_paths:
+        for pkg in ("cudnn", "cublas", "cuda_runtime"):
+            lib_dir = os.path.join(p, "nvidia", pkg, "lib")
+            if os.path.isdir(lib_dir):
+                ld = os.environ.get("LD_LIBRARY_PATH", "")
+                if lib_dir not in ld:
+                    os.environ["LD_LIBRARY_PATH"] = f"{lib_dir}:{ld}"
+                for pat in ("libcudnn*.so*", "libcublas*.so*", "libcudart*.so*"):
+                    for match in sorted(glob.glob(os.path.join(lib_dir, pat))):
+                        try:
+                            ctypes.CDLL(match, mode=ctypes.RTLD_GLOBAL)
+                        except OSError:
+                            pass
+
+
 def load_model(device: torch.device, num_classes: int, storage_client=None):
     """Load PyTorch weights or TorchScript traced model from gs://marketshare-datasets/models/maxvit_variants/."""
+    _preload_nvidia_libraries()
+
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     pth_path = MODEL_DIR / "best_maxvit_brand_variant.pth"
     traced_path = MODEL_DIR / "traced_maxvit_brand_variant.pt"
 
     def _test_forward(m: Any) -> bool:
+        dummy = torch.zeros(1, 3, 224, 224, device=device)
         try:
-            dummy = torch.zeros(1, 3, 224, 224, device=device)
             with torch.no_grad():
                 out = m(dummy)
             return out is not None and out.shape[-1] == num_classes
         except Exception as exc:
+            exc_str = str(exc)
+            if "CUDNN" in exc_str or "cudnn" in exc_str.lower():
+                print(
+                    f"cuDNN backend issue detected ({exc_str[:120]}...). "
+                    "Switching to native PyTorch CUDA kernels (torch.backends.cudnn.enabled = False)..."
+                )
+                torch.backends.cudnn.enabled = False
+                try:
+                    with torch.no_grad():
+                        out = m(dummy)
+                    return out is not None and out.shape[-1] == num_classes
+                except Exception as e2:
+                    print(f"Native CUDA fallback check failed: {e2}")
+                    return False
             print(f"Forward pass validation failed: {exc}")
             return False
 

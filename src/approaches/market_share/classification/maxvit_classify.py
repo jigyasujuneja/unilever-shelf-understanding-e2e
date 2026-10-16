@@ -27,6 +27,36 @@ MODEL_ARCH = "maxvit_tiny_tf_224"
 GCS_MODEL_PATH = "gs://marketshare-datasets/models/maxvit_variants"
 
 
+def _preload_nvidia_libraries() -> None:
+    """Pre-load modular NVIDIA cuDNN v9+ and cuBLAS libraries if installed via pip wheels."""
+    import ctypes
+    import glob
+    import os
+    import site
+    import sys
+
+    search_paths = []
+    try:
+        search_paths.extend(site.getsitepackages())
+    except Exception:
+        pass
+    search_paths.extend(sys.path)
+
+    for p in search_paths:
+        for pkg in ("cudnn", "cublas", "cuda_runtime"):
+            lib_dir = os.path.join(p, "nvidia", pkg, "lib")
+            if os.path.isdir(lib_dir):
+                ld = os.environ.get("LD_LIBRARY_PATH", "")
+                if lib_dir not in ld:
+                    os.environ["LD_LIBRARY_PATH"] = f"{lib_dir}:{ld}"
+                for pat in ("libcudnn*.so*", "libcublas*.so*", "libcudart*.so*"):
+                    for match in sorted(glob.glob(os.path.join(lib_dir, pat))):
+                        try:
+                            ctypes.CDLL(match, mode=ctypes.RTLD_GLOBAL)
+                        except OSError:
+                            pass
+
+
 @register
 class MaxVitClassify(Approach):
     """Fine-tuned Google MaxViT Tiny (maxvit_tiny_tf_224) 1,922-Class Variant Classifier."""
@@ -57,6 +87,8 @@ class MaxVitClassify(Approach):
 
     def setup(self, config: dict, ctx: Context) -> None:
         """Load fine-tuned model artifacts directly from gs://marketshare-datasets/models/maxvit_variants/."""
+        _preload_nvidia_libraries()
+
         cache_dir = Path("models/maxvit_variants")
         cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -77,12 +109,26 @@ class MaxVitClassify(Approach):
 
         # Helper to validate a candidate model with a dummy forward pass
         def _test_forward(m: Any) -> bool:
+            dummy = torch.zeros(1, 3, 224, 224, device=self.device)
             try:
-                dummy = torch.zeros(1, 3, 224, 224, device=self.device)
                 with torch.no_grad():
                     out = m(dummy)
                 return out is not None and out.shape[-1] == num_classes
             except Exception as exc:
+                exc_str = str(exc)
+                if "CUDNN" in exc_str or "cudnn" in exc_str.lower():
+                    print(
+                        f"[MaxViT] cuDNN backend issue detected ({exc_str[:120]}...). "
+                        "Switching to native PyTorch CUDA kernels (torch.backends.cudnn.enabled = False)..."
+                    )
+                    torch.backends.cudnn.enabled = False
+                    try:
+                        with torch.no_grad():
+                            out = m(dummy)
+                        return out is not None and out.shape[-1] == num_classes
+                    except Exception as e2:
+                        print(f"[MaxViT] Native CUDA fallback check failed: {e2}")
+                        return False
                 print(f"[MaxViT] Forward pass check failed: {exc}")
                 return False
 
