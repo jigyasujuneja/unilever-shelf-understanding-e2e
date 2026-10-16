@@ -100,13 +100,17 @@ class EmbeddingRetrieval(Approach):
         "Return the product whose reference photo is most similar (cosine)",
     ]
 
+    def gallery_refs(self, root: str) -> dict[int, list[str]]:
+        """``{sku_id: [reference photo path, ...]}`` to index. Override to change the gallery."""
+        return dataset.rpc_gallery(root)
+
     def setup(self, config: dict, ctx: Context) -> None:
         # Run as an embedding approach: the run's model. Under a Gemini model (the rerank and
         # detect approaches): the fixed ``shortlist_model`` they list in ``also_calls``.
         emb_model = ctx.model if ctx.model in MODELS else self.shortlist_model
         self.emb = VertexEmbeddings(config, model=emb_model)
         root = dataset.data_root(self.dataset)
-        gallery = dataset.rpc_gallery(root)
+        gallery = self.gallery_refs(root)
         max_skus = int(os.environ.get("SHELF_BENCH_MAX_GALLERY_SKUS", "0"))
         if max_skus > 0 and len(gallery) > max_skus and os.environ.get("SHELF_BENCH_FULL_GALLERY") != "1":
             cat = dataset.catalog(root, self.dataset)

@@ -259,7 +259,11 @@ class Approach:
     def accepts(self, model: str) -> bool:
         if self.models is not None:
             return model in self.models
-        return ("gemini-" in model or "/endpoints/" in model) and not model.startswith("gemini-embedding")
+        if ("gemini-" in model or "/endpoints/" in model) and not model.startswith("gemini-embedding"):
+            return True
+        from utils.llm import load_config
+
+        return model in (load_config().get("tuned_models") or {})
 
     @property
     def uses_gemini(self) -> bool:
