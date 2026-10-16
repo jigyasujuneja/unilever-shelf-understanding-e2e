@@ -253,9 +253,11 @@ class HulGoldenSftConfig:
     region: str = "europe-west4"
     base_model: str = "gemini-3.5-flash-lite"
     tuned_model_display_name: str = "marketshare-hul-golden-5attr-sft-euw4-gemini-3-5-flash-lite"
-    epoch_count: int = 4
+    epoch_count: int = 3
     learning_rate_multiplier: float = 1.0
     adapter_size: int = 4
+    max_train: int | None = 3200
+    max_val: int | None = 500
     prompt_text: str = DEFAULT_5ATTR_PROMPT_TEXT
 
 
@@ -519,14 +521,31 @@ def build_clean_splits_in_gcp(
         bucket.blob(clean_fname).upload_from_string(clean_body, content_type="application/jsonl")
         uploaded_uris[f"{split_name}_clean"] = f"gs://{cfg.bucket_name}/{clean_fname}"
 
+    train_job_uri = uploaded_uris["train_clean"]
+    val_job_uri = uploaded_uris["val_clean"]
+    if cfg.max_train and cfg.max_train > 0:
+        sub_train_recs = cleaned_splits["train"][: cfg.max_train]
+        sub_train_fname = f"{cfg.output_prefix}/temp_train_clean_{cfg.max_train}.jsonl"
+        sub_train_body = "".join(json.dumps(r["sft"], ensure_ascii=False) + "\n" for r in sub_train_recs)
+        bucket.blob(sub_train_fname).upload_from_string(sub_train_body, content_type="application/jsonl")
+        train_job_uri = f"gs://{cfg.bucket_name}/{sub_train_fname}"
+        uploaded_uris["train_subset"] = train_job_uri
+    if cfg.max_val and cfg.max_val > 0:
+        sub_val_recs = cleaned_splits["val"][: cfg.max_val]
+        sub_val_fname = f"{cfg.output_prefix}/temp_val_clean_{cfg.max_val}.jsonl"
+        sub_val_body = "".join(json.dumps(r["sft"], ensure_ascii=False) + "\n" for r in sub_val_recs)
+        bucket.blob(sub_val_fname).upload_from_string(sub_val_body, content_type="application/jsonl")
+        val_job_uri = f"gs://{cfg.bucket_name}/{sub_val_fname}"
+        uploaded_uris["val_subset"] = val_job_uri
+
     stats["uploaded_uris"] = uploaded_uris
 
     if launch_sft:
         from utils.gemini_fine_tuning.tuning import launch_sft_job
 
         job = launch_sft_job(
-            uploaded_uris["train_clean"],
-            uploaded_uris["val_clean"],
+            train_job_uri,
+            val_job_uri,
             base_model=cfg.base_model,
             display_name=cfg.tuned_model_display_name,
             epochs=cfg.epoch_count,

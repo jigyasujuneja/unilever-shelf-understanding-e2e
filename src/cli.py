@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--base-model", default="gemini-3.5-flash-lite")
     s.add_argument("--display-name", default="shelf-bench-jev-laya-sft")
     s.add_argument("--region", default=None, help="Vertex AI region for SFT job (e.g. us-central1, europe-west4)")
-    s.add_argument("--epochs", type=int, default=4)
+    s.add_argument("--epochs", type=int, default=3)
     s.add_argument("--adapter-size", type=int, default=4, choices=(1, 4, 8, 16))
     s.add_argument("--lr-multiplier", type=float, default=1.0)
     s.add_argument("--out-dir", default="data/tuning")
@@ -372,6 +372,8 @@ def main(argv: list[str] | None = None) -> int:
                 epoch_count=a.epochs,
                 learning_rate_multiplier=a.lr_multiplier,
                 adapter_size=a.adapter_size,
+                max_train=HulGoldenSftConfig.max_train if a.max_train is None else a.max_train,
+                max_val=HulGoldenSftConfig.max_val if a.max_val is None else a.max_val,
                 prompt_text=DEFAULT_5ATTR_PROMPT_TEXT if f_mode >= 5 else DEFAULT_PROMPT_TEXT,
             )
             stats = build_clean_splits_in_gcp(hcfg, launch_sft=not (a.build_only or a.upload_only), app_config=cfg)
