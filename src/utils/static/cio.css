@@ -48,9 +48,10 @@ body {
 }
 
 .cio-topbar-inner {
-  max-width: 1480px;
+  max-width: 1920px;
+  width: 100%;
   margin: 0 auto;
-  padding: 12px 24px;
+  padding: 12px 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -170,9 +171,11 @@ body {
 }
 
 .cio-container {
-  max-width: 1480px;
+  max-width: 1920px;
+  width: 100%;
   margin: 0 auto;
-  padding: 24px;
+  padding: 20px 28px 56px;
+  overflow-x: hidden;
 }
 
 .cio-loading {

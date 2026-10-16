@@ -33,7 +33,6 @@ MODELS_HIGH_N = [
     "gemini-3.5-flash-lite",
     "gemini-3.8-flash",
     "gemini-embedding-2",
-    "multimodalembedding@001",
     "yolo11n-distilled-onnx",
     "yolov12s-sku110k-onnx",
 ]
@@ -139,15 +138,27 @@ def ulog(*args: object) -> None:
 
 def get_completed_keys() -> set[tuple[str, str, str, str, int]]:
     """Return (dataset, split, approach, model, limit) tuples already completed in GCS results."""
+    import json
+    from pathlib import Path
     import runner
 
     cfg = load_config()
     done: set[tuple[str, str, str, str, int]] = set()
     try:
-        for s in runner.load_summaries(cfg["gcp"]["results"]):
-            if float(s.get("primary_score") or 0.0) <= 0.0:
+        cache_dir = Path("/tmp/shelf_bench_results_cache")
+        runner.pull(src=cfg["gcp"]["results"], results_dir=cache_dir, log=lambda *a: None, include_images=False)
+        for p in cache_dir.glob("*/summary.json"):
+            try:
+                s = json.loads(p.read_text())
+            except Exception:
+                continue
+            if float(s.get("accuracy") or 0.0) <= 0.0 and float(s.get("f2") or 0.0) <= 0.0:
                 continue
             ds = str(s.get("dataset") or "")
+            # Force fresh Cloud Run execution on newly expanded shelf datasets if run before 2026-10-13T23:20:00
+            if ds in ("gt_hul_sessions", "hul_sessions", "gtmerch_golden", "ms_json_golden"):
+                if str(s.get("created_at") or "") < "2026-10-13T23:20:00":
+                    continue
             sp = str(s.get("split") or "")
             app = str(s.get("approach") or "")
             mod = str(s.get("model") or "")
@@ -174,7 +185,7 @@ def run_batch_resilient(
     # Filter out approaches where all compatible models in `models` are already done at >= lim
     pending_apps: list[str] = []
     for app in apps:
-        c = runner.combos([app], ["flex"], models, lambda *a: None)
+        c = runner.combos([app], ["priority"], models, lambda *a: None)
         if any((ds, sp, app, m, lim) not in completed for _, _, m in c):
             pending_apps.append(app)
 
@@ -191,7 +202,7 @@ def run_batch_resilient(
         cloud.run_on_cloud(
             approaches=pending_apps,
             models=models,
-            tiers=["flex"],
+            tiers=["priority"],
             split=sp,
             limit=lim,
             seed=0,
@@ -210,34 +221,207 @@ def run_batch_resilient(
         )
 
 
+def sync_expanded_manifests_and_cache_to_gcs() -> None:
+    """Upload expanded data/* manifests (.json + .jsonl) and gallery_path_vec_cache.pkl to GCS."""
+    from pathlib import Path
+    from google.cloud import storage  # type: ignore[attr-defined]
+    from utils.llm import ensure_gcloud_auth_fallback
+
+    ensure_gcloud_auth_fallback()
+    client = storage.Client(project="ul-fs-s-sandbx-16-prj")
+    b_ms = client.bucket("marketshare-datasets")
+    b_gt = client.bucket("gtmerch-marketshare")
+    b_res = client.bucket("ul-fs-s-sandbx-16-prj-shelf-images")
+
+    gal_cache = Path("/tmp/shelf_bench_emb_cache/gallery_path_vec_cache.pkl")
+    if gal_cache.exists():
+        ulog(f"Uploading {gal_cache} ({gal_cache.stat().st_size / 1e6:.1f} MB) -> gs://ul-fs-s-sandbx-16-prj-shelf-images/cache/gallery_path_vec_cache.pkl ...")
+        b_res.blob("cache/gallery_path_vec_cache.pkl").upload_from_filename(str(gal_cache))
+
+    for ds in (
+        "gt_hul_sessions",
+        "hul_sessions",
+        "gtmerch_golden",
+        "ms_json_golden",
+        "hul_golden",
+        "hul_variants",
+        "hul_packs",
+        "hul_brands",
+        "hul_promos",
+    ):
+        ds_dir = Path("data") / ds
+        if not ds_dir.exists():
+            continue
+        for fname in ("rpc.json", "train.jsonl", "val.jsonl", "test.jsonl"):
+            fpath = ds_dir / fname
+            if fpath.exists():
+                b_ms.blob(f"derived_manifests/{ds}/{fname}").upload_from_filename(str(fpath))
+                if ds == "gtmerch_golden":
+                    b_gt.blob(f"derived_manifests/{ds}/{fname}").upload_from_filename(str(fpath))
+        ulog(f"Synced expanded manifest & splits for {ds} to GCS.")
+
+
+def launch_orchestrator_on_cloud_run(image: str, cfg: dict, only_exp28_30: bool = False) -> int:
+    """Deploy and trigger shelf-bench-orchestrator as a 24-hour Cloud Run Job using GCP service account."""
+    s = cloud._session()
+    project = cfg["gcp"]["project"]
+    region = cfg["gcp"]["region"]
+    job = "shelf-bench-orchestrator"
+    base = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/jobs"
+    c_args = ["-u", "/app/scripts/run_all_golden_cloud_batches.py", "--image", image]
+    if only_exp28_30:
+        c_args.append("--only-exp28-30")
+    body = {
+        "template": {
+            "taskCount": 1,
+            "parallelism": 1,
+            "template": {
+                "maxRetries": 0,
+                "timeout": "86400s",
+                "containers": [
+                    {
+                        "image": image,
+                        "command": ["python3"],
+                        "args": c_args,
+                        "env": [{"name": "PYTHONPATH", "value": "/app/src"}],
+                        "resources": {"limits": {"cpu": "2", "memory": "8Gi"}},
+                    }
+                ],
+            },
+        }
+    }
+    exists = s.get(f"{base}/{job}", timeout=30).status_code == 200
+    op = cloud._ok(
+        s.patch(f"{base}/{job}", json=body, timeout=60)
+        if exists
+        else s.post(f"{base}?jobId={job}", json=body, timeout=60)
+    )
+    cloud._wait_op(s, op["name"])
+    run_op = cloud._ok(s.post(f"{base}/{job}:run", json={}, timeout=60))
+    exec_id = (run_op.get("metadata", {}).get("name") or "").rsplit("/", 1)[-1]
+    ulog(
+        f"Launched 24h Cloud Run Orchestrator Job {job} ({exec_id}):\n"
+        f"  https://console.cloud.google.com/run/jobs/executions/details/{region}/{exec_id}?project={project}"
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run all Golden Cloud Run batches with GCS checkpointing.")
-    parser.add_argument("--image", default=DEFAULT_IMAGE, help="Pre-built Artifact Registry image URI")
+    parser.add_argument("--image", default=None, help="Optional pre-built Artifact Registry image URI (builds fresh image if omitted)")
+    parser.add_argument("--sync-gcs", action="store_true", default=False, help="Sync expanded manifests & gallery cache to GCS before launching")
+    parser.add_argument(
+        "--launch-on-cloud-run",
+        action="store_true",
+        default=False,
+        help="Deploy and run this orchestrator itself inside a 24h Cloud Run Job (eliminates 4-hour local RAPT expiry)",
+    )
+    parser.add_argument(
+        "--only-exp28-30",
+        action="store_true",
+        default=False,
+        help="Run strictly EXP-28 (clef_contrastive_metadata, l8_hul_ultimate), EXP-29 (sft_clm_clef_cascade Base & SFT), and EXP-30 (distilled_yolo_960_softnms, shelf_960_softnms_e2e) on val and test",
+    )
     args = parser.parse_args()
 
-    image = args.image
-    ulog("REUSING_BUILT_IMAGE:", image)
+    if args.sync_gcs:
+        try:
+            sync_expanded_manifests_and_cache_to_gcs()
+        except Exception as exc:
+            ulog(f"Warning: GCS manifest sync skipped ({exc})")
+
+    cfg = load_config()
+    image = args.image or cloud.build_image(
+        cloud._session(), cfg["gcp"]["project"], cfg["gcp"]["region"], log=ulog
+    )
+    ulog("USING_CLOUD_RUN_IMAGE:", image)
+    if args.launch_on_cloud_run:
+        return launch_orchestrator_on_cloud_run(image, cfg, only_exp28_30=args.only_exp28_30)
+    if args.only_exp28_30:
+        exp28_29_apps = ["clef_contrastive_metadata", "sft_clm_clef_cascade", "l8_hul_ultimate"]
+        exp28_29_models = [
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash-lite-sft",
+        ]
+        exp30_apps = ["distilled_yolo_960_softnms", "shelf_960_softnms_e2e"]
+        exp30_models = ["yolo11n-distilled-onnx", "gemini-3.5-flash-lite"]
+        exp_batches = [
+            ("EXP-28 & EXP-29 (hul_variants Val 200)", "hul_variants", "val", 200, exp28_29_apps, exp28_29_models, 12),
+            ("EXP-28 & EXP-29 (hul_variants Test 1000)", "hul_variants", "test", 1000, exp28_29_apps, exp28_29_models, 12),
+            ("EXP-28 & EXP-29 (hul_golden Val 200)", "hul_golden", "val", 200, exp28_29_apps, exp28_29_models, 12),
+            ("EXP-28 & EXP-29 (hul_golden Test 1000)", "hul_golden", "test", 1000, exp28_29_apps, exp28_29_models, 12),
+            ("EXP-30 (ms_json_golden Val 60)", "ms_json_golden", "val", 60, exp30_apps, exp30_models, 4),
+            ("EXP-30 (ms_json_golden Test 100)", "ms_json_golden", "test", 100, exp30_apps, exp30_models, 4),
+            ("EXP-30 (gtmerch_golden Val 100)", "gtmerch_golden", "val", 100, exp30_apps, exp30_models, 4),
+            ("EXP-30 (gtmerch_golden Test 200)", "gtmerch_golden", "test", 200, exp30_apps, exp30_models, 4),
+        ]
+        for label, ds, sp, lim, apps, models, w in exp_batches:
+            run_batch_resilient(label, ds, sp, lim, apps, models, image, workers=w, completed=set())
+        return 0
+
     completed = get_completed_keys()
     ulog(f"Found {len(completed)} existing completed (dataset, split, approach, model, limit) runs in GCS.")
 
-    # WAVE 1: High-Sample-Size Statistical Power Wave (workers=4 on full-shelf, workers=12 on single-crop)
+    # WAVE 0: Winner Priority Wave — Ensure ALL winning approaches have gemini-3.5-flash-lite (and gemini-3.8-flash) on Cloud Run first
+    winner_shelf_apps = [
+        "distilled_yolo_onnx",
+        "distilled_yolo_960_softnms",
+        "tiled_dedup",
+        "single_pass_dedup",
+        "shelf_l8_ultimate",
+        "shelf_hierarchical_clm_jev",
+        "shelf_960_softnms_e2e",
+        "session_overlap_dedup_e2e",
+        "shelf_clm_standalone",
+        "bay_planogram_verifier",
+    ]
+    winner_crop_apps = [
+        "clef_contrastive_metadata",
+        "sft_clm_clef_cascade",
+        "l8_hul_ultimate",
+        "jev_laya_zscore_lid",
+        "clef_standalone",
+        "jev_laya_global_wb",
+        "hierarchical_clm_jev",
+        "clm_standalone",
+        "clef_standalone_classify",
+        "hierarchy_classify",
+        "clm_standalone_classify",
+    ]
+    winner_priority_batches = [
+        ("Wave 0A (GT Sessions Winners Test 100 — Flash-Lite & 3.8-Flash)", "gt_hul_sessions", "test", 100, winner_shelf_apps, MODELS_HIGH_N, 4),
+        ("Wave 0B (GT Sessions Winners Val 50 — Flash-Lite & 3.8-Flash)", "gt_hul_sessions", "val", 50, winner_shelf_apps, MODELS_HIGH_N, 4),
+        ("Wave 0C (MT Market Share Shelves Winners Test 100 — Flash-Lite & 3.8-Flash)", "ms_json_golden", "test", 100, winner_shelf_apps, MODELS_HIGH_N, 4),
+        ("Wave 0D (MT Market Share Shelves Winners Val 60 — Flash-Lite & 3.8-Flash)", "ms_json_golden", "val", 60, winner_shelf_apps, MODELS_HIGH_N, 4),
+        ("Wave 0E (GT Merchandising Winners Test 200 — Flash-Lite & 3.8-Flash)", "gtmerch_golden", "test", 200, winner_shelf_apps, MODELS_HIGH_N, 4),
+        ("Wave 0F (GT Merchandising Winners Val 100 — Flash-Lite & 3.8-Flash)", "gtmerch_golden", "val", 100, winner_shelf_apps, MODELS_HIGH_N, 4),
+        ("Wave 0G (HUL Golden Winners Test 1000 — Flash-Lite & 3.8-Flash)", "hul_golden", "test", 1000, winner_crop_apps, MODELS_HIGH_N, 12),
+        ("Wave 0H (HUL Golden Winners Val 1000 — Flash-Lite & 3.8-Flash)", "hul_golden", "val", 1000, winner_crop_apps, MODELS_HIGH_N, 12),
+    ]
+    for label, ds, sp, lim, apps, models, w in winner_priority_batches:
+        run_batch_resilient(label, ds, sp, lim, apps, models, image, workers=w, completed=completed)
+    completed = get_completed_keys()
+
+    # WAVE 1: Expanded High-Sample-Size Statistical Power Wave (Batches 1-6 across MT Market Share, GT Merchandising, Detection & E2E)
     high_n_batches = [
-        ("High-N 1/16", "gtmerch_golden", "test", 100, DET_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
-        ("High-N 2/16", "gtmerch_golden", "val", 72, DET_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
-        ("High-N 3/16", "ms_json_golden", "test", 31, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
-        ("High-N 4/16", "ms_json_golden", "val", 21, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
-        ("High-N 5/16", "hul_sessions", "test", 25, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
-        ("High-N 6/16", "hul_sessions", "val", 20, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
-        ("High-N 7/16", "hul_golden", "test", 1000, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
-        ("High-N 8/16", "hul_golden", "val", 1000, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
-        ("High-N 9/16", "hul_packs", "test", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
-        ("High-N 10/16", "hul_packs", "val", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
-        ("High-N 11/16", "hul_brands", "test", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
-        ("High-N 12/16", "hul_brands", "val", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
-        ("High-N 13/16", "hul_variants", "test", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
-        ("High-N 14/16", "hul_variants", "val", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
-        ("High-N 15/16", "hul_promos", "test", 500, PROMO_APPS, MODELS_HIGH_N, 12),
-        ("High-N 16/16", "hul_promos", "val", 500, PROMO_APPS, MODELS_HIGH_N, 12),
+        ("Batch 1a (GT Sessions Test)", "gt_hul_sessions", "test", 100, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
+        ("Batch 1b (GT Sessions Val)", "gt_hul_sessions", "val", 50, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
+        ("Batch 1c (HUL Sessions Alias Test)", "hul_sessions", "test", 100, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
+        ("Batch 1d (HUL Sessions Alias Val)", "hul_sessions", "val", 50, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
+        ("Batch 2a (GT Merchandising Test)", "gtmerch_golden", "test", 200, DET_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
+        ("Batch 2b (GT Merchandising Val)", "gtmerch_golden", "val", 100, DET_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
+        ("Batch 3a (MT Market Share Shelves Test)", "ms_json_golden", "test", 100, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
+        ("Batch 3b (MT Market Share Shelves Val)", "ms_json_golden", "val", 60, DET_APPS + HIGH_N_CROP_APPS + E2E_APPS + PLANO_APPS, MODELS_HIGH_N, 4),
+        ("Batch 4a (MT Golden 5-Level Test)", "hul_golden", "test", 1000, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
+        ("Batch 4b (MT Golden 5-Level Val)", "hul_golden", "val", 1000, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
+        ("Batch 5a (MT Packs Test)", "hul_packs", "test", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
+        ("Batch 5b (MT Packs Val)", "hul_packs", "val", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
+        ("Batch 5c (MT Brands Test)", "hul_brands", "test", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
+        ("Batch 5d (MT Brands Val)", "hul_brands", "val", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
+        ("Batch 5e (MT Variants Test)", "hul_variants", "test", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
+        ("Batch 5f (MT Variants Val)", "hul_variants", "val", 500, HIGH_N_CROP_APPS, MODELS_HIGH_N, 12),
+        ("Batch 6a (MT Toker Promos Test)", "hul_promos", "test", 500, PROMO_APPS, MODELS_HIGH_N, 12),
+        ("Batch 6b (MT Toker Promos Val)", "hul_promos", "val", 500, PROMO_APPS, MODELS_HIGH_N, 12),
     ]
 
     for label, ds, sp, lim, apps, models, w in high_n_batches:
