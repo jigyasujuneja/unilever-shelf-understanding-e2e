@@ -621,9 +621,27 @@ def backfill_results_taxonomy(
                 row["pred_count"] = len(new_lbls)
                 changed = True
 
-            for lab in row.get("labels", []):
+            m_lbls_row = (m_row.get("labels") or []) if m_row is not None else []
+            row_tp = 0
+            for idx_lab, lab in enumerate(row.get("labels", [])):
                 gt = lab.get("gt")
                 pred = lab.get("pred")
+                if isinstance(gt, dict) and idx_lab < len(m_lbls_row) and isinstance(m_lbls_row[idx_lab], dict):
+                    for flag_k in ("is_catchall_variant", "is_bay_inferred", "is_others_catchall", "is_unbranded_outside_bay"):
+                        if m_lbls_row[idx_lab].get(flag_k) and not gt.get(flag_k):
+                            gt[flag_k] = True
+                            changed = True
+                elif isinstance(gt, dict) and ds in ("gtmerch_golden", "ms_json_golden"):
+                    if not gt.get("is_catchall_variant"):
+                        gt["is_catchall_variant"] = True
+                        changed = True
+                    if ds == "gtmerch_golden" and not gt.get("is_bay_inferred") and not gt.get("is_others_catchall"):
+                        if gt.get("is_hul"):
+                            gt["is_bay_inferred"] = True
+                        else:
+                            gt["is_others_catchall"] = True
+                            gt["is_unbranded_outside_bay"] = True
+                        changed = True
                 for d_side in (gt, pred):
                     if not isinstance(d_side, dict):
                         continue
@@ -645,16 +663,47 @@ def backfill_results_taxonomy(
                     if lab.get("correct") != mk["correct"]:
                         lab["correct"] = mk["correct"]
                         changed = True
+                    if mk["tp"] > 0:
+                        row_tp += 1
                 all_boxes.append(lab)
 
-        if all_boxes:
+            if row.get("labels") and row_tp != row.get("tp"):
+                gt_n = int(row.get("gt_count") or len(row.get("labels", [])))
+                pred_n = int(row.get("pred_count") or len(row.get("labels", [])))
+                row["tp"] = row_tp
+                row["fp"] = max(0, pred_n - row_tp)
+                row["fn"] = max(0, gt_n - row_tp)
+                for sk, sv in metrics.scores(row["tp"], row["fp"], row["fn"]).items():
+                    row[sk] = round(sv, 4)
+                changed = True
+
+        eval_boxes = [lab for lab in all_boxes if isinstance(lab.get("gt"), dict)] if task == "end_to_end" else all_boxes
+        if not eval_boxes:
+            eval_boxes = all_boxes
+        if eval_boxes:
             new_fa = {
-                f: round(sum(bool((lab.get("correct") or {}).get(f)) for lab in all_boxes) / max(1, len(all_boxes)), 4)
+                f: round(sum(bool((lab.get("correct") or {}).get(f)) for lab in eval_boxes) / max(1, len(eval_boxes)), 4)
                 for f in fields
             }
-            if s_data.get("field_accuracy") != new_fa:
+            new_ha = metrics.hierarchical_field_scores(eval_boxes)
+            tot_tp = sum(int(r.get("tp", 0)) for r in rows)
+            tot_fp = sum(int(r.get("fp", 0)) for r in rows)
+            tot_fn = sum(int(r.get("fn", 0)) for r in rows)
+            tot_sc = metrics.scores(tot_tp, tot_fp, tot_fn)
+            if (
+                s_data.get("field_accuracy") != new_fa
+                or s_data.get("hierarchical_accuracy") != new_ha
+                or s_data.get("tp") != tot_tp
+            ):
+                s_data["tp"] = tot_tp
+                s_data["fp"] = tot_fp
+                s_data["fn"] = tot_fn
+                for sk, sv in tot_sc.items():
+                    s_data[sk] = round(sv, 4)
                 s_data["field_accuracy"] = new_fa
-                s_data["hierarchical_accuracy"] = metrics.hierarchical_field_scores(all_boxes)
+                if task in ("classification", "retrieval", "promo_detection", "planogram_compliance"):
+                    s_data["accuracy"] = new_fa["product"]
+                s_data["hierarchical_accuracy"] = new_ha
                 changed = True
 
         if changed:

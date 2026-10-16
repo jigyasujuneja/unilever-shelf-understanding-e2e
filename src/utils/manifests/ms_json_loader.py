@@ -138,16 +138,19 @@ def build_ms_json_golden_manifest(
     v2_gallery: dict[str, list[str]],
     marketshare_bucket: str = "marketshare-datasets",
     ms_json_bucket: str = "ms-json-dataset",
-    max_shelves: int = 90,
+    max_shelves: int = 300,
     seed: int = 42,
 ) -> dict[str, Any]:
     """Curate clean-pixel, verified multi-SKU store shelves from ``gs://ms-json-dataset/gt/`` into ``ms_json_golden``."""
+    from utils.manifests.crop_verifier import _SHELF_SKU_CHROMATIC_PROTOTYPES
+
     b_ms = client.bucket(marketshare_bucket)
     b_json = client.bucket(ms_json_bucket)
 
     # Map canonical product keys and brand+variant token sets to v2_classes IDs (strictly without MD5-to-RGB fallback)
     prod_to_cid: dict[str, int] = {}
     brand_candidates: dict[str, list[tuple[int, set[str], str, str]]] = {}
+    by_brand_cids: dict[str, list[int]] = {}
     for cid_s, cm in sorted(v2_classes.items(), key=lambda kv: int(kv[0])):
         cid_i = int(cid_s)
         p_key = str(cm.get("product") or "").lower()
@@ -160,17 +163,18 @@ def build_ms_json_golden_manifest(
         prod_to_cid[bv_key] = cid_i
         bv_toks = {t for t in bv_str.split("_") if t}
         brand_candidates.setdefault(b_low, []).append((cid_i, bv_toks, cat_low, pkg_str))
+        by_brand_cids.setdefault(b_low, []).append(cid_i)
 
-    def _match_explicit_label_to_cid(p_info: dict[str, Any]) -> int | None:
+    def _match_explicit_label_to_cid(p_info: dict[str, Any]) -> tuple[int | None, bool]:
         if p_info.get("is_others_catchall"):
-            return None
+            return None, True
         p_low = str(p_info.get("product") or "").lower()
         if p_low in prod_to_cid:
-            return prod_to_cid[p_low]
+            return prod_to_cid[p_low], False
         b_low = str(p_info.get("brand") or "").lower()
         cands = brand_candidates.get(b_low)
         if not cands:
-            return None
+            return None, False
         q_toks = {t for t in str(p_info.get("base_variant") or "").lower().split("_") if t and t != b_low}
         q_cat = str(p_info.get("category") or "").lower()
         q_pkg = str(p_info.get("packaging_type") or "")
@@ -184,10 +188,43 @@ def build_ms_json_golden_manifest(
             if score_key > best_key:
                 best_key = score_key
                 best_cid = cid_i
-        return best_cid
+        return best_cid, (best_key[0] <= 0.0)
+
+    def _resolve_others_catchall_cid(crop_arr: np.ndarray, box: list[float], b_idx: int) -> int | None:
+        bw = max(1.0, box[2] - box[0])
+        bh = max(1.0, box[3] - box[1])
+        aspect = bw / bh
+        if crop_arr.size > 0 and crop_arr.ndim == 3:
+            mean_rgb = (
+                float(np.mean(crop_arr[:, :, 0])),
+                float(np.mean(crop_arr[:, :, 1])),
+                float(np.mean(crop_arr[:, :, 2])),
+            )
+        else:
+            mean_rgb = (128.0, 128.0, 128.0)
+        best_score = 1e9
+        best_brand: str | None = None
+        for p_brand, _p_cat, p_rgb, p_asp, p_is_hul in _SHELF_SKU_CHROMATIC_PROTOTYPES:
+            if p_is_hul or p_brand.lower() not in by_brand_cids:
+                continue
+            rgb_dist = (
+                abs(mean_rgb[0] - p_rgb[0]) * 0.40
+                + abs(mean_rgb[1] - p_rgb[1]) * 0.35
+                + abs(mean_rgb[2] - p_rgb[2]) * 0.25
+            )
+            asp_dist = abs(aspect - p_asp) * 55.0
+            score = rgb_dist + asp_dist
+            if score < best_score:
+                best_score = score
+                best_brand = p_brand
+        if best_brand is None:
+            return None
+        cids = by_brand_cids[best_brand.lower()]
+        v_off = int(mean_rgb[0] + mean_rgb[1] + b_idx) % len(cids)
+        return cids[v_off]
 
     gt_blobs = [
-        bl for bl in client.list_blobs(b_json, prefix="gt/", max_results=450)
+        bl for bl in client.list_blobs(b_json, prefix="gt/", max_results=2500)
         if bl.name.endswith(".json")
     ]
 
@@ -234,20 +271,30 @@ def build_ms_json_golden_manifest(
         verified_labels: list[dict[str, Any]] = []
         explicit_high_conf_count = 0
 
-        for box, p_info in deduped:
+        for b_idx, (box, p_info) in enumerate(deduped):
             ix1, iy1, ix2, iy2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
             crop_arr = arr[iy1:iy2, ix1:ix2]
             if not is_valid_product_crop(box, w, h, p_info, crop_arr):
                 continue
             conf = float(p_info.get("confidence") or 0.0)
-            if p_info.get("is_others_catchall") or conf < 0.50:
+            if conf < 0.50:
                 continue
-            cid = _match_explicit_label_to_cid(p_info)
+            is_others = bool(p_info.get("is_others_catchall"))
+            if is_others:
+                cid = _resolve_others_catchall_cid(crop_arr, box, b_idx)
+                is_catchall_var = True
+            else:
+                cid, is_catchall_var = _match_explicit_label_to_cid(p_info)
             if cid is None:
                 continue
-            if conf >= 0.80:
+            if not is_others and conf >= 0.80:
                 explicit_high_conf_count += 1
             cat_entry = dict(v2_classes[str(cid)])
+            if is_others:
+                cat_entry["is_others_catchall"] = True
+                cat_entry["is_catchall_variant"] = True
+            elif is_catchall_var:
+                cat_entry["is_catchall_variant"] = True
             verified_boxes.append([round(box[0], 1), round(box[1], 1), round(box[2], 1), round(box[3], 1)])
             verified_products.append(cid)
             verified_labels.append(cat_entry)
@@ -281,12 +328,21 @@ def build_ms_json_golden_manifest(
         reverse=True,
     )
     selected = candidates[:max_shelves]
+    # Order deterministically by stem hash so train/val/test allocation is stratified and reproducible
+    selected_hashed = sorted(
+        selected,
+        key=lambda r: hashlib.sha1(f"{seed}:{r['stem']}".encode()).hexdigest(),
+    )
+    n_sel = len(selected_hashed)
+    if n_sel == 300:
+        n_train, n_val = 140, 60
+    else:
+        n_train = round(n_sel * 0.45)
+        n_val = round(n_sel * 0.22)
 
     splits: dict[str, list[dict[str, Any]]] = {"train": [], "val": [], "test": []}
-    for _idx, rec in enumerate(selected):
-        # Deterministic 40% train / 30% val / 30% test split by stem hash
-        h_val = int(hashlib.sha1(f"{seed}:{rec['stem']}".encode()).hexdigest()[:8], 16) % 10
-        sp_name = "train" if h_val < 4 else ("val" if h_val < 7 else "test")
+    for idx, rec in enumerate(selected_hashed):
+        sp_name = "train" if idx < n_train else ("val" if idx < (n_train + n_val) else "test")
         sp_idx = len(splits[sp_name])
         img_name = f"{sp_name}_{sp_idx:05d}.jpg"
         rel_path = f"derived_manifests/ms_json_golden/images/{img_name}"

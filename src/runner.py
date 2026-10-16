@@ -15,6 +15,7 @@ import getpass
 import json
 import logging
 import os
+import shutil
 import tempfile
 import time
 from collections.abc import Callable
@@ -257,13 +258,50 @@ def run(
         extra = {}
         if task == "detection":
             m = metrics.match(preds, sample.boxes)
+            bands = metrics.group_annotated_shelf_bands(sample.boxes)
+            in_preds, _, _ = metrics.filter_preds_to_annotated_bands(preds, None, bands)
+            in_m = metrics.match(in_preds, sample.boxes)
+            extra["annotated_row_box_metrics"] = {
+                "tp": in_m["tp"], "fp": in_m["fp"], "fn": in_m["fn"],
+                "bands": len(bands),
+                "out_of_band_preds": len(preds) - len(in_preds),
+                **{k: round(v, 4) for k, v in metrics.scores(in_m["tp"], in_m["fp"], in_m["fn"]).items()},
+            }
+            extra["enrichment_metrics"] = metrics.compute_enrichment_buckets(
+                preds, None, sample.boxes, sample.labels, None, m["pairs"]
+            )
             trace.step("Score vs ground truth",
                        f"{m['tp']} correct, {m['fp']} false, {m['fn']} missed "
-                       f"({len(sample.boxes)} products in ground truth)")
+                       f"({len(sample.boxes)} products in ground truth; "
+                       f"in-band F2={extra['annotated_row_box_metrics']['f2']:.2f}, "
+                       f"extra discovered={extra['enrichment_metrics']['extra_unannotated_row_preds']})")
         elif task == "end_to_end":  # right box (IoU >= 0.5) and right product
             gt_ids = [g["sku_id"] for g in sample.labels]
-            m = metrics.match_identified(preds, ids, sample.boxes, gt_ids)
+            m = metrics.match_identified(
+                preds,
+                ids,
+                sample.boxes,
+                gt_ids,
+                catalog=catalog,
+                gt_labels=sample.labels,
+                fields=fields,
+            )
             box_m = metrics.match(preds, sample.boxes)
+            bands = metrics.group_annotated_shelf_bands(sample.boxes)
+            in_preds, in_ids, _ = metrics.filter_preds_to_annotated_bands(preds, ids, bands)
+            in_box_m = metrics.match(in_preds, sample.boxes)
+            psa_preds, psa_ids, _ = metrics.filter_preds_to_psa_categories(
+                preds, ids, catalog, sample.labels, bands
+            )
+            psa_m = metrics.match_identified(
+                psa_preds,
+                psa_ids,
+                sample.boxes,
+                gt_ids,
+                catalog=catalog,
+                gt_labels=sample.labels,
+                fields=fields,
+            )
             # Count fast-gated boxes in box units (rather than step count) so
             # stage2a_zero_vlm_gate_pct divides boxes by pred_sum.
             fast_gate_steps = [
@@ -288,13 +326,28 @@ def run(
                 "tp": box_m["tp"], "fp": box_m["fp"], "fn": box_m["fn"],
                 **{k: round(v, 4) for k, v in metrics.scores(box_m["tp"], box_m["fp"], box_m["fn"]).items()},
             }
+            extra["annotated_row_box_metrics"] = {
+                "tp": in_box_m["tp"], "fp": in_box_m["fp"], "fn": in_box_m["fn"],
+                "bands": len(bands),
+                "out_of_band_preds": len(preds) - len(in_preds),
+                **{k: round(v, 4) for k, v in metrics.scores(in_box_m["tp"], in_box_m["fp"], in_box_m["fn"]).items()},
+            }
+            extra["psa_scoped_metrics"] = {
+                "tp": psa_m["tp"], "fp": psa_m["fp"], "fn": psa_m["fn"],
+                "found": psa_m["found"],
+                "scoped_preds": len(psa_preds),
+                **{k: round(v, 4) for k, v in metrics.scores(psa_m["tp"], psa_m["fp"], psa_m["fn"]).items()},
+            }
+            extra["enrichment_metrics"] = metrics.compute_enrichment_buckets(
+                preds, ids, sample.boxes, sample.labels, catalog, m["pairs"]
+            )
             extra["stage2_fast_gate_count"] = fast_gated
             extra["labels"] = [
-                {"box": [round(v, 1) for v in b], "pred": i if isinstance(i, dict) else catalog.get(i),
+                {"box": [round(v, 1) for v in b], "pred": i if isinstance(i, dict) else (catalog.get(i) if i is not None else None),
                  "gt": sample.labels[m["pairs"][k]] if k in m["pairs"] else None,
                  "correct": (
                      metrics.match_product(
-                         i if isinstance(i, dict) else catalog.get(i),
+                         i if isinstance(i, dict) else (catalog.get(i) if i is not None else None),
                          sample.labels[m["pairs"][k]],
                          eval_fields,
                      )["correct"]
@@ -303,7 +356,9 @@ def run(
                 for k, (b, i) in enumerate(zip(preds, ids, strict=True))]
             trace.step("Score vs ground truth",
                        f"{m['found']} of {len(sample.boxes)} products boxed, {m['tp']} of those "
-                       f"identified correctly; {m['fp']} boxes wrong or extra, {m['fn']} products missed")
+                       f"identified correctly; {m['fp']} boxes wrong or extra, {m['fn']} products missed "
+                       f"(in-band det F2={extra['annotated_row_box_metrics']['f2']:.2f}, "
+                       f"psa-scoped E2E F2={extra['psa_scoped_metrics']['f2']:.2f})")
         else:  # classification / retrieval: one answer per ground-truth box
             if not ids:  # the image failed: every product counts as unanswered
                 ids = [None] * len(sample.boxes)
@@ -371,20 +426,23 @@ def run(
         n = len(rows)
         if task in ("classification", "retrieval", "promo_detection", "planogram_compliance", "end_to_end"):
             boxes = [lab for r in rows for lab in r.get("labels", [])]
-            if boxes:
+            eval_boxes = [lab for lab in boxes if lab.get("gt") is not None] if task == "end_to_end" else boxes
+            if not eval_boxes:
+                eval_boxes = boxes
+            if eval_boxes:
                 summary["field_accuracy"] = {
-                    f: round(sum(bool(lab["correct"].get(f)) for lab in boxes) / max(1, len(boxes)), 4)
+                    f: round(sum(bool(lab["correct"].get(f)) for lab in eval_boxes) / max(1, len(eval_boxes)), 4)
                     for f in eval_fields}
                 if task in ("classification", "retrieval", "promo_detection", "planogram_compliance"):
                     if "product" in summary["field_accuracy"] and eval_fields == default_fields:
                         summary["accuracy"] = summary["field_accuracy"]["product"]
                     else:
                         summary["accuracy"] = round(
-                            sum(all(bool(lab["correct"].get(f)) for f in eval_fields) for lab in boxes)
-                            / max(1, len(boxes)),
+                            sum(all(bool(lab["correct"].get(f)) for f in eval_fields) for lab in eval_boxes)
+                            / max(1, len(eval_boxes)),
                             4,
                         )
-                summary["hierarchical_accuracy"] = metrics.hierarchical_field_scores(boxes)
+                summary["hierarchical_accuracy"] = metrics.hierarchical_field_scores(eval_boxes)
                 # Macro-averaged accuracy across GT brands and GT variants + HUL vs Non-HUL competitor breakdown
                 from collections import defaultdict
 
@@ -468,7 +526,9 @@ def run(
                 def _area(b: list[float] | tuple[float, ...]) -> float:
                     return max(0.0, float(b[2]) - float(b[0])) * max(0.0, float(b[3]) - float(b[1]))
 
-                all_eval_boxes = [lab for r in rows for lab in r.get("labels", [])]
+                all_eval_boxes = eval_boxes if eval_boxes else [lab for r in rows for lab in r.get("labels", [])]
+                if task == "end_to_end" and any(lab.get("gt") is not None for lab in all_eval_boxes):
+                    all_gt = [(lab["box"], lab["gt"]) for lab in all_eval_boxes if lab.get("gt") is not None]
                 abstained_n = sum(1 for lab in all_eval_boxes if lab.get("pred") is None)
                 gt_hul_n = sum(1 for _, gt in all_gt if gt.get("is_hul"))
                 pred_hul_n = sum(1 for lab in all_eval_boxes if (lab.get("pred") or {}).get("is_hul") is True)
@@ -489,6 +549,77 @@ def run(
                     "pred_area_sos": pr_a_sos,
                     "area_sos_abs_error": round(abs(pr_a_sos - gt_a_sos), 4),
                     "abstained_box_share": round(abstained_n / max(1, len(all_eval_boxes)), 4),
+                }
+                # Per-Category Share-of-Shelf (all 10 retail categories) & Unilever Past_ROI_Data 12-column contract
+                from collections import defaultdict as _dd
+
+                cat_gt: dict[str, list[tuple[list[float] | tuple[float, ...], dict]]] = _dd(list)
+                cat_eval: dict[str, list[dict]] = _dd(list)
+                for b_gt, gt_item in all_gt:
+                    c_name = str(gt_item.get("category") or "Uncategorized")
+                    cat_gt[c_name].append((b_gt, gt_item))
+                for lab in all_eval_boxes:
+                    c_name = str(
+                        ((lab.get("gt") or {}).get("category"))
+                        or ((lab.get("pred") or {}).get("category"))
+                        or "Uncategorized"
+                    )
+                    cat_eval[c_name].append(lab)
+                cat_sos: dict[str, dict] = {}
+                for c_name in sorted(set(cat_gt.keys()) | set(cat_eval.keys())):
+                    c_gts = cat_gt.get(c_name, [])
+                    c_evs = cat_eval.get(c_name, [])
+                    if not c_gts and not c_evs:
+                        continue
+                    c_gt_hul = sum(1 for _, g_i in c_gts if g_i.get("is_hul"))
+                    c_pr_hul = sum(1 for l_i in c_evs if (l_i.get("pred") or {}).get("is_hul") is True)
+                    c_gt_fsos = round(c_gt_hul / max(1, len(c_gts)), 4) if c_gts else 0.0
+                    c_pr_fsos = round(c_pr_hul / max(1, len(c_evs)), 4) if c_evs else 0.0
+                    c_gt_ta = sum(_area(b_i) for b_i, _ in c_gts) or 1.0
+                    c_pr_ta = sum(_area(l_i["box"]) for l_i in c_evs) or 1.0
+                    c_gt_ha = sum(_area(b_i) for b_i, g_i in c_gts if g_i.get("is_hul"))
+                    c_pr_ha = sum(
+                        _area(l_i["box"]) for l_i in c_evs if (l_i.get("pred") or {}).get("is_hul") is True
+                    )
+                    c_gt_asos = round(c_gt_ha / c_gt_ta, 4) if c_gts else 0.0
+                    c_pr_asos = round(c_pr_ha / c_pr_ta, 4) if c_evs else 0.0
+                    cat_sos[c_name] = {
+                        "gt_facings": len(c_gts),
+                        "eval_facings": len(c_evs),
+                        "gt_hul_facings": c_gt_hul,
+                        "pred_hul_facings": c_pr_hul,
+                        "gt_facing_sos": c_gt_fsos,
+                        "pred_facing_sos": c_pr_fsos,
+                        "facing_sos_abs_error": round(abs(c_pr_fsos - c_gt_fsos), 4),
+                        "gt_area_sos": c_gt_asos,
+                        "pred_area_sos": c_pr_asos,
+                        "area_sos_abs_error": round(abs(c_pr_asos - c_gt_asos), 4),
+                    }
+                if cat_sos:
+                    summary["category_sos_metrics"] = cat_sos
+                summary["past_roi_summary"] = {
+                    "schema_columns": [
+                        "session_uid",
+                        "outlet_code",
+                        "ol_segment",
+                        "capture_date",
+                        "category",
+                        "brand",
+                        "base_variant",
+                        "pack_type",
+                        "pack_size",
+                        "is_hul",
+                        "facing_count",
+                        "area_sos_share",
+                    ],
+                    "total_gt_facings": len(all_gt),
+                    "total_eval_facings": len(all_eval_boxes),
+                    "gt_hul_facings": gt_hul_n,
+                    "pred_hul_facings": pred_hul_n,
+                    "gt_competitor_facings": len(all_gt) - gt_hul_n,
+                    "pred_competitor_facings": len(all_eval_boxes) - pred_hul_n - abstained_n,
+                    "abstained_facings": abstained_n,
+                    "categories_evaluated": len(cat_sos),
                 }
             # Aggregate Merchandising Planogram & OOS Void Metrics across images
             plano_steps = [
@@ -521,17 +652,20 @@ def run(
             shortlist_steps: list[dict] = []
             fast_gate_steps = 0
             vlm_escalated_steps = 0
+            saved_embed_rpcs = 0
             for r in rows:
                 r_labels = r.get("labels", [])
                 box_cursor = 0
                 for st in r.get("steps", []):
                     st_name = str(st.get("name") or "")
                     st_info = st.get("info") or {}
+                    if "saved_embedding_rpcs" in st_info:
+                        saved_embed_rpcs += int(st_info.get("saved_embedding_rpcs", 0))
                     slist = st_info.get("shortlist")
                     if isinstance(slist, list) and slist:
-                        if "Embedding" in st_name or "CLM" in st_name:
+                        if "Embedding" in st_name or "CLM" in st_name or "Stage A" in st_name:
                             fast_gate_steps += 1
-                        elif "Gemini" in st_name or "CLEF" in st_name or "JEV" in st_name:
+                        elif "Gemini" in st_name or "CLEF" in st_name or "JEV" in st_name or "Stage B" in st_name:
                             vlm_escalated_steps += 1
                         b_idx = st_info.get("box_index", st_info.get("medoid_box", box_cursor))
                         if isinstance(b_idx, int) and 0 <= b_idx < len(r_labels):
@@ -565,7 +699,21 @@ def run(
                     "mrr": round(rr_sum / denom_s, 4),
                     "stage2a_zero_vlm_gate_pct": round(fast_gate_steps / total_gate_decisions, 4),
                     "vlm_net_gain": round(final_rate - r1_rate, 4),
+                    "pre_embed_saved_rpcs": saved_embed_rpcs,
                 })
+        if task in ("detection", "end_to_end") and any("annotated_row_box_metrics" in r for r in rows):
+            ar_tp = sum(r.get("annotated_row_box_metrics", {}).get("tp", 0) for r in rows)
+            ar_fp = sum(r.get("annotated_row_box_metrics", {}).get("fp", 0) for r in rows)
+            ar_fn = sum(r.get("annotated_row_box_metrics", {}).get("fn", 0) for r in rows)
+            ar_oob = sum(r.get("annotated_row_box_metrics", {}).get("out_of_band_preds", 0) for r in rows)
+            ar_sc = {k: round(v, 4) for k, v in metrics.scores(ar_tp, ar_fp, ar_fn).items()}
+            summary["annotated_row_box_metrics"] = {
+                "tp": ar_tp,
+                "fp": ar_fp,
+                "fn": ar_fn,
+                "out_of_band_preds": ar_oob,
+                **ar_sc,
+            }
         if task == "end_to_end":  # share of products boxed at all, whatever the identity
             found_sum = sum(r["found"] for r in rows)
             gt_sum = sum(r["gt_count"] for r in rows)
@@ -583,6 +731,39 @@ def run(
                 "stage2_id_acc_on_matched_boxes": round(summary["tp"] / max(1, found_sum), 4),
                 "stage2a_zero_vlm_gate_pct": round(fast_sum / max(1, pred_sum), 4),
             })
+            if any("psa_scoped_metrics" in r for r in rows):
+                ps_tp = sum(r.get("psa_scoped_metrics", {}).get("tp", 0) for r in rows)
+                ps_fp = sum(r.get("psa_scoped_metrics", {}).get("fp", 0) for r in rows)
+                ps_fn = sum(r.get("psa_scoped_metrics", {}).get("fn", 0) for r in rows)
+                ps_found = sum(r.get("psa_scoped_metrics", {}).get("found", 0) for r in rows)
+                ps_sc = {k: round(v, 4) for k, v in metrics.scores(ps_tp, ps_fp, ps_fn).items()}
+                summary["psa_scoped_metrics"] = {
+                    "tp": ps_tp,
+                    "fp": ps_fp,
+                    "fn": ps_fn,
+                    "found": ps_found,
+                    **ps_sc,
+                }
+        if task in ("detection", "end_to_end") and any("enrichment_metrics" in r for r in rows):
+            em_gt = sum(r.get("enrichment_metrics", {}).get("gt_annotated_facings", 0) for r in rows)
+            em_tot = sum(r.get("enrichment_metrics", {}).get("total_predicted_facings", 0) for r in rows)
+            em_in = sum(r.get("enrichment_metrics", {}).get("in_annotated_scope_preds", 0) for r in rows)
+            em_extra = sum(r.get("enrichment_metrics", {}).get("extra_unannotated_row_preds", 0) for r in rows)
+            em_skus = sum(r.get("enrichment_metrics", {}).get("extra_discovered_unique_skus", 0) for r in rows)
+            em_brands = sum(r.get("enrichment_metrics", {}).get("extra_discovered_unique_brands", 0) for r in rows)
+            em_oth_gt = sum(r.get("enrichment_metrics", {}).get("others_catchall_gt_count", 0) for r in rows)
+            em_oth_res = sum(r.get("enrichment_metrics", {}).get("others_catchall_resolved_count", 0) for r in rows)
+            summary["enrichment_metrics"] = {
+                "gt_annotated_facings": em_gt,
+                "total_predicted_facings": em_tot,
+                "in_annotated_scope_preds": em_in,
+                "extra_unannotated_row_preds": em_extra,
+                "extra_discovered_sku_instances": em_skus,
+                "extra_discovered_brand_instances": em_brands,
+                "others_catchall_gt_count": em_oth_gt,
+                "others_catchall_resolved_count": em_oth_res,
+                "enrichment_multiplier": round(em_tot / max(em_gt, 1), 2),
+            }
         extra_summary = getattr(appr, "summary_extra", None)
         if callable(extra_summary):  # approach-specific aggregates (e.g. hybrid escalation rate)
             summary.update(extra_summary(rows, tuple(eval_fields)))
@@ -706,14 +887,20 @@ def _write(local_dir: Path, run_id: str, summary: dict, rows: list[dict], dest: 
     return f"{dest.rstrip('/')}/{run_id}"
 
 
-def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] = print) -> int:
+def pull(
+    src: str,
+    results_dir: Path = RESULTS_DIR,
+    log: Callable[[str], None] = print,
+    *,
+    include_images: bool = True,
+    finalize_compute: bool = True,
+) -> int:
     """Copy finished runs from GCS into ``results/``, prune deleted runs, and finalize compute cost.
 
     A Cloud Run task can't know its own billed duration, so it stores a provisional compute
     cost. Here we look up the task's start/completion time in the Cloud Run Admin API and
     re-price compute from it, then write the final summary back to GCS too.
     """
-    import shutil
     from typing import Any
 
     bucket, prefix = dataset._split_gs(src.rstrip("/"))
@@ -755,22 +942,33 @@ def pull(src: str, results_dir: Path = RESULTS_DIR, log: Callable[[str], None] =
         local_img = dest / "images.jsonl"
         sum_b = remote_blobs[(rid, "summary.json")]
         img_b = remote_blobs[(rid, "images.jsonl")]
-        sum_diff = not local_sum.exists() or ( getattr(sum_b, "size", None) is not None and local_sum.stat().st_size != getattr(sum_b, "size") )
-        img_diff = not local_img.exists() or ( getattr(img_b, "size", None) is not None and local_img.stat().st_size != getattr(img_b, "size") )
+        sum_diff = not local_sum.exists() or (getattr(sum_b, "size", None) is not None and local_sum.stat().st_size != sum_b.size)
+        img_diff = include_images and (
+            not local_img.exists() or (getattr(img_b, "size", None) is not None and local_img.stat().st_size != img_b.size)
+        )
         if sum_diff or img_diff:
             to_download.append(rid)
 
     def _dl_one(rid: str) -> int:
         dest = rpath / rid
         dest.mkdir(parents=True, exist_ok=True)
-        remote_blobs[(rid, "images.jsonl")].download_to_filename(str(dest / "images.jsonl"))
-        remote_blobs[(rid, "summary.json")].download_to_filename(str(dest / "summary.json"))
+        local_sum = dest / "summary.json"
+        local_img = dest / "images.jsonl"
+        sum_b = remote_blobs[(rid, "summary.json")]
+        img_b = remote_blobs[(rid, "images.jsonl")]
+        if not local_sum.exists() or (getattr(sum_b, "size", None) is not None and local_sum.stat().st_size != sum_b.size):
+            sum_b.download_to_filename(str(local_sum))
+        if include_images and (not local_img.exists() or (getattr(img_b, "size", None) is not None and local_img.stat().st_size != img_b.size)):
+            img_b.download_to_filename(str(local_img))
         return 1
 
     n = pruned
     if to_download:
-        with ThreadPoolExecutor(max_workers=min(16, len(to_download))) as pool:
+        with ThreadPoolExecutor(max_workers=min(32, len(to_download))) as pool:
             n += sum(pool.map(_dl_one, to_download))
+
+    if not finalize_compute:
+        return n
 
     for rid in ready_runs:
         local_sum = rpath / rid / "summary.json"
@@ -934,22 +1132,47 @@ _TMP_RESULTS_HYDRATED = False
 
 def resolve_results_dir(results_dir: Path | str = RESULTS_DIR) -> Path:
     """Return ``results_dir`` if it exists locally with runs, or hydrate from GCS into ``/tmp``."""
+    import threading
+
     global _TMP_RESULTS_HYDRATED
     p = Path(results_dir)
-    if p != RESULTS_DIR and p != Path("results"):
+    if p != RESULTS_DIR and p != Path("results") and p.resolve() != RESULTS_DIR.resolve():
         return p
     if p.is_dir() and any(p.glob("*/summary.json")):
         return p
     if not _TMP_RESULTS_HYDRATED:
         _TMP_RESULTS_HYDRATED = True
         _TMP_RESULTS_CACHE.mkdir(parents=True, exist_ok=True)
+        already_cached = any(_TMP_RESULTS_CACHE.glob("*/summary.json"))
         try:
             gcp_res = load_config().get("gcp", {}).get("results")
             if gcp_res:
-                pull(gcp_res, results_dir=_TMP_RESULTS_CACHE, log=lambda *_: None)
+                if not already_cached:
+                    # Fast-hydrate summaries + registry first (<1s), then hydrate images.jsonl in background
+                    pull(
+                        gcp_res,
+                        results_dir=_TMP_RESULTS_CACHE,
+                        log=lambda *_: None,
+                        include_images=False,
+                        finalize_compute=False,
+                    )
+                threading.Thread(
+                    target=lambda: pull(
+                        gcp_res,
+                        results_dir=_TMP_RESULTS_CACHE,
+                        log=lambda *_: None,
+                        include_images=True,
+                        finalize_compute=False,
+                    ),
+                    daemon=True,
+                ).start()
         except Exception:
             pass
     return _TMP_RESULTS_CACHE if _TMP_RESULTS_CACHE.is_dir() else p
+
+
+_LB_SUMMARY_CACHE: dict[str, tuple[int, dict]] = {}
+_RUN_DETAIL_CACHE: dict[tuple[str, str], tuple[int, dict, list[dict]]] = {}
 
 
 def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> list[dict]:
@@ -978,7 +1201,15 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
     runs = []
     for p in Path(results_dir).glob("*/summary.json"):
         try:
-            s = _with_inr(json.loads(p.read_text()))
+            pkey = str(p)
+            mtime = p.stat().st_mtime_ns
+            cached_s = _LB_SUMMARY_CACHE.get(pkey)
+            if cached_s and cached_s[0] == mtime:
+                s = dict(cached_s[1])
+            else:
+                raw_s = _with_inr(json.loads(p.read_text()))
+                _LB_SUMMARY_CACHE[pkey] = (mtime, dict(raw_s))
+                s = dict(raw_s)
         except (OSError, json.JSONDecodeError):
             continue
         setup_s = float((s.get("cost") or {}).get("setup_seconds", 0.0) or 0.0)
@@ -1003,8 +1234,8 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
         ds = str(s.get("dataset") or "")
         ap = str(s.get("approach") or "")
         tk = str(s.get("task") or "detection")
-        is_golden = ds.startswith(("hul_", "gtmerch", "ms_json"))
-        is_shelf = ds in ("gtmerch_golden", "ms_json_golden", "hul_sessions", "shelves", "sku110k")
+        is_golden = ds.startswith(("hul_", "gt_hul", "gtmerch", "ms_json"))
+        is_shelf = ds in ("gtmerch_golden", "ms_json_golden", "hul_sessions", "gt_hul_sessions", "shelves", "sku110k")
         n_imgs = max(1, int(s.get("images", 1) or 1))
         tp_fn = int(s.get("tp", 0) or 0) + int(s.get("fn", 0) or 0)
         tot_boxes = int(s.get("total_gt_boxes") or (tp_fn if tp_fn > n_imgs else (n_imgs * 25 if is_shelf else n_imgs)))
@@ -1036,7 +1267,11 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
                 s["short_model"] = f"{base_m} (SFT)"
             else:
                 s["short_model"] = raw_mod
-        matched_ed = exp_by_app_ds.get((ap, ds)) or exp_by_app.get(ap)
+        matched_ed = (
+            exp_by_app_ds.get((ap, ds))
+            or (exp_by_app_ds.get((ap, "hul_sessions")) if ds == "gt_hul_sessions" else None)
+            or exp_by_app.get(ap)
+        )
         if matched_ed:
             raw_eid = str(matched_ed.get("experiment_id", ""))
             s["exp_id"] = f"EXP-{raw_eid.rsplit('-', 1)[-1]}" if "-" in raw_eid else raw_eid
@@ -1047,7 +1282,7 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
 
     def official(r: dict) -> bool:
         ds = str(r.get("dataset") or "")
-        if ds.startswith(("hul_", "gtmerch", "ms_json")):
+        if ds.startswith(("hul_", "gt_hul", "gtmerch", "ms_json")):
             return r.get("split") == "test" and int(r.get("images", 0)) >= 5 and int(r.get("errors", 0)) == 0
         return (r.get("environment", {}).get("platform") == "cloud-run"
                 and (r["split"], r.get("limit"), r.get("seed")) == board_set)
@@ -1075,10 +1310,28 @@ def load_run(run_id: str, results_dir: Path = RESULTS_DIR) -> tuple[dict, list[d
     d = Path(results_dir) / run_id
     if d.resolve().parent != Path(results_dir).resolve() or not (d / "summary.json").exists():
         raise FileNotFoundError(run_id)
-    summary = _with_inr(json.loads((d / "summary.json").read_text()))
+    sum_p = d / "summary.json"
+    img_p = d / "images.jsonl"
+    if not img_p.exists():
+        try:
+            gcp_res = load_config().get("gcp", {}).get("results")
+            if gcp_res:
+                bucket, prefix = dataset._split_gs(gcp_res.rstrip("/"))
+                dataset._gcs().bucket(bucket).blob(f"{prefix}/{run_id}/images.jsonl").download_to_filename(str(img_p))
+        except Exception:
+            pass
+    ckey = (str(results_dir), run_id)
+    mtime = sum_p.stat().st_mtime_ns + (img_p.stat().st_mtime_ns if img_p.exists() else 0)
+    hit = _RUN_DETAIL_CACHE.get(ckey)
+    if hit and hit[0] == mtime:
+        return hit[1], hit[2]
+    summary = _with_inr(json.loads(sum_p.read_text()))
     rate = summary["usd_to_inr"] or 0
-    images = [json.loads(line) for line in (d / "images.jsonl").read_text().splitlines() if line]
+    images = [json.loads(line) for line in img_p.read_text().splitlines() if line] if img_p.exists() else []
     for r in images:
         r["cost_inr"] = round(r["cost_usd"] * rate, 4)
+    if len(_RUN_DETAIL_CACHE) > 32:
+        _RUN_DETAIL_CACHE.pop(next(iter(_RUN_DETAIL_CACHE)))
+    _RUN_DETAIL_CACHE[ckey] = (mtime, summary, images)
     return summary, images
 
