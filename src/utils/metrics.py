@@ -62,10 +62,11 @@ def match_identified(
     *,
     catalog: dict[int, dict] | None = None,
     gt_labels: Sequence[dict] | None = None,
-    fields: Sequence[str] = ("product",),
+    fields: Sequence[str] | None = ("product",),
 ) -> dict:
     """End-to-end: a prediction is a TP only if it matches a GT box (IoU >= 0.5) **and** names
     that box's product. ``found`` counts box matches regardless of product."""
+    resolved_fields = fields or ("product",)
     m = match(preds, gts)
     hits: list[int] = []
     for i, j in sorted(m["pairs"].items()):
@@ -73,7 +74,7 @@ def match_identified(
             hits.append(i)
         elif catalog is not None and gt_labels is not None and j < len(gt_labels):
             pred_entry = catalog.get(pred_ids[i]) if pred_ids[i] is not None else None
-            if pred_entry is not None and match_product(pred_entry, gt_labels[j], fields)["tp"] > 0:
+            if pred_entry is not None and match_product(pred_entry, gt_labels[j], resolved_fields)["tp"] > 0:
                 hits.append(i)
     tp = len(hits)
     return {"tp": tp, "fp": len(preds) - tp, "fn": len(gts) - tp, "matched": hits,

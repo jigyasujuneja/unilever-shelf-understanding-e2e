@@ -51,8 +51,9 @@ cv_models:
 cloud_run:
   job: shelf-bench
   service: shelf-ui                        # simple Cloud Run UI service name (also mirrored on perfect-store-control-plane)
-  cpu: 4
+  cpu: 8
   memory_gib: 16
+  timeout_s: 10800
   parallelism: 100  # tasks at once - concurrent tasks alternate across models
   # Direct VPC egress, needed to reach a private-IP AlloyDB instance. Leave unset otherwise.
   # network: default

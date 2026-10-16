@@ -284,7 +284,7 @@ def run(
                 gt_ids,
                 catalog=catalog,
                 gt_labels=sample.labels,
-                fields=fields,
+                fields=eval_fields,
             )
             box_m = metrics.match(preds, sample.boxes)
             bands = metrics.group_annotated_shelf_bands(sample.boxes)
@@ -300,7 +300,7 @@ def run(
                 gt_ids,
                 catalog=catalog,
                 gt_labels=sample.labels,
-                fields=fields,
+                fields=eval_fields,
             )
             # Count fast-gated boxes in box units (rather than step count) so
             # stage2a_zero_vlm_gate_pct divides boxes by pred_sum.
@@ -1283,7 +1283,12 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
     def official(r: dict) -> bool:
         ds = str(r.get("dataset") or "")
         if ds.startswith(("hul_", "gt_hul", "gtmerch", "ms_json")):
-            return r.get("split") == "test" and int(r.get("images", 0)) >= 5 and int(r.get("errors", 0)) == 0
+            n_img = int(r.get("images", 0))
+            return (
+                r.get("split") in ("test", "test_5k")
+                and n_img >= 5
+                and int(r.get("errors", 0)) <= n_img // 1000
+            )
         return (r.get("environment", {}).get("platform") == "cloud-run"
                 and (r["split"], r.get("limit"), r.get("seed")) == board_set)
 

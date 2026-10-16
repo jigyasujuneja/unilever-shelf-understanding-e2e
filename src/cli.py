@@ -107,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--workers", type=int, default=d.get("workers", 4))
     s.add_argument("--owner", default=None, help="defaults to $USER")
     s.add_argument("--image", default=None, help="reuse pre-built Artifact Registry image URI instead of rebuilding")
+    s.add_argument("--job", default=None, help="override Cloud Run job name (e.g. shelf-bench-5k-exp28)")
     s.add_argument("--pull", action="store_true", help="pull finished runs into local results/ (default: finalize directly on GCS with zero local files)")
     s.add_argument("--no-pull", action="store_true", help="keep results 100% on GCS without pulling to local results/")
 
@@ -281,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             brand_model=a.brand_model,
             pack_model=a.pack_model,
             image=a.image,
+            job_name=a.job,
             pull_local=bool(a.pull and not a.no_pull),
             **{f"{r}_model": getattr(a, f"{r}_model", None) for r in VARIANT_ROLES},
         )
