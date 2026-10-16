@@ -29,6 +29,42 @@ from utils.photometry import restore_photometry
 
 MODEL = GEMINI_EMBEDDING  # the fixed embedder of the Gemini pipelines built on this one
 _GALLERY_CACHE: dict[tuple[str, bool, str], tuple[bytes, list[float]]] = {}
+_GALLERY_DISK_LOADED = False
+_GALLERY_CACHE_GCS_URI = os.environ.get(
+    "SHELF_BENCH_GALLERY_VEC_CACHE_URI",
+    "gs://ul-fs-s-sandbx-16-prj-shelf-images/cache/gallery_path_vec_cache.pkl",
+)
+_GALLERY_CACHE_LOCAL_PATH = "/tmp/shelf_bench_emb_cache/gallery_path_vec_cache.pkl"
+
+
+def _ensure_gallery_disk_cache_loaded() -> None:
+    global _GALLERY_DISK_LOADED
+    if _GALLERY_DISK_LOADED:
+        return
+    _GALLERY_DISK_LOADED = True
+    import pickle
+    from pathlib import Path
+
+    p = Path(_GALLERY_CACHE_LOCAL_PATH)
+    if not p.exists() and _GALLERY_CACHE_GCS_URI.startswith("gs://"):
+        try:
+            raw = dataset.read_bytes(_GALLERY_CACHE_GCS_URI)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(raw)
+        except Exception:
+            pass
+    if p.exists():
+        try:
+            data = pickle.loads(p.read_bytes())
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if k not in _GALLERY_CACHE:
+                        if isinstance(v, tuple) and len(v) == 2:
+                            _GALLERY_CACHE[k] = v
+                        elif isinstance(v, list):
+                            _GALLERY_CACHE[k] = (b"", v)
+        except Exception:
+            pass
 
 
 class _LazyJpegDict(dict):
@@ -98,7 +134,10 @@ class EmbeddingRetrieval(Approach):
 
         refs = [(pid, path) for pid, paths in gallery.items() for path in paths]
         self.jpeg: dict[str, bytes] = _LazyJpegDict()  # lazy reference photos for rerank contact sheets
-        is_real_shelf_gallery = self.dataset.startswith("hul") or self.dataset.startswith("gtmerch")
+        is_real_shelf_gallery = self.dataset.startswith(("hul", "gt_hul", "gtmerch", "ms_json"))
+        use_fast_sku_cache = is_real_shelf_gallery and type(self.emb).__name__ == "VertexEmbeddings"
+        if use_fast_sku_cache:
+            _ensure_gallery_disk_cache_loaded()
 
         def embed(ref: tuple[int, str]) -> tuple[int, str, list[float]]:
             pid, path = ref
@@ -107,6 +146,11 @@ class EmbeddingRetrieval(Approach):
             if cached is not None:
                 _, vec = cached
                 return pid, path, vec
+            if use_fast_sku_cache:
+                sku_fallback = _GALLERY_CACHE.get((emb_model, is_real_shelf_gallery, f"sku:{pid}"))
+                if sku_fallback is not None:
+                    _, vec = sku_fallback
+                    return pid, path, vec
             raw_bytes = dataset.read_bytes(path)
             with Image.open(io.BytesIO(raw_bytes)) as im:
                 rgb = im.convert("RGB")

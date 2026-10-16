@@ -58,13 +58,17 @@ def visual_gallery_centroids_for_catalog(
     dataset_name: str, catalog_ids: list[int], emb: VertexEmbeddings, ctx: Context
 ) -> dict[int, list[float]]:
     """Build L2-normalized visual gallery centroids per SKU when dataset has an RPC reference gallery."""
-    if not dataset_name.startswith(("hul_", "gtmerch")):
+    if not dataset_name.startswith(("hul_", "gt_hul", "gtmerch", "ms_json")):
         return {}
     import io
 
-    from approaches.market_share.retrieval.embedding_retrieval import _GALLERY_CACHE
+    from approaches.market_share.retrieval.embedding_retrieval import (
+        _GALLERY_CACHE,
+        _ensure_gallery_disk_cache_loaded,
+    )
     from utils.photometry import restore_photometry
 
+    _ensure_gallery_disk_cache_loaded()
     try:
         root = dataset.data_root(dataset_name)
         gal = dataset.rpc_gallery(root)
@@ -80,6 +84,9 @@ def visual_gallery_centroids_for_catalog(
         cached = _GALLERY_CACHE.get(ck)
         if cached is not None:
             return pid, cached[1]
+        sku_fb = _GALLERY_CACHE.get((emb.model, True, f"sku:{pid}"))
+        if sku_fb is not None:
+            return pid, sku_fb[1]
         raw_b = dataset.read_bytes(path)
         with Image.open(io.BytesIO(raw_b)) as im:
             rgb, _ = restore_photometry(im.convert("RGB"))
