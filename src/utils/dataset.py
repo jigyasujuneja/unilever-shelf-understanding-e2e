@@ -45,7 +45,7 @@ def _default_root() -> str:
 
 # Local folder or gs:// URI. Cloud Run jobs set SHELF_BENCH_DATA=gs://<bucket>/SKU110K_fixed.
 DEFAULT_ROOT = _default_root()
-SPLITS = ("train", "val", "test")
+SPLITS = ("train", "val", "test", "test_5k")
 
 # A box is (x1, y1, x2, y2) in absolute pixels of the original image.
 Box = tuple[float, float, float, float]
@@ -235,6 +235,10 @@ def sample_images(
     loaded = (load_products(str(root)) if name == "products" else
               load_rpc(split, str(root)) if name in RPC_FORMAT_SETS else load_split(split, str(root)))
     all_samples = sorted(loaded.values(), key=lambda s: s.image_id)
+    if name in RPC_FORMAT_SETS and split == "test" and (limit <= 0 or limit > len(all_samples)):
+        loaded_5k = load_rpc("test_5k", str(root))
+        if len(loaded_5k) > len(all_samples):
+            all_samples = sorted(loaded_5k.values(), key=lambda s: s.image_id)
     if not str(root).startswith("gs://"):
         all_samples = [s for s in all_samples if str(s.path).startswith("gs://") or Path(s.path).exists()]
     if limit <= 0 or limit >= len(all_samples):
@@ -507,7 +511,7 @@ def load_split_jsonl(
 
 @lru_cache(maxsize=64)
 def load_rpc(split: str, root: str) -> dict[str, Sample]:
-    if split not in RPC_SUBSETS:
+    if split not in (*RPC_SUBSETS, "test_5k"):
         raise ValueError(f"the rpc dataset has splits {tuple(RPC_SUBSETS)}, got {split!r}")
     cat = rpc_catalog(root)
     rows = _rpc_split_rows(split, root)

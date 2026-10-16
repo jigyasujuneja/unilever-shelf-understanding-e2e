@@ -736,6 +736,7 @@ class EndpointClassifier:
         self.endpoint, self.model_uri = endpoint, model_uri
         self.name = Path(model_uri).name if model_uri else endpoint.rsplit("/", 1)[-1]
         self.source_uri = f"{model_uri} @ {endpoint}" if model_uri else endpoint
+        self._fallback_keras: KerasClassifier | None = None
 
     @property
     def classes(self) -> tuple[str, ...]:
@@ -756,7 +757,15 @@ class EndpointClassifier:
         category: str | None = None,
         brand: str | None = None,
     ) -> tuple[str, float]:
-        pred = call_cv_endpoint(self.endpoint, image, self.role, category=category, brand=brand)
+        if self._fallback_keras is not None:
+            return self._fallback_keras.predict_class(image, category=category, brand=brand)
+        try:
+            pred = call_cv_endpoint(self.endpoint, image, self.role, category=category, brand=brand)
+        except RuntimeError as e:
+            if "traffic_split" in str(e) and self.model_uri:
+                self._fallback_keras = KerasClassifier(self.role, self.model_uri)
+                return self._fallback_keras.predict_class(image, category=category, brand=brand)
+            raise
         label = str(pred.get("raw_class") or "").strip()
         if label.isdigit():  # the server had no class list (no <model>_classes.json in its artifacts)
             classes = self.classes
@@ -826,22 +835,22 @@ class CVPipeline:
         with_variant: bool | None = None,
         category_hint: str | None = None,
     ) -> dict[str, Any]:
-        """Brand model -> pack model -> ``gt-mapping.yml``-routed variant model, coupled:
-        1. Brand model predicts ``brand`` and implies a category + HUL ownership hint.
-        2. Pack model takes that category as its 10-d one-hot input (``category_mapping``) and
-           predicts ``Category__PackType`` (``pack_type_mapping``).
-        3. The brand + category route the image to one of the 7 variant models (``wash_variant``,
+        """Brand model -> ``gt-mapping.yml``-routed variant model -> pack model, coupled:
+        1. Brand model predicts ``brand`` (and an initial category + HUL ownership hint).
+        2. The predicted ``brand`` routes the image to one of the 7 variant models (``wash_variant``,
            ``skin_variant``, ``p5_variant``, ``oral_variant``, ``gen_variant``,
            ``nonhul_p6_variant``, ``nonhul_gen_variant``) using ``gt-mapping.yml``'s
-           ``*_brand_mapping`` tables. If the predicted variant's ``gt-mapping.yml`` category
-           differs from the initial brand category hint (for multi-category umbrella brands like
-           Dove, Ayush, Lux, LBP, Tata), the pack model is re-conditioned with the variant's true
-           ``gt-mapping.yml`` category.
+           ``*_brand_mapping`` tables, feeding the ``brand`` one-hot vector + image to predict
+           ``base_variant``, ``product``, and the variant's ``gt-mapping.yml`` category.
+        3. Pack model takes the category output from the variant model (falling back to the
+           brand-implied category when variant models are not run) as its 10-d one-hot input
+           (``category_mapping``) and predicts ``Category__PackType`` (``pack_type_mapping``).
         """
-        from utils.legacy_benchmark import CANONICAL_TO_LEGACY_PACK_CATEGORY, normalize_legacy_prediction
+        from utils.legacy_benchmark import normalize_legacy_prediction
 
         out: dict[str, Any] = {}
         b: dict[str, str] = {}
+        v: dict[str, Any] = {}
         is_hul_flag: bool | None = None
 
         if "brand" in self.runners:
@@ -858,25 +867,13 @@ class CVPipeline:
             if is_hul_flag is not None:
                 out["is_hul"] = is_hul_flag
 
-        initial_pack_hint = b.get("category") or category_hint or None
-        if with_pack and "pack" in self.runners:
-            pack_cls, pack_conf = self.runners["pack"].predict_class(image, initial_pack_hint)
-            p = parse_label("pack", pack_cls)
-            out.update({
-                "packaging_type": p.get("packaging_type", ""),
-                "category": p.get("category", "") or b.get("category", ""),
-                "pack_class": pack_cls,
-                "pack_confidence": round(float(pack_conf), 4),
-                "category_hint": initial_pack_hint or "",
-            })
-        elif initial_pack_hint:
-            out.setdefault("category", initial_pack_hint)
-
         if with_variant is None:
             with_variant = any(r in self.runners for r in VARIANT_ROLES)
 
+        var_gt_cat = ""
+        var_canon_cat = ""
         if with_variant and any(r in self.runners for r in VARIANT_ROLES):
-            routed_cat = category_hint or out.get("category") or b.get("category") or ""
+            routed_cat = category_hint or b.get("category") or ""
             routed_brand = out.get("brand") or ""
             v_role = route_variant_role(
                 category=routed_cat,
@@ -892,12 +889,14 @@ class CVPipeline:
                     brand=brand_hint,
                 )
                 v = parse_gt_variant_label(v_role, var_cls)
+                var_gt_cat = str(v.get("gt_category") or "")
+                var_canon_cat = str(v.get("category") or "")
                 out.update({
                     "variant_role": v_role,
                     "variant_class": var_cls,
                     "variant_confidence": round(float(var_conf), 4),
                     "brand_hint": routed_brand,
-                    "routed_category": routed_cat,
+                    "routed_category": var_canon_cat or routed_cat,
                     "base_variant": v.get("base_variant", ""),
                     "variant": v.get("variant", ""),
                 })
@@ -911,32 +910,26 @@ class CVPipeline:
                 elif v.get("product"):
                     out["product"] = v["product"]
 
-                # If gt-mapping.yml specifies a variant-level category that differs from the initial
-                # umbrella-brand category hint (and the predicted variant belongs to the routed brand),
-                # update category and re-condition the pack model.
-                var_gt_cat = str(v.get("gt_category") or "")
-                var_canon_cat = str(v.get("category") or "")
-                var_brand_matches = not routed_brand or (
-                    _norm_brand_key(v.get("gt_brand") or v.get("brand")) == _norm_brand_key(routed_brand)
-                )
-                init_leg_cat = CANONICAL_TO_LEGACY_PACK_CATEGORY.get(
-                    str(initial_pack_hint or ""), str(initial_pack_hint or "")
-                )
-                if var_brand_matches and var_gt_cat and var_gt_cat in pack_categories() and var_gt_cat != init_leg_cat:
-                    if with_pack and "pack" in self.runners:
-                        pack_cls2, pack_conf2 = self.runners["pack"].predict_class(image, var_gt_cat)
-                        p2 = parse_label("pack", pack_cls2)
-                        out.update({
-                            "packaging_type": p2.get("packaging_type", "") or out.get("packaging_type", ""),
-                            "category": p2.get("category", "") or var_canon_cat or out.get("category", ""),
-                            "pack_class": pack_cls2,
-                            "pack_confidence": round(float(pack_conf2), 4),
-                            "category_hint": var_gt_cat,
-                        })
-                    elif var_canon_cat:
-                        out["category"] = var_canon_cat
-                elif not out.get("category") and var_canon_cat:
-                    out["category"] = var_canon_cat
-                if not out.get("packaging_type") and v.get("packaging_type"):
-                    out["packaging_type"] = v["packaging_type"]
+        pack_hint = (
+            (var_gt_cat if var_gt_cat and var_gt_cat in pack_categories() else var_canon_cat)
+            or b.get("category")
+            or category_hint
+            or None
+        )
+        if with_pack and "pack" in self.runners:
+            pack_cls, pack_conf = self.runners["pack"].predict_class(image, pack_hint)
+            p = parse_label("pack", pack_cls)
+            out.update({
+                "packaging_type": p.get("packaging_type", "") or v.get("packaging_type", ""),
+                "category": p.get("category", "") or var_canon_cat or b.get("category", ""),
+                "pack_class": pack_cls,
+                "pack_confidence": round(float(pack_conf), 4),
+                "category_hint": pack_hint or "",
+            })
+        else:
+            if var_canon_cat or pack_hint:
+                out.setdefault("category", var_canon_cat or str(pack_hint))
+            if v.get("packaging_type"):
+                out.setdefault("packaging_type", str(v["packaging_type"]))
+
         return out
