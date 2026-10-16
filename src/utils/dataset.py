@@ -45,7 +45,7 @@ def _default_root() -> str:
 
 # Local folder or gs:// URI. Cloud Run jobs set SHELF_BENCH_DATA=gs://<bucket>/SKU110K_fixed.
 DEFAULT_ROOT = _default_root()
-SPLITS = ("train", "val", "test")
+SPLITS = ("train", "val", "test", "test_5k")
 
 # A box is (x1, y1, x2, y2) in absolute pixels of the original image.
 Box = tuple[float, float, float, float]

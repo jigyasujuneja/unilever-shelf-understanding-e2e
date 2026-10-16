@@ -736,6 +736,7 @@ class EndpointClassifier:
         self.endpoint, self.model_uri = endpoint, model_uri
         self.name = Path(model_uri).name if model_uri else endpoint.rsplit("/", 1)[-1]
         self.source_uri = f"{model_uri} @ {endpoint}" if model_uri else endpoint
+        self._fallback_keras: KerasClassifier | None = None
 
     @property
     def classes(self) -> tuple[str, ...]:
@@ -756,7 +757,15 @@ class EndpointClassifier:
         category: str | None = None,
         brand: str | None = None,
     ) -> tuple[str, float]:
-        pred = call_cv_endpoint(self.endpoint, image, self.role, category=category, brand=brand)
+        if self._fallback_keras is not None:
+            return self._fallback_keras.predict_class(image, category=category, brand=brand)
+        try:
+            pred = call_cv_endpoint(self.endpoint, image, self.role, category=category, brand=brand)
+        except RuntimeError as e:
+            if "traffic_split" in str(e) and self.model_uri:
+                self._fallback_keras = KerasClassifier(self.role, self.model_uri)
+                return self._fallback_keras.predict_class(image, category=category, brand=brand)
+            raise
         label = str(pred.get("raw_class") or "").strip()
         if label.isdigit():  # the server had no class list (no <model>_classes.json in its artifacts)
             classes = self.classes
