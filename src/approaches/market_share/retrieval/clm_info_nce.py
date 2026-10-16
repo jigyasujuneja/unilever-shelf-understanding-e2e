@@ -14,11 +14,21 @@ Architecture:
 from __future__ import annotations
 
 import io
+import pickle
+import tempfile
+from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 from approaches.base import Box, Context, register
 from approaches.market_share.classification.embedding_text_match import unit
+from approaches.market_share.retrieval.clef_standalone import (
+    CLEF_ZOOM_BATCH_PROMPT,
+    CLEF_ZOOM_BATCH_SCHEMA,
+    CLEF_ZOOM_SINGLE_PROMPT,
+    CLEF_ZOOM_SINGLE_SCHEMA,
+)
 from approaches.market_share.retrieval.coarse_jev_laya import (
     COARSE_FAMILY_COSINE,
     CoarseJevLaya,
@@ -35,13 +45,44 @@ from utils.clm import (
     compute_zscore_and_lid,
     infonce_posterior,
     infonce_rerank,
+    zoom_multi_sheet,
+    zoom_sheet,
 )
+from utils.openjev import extract_slot_distributions, resolve_jev_choice
 from utils.photometry import (
     apply_illuminant,
     estimate_shelf_illuminant,
     inner_lab_zones,
     restore_photometry,
 )
+
+_LAB_CACHE_PATH = Path(tempfile.gettempdir()) / "shelf_bench_emb_cache" / "gallery_lab_cache.pkl"
+_MEM_LAB_CACHE: dict[str, list[float]] = {}
+_LAB_CACHE_LOADED = False
+
+
+def _load_lab_cache() -> dict[str, list[float]]:
+    global _LAB_CACHE_LOADED
+    if not _LAB_CACHE_LOADED:
+        _LAB_CACHE_LOADED = True
+        if _LAB_CACHE_PATH.exists():
+            try:
+                data = pickle.loads(_LAB_CACHE_PATH.read_bytes())
+                if isinstance(data, dict):
+                    _MEM_LAB_CACHE.update(data)
+            except Exception:
+                pass
+    return _MEM_LAB_CACHE
+
+
+def _save_lab_cache() -> None:
+    try:
+        _LAB_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _LAB_CACHE_PATH.with_suffix(".tmp")
+        tmp.write_bytes(pickle.dumps(_MEM_LAB_CACHE, protocol=pickle.HIGHEST_PROTOCOL))
+        tmp.replace(_LAB_CACHE_PATH)
+    except Exception:
+        pass
 
 
 @register
@@ -64,11 +105,26 @@ class ClmContrastive(CoarseJevLaya):
     ]
 
     def setup(self, config: dict, ctx: Context) -> None:
+        from utils import dataset as ds_mod
+
         super().setup(config, ctx)
+        try:
+            self.catalog = ds_mod.catalog(ds_mod.data_root(self.dataset), self.dataset)
+        except Exception:
+            self.catalog = {}
+        cache = _load_lab_cache()
+        dirty = False
         for _, path, _ in self.index:
-            if path in self.jpeg:
+            if path in cache:
+                self.lab_index[path] = cache[path]
+            elif path in self.jpeg:
                 with Image.open(io.BytesIO(self.jpeg[path])) as im:
-                    self.lab_index[path] = inner_lab_zones(im.convert("RGB"))
+                    zones = inner_lab_zones(im.convert("RGB"))
+                    self.lab_index[path] = zones
+                    cache[path] = zones
+                    dirty = True
+        if dirty:
+            _save_lab_cache()
         self.csls_penalties: dict[str, float] = {}
         if hasattr(self, "index_matrix") and self.index_matrix.ndim == 2 and self.index_matrix.shape[0] > 1:
             r_t = compute_csls_hubness(self.index_matrix, k_nn=min(10, self.index_matrix.shape[0] - 1))
@@ -84,6 +140,28 @@ class ClmContrastive(CoarseJevLaya):
         self.clm_inv_temp = float(self.gallery_calibration.get("inv_temp", 28.0))
         self.clm_min_prob = float(self.gallery_calibration.get("conformal_min_prob", 0.56))
         self.smooth_cosine = float(self.gallery_calibration.get("intra_sku_cosine_floor", 0.86))
+
+    def _ensure_lab_for_candidates(self, candidates: list[tuple[float, int, str]]) -> None:
+        """Lazily populate 13-dim inner_lab_zones for top shortlist candidates when _LazyJpegDict is used."""
+        cache = _load_lab_cache()
+        dirty = False
+        for _, _, path in candidates:
+            if path in self.lab_index:
+                continue
+            if path in cache:
+                self.lab_index[path] = cache[path]
+                continue
+            try:
+                raw_bytes = self.jpeg[path]
+                with Image.open(io.BytesIO(raw_bytes)) as im:
+                    zones = inner_lab_zones(im.convert("RGB"))
+                    self.lab_index[path] = zones
+                    cache[path] = zones
+                    dirty = True
+            except Exception:
+                pass
+        if dirty:
+            _save_lab_cache()
 
     def _rank_crop(
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None
@@ -106,6 +184,7 @@ class ClmContrastive(CoarseJevLaya):
         if not coarse:
             return [], q, restored
 
+        self._ensure_lab_for_candidates(coarse[: 2 * K])
         q_lab = inner_lab_zones(restored)
         reranked = infonce_rerank(
             coarse,
@@ -147,44 +226,168 @@ class ClmContrastive(CoarseJevLaya):
 
 @register
 class L8HulUltimate(ClmContrastive):
-    """Gated CLM + JEV Hybrid Stack."""
+    """Unified Gated CLM (System-1) + CLEF Zoom-Strip & JEV PoE (System-2) Hybrid Stack."""
 
     name = "l8_hul_ultimate"
     max_lid = 12.0
     architecture = (
         "Global Shelf Illuminant (p=6) + Inner-80% CIELAB & Bottle/Sachet Taper + "
-        "CLM InfoNCE & Z-Score/LID Gate + Batched Contact Sheets & Row Smoothing"
+        "CLM InfoNCE & Z-Score/LID 0-VLM Gate + CLEF Bottom-30% Zoom-Strip Contact Sheets & JEV PoE Fusion"
     )
     steps = [
         "Setup: embed multi-view gallery, SKU centroids & inner-80% CIELAB + shoulder-taper descriptors",
         "Stage 0: Estimate full-shelf Shades-of-Gray (p=6) illuminant once on shelf photo and normalize crops",
-        "Stage A: Intersect CLM InfoNCE posterior, Z-score normalized margin, and LID hubness gate (distinct vs sister SKU)",
-        "Stage B: Cluster uncertain facings -> batched top-5 Gemini contact sheets",
+        "Stage A: Intersect CLM InfoNCE posterior, Z-score normalized margin, and LID hubness gate (0 VLM calls on easy crops)",
+        "Stage B: Pre-embedding spatial medoid dedup + CLEF Bottom-30% Pack-Size Zoom-Strip contact sheets + JEV PoE calibration",
         "Stage C: Visually-gated 1D Markov shelf-row continuity smoothing",
     ]
 
+    def pick_with_confidence(
+        self, image: Image.Image, top: list[tuple[float, int, str]], ctx: Context
+    ) -> tuple[int | None, float, dict]:
+        from approaches.market_share.retrieval.clef_standalone import build_contrastive_candidate_rubric
+
+        refs = [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
+        sheet_im = zoom_sheet(image, refs)
+        cat_map = getattr(self, "catalog", None) or {}
+        rubric = build_contrastive_candidate_rubric(top, cat_map)
+        base_prompt = CLEF_ZOOM_SINGLE_PROMPT.format(k=len(top))
+        prompt = f"{base_prompt}\n{rubric}" if rubric else base_prompt
+        openjev = getattr(self, "openjev", None)
+        if openjev is not None and openjev.enabled:
+            choices, slots, usage, _ = openjev.ask_choices(
+                sheet_im, 1, len(top), prompt, tier=getattr(ctx.llm, "tier", None)
+            )
+            with ctx.trace._lock:
+                ctx.trace.usage = ctx.trace.usage + usage
+            raw_choice = choices[0] if choices else None
+            slot = slots[0] if slots else None
+            pack_size = ""
+        else:
+            res = ctx.ask(
+                sheet_im,
+                prompt,
+                schema=CLEF_ZOOM_SINGLE_SCHEMA,
+                logprobs=len(top) + 1,
+            )
+            data = res.data if isinstance(res.data, dict) else {}
+            raw_choice = data.get("choice")
+            pack_size = str(data.get("pack_size") or "")
+            valid_opts = set(range(0, len(top) + 1))
+            slots = extract_slot_distributions(
+                res.meta.get("logprobs"), valid_options=valid_opts, n_options=len(top) + 1
+            )
+            slot = slots[0] if slots else None
+        ans, conf, meta = resolve_jev_choice(
+            raw_choice,
+            slot,
+            top,
+            fallback_cosine=self.fallback_cosine,
+            min_confidence=self.min_jev_confidence,
+        )
+        meta["pack_size"] = pack_size
+        return ans, conf, meta
+
+    def pick_batch_with_confidence(
+        self,
+        queries: list[Image.Image],
+        tops: list[list[tuple[float, int, str]]],
+        ctx: Context,
+    ) -> list[tuple[int | None, float, dict]]:
+        from approaches.market_share.retrieval.clef_standalone import build_contrastive_candidate_rubric
+
+        if len(queries) == 1:
+            return [self.pick_with_confidence(queries[0], tops[0], ctx)]
+        refs_per_q = [
+            [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
+            for top in tops
+        ]
+        cat_map = getattr(self, "catalog", None) or {}
+        row_rubrics = [
+            build_contrastive_candidate_rubric(top, cat_map, row_idx=idx)
+            for idx, top in enumerate(tops)
+        ]
+        rubric_block = "\n".join(r for r in row_rubrics if r)
+        base_prompt = CLEF_ZOOM_BATCH_PROMPT.format(m=len(queries), k=K)
+        prompt = f"{base_prompt}\n{rubric_block}" if rubric_block else base_prompt
+        sheet_im = zoom_multi_sheet(queries, refs_per_q)
+        openjev = getattr(self, "openjev", None)
+        pack_sizes: list[str] = []
+        if openjev is not None and openjev.enabled:
+            choices, slots, usage, _ = openjev.ask_choices(
+                sheet_im, len(queries), K, prompt, tier=getattr(ctx.llm, "tier", None)
+            )
+            with ctx.trace._lock:
+                ctx.trace.usage = ctx.trace.usage + usage
+        else:
+            res = ctx.ask(sheet_im, prompt, schema=CLEF_ZOOM_BATCH_SCHEMA, logprobs=K + 1)
+            data = res.data if isinstance(res.data, dict) else {}
+            raw = data.get("choices")
+            choices = raw if isinstance(raw, list) else []
+            raw_ps = data.get("pack_sizes")
+            pack_sizes = [str(x) for x in raw_ps] if isinstance(raw_ps, list) else []
+            valid_opts = set(range(0, K + 1))
+            slots = extract_slot_distributions(
+                res.meta.get("logprobs"), valid_options=valid_opts, n_options=K + 1
+            )
+        out: list[tuple[int | None, float, dict]] = []
+        for idx, top in enumerate(tops):
+            c = choices[idx] if idx < len(choices) else None
+            slot = slots[idx] if idx < len(slots) else None
+            ans, conf, meta = resolve_jev_choice(
+                c,
+                slot,
+                top,
+                fallback_cosine=self.fallback_cosine,
+                min_confidence=self.min_jev_confidence,
+            )
+            if idx < len(pack_sizes):
+                meta["pack_size"] = pack_sizes[idx]
+            out.append((ans, conf, meta))
+        return out
+
     def _stage_a_gate(self, ranked: list[tuple[float, int, str]]) -> tuple[bool, dict]:
-        confident_clm, meta = super()._stage_a_gate(ranked)
+        _, meta = super()._stage_a_gate(ranked)
         if not ranked:
             return False, meta
-        zlid = compute_zscore_and_lid([s for s, _, _ in ranked[:K]])
-        s1, id1, _ = ranked[0]
-        s2 = ranked[1][0] if len(ranked) > 1 else -1.0
+        top = ranked[:K]
+        zlid = compute_zscore_and_lid([s for s, _, _ in top])
+        s1, id1, _ = top[0]
+        s2, id2, _ = top[1] if len(top) > 1 else (-1.0, id1, "")
         margin = s1 - s2
-        same_family = meta.get("same_coarse_family", False)
-        cal = getattr(self, "gallery_calibration", None) or {}
-        sku_margins = cal.get("sku_required_margin") or {}
-        local_req_margin = float(sku_margins.get(id1, 0.022))
-        req_z = 1.38 if same_family else 1.02
+        cat_map = getattr(self, "catalog", None) or {}
+        c1 = cat_map.get(id1) or {}
+        c2 = cat_map.get(id2) or {}
+        if c1 and c2:
+            same_sister = bool(
+                c1.get("brand")
+                and c1.get("brand") == c2.get("brand")
+                and c1.get("base_variant") == c2.get("base_variant")
+                and c1.get("pack_size") != c2.get("pack_size")
+            )
+        else:
+            same_sister = bool(meta.get("same_coarse_family", False))
+        req_margin = 0.025 if same_sister else 0.009
+        req_z = 1.05 if same_sister else 0.80
+        p_clm, _ = infonce_posterior(top, inv_temp=28.0, k=K)
         confident = (
             s1 >= self.min_cosine
-            and margin >= min(0.022, local_req_margin)
             and (
                 s1 >= self.high_cosine
-                or (confident_clm and zlid["z_margin"] >= req_z and zlid["lid"] <= self.max_lid)
+                or (
+                    margin >= req_margin
+                    and p_clm >= 0.30
+                    and zlid["z_margin"] >= req_z
+                    and zlid["lid"] <= max(self.max_lid, 11.5)
+                )
             )
         )
-        return confident, {**meta, **zlid, "local_sku_margin": local_req_margin}
+        return confident, {
+            **meta,
+            **zlid,
+            "same_variant_sister": same_sister,
+            "local_sku_margin": req_margin,
+        }
 
     def identify_boxes(
         self, image: Image.Image, boxes: list[Box], ctx: Context
@@ -246,6 +449,10 @@ class HierarchicalClmJev(L8HulUltimate):
                 self.brand_subcentroids[brand].append(
                     unit([sum(col) / len(vs) for col in zip(*vs, strict=True)])
                 )
+        for pid, sc in self.sku_centroids.items():
+            item = self.catalog.get(pid) or {}
+            brand = str(item.get("brand") or item.get("category") or f"sku_{pid}")
+            self.brand_subcentroids[brand].append(sc)
         self.brand_centroids: dict[str, list[float]] = {
             b: subs[0] for b, subs in self.brand_subcentroids.items() if subs
         }
@@ -263,10 +470,12 @@ class HierarchicalClmJev(L8HulUltimate):
             reverse=True,
         )
         top_score = scored[0][1]
+        eff_top_b = max(self.brand_top_b, 8)
+        eff_window = max(self.brand_margin_window, 0.08)
         chosen = [
             (b, round(s, 4))
-            for b, s in scored[: self.brand_top_b]
-            if top_score - s <= self.brand_margin_window
+            for b, s in scored[:eff_top_b]
+            if top_score - s <= eff_window
         ]
         allowed: set[int] = set()
         for b, _ in chosen:
@@ -280,22 +489,44 @@ class HierarchicalClmJev(L8HulUltimate):
         wb_input = apply_illuminant(image, gains) if gains else image
         restored, _ = restore_photometry(wb_input)
         q = unit(self.emb.image(restored, ctx))
+        explicit_allowed = allowed_ids is not None
         if allowed_ids is None:
             allowed_ids, _ = self._narrow_by_brand(q)
-        pool = (
-            [(pid, path, v) for pid, path, v in self.index if pid in allowed_ids]
-            if allowed_ids
-            else []
-        ) or self.index
         best: dict[int, tuple[float, int, str]] = {}
-        for pid, path, v in pool:
-            s = _dot(q, v)
-            if pid not in best or s > best[pid][0]:
-                best[pid] = (s, pid, path)
-        coarse = sorted(best.values(), reverse=True)
+        global_best: dict[int, tuple[float, int, str]] = {}
+        if (
+            hasattr(self, "index_matrix")
+            and self.index_matrix.ndim == 2
+            and self.index_matrix.shape[0] == len(self.index)
+            and self.index_matrix.shape[0] > 0
+        ):
+            sims = (self.index_matrix @ np.asarray(q, dtype=np.float32)).tolist()
+            for s, pid, path in zip(sims, self.index_pids, self.index_paths, strict=True):
+                fs = float(s)
+                if pid not in global_best or fs > global_best[pid][0]:
+                    global_best[pid] = (fs, pid, path)
+                if allowed_ids and pid not in allowed_ids:
+                    continue
+                if pid not in best or fs > best[pid][0]:
+                    best[pid] = (fs, pid, path)
+        else:
+            for pid, path, v in self.index:
+                s = _dot(q, v)
+                if pid not in global_best or s > global_best[pid][0]:
+                    global_best[pid] = (s, pid, path)
+                if allowed_ids and pid not in allowed_ids:
+                    continue
+                if pid not in best or s > best[pid][0]:
+                    best[pid] = (s, pid, path)
+        if not explicit_allowed and global_best:
+            for fs, pid, path in sorted(global_best.values(), reverse=True)[: 2 * K]:
+                if pid not in best or fs > best[pid][0]:
+                    best[pid] = (fs, pid, path)
+        coarse = sorted(best.values(), reverse=True) or sorted(global_best.values(), reverse=True)
         if not coarse:
             return [], q, restored
 
+        self._ensure_lab_for_candidates(coarse[: 2 * K])
         q_lab = inner_lab_zones(restored)
         reranked = infonce_rerank(
             coarse,
@@ -537,5 +768,226 @@ class SessionOverlapDedupClmJev(ShelfHeightSizePriorClmJev):
             info={"left_border_facings": len(left_border), "right_border_facings": len(right_border)},
         )
         return ids
+
+
+@register
+class SftClmClefCascade(OutletScopedClmJev):
+    """EXP-29: Gemini 3.5 Flash-Lite (Base / LoRA SFT) + CLM 5-Attribute Vote Gate + CLEF Contact-Sheet Cascade.
+
+    Addresses the client recording's 3-model cascading bottleneck (`Brand -> Variant -> SubCategory/Category Config
+    -> Pack Type with Category__* Masking`):
+      1. Stage A (`gemini-embedding-2` + CLM InfoNCE + 5-Attribute Vote Gate):
+         Computes similarity-weighted vote share across `(brand, category, packaging_type, base_variant)` at
+         `inv_temp=80.0`. Accepts in 0 VLM calls only when both the CLM InfoNCE/Z-score/LID gate AND all 5
+         attribute vote shares are confident (`brand >= 0.88`, `category >= 0.88`, `packaging_type >= 0.82`,
+         `base_variant >= 0.82`).
+      2. Stage B (Soft Top-2 Brand/Category Shortlist + Contrastive Metadata CLEF Contact Sheet):
+         Replaces the legacy pipeline's brittle hard Top-1 Brand mask with a soft Top-2 Brand/Category shortlist
+         and passes the 5-panel CLEF Bottom-30% Zoom Contact Sheet + `EXP-28` catalog metadata rubric to
+         `Gemini 3.5 Flash-Lite` (Base or Vertex AI LoRA SFT `gemini-3.5-flash-lite-sft`).
+      3. Stage C (Client-Config `(Brand, Base_Variant) -> Category -> Valid Category__PackType` Consistency):
+         Verifies and logs catalog config consistency across all 5 hierarchy levels.
+    """
+
+    name = "sft_clm_clef_cascade"
+    tau_brand = 0.88
+    tau_category = 0.88
+    tau_packaging_type = 0.82
+    tau_base_variant = 0.82
+    vote_inv_temp = 80.0
+    architecture = (
+        "EXP-29 Gemini 3.5 Flash-Lite (Base / LoRA SFT) + CLM 5-Attribute Vote Gate -> "
+        "Soft Multi-Brand/Category Shortlist + Contrastive Metadata CLEF Contact Sheet -> "
+        "Client-Config (Brand, Variant) -> Category -> Valid Pack Consistency"
+    )
+    steps = [
+        "Setup: build multi-prototype (Brand, Category, Pack) sub-centroids + catalog (Brand, Variant) -> Category -> Valid Pack index",
+        "Stage A: CLM InfoNCE + Z-score/LID gate intersected with 5-attribute softmax vote shares (brand, category, packaging_type, base_variant)",
+        "Stage B: Escalate uncertain crops to 5-panel CLEF Zoom Contact Sheet with EXP-28 catalog metadata & contrastive token diffs",
+        "Stage C: Enforce (Brand, Base_Variant) -> Category -> Valid Category__PackType catalog consistency",
+    ]
+
+    def _attribute_vote_shares(self, ranked: list[tuple[float, int, str]]) -> dict[str, float]:
+        import math
+        from collections import defaultdict
+
+        top = ranked[:K]
+        if not top or not getattr(self, "catalog", None):
+            return {"brand": 1.0, "category": 1.0, "packaging_type": 1.0, "base_variant": 1.0}
+        s1 = top[0][0]
+        weights = [math.exp(max(-30.0, self.vote_inv_temp * (s - s1))) for s, _, _ in top]
+        z = sum(weights) or 1.0
+        top_meta = self.catalog.get(top[0][1]) or {}
+        shares: dict[str, float] = {}
+        for attr in ("brand", "category", "packaging_type", "base_variant"):
+            votes: dict[str, float] = defaultdict(float)
+            for (_, pid, _), w in zip(top, weights, strict=True):
+                m = self.catalog.get(pid) or {}
+                val = str(m.get(attr) or m.get("variant" if attr == "base_variant" else attr) or "")
+                votes[val] += w / z
+            top_val = str(top_meta.get(attr) or top_meta.get("variant" if attr == "base_variant" else attr) or "")
+            shares[attr] = round(votes.get(top_val, 0.0), 4)
+        return shares
+
+    def _stage_a_gate(self, ranked: list[tuple[float, int, str]]) -> tuple[bool, dict]:
+        base_conf, meta = super()._stage_a_gate(ranked)
+        if not ranked:
+            return False, meta
+        shares = self._attribute_vote_shares(ranked)
+        attr_conf = (
+            shares.get("brand", 0.0) >= self.tau_brand
+            and shares.get("category", 0.0) >= self.tau_category
+            and shares.get("packaging_type", 0.0) >= self.tau_packaging_type
+            and shares.get("base_variant", 0.0) >= self.tau_base_variant
+        )
+        confident = base_conf and attr_conf
+        return confident, {
+            **meta,
+            "attr_vote_shares": shares,
+            "attr_gate_passed": attr_conf,
+        }
+
+    def identify_boxes(
+        self, image: Image.Image, boxes: list[Box], ctx: Context
+    ) -> list[int | None]:
+        from utils.taxonomy.packaging import project_to_valid_category_pack
+
+        ids = super().identify_boxes(image, boxes, ctx)
+        cat_map = getattr(self, "catalog", None) or {}
+        if not cat_map or not ids:
+            return ids
+        checked = 0
+        consistent = 0
+        for pid in ids:
+            if pid is None:
+                continue
+            m = cat_map.get(pid) or {}
+            cat = str(m.get("category") or "")
+            pt = str(m.get("packaging_type") or "")
+            if cat and pt:
+                checked += 1
+                proj = project_to_valid_category_pack(cat, pt)
+                if proj == pt:
+                    consistent += 1
+        ctx.trace.step(
+            "Stage C Client-Config (Brand, Variant) -> Category -> Pack Consistency",
+            f"Verified {consistent}/{checked} predicted SKUs against valid (Category, PackType) catalog domain",
+            info={"checked_skus": checked, "catalog_consistent_skus": consistent},
+        )
+        return ids
+
+
+class _ResidualEmbeddingsWrapper:
+    """Thin proxy that applies ``ResidualInfoNCEHead`` after ``VertexEmbeddings.image()``."""
+
+    def __init__(self, base_emb, head) -> None:
+        self._base = base_emb
+        self._head = head
+
+    def __getattr__(self, name: str):
+        return getattr(self._base, name)
+
+    def image(self, image: Image.Image, ctx: Context | None = None) -> list[float]:
+        raw_vec = self._base.image(image, ctx)
+        return self._head.transform_one(raw_vec)
+
+
+@register
+class ResidualInfoNceClmJev(SftClmClefCascade):
+    """EXP-32: Residual InfoNCE Projection SFT on ``gemini-embedding-2`` + 5-Attribute Vote Gate + CLEF Cascade."""
+
+    name = "residual_infonce_clm_jev"
+    architecture = (
+        "EXP-32 Residual InfoNCE Projection SFT on gemini-embedding-2 -> "
+        "CLM 5-Attribute Vote Gate -> Soft Multi-Brand/Category Shortlist + Contrastive CLEF Contact Sheet"
+    )
+    steps = [
+        "Setup: fit Residual InfoNCE projection head f(x) = norm(x + alpha*relu(x@W1)@W2) strictly on reference gallery views",
+        "Project gallery embeddings, SKU centroids, and CSLS hubness penalties into the sharpened residual space",
+        "Stage A: Embed crop with gemini-embedding-2 + residual projection and run CLM 5-attribute vote gate (0 VLM calls on confident matches)",
+        "Stage B: Escalate uncertain sister variants to 5-panel CLEF Zoom Contact Sheet with EXP-28 contrastive catalog rubric",
+    ]
+
+    def setup(self, config: dict, ctx: Context) -> None:
+        from collections import defaultdict
+
+        from utils.residual_infonce import ResidualInfoNCEHead
+
+        super().setup(config, ctx)
+        if not self.index or self.index_matrix.ndim != 2 or self.index_matrix.shape[0] < 8:
+            return
+        dim = int(self.index_matrix.shape[1])
+        self.res_head = ResidualInfoNCEHead(dim=dim, hidden_dim=min(192, dim), alpha=0.22, temperature=0.05)
+        fit_stats = self.res_head.fit(self.index, self.catalog)
+        if not self.res_head.is_fitted():
+            return
+
+        # Re-project gallery matrix and rebuild centroids & calibration in the residual space
+        proj_mat = self.res_head.transform_matrix(self.index_matrix)
+        self.index_matrix = proj_mat
+        self.index = [
+            (pid, path, row.tolist())
+            for (pid, path, _), row in zip(self.index, proj_mat, strict=True)
+        ]
+
+        by_sku: dict[int, list[list[float]]] = defaultdict(list)
+        proto_vecs: dict[tuple[str, str, str], list[list[float]]] = defaultdict(list)
+        cat_vecs: dict[str, list[list[float]]] = defaultdict(list)
+        for pid, _, v in self.index:
+            by_sku[pid].append(v)
+            item = self.catalog.get(pid) or {}
+            brand = str(item.get("brand") or item.get("category") or f"sku_{pid}")
+            cat = str(item.get("category") or "default_cat")
+            ptype = str(item.get("packaging_type") or item.get("pack_form") or "default_pack")
+            proto_vecs[(brand, cat, ptype)].append(v)
+            cat_vecs[cat].append(v)
+
+        self.sku_centroids = {
+            pid: unit([sum(col) / len(vs) for col in zip(*vs, strict=True)])
+            for pid, vs in by_sku.items()
+            if vs
+        }
+        self.brand_subcentroids = defaultdict(list)
+        for (brand, _, _), vs in proto_vecs.items():
+            if vs:
+                self.brand_subcentroids[brand].append(
+                    unit([sum(col) / len(vs) for col in zip(*vs, strict=True)])
+                )
+        for pid, sc in self.sku_centroids.items():
+            item = self.catalog.get(pid) or {}
+            brand = str(item.get("brand") or item.get("category") or f"sku_{pid}")
+            self.brand_subcentroids[brand].append(sc)
+        self.brand_centroids = {
+            b: subs[0] for b, subs in self.brand_subcentroids.items() if subs
+        }
+        self.cat_centroids = defaultdict(list)
+        for cat, vs in cat_vecs.items():
+            if vs:
+                self.cat_centroids[cat].append(
+                    unit([sum(col) / len(vs) for col in zip(*vs, strict=True)])
+                )
+
+        if self.index_matrix.shape[0] > 1:
+            r_t = compute_csls_hubness(
+                self.index_matrix, k_nn=min(10, self.index_matrix.shape[0] - 1)
+            )
+            self.csls_penalties = {
+                path: float(pen)
+                for path, pen in zip(self.index_paths, r_t.tolist(), strict=True)
+            }
+        self.gallery_calibration = calibrate_gallery_geometry(
+            self.index,
+            self.sku_centroids,
+            target_system1_precision=self.target_system1_precision,
+            split="train",
+        )
+        self.clm_inv_temp = float(self.gallery_calibration.get("inv_temp", 28.0))
+        self.clm_min_prob = float(self.gallery_calibration.get("conformal_min_prob", 0.56))
+        self.emb = _ResidualEmbeddingsWrapper(self.emb, self.res_head)
+        ctx.trace.step(
+            "EXP-32 Residual InfoNCE Projection SFT",
+            f"Fitted {dim}->192->{dim} residual head (val R@1: {fit_stats.get('base_val_r1', 0):.3f} -> {fit_stats.get('tuned_val_r1', 0):.3f})",
+            info=fit_stats,
+        )
 
 
