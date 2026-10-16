@@ -770,88 +770,187 @@ def build_sft_jsonl(
 
     cfg = load_config()
     tuning_root = cfg.get("gcp", {}).get("tuning", "gs://ul-fs-s-sandbx-16-prj-shelf-images/tuning")
-    gcs_prefix = (gcs_prefix or f"{tuning_root.rstrip('/')}/{dataset_name}").rstrip("/")
+    use_clef_contrastive = task == "clef_contrastive"
+    ds_folder = f"{dataset_name}_clef_contrastive" if use_clef_contrastive else dataset_name
+    gcs_prefix = (gcs_prefix or f"{tuning_root.rstrip('/')}/{ds_folder}").rstrip("/")
 
     root = dataset.data_root(dataset_name)
     cat = dataset.catalog(root, dataset_name)
     gallery = dataset.rpc_gallery(root)
-    val_samples = dataset.sample_images("val", max_val_images, seed, root, dataset_name)
+    eff_val_images = max(max_val_images, 50) if use_clef_contrastive else max_val_images
+    val_samples = dataset.sample_images("val", eff_val_images, seed, root, dataset_name)
 
-    out_p = Path(out_dir) / dataset_name
+    out_p = Path(out_dir) / ds_folder
     sheets_dir = out_p / "sheets"
     sheets_dir.mkdir(parents=True, exist_ok=True)
 
     rng = random.Random(seed)
     all_pids = sorted(gallery.keys())
 
-    # Cache gallery images in memory for fast contact-sheet construction
-    ref_imgs: dict[str, Image.Image] = {}
-    for paths in gallery.values():
-        for p in paths:
-            with Image.open(io.BytesIO(dataset.read_bytes(p))) as im:
-                ref_imgs[p] = im.convert("RGB")
-
     # 1. Build TRAIN examples strictly from multi-view gallery crops (never scored in test)
-    train_lines: list[str] = []
-    for pid in all_pids:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from approaches.market_share.retrieval.clef_standalone import (
+        CLEF_ZOOM_SINGLE_PROMPT,
+        build_contrastive_candidate_rubric,
+    )
+    from utils.clm import zoom_sheet
+
+    sheet_fn = zoom_sheet if use_clef_contrastive else sheet
+
+    def _make_prompt_and_target(cand_pids: list[int], correct_choice: int, gt_pid: int | None) -> tuple[str, dict[str, Any]]:
+        if not use_clef_contrastive:
+            return PROMPT, {"choice": correct_choice}
+        base_p = CLEF_ZOOM_SINGLE_PROMPT.format(k=len(cand_pids))
+        top_stub = [(1.0, c_pid, gallery[c_pid][0]) for c_pid in cand_pids]
+        rubric = build_contrastive_candidate_rubric(top_stub, cat)
+        full_p = f"{base_p}\n\n{rubric}" if rubric else base_p
+        ps = str((cat.get(gt_pid) or {}).get("pack_size") or "") if gt_pid is not None and correct_choice > 0 else ""
+        return full_p, {"pack_size": ps, "choice": correct_choice}
+
+    # Select stratified multi-view SKUs across brands/categories so large catalogs (2,659 SKUs)
+    # produce a balanced ~600-example LoRA dataset without downloading 10,000 unused images.
+    multi_pids = [p for p in all_pids if len(gallery[p]) >= 2]
+    max_train_pids = 600 if use_clef_contrastive else 800
+    if len(multi_pids) > max_train_pids:
+        by_brand: dict[str, list[int]] = defaultdict(list)
+        for p in multi_pids:
+            b = str((cat.get(p) or {}).get("brand") or "Unknown")
+            by_brand[b].append(p)
+        for b_list in by_brand.values():
+            rng.shuffle(b_list)
+        selected_pids: list[int] = []
+        brand_keys = sorted(by_brand.keys())
+        round_idx = 0
+        while len(selected_pids) < max_train_pids:
+            added_any = False
+            for b in brand_keys:
+                if round_idx < len(by_brand[b]):
+                    selected_pids.append(by_brand[b][round_idx])
+                    added_any = True
+                    if len(selected_pids) >= max_train_pids:
+                        break
+            if not added_any:
+                break
+            round_idx += 1
+        train_pids = sorted(selected_pids)
+    else:
+        train_pids = multi_pids
+
+    train_specs: list[tuple[int, int, str, str, list[int], int]] = []
+    needed_paths: set[str] = set()
+    for pid in train_pids:
         views = gallery[pid]
-        if len(views) < 2:
-            continue
-        for v_idx, q_path in enumerate(views):
+        max_views_per_pid = 1 if len(train_pids) >= 400 else len(views)
+        for v_idx, q_path in enumerate(views[:max_views_per_pid]):
             pos_path = views[(v_idx + 1) % len(views)]
             distractor_pids = [p for p in all_pids if p != pid]
-            # Prefer same-category or similar-name distractors when available
-            p_cat = (cat.get(pid) or {}).get("category")
-            same_cat = [p for p in distractor_pids if (cat.get(p) or {}).get("category") == p_cat]
-            pool = same_cat if len(same_cat) >= K - 1 else distractor_pids
-            chosen_neg = rng.sample(pool, min(K - 1, len(pool)))
+            p_meta = cat.get(pid) or {}
+            p_brand = p_meta.get("brand")
+            p_cat = p_meta.get("category")
+            same_brand = [p for p in distractor_pids if p_brand and (cat.get(p) or {}).get("brand") == p_brand]
+            same_cat = [p for p in distractor_pids if p_cat and (cat.get(p) or {}).get("category") == p_cat and p not in same_brand]
+            chosen_neg: list[int] = []
+            if same_brand:
+                chosen_neg.extend(rng.sample(same_brand, min(K - 1, len(same_brand))))
+            if len(chosen_neg) < K - 1 and same_cat:
+                rem = (K - 1) - len(chosen_neg)
+                chosen_neg.extend(rng.sample(same_cat, min(rem, len(same_cat))))
+            if len(chosen_neg) < K - 1:
+                rem = (K - 1) - len(chosen_neg)
+                rest = [p for p in distractor_pids if p not in chosen_neg]
+                chosen_neg.extend(rng.sample(rest, min(rem, len(rest))))
             cand_pids = [pid, *chosen_neg]
             rng.shuffle(cand_pids)
             correct_choice = cand_pids.index(pid) + 1
-            refs = [
-                ref_imgs[pos_path if c_pid == pid else gallery[c_pid][0]]
-                for c_pid in cand_pids
-            ]
-            sheet_name = f"train_{pid}_{v_idx}.jpg"
-            sheet_path = sheets_dir / sheet_name
-            sheet(ref_imgs[q_path], refs).save(sheet_path, format="JPEG", quality=88)
-            ex = _sft_example(
-                f"{gcs_prefix}/sheets/{sheet_name}",
-                PROMPT,
-                {"choice": correct_choice},
-            )
-            train_lines.append(json.dumps(ex))
+            train_specs.append((pid, v_idx, q_path, pos_path, cand_pids, correct_choice))
+            needed_paths.add(q_path)
+            needed_paths.add(pos_path)
+            for c_pid in cand_pids:
+                needed_paths.add(gallery[c_pid][0])
 
-    # 2. Build VAL examples strictly from the `val` split (zero `test` split leakage)
-    val_lines: list[str] = []
+    # Pre-plan val specs so we know all needed gallery image paths up front
+    val_specs: list[tuple[Any, int, Any, dict[str, Any], list[int], int]] = []
     for sample in val_samples:
-        with Image.open(io.BytesIO(dataset.read_bytes(sample.path))) as im:
-            full_img = im.convert("RGB")
         for b_idx, (box, lab) in enumerate(zip(sample.boxes, sample.labels, strict=True)):
             gt_pid = lab["sku_id"]
-            q_crop = crop(full_img, box)
             distractor_pids = [p for p in all_pids if p != gt_pid]
             if not distractor_pids:
                 continue
             if gt_pid in gallery:
-                chosen_neg = rng.sample(distractor_pids, min(K - 1, len(distractor_pids)))
+                g_meta = cat.get(gt_pid) or {}
+                g_brand = g_meta.get("brand")
+                g_cat = g_meta.get("category")
+                same_brand = [p for p in distractor_pids if g_brand and (cat.get(p) or {}).get("brand") == g_brand]
+                same_cat = [p for p in distractor_pids if g_cat and (cat.get(p) or {}).get("category") == g_cat and p not in same_brand]
+                chosen_neg = []
+                if same_brand:
+                    chosen_neg.extend(rng.sample(same_brand, min(K - 1, len(same_brand))))
+                if len(chosen_neg) < K - 1 and same_cat:
+                    rem = (K - 1) - len(chosen_neg)
+                    chosen_neg.extend(rng.sample(same_cat, min(rem, len(same_cat))))
+                if len(chosen_neg) < K - 1:
+                    rem = (K - 1) - len(chosen_neg)
+                    rest = [p for p in distractor_pids if p not in chosen_neg]
+                    chosen_neg.extend(rng.sample(rest, min(rem, len(rest))))
                 cand_pids = [gt_pid, *chosen_neg]
                 rng.shuffle(cand_pids)
                 correct_choice = cand_pids.index(gt_pid) + 1
             else:
-                # Product not in gallery -> teach the model to answer 0 ("none of them")
                 cand_pids = rng.sample(distractor_pids, min(K, len(distractor_pids)))
                 correct_choice = 0
-            refs = [ref_imgs[gallery[c_pid][0]] for c_pid in cand_pids]
-            sheet_name = f"val_{Path(sample.image_id).stem}_{b_idx}.jpg"
-            sheet_path = sheets_dir / sheet_name
-            sheet(q_crop, refs).save(sheet_path, format="JPEG", quality=88)
-            ex = _sft_example(
-                f"{gcs_prefix}/sheets/{sheet_name}",
-                PROMPT,
-                {"choice": correct_choice},
-            )
-            val_lines.append(json.dumps(ex))
+            val_specs.append((sample, b_idx, box, lab, cand_pids, correct_choice))
+            for c_pid in cand_pids:
+                needed_paths.add(gallery[c_pid][0])
+
+    def _load_rgb(path_str: str) -> tuple[str, Image.Image]:
+        with Image.open(io.BytesIO(dataset.read_bytes(path_str))) as im:
+            return path_str, im.convert("RGB")
+
+    ref_imgs: dict[str, Image.Image] = {}
+    with ThreadPoolExecutor(max_workers=24) as pool:
+        for p_str, img_obj in pool.map(_load_rgb, sorted(needed_paths)):
+            ref_imgs[p_str] = img_obj
+
+    train_lines: list[str] = []
+    for pid, v_idx, q_path, pos_path, cand_pids, correct_choice in train_specs:
+        refs = [
+            ref_imgs[pos_path if c_pid == pid else gallery[c_pid][0]]
+            for c_pid in cand_pids
+        ]
+        sheet_name = f"train_{pid}_{v_idx}.jpg"
+        sheet_path = sheets_dir / sheet_name
+        sheet_fn(ref_imgs[q_path], refs).save(sheet_path, format="JPEG", quality=88)
+        prompt_str, target_dict = _make_prompt_and_target(cand_pids, correct_choice, pid)
+        ex = _sft_example(
+            f"{gcs_prefix}/sheets/{sheet_name}",
+            prompt_str,
+            target_dict,
+        )
+        train_lines.append(json.dumps(ex))
+
+    # 2. Build VAL examples strictly from the `val` split (zero `test` split leakage)
+    val_lines: list[str] = []
+    val_full_imgs: dict[str, Image.Image] = {}
+    unique_val_sample_paths = sorted({s.path for s, *_ in val_specs})
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        for p_str, img_obj in pool.map(_load_rgb, unique_val_sample_paths):
+            val_full_imgs[p_str] = img_obj
+
+    for sample, b_idx, box, lab, cand_pids, correct_choice in val_specs:
+        gt_pid = lab["sku_id"]
+        q_crop = crop(val_full_imgs[sample.path], box)
+        refs = [ref_imgs[gallery[c_pid][0]] for c_pid in cand_pids]
+        sheet_name = f"val_{Path(sample.image_id).stem}_{b_idx}.jpg"
+        sheet_path = sheets_dir / sheet_name
+        sheet_fn(q_crop, refs).save(sheet_path, format="JPEG", quality=88)
+        prompt_str, target_dict = _make_prompt_and_target(cand_pids, correct_choice, gt_pid)
+        ex = _sft_example(
+            f"{gcs_prefix}/sheets/{sheet_name}",
+            prompt_str,
+            target_dict,
+        )
+        val_lines.append(json.dumps(ex))
 
     train_file = out_p / "train.jsonl"
     val_file = out_p / "val.jsonl"

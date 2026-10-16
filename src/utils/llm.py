@@ -55,6 +55,9 @@ def _fetch_gcloud_cli_token() -> str | None:
 
 def ensure_gcloud_auth_fallback() -> None:
     """Patch `google.auth.default` so `gcloud auth login` seamlessly backs expired ADC files."""
+    os.environ.pop("GOOGLE_AUTH_WEBAUTHN_PLUGIN", None)
+    os.environ.pop("GOOGLE_API_CERTIFICATE_CONFIG", None)
+    os.environ["CLOUDSDK_CONTEXT_AWARE_USE_CLIENT_CERTIFICATE"] = "false"
     if getattr(google.auth.default, "_gcloud_fallback_wrapped", False):
         return
     orig_default = google.auth.default
@@ -62,9 +65,13 @@ def ensure_gcloud_auth_fallback() -> None:
     def _wrap_creds(creds: Any) -> Any:
         if creds is None or getattr(creds, "_gcloud_refresh_wrapped", False):
             return creds
+        if hasattr(creds, "_enable_reauth_refresh"):
+            creds._enable_reauth_refresh = False
         orig_refresh = getattr(creds, "refresh", None)
         if callable(orig_refresh):
             def _refresh(request: Any) -> None:
+                if hasattr(creds, "_enable_reauth_refresh"):
+                    creds._enable_reauth_refresh = False
                 try:
                     orig_refresh(request)
                 except Exception:

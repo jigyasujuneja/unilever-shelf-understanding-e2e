@@ -151,8 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("tune", help="build zero-leakage SFT JSONL data and launch/list Vertex AI LoRA tuning jobs")
     s.add_argument("--dataset", default="shelves",
                    choices=("shelves", "rpc", "pack", "brand", "variant", "hul_golden", "gtmerch_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos"))
-    s.add_argument("--task", default="all3", choices=("all3", "category", "brand", "variant"),
-                   help="target task when --dataset=variant")
+    s.add_argument("--task", default="all3", choices=("all3", "category", "brand", "variant", "clef_contrastive"),
+                   help="target task when --dataset=variant or 'clef_contrastive' for contact-sheet SFT")
     s.add_argument("--fields", type=int, default=5, choices=(3, 5),
                    help="HUL Golden SFT attribute count: 5 (product, brand, base_variant, packaging_type, category) or 3 (brand, packaging_type, category)")
     s.add_argument("--base-model", default="gemini-3.5-flash-lite")
@@ -192,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("-m", "--model", default="Cloudflare/clef-flash",
                    choices=("all", "Cloudflare/clef-flash", "Cloudflare/clef-27b", "Contrastive-LM/CLM-v0.1-8B"))
     s.add_argument("-d", "--dataset", default="hul_golden",
-                   choices=("hul_golden", "hul_variants", "hul_packs", "hul_brands", "hul_promos", "hul_sessions", "gtmerch_golden", "ms_json_golden"))
+                   choices=("hul_golden", "hul_variants", "hul_packs", "hul_brands", "hul_promos", "hul_sessions", "gt_hul_sessions", "gtmerch_golden", "ms_json_golden"))
     s.add_argument("--splits", nargs="+", default=["val", "test"], choices=("val", "test"))
     s.add_argument("--limit", type=int, default=1000, help="samples per split (default 1000 => 2000 across val+test)")
     s.add_argument("--seed", type=int, default=0)
@@ -319,7 +319,12 @@ def main(argv: list[str] | None = None) -> int:
         if a.pull:
             def _bg_initial_pull() -> None:
                 try:
-                    n = runner.pull(cfg["gcp"]["results"], eff_results)
+                    n = runner.pull(
+                        cfg["gcp"]["results"],
+                        eff_results,
+                        include_images=True,
+                        finalize_compute=False,
+                    )
                     if n:
                         print(f"Pulled {n} updated/pruned run(s) into {eff_results}/")
                 except Exception:

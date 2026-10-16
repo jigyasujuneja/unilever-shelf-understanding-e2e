@@ -18,7 +18,8 @@ gcp:
   ms_json_golden: gs://marketshare-datasets/derived_manifests/ms_json_golden  # v2.2 Verified clean LabelMe store shelf manifest
   hul_promos: gs://marketshare-datasets/derived_manifests/hul_promos          # v2.2 Promo & Price callout Golden subset
   hul_brands: gs://marketshare-datasets/derived_manifests/hul_brands          # v2.2 50/50 Stratified Brand & M&A benchmark
-  hul_sessions: gs://marketshare-datasets/derived_manifests/hul_sessions      # v2.2 Multi-facing store session shelf strips
+  hul_sessions: gs://marketshare-datasets/derived_manifests/hul_sessions      # v2.2 Multi-facing store session shelf strips (legacy alias)
+  gt_hul_sessions: gs://marketshare-datasets/derived_manifests/gt_hul_sessions  # v2.2 Expanded GT Store-Session shelf strips (100 test / 50 val / 150 train)
   results: gs://ul-fs-s-sandbx-16-prj-shelf-images/results        # run outputs from Cloud Run
 
 # Legacy InceptionV3 Keras classifiers for `-a cv_classify`. The .h5 files are registered in Vertex AI
@@ -85,8 +86,8 @@ models:
 tuned_models:
   gemini-3.5-flash-lite-sft:
     base_model: gemini-3.5-flash-lite
-    location: global
-    endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/ENDPOINT_ID
+    location: us
+    endpoint: projects/663686437672/locations/us/endpoints/8037166116251893760
   marketshare-hul-golden-clean-sft-euw4-gemini-3-5-flash-lite:
     base_model: gemini-3.5-flash-lite
     location: eu
