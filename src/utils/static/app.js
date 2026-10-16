@@ -173,7 +173,7 @@ const SHORT_APPROACH_NAMES = {
   clef_flash_classify: "Weight-Zoom Constrained Gemini Classifier",
   clef_standalone_classify: "Logprob-Calibrated 5-Level Classifier",
   coarse_jev_gemini: "Coarse-to-Fine Brand Router + Gemini",
-  gemini_classify: "Direct Gemini 5-Level Classifier (SFT / Base)",
+  gemini_classify: "Single-Pass Gemini 3.5 Flash-Lite 5-Attribute Classifier (Catalog-Grounded SFT / Base)",
   stitched_classify: "Stitched Multi-Crop Gemini Classifier",
   stitched_e2e: "Stitched Multi-Crop End-to-End Pipeline",
   shelf_hierarchical_clm_jev: "E2E CPU Detector + Brand-Gated Hybrid",
@@ -191,6 +191,10 @@ const SHORT_APPROACH_NAMES = {
   bay_planogram_verifier: "Display Bay & Row Planogram Auditor",
   jev_promo_verifier: "Promo Banner Zoom + Gemini Verifier",
   clm_promo_matcher: "Zero-VLM Promo Embedding Matcher",
+  cv_classify: "Legacy 3-Stage InceptionV3 Cascade (Brand → Pack → 7 Routed Variant Models)",
+  hybrid_classify: "2-Stage Hybrid Embedding Gate + Gemini 3.5 Flash-Lite Contact-Sheet Verifier (5-Attribute Cascade)",
+  hybrid_classify_sft: "2-Stage Hybrid Embedding Gate + LoRA SFT Gemini 3.5 Flash-Lite with Top-5 kNN Hints (5-Attribute Cascade)",
+  hybrid_classify_max: "2-Stage High-Precision Unanimous kNN Gate + Gemini Contact-Sheet Verifier (5-Attribute Cascade)",
 };
 
 const USE_CASES = {
@@ -242,9 +246,25 @@ function fmtShortRunId(r) {
 function fmtShortModel(r) {
   if (r.short_model) return r.short_model;
   const m = String(r.model || "");
-  if (/sft|endpoints\//i.test(m)) {
-    return /3-5-flash(?!-lite)/i.test(m) ? "gemini-3.5-flash (SFT)" : "gemini-3.5-flash-lite (SFT)";
+  const ap = String(r.approach || "");
+  if (/\.h5/i.test(m)) {
+    return /oracle_brand/i.test(m)
+      ? "InceptionV3 7-Variant + Pack (.h5, Oracle Brand)"
+      : "InceptionV3 9-Model Ensemble (.h5)";
   }
+  const isSft = /sft|endpoints\//i.test(m);
+  const vlmLbl = isSft
+    ? /3-5-flash(?!-lite)/i.test(m)
+      ? "gemini-3.5-flash (LoRA SFT)"
+      : "gemini-3.5-flash-lite (LoRA SFT)"
+    : m || "gemini-3.5-flash-lite";
+  if (ap === "hybrid_classify" || ap === "hybrid_classify_sft") {
+    return `gemini-embedding-2 (1408-d kNN) + ${vlmLbl}`;
+  }
+  if (ap === "hybrid_classify_max") {
+    return `gemini-embedding-2 (Unanimous kNN) + ${vlmLbl}`;
+  }
+  if (isSft) return vlmLbl;
   return m || "CPU / ONNX";
 }
 
@@ -271,9 +291,10 @@ function fmtSubMetricsCompact(r) {
   }
   const items = [];
   if (fa.is_hul != null) items.push(`HUL <b>${pct(fa.is_hul)}</b>`);
+  if (fa.category != null) items.push(`Cat <b>${pct(fa.category)}</b>`);
   if (fa.brand != null) items.push(`Brand <b>${pct(fa.brand)}</b>`);
   if (fa.packaging_type != null) items.push(`Pack <b>${pct(fa.packaging_type)}</b>`);
-  else if (fa.category != null) items.push(`Cat <b>${pct(fa.category)}</b>`);
+  if (fa.base_variant != null) items.push(`Var <b>${pct(fa.base_variant)}</b>`);
   if (fa.promo_type != null) items.push(`Promo <b>${pct(fa.promo_type)}</b>`);
   return items.length ? items.join(" · ") : `Recall <b>${pct(r.recall)}</b>`;
 }
@@ -626,19 +647,24 @@ async function showUseCaseBoard(useCase = "market_share") {
     )
     .join("");
 
+  const ucMeta = USE_CASES[useCase] || USE_CASES.market_share;
+
   const rowsHtml = filtered
     .map((r, idx) => {
       const tk = taskOf(r);
       const ti = infoOf(tk);
       const sc = Number(r.primary_score ?? r[ti.scoreKey] ?? 0);
-      const shortTitle = SHORT_APPROACH_NAMES[r.approach] || r.approach_title || r.approach;
+      const shortTitle =
+        (r.approach_title && r.approach_title !== r.approach ? r.approach_title : null) ||
+        SHORT_APPROACH_NAMES[r.approach] ||
+        r.approach;
       const expBadge = r.exp_id ? ` <span class="task-badge">${esc(r.exp_id)}</span>` : "";
       const isTaskWin = taskWinnerRunIds.has(r.run_id);
       const isDsWin = !isTaskWin && dsTaskWinnerRunIds.has(r.run_id);
       const winLabel = USE_CASE_TASK_WINNER_LABELS[`${useCase}__${tk}`] || `🏆 ${ti.shortLabel} Winner`;
       const dsShort = DATASETS[r.dataset]?.chipLabel || r.dataset || "Dataset";
       const winnerPill = isTaskWin
-        ? ` <span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:800;margin-left:4px;vertical-align:middle;" title="Top-performing modern architecture for ${esc(ucMeta.title)} — ${esc(ti.shortLabel)}">${esc(winLabel)}</span>`
+        ? ` <span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:800;margin-left:4px;vertical-align:middle;" title="Top-performing modern architecture for ${esc(ucMeta.label || ucMeta.title || useCase)} — ${esc(ti.shortLabel)}">${esc(winLabel)}</span>`
         : isDsWin
           ? ` <span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #10b981;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle;" title="Top-performing modern architecture on ${esc(dsShort)} (${esc(ti.shortLabel)})">🥇 #1 on ${esc(dsShort)}</span>`
           : "";
@@ -689,11 +715,12 @@ async function showUseCaseBoard(useCase = "market_share") {
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
                 <div style="max-width:820px;">
                   <div style="font-weight:700;font-size:13.5px;color:var(--text);">
-                    ${r.exp_id ? `<span class="task-badge">${esc(r.exp_id)}</span> ` : ""}${esc(r.exp_title || shortTitle)}${winnerPill}
+                    ${r.exp_id ? `<span class="task-badge">${esc(r.exp_id)}</span> ` : ""}${esc(shortTitle || r.exp_title)}${winnerPill}
                   </div>
                   <div style="font-size:12.5px;color:var(--text-secondary);margin-top:4px;">
                     ${esc(r.approach_intuition || r.exp_hypothesis || "")}
                   </div>
+                  ${r.architecture ? `<div style="font-size:12px;color:var(--text);margin-top:4px;"><b>Architecture:</b> ${esc(r.architecture)}</div>` : ""}
                   <div style="font-size:11.5px;color:var(--muted);margin-top:4px;">
                     <b>Experimenter:</b> ${esc(ownerStr)} &middot; <b>Evaluated Scale:</b> ${sampleLabel} (&plusmn;${ciHw}% 95% Wilson CI)
                   </div>
@@ -703,6 +730,7 @@ async function showUseCaseBoard(useCase = "market_share") {
                 </a>
               </div>
               <div class="level-strip">${levelPills}</div>
+              ${(r.steps || []).length ? `<div style="margin-top:6px;font-size:12px;color:var(--text-secondary);line-height:1.55;"><b>Methodology &amp; Pipeline Steps:</b><ol class="pipeline" style="margin:4px 0 0 18px;padding:0;">${(r.steps || []).map((st) => `<li>${esc(st)}</li>`).join("")}</ol></div>` : ""}
               <details style="font-size:12px;color:var(--muted);margin-top:6px;" onclick="event.stopPropagation()">
                 <summary style="cursor:pointer;font-weight:600;color:var(--accent);">Technical Parameters &amp; Full Run ID &blacktriangledown;</summary>
                 <div style="margin-top:6px;line-height:1.6;" class="mono">
@@ -717,8 +745,6 @@ async function showUseCaseBoard(useCase = "market_share") {
         </tr>`;
     })
     .join("");
-
-  const ucMeta = USE_CASES[useCase] || USE_CASES.market_share;
 
   app.innerHTML = `
     <div class="page-head">
@@ -1491,7 +1517,11 @@ async function showRun(runId) {
   const uc = useCaseOf(s);
   setActiveNav(uc);
 
-  const shortTitle = SHORT_APPROACH_NAMES[s.approach] || s.approach_title || s.architecture || s.approach;
+  const shortTitle =
+    (s.approach_title && s.approach_title !== s.approach ? s.approach_title : null) ||
+    SHORT_APPROACH_NAMES[s.approach] ||
+    s.architecture ||
+    s.approach;
   const shortId = fmtShortRunId(s);
   const shortMod = fmtShortModel(s);
   const single = task === "classification";
@@ -1615,17 +1645,26 @@ async function showRun(runId) {
       </div>
     </div>
 
-    <!-- All low-level parameters, pipeline steps & billing SKU details collapsed by default -->
+    <!-- Methodology & Architecture Section (Visible by Default) -->
+    <details class="clean-accordion" open style="margin-bottom:10px">
+      <summary>Methodology, Architecture &amp; Pipeline Steps &blacktriangledown;</summary>
+      <div class="clean-accordion-body" style="font-size:12.5px;line-height:1.6">
+        ${s.architecture ? `<div style="margin-bottom:4px"><b>Architecture:</b> ${esc(s.architecture)}</div>` : ""}
+        ${s.approach_intuition && s.approach_intuition !== s.architecture ? `<div style="margin-bottom:6px;color:var(--text-secondary)"><b>Methodology Summary:</b> ${esc(s.approach_intuition)}</div>` : ""}
+        <div><b>Pipeline Execution Steps:</b></div>
+        <ol class="pipeline" style="margin:4px 0 0 18px">${(s.steps || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ol>
+      </div>
+    </details>
+
+    <!-- All low-level parameters & billing SKU details collapsed by default -->
     <details class="clean-accordion">
-      <summary>Run Parameters, Full Run ID, Pipeline Steps &amp; GCP Telemetry &blacktriangledown;</summary>
+      <summary>Run Parameters, Full Run ID &amp; GCP Telemetry &blacktriangledown;</summary>
       <div class="clean-accordion-body" style="font-size:12.5px;line-height:1.6">
         <div><b>Full Run ID:</b> <code class="mono">${esc(s.run_id)}</code> &middot; <b>Executed At:</b> ${esc(fmtExecutedAt(s))} &middot; <b>Experiment Run Time:</b> <b>${esc(fmtRunDuration(s, images))}</b> &middot; <b>Experimenter:</b> <b>${esc(runOwner)}</b></div>
         <div><b>Full Model / Endpoint:</b> <code class="mono">${esc(s.model)}</code></div>
         <div><b>Environment &amp; Billing:</b> ${envLine(s)}</div>
         ${telemetryLinks(s.telemetry)}
         ${experiments.length ? `<div style="margin-top:6px"><b>Linked Experiment:</b> ${experiments.map((e) => `<code>${esc(e.exp_id)}</code> ${esc(e.title)}`).join(" · ")}</div>` : ""}
-        <div style="margin-top:8px"><b>Pipeline Steps:</b></div>
-        <ol class="pipeline">${(s.steps || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ol>
       </div>
     </details>
 

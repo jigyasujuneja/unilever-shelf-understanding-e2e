@@ -583,6 +583,9 @@ def run(
                 "stage2_id_acc_on_matched_boxes": round(summary["tp"] / max(1, found_sum), 4),
                 "stage2a_zero_vlm_gate_pct": round(fast_sum / max(1, pred_sum), 4),
             })
+        extra_summary = getattr(appr, "summary_extra", None)
+        if callable(extra_summary):  # approach-specific aggregates (e.g. hybrid escalation rate)
+            summary.update(extra_summary(rows, tuple(eval_fields)))
         usage = Usage(**summary["tokens"])
         g = pricing.gemini_cost(model, usage.buckets, sheet, started.date())
         on_gcs = str(data_root).startswith("gs://")
@@ -1019,19 +1022,20 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
         tk_meta = TASK_DEFINITIONS.get(tk, {})
         s["task_id"] = tk_meta.get("task_id", "TASK-RET")
         s["task_title"] = tk_meta.get("title", tk)
-        s["approach_title"] = ap_meta.get("display_name", ap)
-        s["approach_intuition"] = ap_meta.get("intuition", s.get("architecture", ""))
+        s["approach_title"] = s.get("approach_title") or ap_meta.get("display_name", ap)
+        s["approach_intuition"] = s.get("approach_intuition") or ap_meta.get("intuition", s.get("architecture", ""))
         s["primary_score"] = float(s.get("f2", 0.0) if tk in ("detection", "end_to_end") else s.get("accuracy", 0.0))
         # Human-friendly short Run ID & short Model name
         rid = str(s.get("run_id") or p.parent.name)
         parts_id = rid.split("-")
         s["short_id"] = f"#{parts_id[1]}" if len(parts_id) >= 2 and parts_id[1].isdigit() else f"#{rid[:6]}"
         raw_mod = str(s.get("model") or "")
-        if "sft" in raw_mod.lower() or "endpoints/" in raw_mod.lower():
-            base_m = "gemini-3.5-flash" if "3-5-flash" in raw_mod and "lite" not in raw_mod else "gemini-3.5-flash-lite"
-            s["short_model"] = f"{base_m} (SFT)"
-        else:
-            s["short_model"] = raw_mod
+        if not s.get("short_model"):
+            if "sft" in raw_mod.lower() or "endpoints/" in raw_mod.lower():
+                base_m = "gemini-3.5-flash" if "3-5-flash" in raw_mod and "lite" not in raw_mod else "gemini-3.5-flash-lite"
+                s["short_model"] = f"{base_m} (SFT)"
+            else:
+                s["short_model"] = raw_mod
         matched_ed = exp_by_app_ds.get((ap, ds)) or exp_by_app.get(ap)
         if matched_ed:
             raw_eid = str(matched_ed.get("experiment_id", ""))

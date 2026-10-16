@@ -34,15 +34,17 @@ class CVClassify(Approach):
         "wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5",
     )
     architecture = (
-        "Legacy InceptionV3 Keras models on Vertex AI Endpoints: "
-        "brand -> pack (category hint) -> category-routed variant (brand hint)"
+        "Phase-1 Coupled 3-Stage InceptionV3 Cascade on Vertex AI Endpoints: "
+        "Stage 1 Brand Classifier (67 classes, RGB [-1,1]) → "
+        "Stage 2 Category-Conditioned Pack Classifier (46 classes, 10-d category one-hot + BGR [0,1]) → "
+        "Stage 3 Silo-Routed Variant Classifier (7 HUL & Non-HUL variant endpoints with brand one-hot + BGR [0,1])"
     )
     steps = [
-        "Brand Vertex AI Endpoint (legacy .h5): 299x299 InceptionV3 argmax -> brand_data class -> brand",
-        "Map the predicted brand to its category and HUL ownership (main's legacy brand taxonomy)",
-        "Pack Vertex AI Endpoint (legacy .h5), with that category as its one-hot category input",
-        "Route by category and brand to the matching variant Vertex AI Endpoint (wash, skin, p5, oral, gen, nonhul_p6, nonhul_gen)",
-        "Score brand, packaging_type, category, base_variant, and product from the coupled legacy models",
+        "Stage 1 · Brand Classifier (marketshare_brand.h5): 299×299 PIL RGB NEAREST [-1, 1] InceptionV3 predicts brand (67 classes) and infers canonical category + HUL ownership hint",
+        "Stage 2 · Category-Conditioned Pack Classifier (marketshare_packtype.h5): 299×299 OpenCV BGR BILINEAR [0, 1] + 10-d category one-hot predicts packaging_type and category (46 classes)",
+        "Stage 3 · Silo Router (gt-mapping.yml): Routes by HUL ownership, category, and brand to the matching specialist endpoint among 5 HUL models (wash, skin, p5, oral, gen) and 2 Non-HUL models (nonhul_p6, nonhul_gen)",
+        "Stage 4 · Brand-Conditioned Variant Classifier (*_variant.h5): 299×299 OpenCV BGR BILINEAR [0, 1] + brand one-hot vector predicts base_variant and product (Brand__Variant); re-conditions pack model if variant category differs",
+        "Stage 5 · 5-Attribute Taxonomy Scoring: Evaluates product, brand, base_variant, packaging_type, and category against ground truth",
     ]
 
     def setup(self, config: dict, ctx: Context) -> None:
@@ -65,7 +67,14 @@ class CVClassify(Approach):
         self.resolved_model = "+".join(r.name for r in runners)
         self.model_uris = [r.source_uri for r in runners]
         chain = "brand -> pack -> routed variant" if self.with_variant else "brand -> pack"
-        self.architecture = f"Legacy InceptionV3 Keras models, {chain} ({' -> '.join(self.model_uris)})"
+        self.architecture = (
+            "Phase-1 Coupled 3-Stage InceptionV3 Cascade on Vertex AI Endpoints: "
+            "Stage 1 Brand Classifier (67 classes, RGB [-1,1]) → "
+            "Stage 2 Category-Conditioned Pack Classifier (46 classes, 10-d category one-hot + BGR [0,1]) → "
+            "Stage 3 Silo-Routed Variant Classifier (7 HUL & Non-HUL variant endpoints with brand one-hot + BGR [0,1])"
+            if self.with_variant
+            else "Phase-1 Coupled 2-Stage InceptionV3 Cascade on Vertex AI Endpoints: Stage 1 Brand Classifier → Stage 2 Category-Conditioned Pack Classifier"
+        )
         ctx.trace.step(
             f"Legacy CV models: {self.resolved_model}",
             f"{chain} for {self.dataset} ({', '.join(self.evaluated_fields)})",
