@@ -79,56 +79,122 @@ samples = dataset.sample_images(
 print(samples[0].image_id, len(samples[0].boxes), samples[0].labels[0])
 ```
 
-## 4. Team Guide: How to Set Up Experiments, Write to GCS, and Update the Dashboard
+## 4. Defining Runs, Running on Cloud Run, and Using Vertex AI
 
-### Step 1: Choose or Build an Approach (`src/approaches/`)
+### Defining Approaches and Runs
+Approaches live under `src/approaches/<use_case>/<task>/` and auto-register when imported. Each approach declares its task, dataset, model compatibility, and step-by-step trace labels.
+
 | Task ID & Name | Embedding-Only Approach (`₹0` LLM Spend) | Highest-Accuracy Hybrid Approach | Plain-English Summary |
 | :--- | :--- | :--- | :--- |
-| **`TASK-E2E` (`end_to_end`)** | `shelf_clm_standalone` (`gemini-embedding-2`) | `shelf_hierarchical_clm_jev` (`gemini-3.5-flash-lite`) | CPU ONNX shelf detector (`Class 0` bays vs `Class 1` products) + Embedding Brand Filter (`68%` early exit) + 4-crop Gemini contact sheet. |
+| **`TASK-E2E` (`end_to_end`)** | `shelf_clm_standalone` (`gemini-embedding-2`) | `shelf_hierarchical_clm_jev` / `shelf_960_softnms_e2e` (`gemini-3.5-flash-lite`) | CPU ONNX shelf detector (`Class 0` bays vs `Class 1` products) + Embedding Brand Filter + 4-crop Gemini contact sheet. |
 | **`TASK-RET` (`retrieval`)** | `clm_standalone` (`gemini-embedding-2`) | `hierarchical_clm_jev` / `l8_hul_ultimate` (`gemini-3.5-flash-lite`) | Matches each crop against the `2,745`-product gallery using embeddings and confidence filtering before optional contact-sheet verification. |
-| **`TASK-CLS` (`classification`)** | `clm_standalone_classify` (`gemini-embedding-2`) | `djev_classify` (`gemini-3.5-flash-lite`) | Predicts all 5 catalog levels (`L1` Unilever/Rival -> `L2` Cat/Pack -> `L3` Brand -> `L4` Variant -> `L5` Product) with token probability calibration. |
-| **`TASK-DET` (`detection`)** | `distilled_yolo_onnx` (`yolo11n-distilled-onnx`) | `distilled_yolo_onnx` (`yolo11n-distilled-onnx`) | Dual-head CPU ONNX detector (`<100 ms`, `₹0` token cost) trained on `gtmerch_golden` and `ms_json_golden`. |
+| **`TASK-CLS` (`classification`)** | `clm_standalone_classify` (`gemini-embedding-2`) | `clef_contrastive_metadata` / `residual_infonce_clm_jev` (`gemini-3.5-flash-lite`) | Predicts all 5 catalog levels (`L1` Unilever/Rival -> `L2` Cat/Pack -> `L3` Brand -> `L4` Variant -> `L5` Product) with token probability calibration. |
+| **`TASK-DET` (`detection`)** | `distilled_yolo_960_softnms` (`yolo11n-distilled-onnx`) | `distilled_yolo_960_softnms` (`yolo11n-distilled-onnx`) | Dual-head CPU ONNX detector (`<100 ms`, `₹0` token cost) trained on `gtmerch_golden` and `ms_json_golden`. |
 | **`TASK-PLN` (`planogram_compliance`)** | None (requires bay & gap reasoning) | `bay_planogram_verifier` (`gemini-3.5-flash-lite`) | Checks `Class 0` branded bay purity, brand-block cohesion, horizontal out-of-stock shelf gaps, and Share of Shelf (`SOS`). |
 | **`TASK-PRM` (`promo_detection`)** | `clm_promo_matcher` (`gemini-embedding-2`) | `jev_promo_verifier` (`gemini-3.5-flash-lite`) | Uses color-band cues and structured Gemini verification to read price-off bands, multipacks, and freebie callouts. |
 
-To create a new approach:
-1. Add `src/approaches/<use_case>/<task>/<your_approach>.py` subclassing `Approach` (from `src/approaches/base.py`) and register it with `@register` in `src/approaches/__init__.py`.
-2. Add its plain-English title and 1-line summary to `APPROACH_INTUITIONS` (and optionally register an Experiment ID in `EXPERIMENT_DEFINITIONS`) inside [`src/utils/experiment_matrix.py`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/utils/experiment_matrix.py).
+To define a new approach and wire it into an experiment:
+1. Create `src/approaches/<use_case>/<task>/<your_approach>.py`, subclass `Approach` (from `src/approaches/base.py`), and decorate the class with `@register`. For two-stage shelf pipelines, call `compose("your_e2e_name", DetectorClass, IdentifierClass, dataset="rpc")` instead of writing boilerplate glue code.
+2. Add the display name and plain-English description to `APPROACH_INTUITIONS` in `src/utils/experiment_matrix.py`.
+3. Add or update the experiment entry in `POC_EXPERIMENTS` inside `src/utils/experiment_matrix.py` (`experiment_id`, `priority`, `task`, `dataset`, `approaches`, and `hypothesis`) so the run binds to its Experiment ID (`EXP-01` through `EXP-33`) in the registry and UI.
+4. Check that your approach appears in the CLI catalog:
+   ```bash
+   PYTHONPATH=src .venv/bin/python -m cli list
+   ```
 
-### Step 2: Run the Experiment Directly into GCS (Zero Local Files Left Behind)
-Pass `--results gs://ul-fs-s-sandbx-16-prj-shelf-images/results` (or use `cloud-run`). `runner.py` writes `images.jsonl` and `summary.json` in a temporary directory, uploads them directly to GCS, logs the run to **Vertex AI Experiments**, and deletes the temporary directory:
+### Running on Cloud Run Jobs and Services
+`shelf-bench cloud-run` runs evaluations entirely on GCP in `us-central1` (`cloud_run` block in `config.yaml`). It archives `src/` and `config.yaml`, builds a container image via Cloud Build into Artifact Registry (`us-central1-docker.pkg.dev/<project>/cloud-run-source-deploy/shelf-bench:<tag>`), deploys a Cloud Run Job (`cloud_run.job`, default `shelf-bench`), and executes one task per `approach x tier x model`.
 
 ```bash
-# Option A: Run from terminal directly into GCS (zero local files kept)
-PYTHONPATH=src .venv/bin/python -m cli run \
-  -a shelf_hierarchical_clm_jev \
-  -m gemini-3.5-flash-lite \
-  -d gtmerch_golden \
-  --split test --limit 15 \
-  --results gs://ul-fs-s-sandbx-16-prj-shelf-images/results
-
-# Option B: Run in parallel as a Cloud Run Job (reads & writes 100% in GCS)
+# Build a fresh image on Cloud Build and run a Cloud Run Job (writes directly to GCS)
 PYTHONPATH=src .venv/bin/python -m cli cloud-run \
-  -a shelf_hierarchical_clm_jev \
+  -a clef_contrastive_metadata \
   -m gemini-3.5-flash-lite \
   -t priority \
-  --split test --limit 50
+  -d hul_golden \
+  --split test --limit 50 --workers 16 --pull
+
+# Reuse a pre-built Artifact Registry image and run concurrent jobs with --job
+PYTHONPATH=src .venv/bin/python -m cli cloud-run \
+  -a residual_infonce_clm_jev \
+  -m gemini-3.5-flash-lite \
+  -t priority \
+  -d hul_golden \
+  --split test --limit 50 --workers 16 \
+  --image us-central1-docker.pkg.dev/ul-fs-s-sandbx-16-prj/cloud-run-source-deploy/shelf-bench:latest \
+  --job shelf-bench-exp32 --pull
 ```
 
-If you run locally into `results/` during debugging, push everything to GCS and clean your local disk in one command:
-```bash
-PYTHONPATH=src .venv/bin/python -m cli qc --verify-all
-PYTHONPATH=src .venv/bin/python -m cli experiments --sync-gcp
-PYTHONPATH=src .venv/bin/python -m cli push --overwrite --prune --clean-local
-```
+Cloud Run execution details:
+- **Zero local data dependency**: Each Cloud Run task streams `rpc.json` and images from `gs://marketshare-datasets/derived_manifests/<dataset>/` and writes `summary.json` and `images.jsonl` directly to `gs://ul-fs-s-sandbx-16-prj-shelf-images/results/<run_id>/`.
+- **Exact compute billing**: Inside the container, `runner.py` records a provisional wall-clock duration. When the job completes, `runner.pull` (or `runner.finalize_remote_compute` when `--no-pull` is used) queries the Cloud Run Admin API for the task's exact start-to-completion time and re-prices vCPU and GiB-second costs from the Cloud Billing Catalog API.
+- **Deploying the web UI service**: Run `PYTHONPATH=src .venv/bin/python -m cli serve-cloud` to deploy the `/engineering` and `/exec` portals to the `shelf-ui` and `perfect-store-control-plane` Cloud Run Services (with Direct IAP enabled). Open the private service locally at `http://127.0.0.1:8083` with `PYTHONPATH=src .venv/bin/python -m cli proxy`.
 
-### Step 3: How New Results Automatically Reflect in the Dashboards (`/engineering` and `/exec`)
-1. **Automatic 30-Second GCS Polling (`PULL_TTL_S = 30.0`):** The live Cloud Run service (`https://perfect-store-control-plane-jbn2qgbina-uc.a.run.app`) runs `shelf-bench serve --pull`, which polls `gs://ul-fs-s-sandbx-16-prj-shelf-images/results` every 30 seconds.
-2. **Where Your Run Appears Automatically:**
-   - **Engineering Leaderboard (`/engineering#/board/market_share` or `#/board/merchandising`):** Appears under its Task tab (`TASK-E2E`, `TASK-RET`, etc.) and Golden Dataset chip with its Task ID badge, plain-English model summary, UTC timestamp, run duration (`wall_time_s` + `setup_seconds`), and unit-labeled cost (`₹/crop` and `₹/shelf`).
-   - **Experiments Matrix (`/engineering#/experiments`):** Binds to its matching Experiment ID (`P0-EXP-01` through `P0-EXP-19`), updates the 5-level accuracy breakdown (`L1` through `L5`), and links the Vertex AI Experiment context.
-   - **Executive Summary (`/exec`):** Updates executive KPI cards, the Audited GCP Cloud Billing SKU cost simulator, 5-level accuracy bars, and the interactive Shelf Proof modal.
-3. **Redeploying After UI or Code Changes:**
+### Working with Vertex AI Models and Endpoints
+`config.yaml` and `src/utils/llm.py` route model calls across three Vertex AI model types plus multimodal embeddings:
+
+1. **Publisher Gemini models (`global` endpoint)**: Pass `-m gemini-3.5-flash-lite`, `gemini-3.5-flash`, or `gemini-3.8-flash` with `-t priority`, `standard`, or `flex`. `src/utils/llm.py` calls the Vertex AI `generateContent` REST API on `gcp.location: global` and records the served traffic tier from response headers.
+2. **Supervised Fine-Tuning (LoRA) endpoints (`tuned_models`)**:
+   - Build zero-leakage JSONL training sets in GCS and launch a Vertex AI LoRA tuning job with `shelf-bench tune`:
+     ```bash
+     # Check existing Vertex AI tuning jobs and deployed endpoints
+     PYTHONPATH=src .venv/bin/python -m cli tune --status
+
+     # Build SFT JSONL in GCS and launch a LoRA tuning job on gemini-3.5-flash-lite
+     PYTHONPATH=src .venv/bin/python -m cli tune \
+       --dataset hul_golden --task clef_contrastive \
+       --base-model gemini-3.5-flash-lite --epochs 3 --adapter-size 4 --clean-local
+     ```
+   - Register the deployed endpoint resource name (`projects/<project_num>/locations/<region>/endpoints/<endpoint_id>`) under `tuned_models` in `config.yaml` with its `base_model` and `location`. You can then pass the short key (for example `-m gemini-3.5-flash-lite-sft`) to `run` or `cloud-run`, and `pricing.py` bills tokens at `base_model` SKU rates.
+3. **Legacy `.h5` Keras endpoints (`cv_models` and `deploy-cv-endpoints`)**:
+   - The 9 legacy InceptionV3 `.h5` classifiers (`brand`, `pack`, and 7 `*_variant` silos) live in `gs://sos-datasets/legacy-models/`.
+   - Run `shelf-bench deploy-cv-endpoints` to build the `EXTRAS=cv` container image, register all 9 `.h5` models in Vertex AI Model Registry, deploy them to Vertex AI Endpoints (`/api/cv/predict`), and print their endpoint IDs for `config.yaml` (`cv_models.<role>_endpoint`):
+     ```bash
+     PYTHONPATH=src .venv/bin/python -m cli deploy-cv-endpoints
+     ```
+   - To evaluate `cv_classify` on Cloud Run, either call the deployed Vertex AI Endpoints or pass `--brand-model`, `--pack-model`, and `--*-variant-model` with `gs://.../*.h5` URIs on an `EXTRAS=cv` image so `KerasClassifier` runs the `.h5` weights directly inside the Cloud Run Job.
+4. **Multimodal embeddings (`gemini-embedding-2`)**: `src/utils/embeddings.py` calls the regional Vertex AI `:predict` endpoint (`us-central1`) to embed reference gallery views and shelf crops, caching vectors in GCS so repeat runs only embed unseen crops.
+
+### Experiment Registry and Cloud Trace Verification
+Every official run must appear in `experiments_registry.json`, Vertex AI Experiments, and Cloud Trace.
+
+1. **How Cloud Trace and Cloud Logging work (`src/utils/telemetry.py`)**:
+   - When `telemetry.enabled: true` is set in `config.yaml` (default, overridable via `SHELF_BENCH_TELEMETRY=0`), `runner.py` initializes OpenTelemetry with `CloudTraceSpanExporter` and `CloudLoggingHandler`.
+   - Every run emits one root trace (`run <run_id>`) with child spans for each image (`image <image_id>`) and grandchildren for every model call (`gemini <model>` and `embedding <model>`).
+   - Each span writes a structured JSON entry to Cloud Logging (`shelf_bench.telemetry`) carrying the same `trace_id` and `span_id`, plus prompts, responses, token counts by bucket, traffic tier served, retry errors, and USD/INR cost.
+   - `summary.json` saves direct console links in `summary["telemetry"]["trace_url"]` and `summary["telemetry"]["logs_url"]`. The service account needs `roles/cloudtrace.agent` and `roles/logging.logWriter`.
+2. **How Vertex AI Experiments and `experiments_registry.json` sync (`src/utils/vertex_experiments.py`)**:
+   - Every Cloud Run task automatically logs a `system.ExperimentRun` context under `shelf-bench-l8-experiments` in Vertex AI Metadata Store (`us-central1`) and writes the console URL to `summary["vertex_experiment"]["console_url"]` (disable with `SHELF_BENCH_VERTEX_EXPERIMENTS=0`).
+   - Run `cli experiments --sync-gcp` to rebuild `results/experiments_registry.json`, backfill any missing Vertex AI Experiment runs, and register the 6 model families in Vertex AI Model Registry:
+     ```bash
+     PYTHONPATH=src .venv/bin/python -m cli experiments --sync-gcp
+     PYTHONPATH=src .venv/bin/python -m cli qc --verify-all
+     PYTHONPATH=src .venv/bin/python -m cli push --overwrite
+     ```
+3. **One-command check for registry and trace completeness**:
+   Run this check before opening a PR to confirm every official run in `results/` has a Cloud Run platform tag, a Cloud Trace URL, and a Vertex AI Experiment link:
+   ```bash
+   python3 -c '
+   import glob, json
+   for p in sorted(glob.glob("results/*/summary.json")):
+       s = json.load(open(p))
+       if not str(s.get("dataset", "")).startswith(("hul_", "gtmerch", "ms_json")):
+           continue
+       plat = (s.get("environment") or {}).get("platform")
+       trace = (s.get("telemetry") or {}).get("trace_url")
+       vexp = (s.get("vertex_experiment") or {}).get("console_url")
+       if plat != "cloud-run" or not trace or not vexp:
+           print("MISSING:", s.get("run_id"), "platform=", plat, "trace=", bool(trace), "vertex_exp=", bool(vexp))
+   '
+   ```
+
+### How New Results Automatically Reflect in the Dashboards (`/engineering` and `/exec`)
+1. **Automatic 30-second GCS polling (`PULL_TTL_S = 30.0`)**: The live Cloud Run service (`https://perfect-store-control-plane-jbn2qgbina-uc.a.run.app`) runs `shelf-bench serve --pull`, which polls `gs://ul-fs-s-sandbx-16-prj-shelf-images/results` every 30 seconds.
+2. **Where your run appears**:
+   - **Engineering Leaderboard (`/engineering#/board/market_share` or `#/board/merchandising`)**: Appears under its Task tab (`TASK-E2E`, `TASK-RET`, etc.) and Golden Dataset chip with its Task ID badge, plain-English model summary, UTC timestamp, run duration (`wall_time_s` + `setup_seconds`), and unit-labeled cost (`₹/crop` and `₹/shelf`).
+   - **Experiments Matrix (`/engineering#/experiments`)**: Binds to its matching Experiment ID (`EXP-01` through `EXP-33`), updates the 5-level accuracy breakdown (`L1` through `L5`), and links the Vertex AI Experiment context and Cloud Trace URL.
+   - **Executive Summary (`/exec`)**: Updates executive KPI cards, the Audited GCP Cloud Billing SKU cost simulator, 5-level accuracy bars, and the interactive Shelf Proof modal.
+3. **Redeploying after UI or code changes**:
    ```bash
    PYTHONPATH=src .venv/bin/python -m cli serve-cloud
    ```
