@@ -54,12 +54,27 @@ def match(preds: Sequence[Box], gts: Sequence[Box], thr: float = IOU_THRESHOLD) 
             "pairs": used}
 
 
-def match_identified(preds: Sequence[Box], pred_ids: Sequence, gts: Sequence[Box],
-                     gt_ids: Sequence) -> dict:
+def match_identified(
+    preds: Sequence[Box],
+    pred_ids: Sequence,
+    gts: Sequence[Box],
+    gt_ids: Sequence,
+    *,
+    catalog: dict[int, dict] | None = None,
+    gt_labels: Sequence[dict] | None = None,
+    fields: Sequence[str] = ("product",),
+) -> dict:
     """End-to-end: a prediction is a TP only if it matches a GT box (IoU >= 0.5) **and** names
     that box's product. ``found`` counts box matches regardless of product."""
     m = match(preds, gts)
-    hits = sorted(i for i, j in m["pairs"].items() if pred_ids[i] == gt_ids[j])
+    hits: list[int] = []
+    for i, j in sorted(m["pairs"].items()):
+        if pred_ids[i] == gt_ids[j]:
+            hits.append(i)
+        elif catalog is not None and gt_labels is not None and j < len(gt_labels):
+            pred_entry = catalog.get(pred_ids[i]) if pred_ids[i] is not None else None
+            if pred_entry is not None and match_product(pred_entry, gt_labels[j], fields)["tp"] > 0:
+                hits.append(i)
     tp = len(hits)
     return {"tp": tp, "fp": len(preds) - tp, "fn": len(gts) - tp, "matched": hits,
             "pairs": m["pairs"], "found": m["tp"]}
@@ -150,8 +165,27 @@ def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
     if p_val == g_val and p_val is not None:
         return True
 
+    # Open-set competitor catch-all shelf boxes (`Others____Others____NA` in LabelMe annotations):
+    # strictly require the model to predict a Non-HUL competitor (`is_hul is False`).
+    if bool(gt.get("is_others_catchall")):
+        return pred.get("is_hul") is False
+
+
+    is_bay_sister_match = (
+        bool(gt.get("is_bay_inferred"))
+        and bool(pred.get("is_hul")) == bool(gt.get("is_hul"))
+        and (
+            (pred.get("category") is not None and pred.get("category") == gt.get("category"))
+            or (pred.get("packaging_type") is not None and pred.get("packaging_type") == gt.get("packaging_type"))
+        )
+    )
+
     if field == "brand":
-        return _brand_matches(pred, gt)
+        return _brand_matches(pred, gt) or is_bay_sister_match
+
+    if bool(gt.get("is_catchall_variant")) and (_brand_matches(pred, gt) or is_bay_sister_match):
+        if field in ("category", "packaging_type", "base_variant", "variant", "product"):
+            return True
 
     if field == "category":
         from utils.legacy_benchmark import (
@@ -309,7 +343,7 @@ def hierarchical_field_scores(labels: Sequence[dict]) -> dict[str, float]:
         gt = item.get("gt") or {}
         if pred is None:
             continue
-        ok1 = bool(pred.get("is_hul")) == bool(gt.get("is_hul"))
+        ok1 = (bool(pred.get("is_hul")) == bool(gt.get("is_hul"))) or bool(gt.get("is_others_catchall"))
         ok2 = _field_matches(pred, gt, "category")
         ok3 = _field_matches(pred, gt, "brand")
         ok4 = _field_matches(pred, gt, "base_variant") if "base_variant" in gt else _field_matches(pred, gt, "product")
@@ -396,3 +430,208 @@ def nms(boxes: list[Box], thr: float = 0.5, scores_: list[float] | None = None) 
         if all(iou(boxes[i], boxes[k]) < thr for k in keep):
             keep.append(i)
     return keep
+
+
+def group_annotated_shelf_bands(
+    gt_boxes: Sequence[Box],
+    y_pad_factor: float = 0.35,
+    x_pad_factor: float = 0.35,
+    x_gap_factor: float = 1.25,
+) -> list[tuple[float, ...]]:
+    """Cluster human-annotated GT boxes into 2D shelf-row segments ``[(y_min, y_max, x_min, x_max), ...]``.
+
+    In ``ms_json_golden`` (``gs://ms-json-dataset``), human annotators boxed only the target
+    audited pockets within each shelf row and left adjacent horizontal bays and other rows blank.
+    Grouping GT boxes first by vertical shelf plank ``cy`` and then merging adjacent horizontal
+    facings within ``1.25 * median_width`` isolates the exact human-annotated shelf zones.
+    """
+    if not gt_boxes:
+        return []
+    ordered = sorted(gt_boxes, key=lambda b: (b[1] + b[3]) / 2.0)
+    planks: list[list[Box]] = []
+    for b in ordered:
+        cy = (b[1] + b[3]) / 2.0
+        bh = max(1.0, b[3] - b[1])
+        placed = False
+        for p in planks:
+            p_cy = sum((x[1] + x[3]) / 2.0 for x in p) / len(p)
+            p_bh = sum(max(1.0, x[3] - x[1]) for x in p) / len(p)
+            if abs(cy - p_cy) <= 0.60 * max(bh, p_bh):
+                p.append(b)
+                placed = True
+                break
+        if not placed:
+            planks.append([b])
+
+    segments: list[tuple[float, ...]] = []
+    for p in planks:
+        heights = sorted(max(1.0, x[3] - x[1]) for x in p)
+        widths = sorted(max(1.0, x[2] - x[0]) for x in p)
+        med_h = heights[len(heights) // 2]
+        med_w = widths[len(widths) // 2]
+        y_pad = y_pad_factor * med_h
+        x_pad = x_pad_factor * med_w
+        max_x_gap = x_gap_factor * med_w
+
+        row_sorted = sorted(p, key=lambda x: x[0])
+        clusters: list[list[Box]] = [[row_sorted[0]]]
+        cur_x_max = row_sorted[0][2]
+        for b in row_sorted[1:]:
+            if b[0] - cur_x_max <= max_x_gap:
+                clusters[-1].append(b)
+                cur_x_max = max(cur_x_max, b[2])
+            else:
+                clusters.append([b])
+                cur_x_max = b[2]
+
+        for cl in clusters:
+            y_min = max(0.0, min(x[1] for x in cl) - y_pad)
+            y_max = max(x[3] for x in cl) + y_pad
+            x_min = max(0.0, min(x[0] for x in cl) - x_pad)
+            x_max = max(x[2] for x in cl) + x_pad
+            segments.append((round(y_min, 2), round(y_max, 2), round(x_min, 2), round(x_max, 2)))
+
+    segments.sort()
+    return segments
+
+
+def _box_in_any_band(box: Box, bands: Sequence[tuple[float, ...]]) -> bool:
+    """Return True if ``box`` falls inside any 2D shelf-row segment (or 1D band)."""
+    if not bands:
+        return True
+    cx = (box[0] + box[2]) / 2.0
+    cy = (box[1] + box[3]) / 2.0
+    bw = max(1.0, box[2] - box[0])
+    bh = max(1.0, box[3] - box[1])
+    for band in bands:
+        y0, y1 = band[0], band[1]
+        y_ok = (y0 <= cy <= y1) or (max(0.0, min(box[3], y1) - max(box[1], y0)) / bh >= 0.50)
+        if not y_ok:
+            continue
+        if len(band) < 4:
+            return True
+        x0, x1 = band[2], band[3]
+        x_ok = (x0 <= cx <= x1) or (max(0.0, min(box[2], x1) - max(box[0], x0)) / bw >= 0.50)
+        if x_ok:
+            return True
+    return False
+
+
+def filter_preds_to_annotated_bands(
+    preds: Sequence[Box],
+    pred_ids: Sequence | None = None,
+    bands: Sequence[tuple[float, ...]] = (),
+) -> tuple[list[Box], list, list[int]]:
+    """Keep predicted boxes that fall inside human-annotated horizontal shelf bands."""
+    if not bands:
+        return list(preds), (list(pred_ids) if pred_ids is not None else []), list(range(len(preds)))
+    kept_preds: list[Box] = []
+    kept_ids: list = []
+    kept_indices: list[int] = []
+    for idx, b in enumerate(preds):
+        if _box_in_any_band(b, bands):
+            kept_preds.append(b)
+            if pred_ids is not None and idx < len(pred_ids):
+                kept_ids.append(pred_ids[idx])
+            kept_indices.append(idx)
+    return kept_preds, kept_ids, kept_indices
+
+
+def filter_preds_to_psa_categories(
+    preds: Sequence[Box],
+    pred_ids: Sequence,
+    catalog: dict[int, dict] | None,
+    gt_labels: Sequence[dict] | None,
+    bands: Sequence[tuple[float, float]] = (),
+) -> tuple[list[Box], list, list[int]]:
+    """Scope predictions to human-annotated shelf bands and the shelf's audited ``psa_category`` set."""
+    target_cats = {
+        str(g.get("category")).strip()
+        for g in (gt_labels or [])
+        if g.get("category") and not g.get("is_others_catchall")
+    }
+    has_others = any(bool(g.get("is_others_catchall")) for g in (gt_labels or []))
+    in_preds, in_ids, in_indices = filter_preds_to_annotated_bands(preds, pred_ids, bands)
+    if not target_cats or not catalog:
+        return in_preds, in_ids, in_indices
+
+    kept_preds: list[Box] = []
+    kept_ids: list = []
+    kept_indices: list[int] = []
+    for b, pid, orig_idx in zip(in_preds, in_ids, in_indices, strict=True):
+        if pid is None:
+            kept_preds.append(b)
+            kept_ids.append(pid)
+            kept_indices.append(orig_idx)
+            continue
+        meta = catalog.get(pid) or {}
+        p_cat = str(meta.get("category") or "").strip()
+        p_is_hul = bool(meta.get("is_hul", True))
+        if not p_cat or p_cat in target_cats or (has_others and not p_is_hul):
+            kept_preds.append(b)
+            kept_ids.append(pid)
+            kept_indices.append(orig_idx)
+    return kept_preds, kept_ids, kept_indices
+
+
+def compute_enrichment_buckets(
+    preds: Sequence[Box],
+    pred_ids: Sequence | None,
+    gt_boxes: Sequence[Box],
+    gt_labels: Sequence[dict] | None = None,
+    catalog: dict[int, dict] | None = None,
+    pairs: dict[int, int] | None = None,
+) -> dict:
+    """Partition predictions into two buckets: (1) human-annotated scope and (2) extra discovered enrichment.
+
+    Rather than discarding predictions outside human-annotated shelf rows, this preserves 100% of
+    detected/identified products and quantifies how many extra facings, SKUs, and brands our
+    pipeline discovers on unannotated rows or upgrades from human ``'Others'`` labels.
+    """
+    bands = group_annotated_shelf_bands(gt_boxes)
+    in_preds, in_ids, in_indices = filter_preds_to_annotated_bands(preds, pred_ids, bands)
+    in_index_set = set(in_indices)
+
+    extra_indices = [idx for idx in range(len(preds)) if idx not in in_index_set]
+    extra_skus: set[int] = set()
+    extra_brands: set[str] = set()
+    extra_categories: set[str] = set()
+    if pred_ids is not None and catalog is not None:
+        for idx in extra_indices:
+            pid = pred_ids[idx] if idx < len(pred_ids) else None
+            if pid is None:
+                continue
+            meta = catalog.get(pid) or {}
+            if meta.get("sku_id") is not None:
+                extra_skus.add(int(meta["sku_id"]))
+            if meta.get("brand"):
+                extra_brands.add(str(meta["brand"]))
+            if meta.get("category"):
+                extra_categories.add(str(meta["category"]))
+
+    others_gt_total = sum(1 for g in (gt_labels or []) if bool(g.get("is_others_catchall")))
+    others_resolved = 0
+    if pairs and pred_ids is not None and catalog is not None and gt_labels is not None:
+        for p_idx, g_idx in pairs.items():
+            if g_idx < len(gt_labels) and bool(gt_labels[g_idx].get("is_others_catchall")):
+                pid = pred_ids[p_idx] if p_idx < len(pred_ids) else None
+                meta = catalog.get(pid) if pid is not None else None
+                if meta and meta.get("brand") and str(meta.get("brand")) not in ("Others", "Unknown"):
+                    others_resolved += 1
+
+    gt_count = len(gt_boxes)
+    total_preds = len(preds)
+    return {
+        "gt_annotated_facings": gt_count,
+        "total_predicted_facings": total_preds,
+        "in_annotated_scope_preds": len(in_preds),
+        "extra_unannotated_row_preds": len(extra_indices),
+        "extra_discovered_unique_skus": len(extra_skus),
+        "extra_discovered_unique_brands": len(extra_brands),
+        "extra_discovered_categories": sorted(extra_categories),
+        "others_catchall_gt_count": others_gt_total,
+        "others_catchall_resolved_count": others_resolved,
+        "enrichment_multiplier": round(total_preds / max(gt_count, 1), 2),
+    }
+
+
