@@ -235,6 +235,10 @@ def sample_images(
     loaded = (load_products(str(root)) if name == "products" else
               load_rpc(split, str(root)) if name in RPC_FORMAT_SETS else load_split(split, str(root)))
     all_samples = sorted(loaded.values(), key=lambda s: s.image_id)
+    if name in RPC_FORMAT_SETS and split == "test" and (limit <= 0 or limit > len(all_samples)):
+        loaded_5k = load_rpc("test_5k", str(root))
+        if len(loaded_5k) > len(all_samples):
+            all_samples = sorted(loaded_5k.values(), key=lambda s: s.image_id)
     if not str(root).startswith("gs://"):
         all_samples = [s for s in all_samples if str(s.path).startswith("gs://") or Path(s.path).exists()]
     if limit <= 0 or limit >= len(all_samples):

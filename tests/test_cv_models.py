@@ -358,6 +358,35 @@ def test_coupled_3_stage_pipeline_with_variant_endpoints(monkeypatch):
         "packaging_type": "Tube",
         "category": "Oral_Care",
     }
-    assert sess.calls[2][1]["instances"][0]["role"] == "oral_variant"
-    assert sess.calls[2][1]["instances"][0]["brand"] == "Pepsodent"
+    assert len(sess.calls) == 3
+    assert sess.calls[0][1]["instances"][0]["role"] == "brand"
+    assert sess.calls[1][1]["instances"][0]["role"] == "oral_variant"
+    assert sess.calls[1][1]["instances"][0]["brand"] == "Pepsodent"
+    assert sess.calls[2][1]["instances"][0]["role"] == "pack"
+    assert sess.calls[2][1]["instances"][0]["category"] == "Oral_Care"
+
+    # Multi-category umbrella brand (Dove -> skin_variant -> Hair__Shampoo -> pack receives "Hair" once)
+    skin_cfg = {
+        "cv_models": {
+            **CFG["cv_models"],
+            "skin_variant_model": "gs://b/skin_variant/skin_variant.h5",
+            "skin_variant_endpoint": "projects/p/locations/us-central1/endpoints/555",
+        }
+    }
+    sess2 = FakeSession({
+        "111": (200, {"predictions": [{"raw_class": "ADove", "confidence": 0.97}]}),
+        "555": (200, {"predictions": [{"raw_class": "HUL__Hair__Shampoo__Dove__Daily_Shine", "confidence": 0.93}]}),
+        "222": (200, {"predictions": [{"raw_class": "Hair__Bottle", "confidence": 0.90}]}),
+    })
+    monkeypatch.setattr(cv_models, "_session", lambda: sess2)
+    a2 = CVClassify()
+    a2.dataset, a2.evaluated_fields = "hul_golden", None
+    a2.setup(skin_cfg, Context(model="keras-h5"))
+    pred2 = a2.identify(Image.new("RGB", (64, 64)), Context(model="keras-h5"))
+    assert pred2["brand"] == "Dove"
+    assert pred2["category"] == "Hair_Care"
+    assert pred2["packaging_type"] == "Bottle"
+    assert [c[1]["instances"][0]["role"] for c in sess2.calls] == ["brand", "skin_variant", "pack"]
+    assert sess2.calls[1][1]["instances"][0]["brand"] == "Dove"
+    assert sess2.calls[2][1]["instances"][0]["category"] == "Hair"
 
