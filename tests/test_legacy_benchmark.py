@@ -269,3 +269,118 @@ def test_export_and_load_splits_jsonl(tmp_path: Path) -> None:
         loaded = load_split_jsonl(p, catalog=dataset.rpc_catalog(str(tmp_path)), root=str(tmp_path))
         assert f"{sp}_00000.jpg" in loaded
         assert loaded[f"{sp}_00000.jpg"].labels[0]["brand"] == "Dove"
+
+
+def test_dynamic_methodology_across_all_approach_families() -> None:
+    """Verify dynamic methodology synthesis introspects each approach class and never stamps JEV/CLM/CLEF onto V-JEPA 2 or DINOv3."""
+    import runner
+
+    # 1. Meta V-JEPA 2 (Run #115616 from user screenshot) — must reflect V-JEPA 2 ViT-L/16 + CosFace head, NEVER JEV/CLM/CLEF/gemini-embedding-2
+    vjepa_sum = {
+        "run_id": "1017-115616-vjepa2_hierarchical-vjepa2_vitl16-hul_golden-test",
+        "short_id": "#115616",
+        "approach": "vjepa2_hierarchical",
+        "model": "vjepa2_vitl16",
+        "dataset": "hul_golden",
+        "split": "test",
+        "task": "classification",
+        "images": 1000,
+        "eval_samples": 1000,
+        "accuracy": 0.453,
+        "three_attr_accuracy": 0.659,
+        "p50_latency_s": 0.08,
+        "cost_per_image_inr": 0.0002,
+        "field_accuracy": {
+            "is_hul": 0.870,
+            "category": 0.875,
+            "brand": 0.779,
+            "packaging_type": 0.858,
+            "base_variant": 0.506,
+            "product": 0.453,
+        },
+    }
+    m_vjepa = runner.synthesize_dynamic_methodology(vjepa_sum)
+    assert m_vjepa["generated_dynamically"] is True
+    assert "V-JEPA 2" in m_vjepa["summary_header"]
+    assert "Standalone Open-Source Vision Backbone" in m_vjepa["origin_badge"]
+    assert "Meta V-JEPA 2" in m_vjepa["origin_badge"]
+    assert "CLM Gate: 68.0% 0-VLM" not in m_vjepa["summary_header"]
+    assert "CLEF Zoom Sheet" not in m_vjepa["summary_header"]
+    joined_vjepa_bullets = " ".join(m_vjepa["bullets"])
+    assert "V-JEPA 2" in joined_vjepa_bullets or "1024-d" in joined_vjepa_bullets
+    assert "JEV (Joint Embedding + VLM Cascade" not in joined_vjepa_bullets
+    assert "45.3% 5-Attr Exact SKU" in joined_vjepa_bullets
+
+    # 2. Meta DINOv3 — must reflect DINOv3 + CosFace head
+    dino_sum = {
+        "run_id": "1015-081200-dinov3_classify-dinov3_vits16-hul_golden-test",
+        "short_id": "#081200",
+        "approach": "dinov3_classify",
+        "model": "dinov3_vits16",
+        "dataset": "hul_golden",
+        "split": "test",
+        "task": "classification",
+        "images": 1000,
+        "accuracy": 0.562,
+        "p50_latency_s": 0.05,
+        "cost_per_image_inr": 0.0001,
+    }
+    m_dino = runner.synthesize_dynamic_methodology(dino_sum)
+    assert "Standalone Open-Source Vision Backbone" in m_dino["origin_badge"]
+    assert "Meta DINOv3" in m_dino["origin_badge"]
+    assert "CLM Gate" not in m_dino["summary_header"]
+
+    # 3. In-House Vertex AI Hybrid Cascade (clef_contrastive_metadata) — must expand internal slugs and include terminology_note + live trace stages
+    clef_sum = {
+        "run_id": "1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k",
+        "short_id": "#092456",
+        "approach": "clef_contrastive_metadata",
+        "model": "gemini-3.5-flash-lite",
+        "dataset": "hul_golden",
+        "split": "test_5k",
+        "task": "retrieval",
+        "images": 5000,
+        "eval_samples": 5000,
+        "accuracy": 0.823,
+        "three_attr_accuracy": 0.916,
+        "p50_latency_s": 1.38,
+        "cost_per_image_inr": 0.044,
+    }
+    sample_rows = [
+        {
+            "image_id": "test_00001.jpg",
+            "trace": [
+                {"step": "embed_and_gate", "calls": 1, "ms": 75.0, "detail": "gate_accepted=True"},
+            ],
+        },
+        {
+            "image_id": "test_00002.jpg",
+            "trace": [
+                {"step": "embed_and_gate", "calls": 1, "ms": 80.0, "detail": "gate_accepted=False"},
+                {"step": "contact_sheet_verify", "calls": 1, "ms": 940.0, "detail": "top-6 sheet"},
+            ],
+        },
+    ]
+    m_clef = runner.generate_run_methodology(clef_sum, sample_rows)
+    assert "100% In-House Google Cloud Vertex AI Pipeline" in m_clef["origin_badge"]
+    assert "Base CLEF Visual Contact-Sheet Technique" in m_clef["origin_badge"]
+    assert "Multi-Crop Visual Contact Sheet" in m_clef["summary_header"]
+    assert "Disambiguating Base Technique vs. Decision Model" in m_clef["terminology_note"]
+    assert "CLM-v0.1-8B" in m_clef["terminology_note"]
+    assert "Cloudflare/clef-flash" in m_clef["terminology_note"]
+    assert any("Live Execution Trace Telemetry" in b for b in m_clef["bullets"])
+
+    # 4. Decision Model Variant (clef_flash_decision & jev_laya_zscore_lid) — must explicitly distinguish Decision Model from Base Technique
+    m_clef_dec = runner.synthesize_dynamic_methodology({
+        "run_id": "1015-120000-clef_flash_decision-gemini-3.5-flash-lite-hul_golden-test",
+        "approach": "clef_flash_decision",
+        "model": "gemini-3.5-flash-lite",
+        "dataset": "hul_golden",
+        "split": "test",
+        "task": "retrieval",
+        "accuracy": 0.812,
+    })
+    assert "CLEF Decision Model Variant" in m_clef_dec["origin_badge"]
+    assert "Distinct from Base CLEF Multi-Crop Contact-Sheet Prompt" in m_clef_dec["origin_badge"]
+
+

@@ -164,33 +164,42 @@ const SHORT_APPROACH_NAMES = {
   yolo_sku110k_onnx: "Single-Pass ONNX CPU Shelf Detector",
   single_pass_dedup: "Single-Pass Gemini Full-Shelf Detector",
   tiled_dedup: "Tiled Multi-Pass Gemini Detector",
-  clm_standalone: "Zero-VLM Contrastive Embedding Matcher",
+  clm_standalone: "Base CLM Retrieval: Zero-VLM gemini-embedding-2 + CIELAB Color Scorer",
   embedding_retrieval: "Nearest-Neighbor Embedding Baseline",
-  hierarchical_clm_jev: "2-Stage Brand-Gated Hybrid + Contact Sheet",
-  outlet_scoped_clm_jev: "Store-Segment Scoped Hybrid Matcher",
-  tube_midband_jev: "Cylindrical Tube Unwarp + Variant Strip",
-  row_neighbor_prior_jev: "1D Shelf-Row Neighbor Category Prior",
-  shelf_height_size_prior_jev: "Shelf-Plank Relative Height Size Prior",
-  session_overlap_dedup_jev: "Store-Visit Session Overlap Deduplicator",
+  hierarchical_clm_jev: "Base JEV Cascade: 2-Stage Brand-Gated Embedding + Contact Sheet",
+  outlet_scoped_clm_jev: "Store-Segment Scoped Hybrid Matcher (EXP-20)",
+  tube_midband_jev: "Cylindrical Tube Unwarp + Variant Strip (EXP-21)",
+  row_neighbor_prior_jev: "1D Shelf-Row Neighbor Category Prior (EXP-22)",
+  shelf_height_size_prior_jev: "Shelf-Plank Relative Height Size Prior (EXP-23)",
+  session_overlap_dedup_jev: "Store-Visit Session Overlap Deduplicator (EXP-25)",
   l8_hul_ultimate: "Lighting-Corrected + Taper + Contact Sheet",
-  clef_standalone: "Bottom-Band Weight Zoom + Logprob Verifier",
-  clef_contrastive_metadata: "Contrastive Metadata Zoom Contact Sheet (EXP-28)",
-  sft_clm_clef_cascade: "Gemini 3.5-Lite SFT + CLM + CLEF Cascade (EXP-29 / EXP-33)",
-  residual_infonce_clm_jev: "Residual InfoNCE Adapter + CLM-JEV (EXP-32)",
+  clef_standalone: "Base CLEF Prompt: Bottom-Band Weight Zoom + Contact Sheet",
+  clef_contrastive_metadata: "Base CLEF Prompt: Multi-Crop Contact Sheet + Catalog Diff Headers (EXP-28)",
+  sft_clm_clef_cascade: "Gemini 3.5-Lite LoRA SFT + Embedding Gate + Contact Sheet (EXP-29 / EXP-33)",
+  residual_infonce_clm_jev: "Residual InfoNCE Adapter + Calibrated Embedding Cascade (EXP-32)",
   dinov3_classify: "Meta DINOv3 + CosFace SFT Classifier",
-  cv_classify: "Legacy 9-Model Chained .h5 Baseline",
-  hybrid_classify: "CLM 5-Attr Vote Gate + CLEF Contact Sheet",
-  hybrid_classify_sft: "CLM 5-Attr Vote Gate + Gemini 3.5-Lite LoRA SFT",
-  hybrid_classify_max: "Max-Accuracy CLM + CLEF 5-Attr Cascade",
-  clef_flash_decision: "Contrastive Shortlist + Single-Token Flash",
-  jev_laya_zscore_lid: "Z-Score & Manifold Gate + Contact Sheet",
+  dinov3_hierarchical_sft: "Meta DINOv3 ViT-S/16 + 5-Level Taxonomic CosFace SFT (EXP-25)",
+  dinov3_triage: "Meta DINOv3 Confidence Triage + Selective Gemini 3.5 Flash-Lite",
+  dinov3_vitb_hierarchical: "Meta DINOv3 ViT-B/16 (1,536-D) + 5-Level Taxonomic CosFace SFT",
+  dinov3_vitb_detr_hierarchical: "E2E ONNX RT-DETR + Meta DINOv3 ViT-B/16 Hierarchical SFT",
+  ijepa_hierarchical: "Meta I-JEPA ViT-H/14 (2,560-D) + 5-Level Taxonomic CosFace SFT",
+  vjepa2_hierarchical: "Meta V-JEPA 2 Self-Supervised Vision Backbone + SFT Hierarchical Head",
+  hf_clm_v01_8b_gpu: "Open-Source HuggingFace Contrastive-LM/CLM-v0.1-8B (EXP-26)",
+  hf_clef_flash_gpu: "Open-Source HuggingFace Cloudflare/clef-flash (EXP-26)",
+  hf_clm_clef_cascade_gpu: "Open-Source HuggingFace CLM-8B -> clef-flash Cascade (EXP-26)",
+  cv_classify: "Legacy 3-Stage InceptionV3 Cascade (Brand → Pack → 7 Routed Variant Models)",
+  hybrid_classify: "2-Stage Hybrid Embedding Gate + Gemini 3.5 Flash-Lite Contact-Sheet Verifier (5-Attribute Cascade)",
+  hybrid_classify_sft: "2-Stage Hybrid Embedding Gate + LoRA SFT Gemini 3.5 Flash-Lite with Top-5 kNN Hints (5-Attribute Cascade)",
+  hybrid_classify_max: "2-Stage High-Precision Unanimous kNN Gate + Gemini Contact-Sheet Verifier (5-Attribute Cascade)",
+  clef_flash_decision: "CLEF Decision Model: Single-Token Logprob Decision Head on Shortlist",
+  jev_laya_zscore_lid: "JEV Decision Model: Statistical Z-Score & LID Routing Gate + Contact Sheet",
   cold_start_lid_discovery: "Zero-Shot New-Launch SKU Discovery",
-  djev_classify: "Photometric 5-Level Taxonomy Classifier",
-  clm_standalone_classify: "Zero-VLM Prototype 5-Level Classifier",
-  clm_classify: "Hybrid Embedding + Gemini 5-Level Classifier",
-  clef_flash_classify: "Weight-Zoom Constrained Gemini Classifier",
-  clef_standalone_classify: "Logprob-Calibrated 5-Level Classifier",
-  coarse_jev_gemini: "Coarse-to-Fine Brand Router + Gemini",
+  djev_classify: "JEV Decision Model: Photometric 5-Level Taxonomy Decision Classifier",
+  clm_standalone_classify: "CLM Decision Model: Zero-VLM Lidstone-Prior 5-Level Taxonomy Classifier",
+  clm_classify: "CLM Decision Model: Hybrid kNN Gate + Gemini 5-Level Taxonomy Classifier",
+  clef_flash_classify: "CLEF Decision Model: Weight-Zoom Single-Token 5-Level Classifier",
+  clef_standalone_classify: "CLEF Decision Model: Logprob-Calibrated 5-Level Taxonomy Classifier",
+  coarse_jev_gemini: "JEV Decision Model: Coarse-to-Fine Brand Router + Gemini Classifier",
   gemini_classify: "Single-Pass Gemini 3.5 Flash-Lite 5-Attribute Classifier (Catalog-Grounded SFT / Base)",
   stitched_classify: "Stitched Multi-Crop Gemini Classifier",
   stitched_e2e: "Stitched Multi-Crop End-to-End Pipeline",
@@ -205,14 +214,10 @@ const SHORT_APPROACH_NAMES = {
   detect_l8_ultimate: "E2E Gemini Detector + Lighting Verifier",
   shelf_onnx_jev_laya: "E2E CPU Detector + Contrastive Contact Sheet",
   detect_onnx_jev_laya: "Single-Model ONNX + Contact Sheet",
-  shelf_clm_standalone: "Zero-VLM E2E Shelf Pipeline (ONNX + CLM)",
+  shelf_clm_standalone: "Zero-VLM E2E Shelf Pipeline (ONNX + Calibrated gemini-embedding-2)",
   bay_planogram_verifier: "Display Bay & Row Planogram Auditor",
   jev_promo_verifier: "Promo Banner Zoom + Gemini Verifier",
   clm_promo_matcher: "Zero-VLM Promo Embedding Matcher",
-  cv_classify: "Legacy 3-Stage InceptionV3 Cascade (Brand → Pack → 7 Routed Variant Models)",
-  hybrid_classify: "2-Stage Hybrid Embedding Gate + Gemini 3.5 Flash-Lite Contact-Sheet Verifier (5-Attribute Cascade)",
-  hybrid_classify_sft: "2-Stage Hybrid Embedding Gate + LoRA SFT Gemini 3.5 Flash-Lite with Top-5 kNN Hints (5-Attribute Cascade)",
-  hybrid_classify_max: "2-Stage High-Precision Unanimous kNN Gate + Gemini Contact-Sheet Verifier (5-Attribute Cascade)",
 };
 
 const USE_CASES = {
@@ -345,10 +350,10 @@ function fmtShortModel(r) {
       : "gemini-3.5-flash-lite (LoRA SFT)"
     : m || "gemini-3.5-flash-lite";
   if (ap === "hybrid_classify" || ap === "hybrid_classify_sft") {
-    return `gemini-embedding-2 (1408-d kNN) + ${vlmLbl}`;
+    return `gemini-embedding-2 (3,072-D kNN) + ${vlmLbl}`;
   }
   if (ap === "hybrid_classify_max") {
-    return `gemini-embedding-2 (Unanimous kNN) + ${vlmLbl}`;
+    return `gemini-embedding-2 (3,072-D Unanimous kNN) + ${vlmLbl}`;
   }
   if (isSft) return vlmLbl;
   return m || "CPU / ONNX";
@@ -584,183 +589,84 @@ function renderPhase1BaselineFootnote() {
 }
 
 // ============================================================================
-// PER-RUN DYNAMIC METHODOLOGY & COMPONENT ARCHITECTURE GENERATOR
+// PER-RUN DYNAMIC METHODOLOGY & COMPONENT ARCHITECTURE RENDERER
 // ============================================================================
 function buildRunMethodologyHtml(r, isAccordion = false) {
+  const m = r.methodology && typeof r.methodology === "object" ? r.methodology : null;
   const ap = String(r.approach || "");
   const mod = String(r.model || "");
   const ds = String(r.dataset || "hul_golden");
   const tk = taskOf(r);
   const shortId = fmtShortRunId(r);
-  const fa = r.field_accuracy || {};
-  const ha = r.hierarchical_accuracy || {};
-  const l1 = ha.level1_is_hul ?? fa.is_hul;
-  const l2 = ha.level2_category ?? fa.category;
-  const l3 = ha.level3_brand ?? fa.brand;
-  const l4 = ha.level4_base_variant ?? fa.base_variant ?? fa.product;
-  const l5 = ha.level5_packaging_type ?? fa.packaging_type;
-  const threeAttr = ha.compound_brand_category_pack ?? r.three_attr_accuracy;
-  const fiveAttr = ha.compound_all_5_levels ?? r.five_attr_compound_accuracy;
-  const gateVal = r.stage2a_zero_vlm_gate_pct != null ? Number(r.stage2a_zero_vlm_gate_pct) : null;
-  const gateStr = gateVal != null ? `${gateVal.toFixed(1)}%` : "68.0%";
-  const escPctStr = gateVal != null ? `${Math.max(0, 100 - gateVal).toFixed(1)}%` : "32.0%";
   const steps = Array.isArray(r.steps) && r.steps.length ? r.steps : [];
-  const stepFlow = steps.length ? steps.map((st, idx) => `<b>Step ${idx + 1}:</b> ${esc(st)}`).join(" &rarr; ") : esc(r.architecture || ap);
-
-  const metricsSummaryBits = [];
-  if (tk === "detection" || r.f2 != null && tk === "end_to_end") {
-    if (r.f2 != null) metricsSummaryBits.push(`<b>${pct(r.f2)} Det F2</b> (${pct(r.precision)} Prec / ${pct(r.recall)} Rec)`);
-  }
-  if (fiveAttr != null && fiveAttr > 0) metricsSummaryBits.push(`<b>${pct(fiveAttr)} 5-Attr Exact SKU</b>`);
-  if (threeAttr != null && threeAttr > 0) metricsSummaryBits.push(`<b>${pct(threeAttr)} 3-Attr (Brd+Cat+Pack)</b>`);
-  if (l1 != null) metricsSummaryBits.push(`${pct(l1)} L1 HUL`);
-  if (l3 != null) metricsSummaryBits.push(`${pct(l3)} Brand`);
-  if (l4 != null && l4 > 0) metricsSummaryBits.push(`${pct(l4)} Variant`);
-  if (l5 != null && l5 > 0) metricsSummaryBits.push(`${pct(l5)} Pack`);
-  const perfSummary = metricsSummaryBits.length ? metricsSummaryBits.join(" &middot; ") : `<b>${pct(primaryScore(r))} primary score</b>`;
 
   let summaryHeader = "";
+  let originBadge = "";
   let flowHtml = "";
   let bullets = [];
+  let terminologyNote = "";
 
-  if (ap === "cv_classify") {
-    const isOracle = mod.includes("oracle_brand") || String(r.run_id || "").includes("oracle_brand");
-    const hasVariants = mod.includes("variant.h5");
-    summaryHeader = isOracle
-      ? `Run ${esc(shortId)} Methodology (<code>cv_classify + oracle_brand</code>): <code>100% Oracle GT Brand &amp; Category</code> &rarr; <code>marketshare_packtype.h5</code> &rarr; <code>7 Category-Routed Variant .h5 Endpoints</code>`
-      : hasVariants
-      ? `Run ${esc(shortId)} Methodology (<code>cv_classify</code> 9-Model Chain): <code>marketshare_brand.h5</code> &rarr; <code>marketshare_packtype.h5</code> &rarr; <code>7 Category-Routed Variant .h5 Endpoints</code>`
-      : `Run ${esc(shortId)} Methodology (<code>cv_classify</code> 2-Model Chain): <code>marketshare_brand.h5</code> (941-Class Softmax) &rarr; <code>marketshare_packtype.h5</code> (46-Class Softmax)`;
-    flowHtml = `<b>Legacy Coupled Vertex AI Endpoint Chain on <code>${esc(ds)}</code>:</b> ${stepFlow}. <i>(No <code>gemini-embedding-2</code>, JEV, CLM, or CLEF components are used in this legacy baseline.)</i>`;
-    bullets = [
-      `<b>Stage 1 — ${isOracle ? "Oracle Ground-Truth Brand Override (<code>+oracle_brand</code>)" : "Brand Classification (<code>marketshare_brand.h5</code>)"}:</b> ${
-        isOracle
-          ? `Replaces Step 1's <code>marketshare_brand.h5</code> prediction with the <b>100% Ground-Truth Brand (${pct(l3)}) and Category (${pct(l2)})</b> from <code>gt</code> so downstream pack and variant <code>.h5</code> models receive error-free one-hot conditioning vectors.`
-          : `Runs a <code>299x299</code> InceptionV3 941-way softmax over <code>brand_data</code> classes on Vertex AI Endpoint (achieving <b>${pct(l3)} Brand</b> and <b>${pct(l1)} L1 HUL</b> after brand-to-owner mapping), then maps the predicted brand to its 10-category one-hot hint via <code>gt-mapping.yml</code>.`
-      }`,
-      `<b>Stage 2 — Category-Conditioned Pack Classification (<code>marketshare_packtype.h5</code>):</b> Takes the <code>299x299</code> BGR crop alongside the 10-d one-hot category vector from Stage 1 to predict a 46-way <code>Category__PackType</code> softmax class. On this run (<code>${esc(shortId)}</code>), pack accuracy reaches <b>${pct(l5)}</b>, which bottlenecks <b>3-Attr (<code>Brd+Cat+Pack</code>) at ${pct(threeAttr)}</b>.`,
-      hasVariants
-        ? `<b>Stage 3 — Category &amp; Brand Routed Variant Models (7 <code>.h5</code> Endpoints):</b> Routes each crop by its category and brand to one of 7 specialized InceptionV3 endpoints (<code>wash_variant.h5</code>, <code>skin_variant.h5</code>, <code>p5_variant.h5</code>, <code>oral_variant.h5</code>, <code>gen_variant.h5</code>, <code>nonhul_p6_variant.h5</code>, <code>nonhul_gen_variant.h5</code>) with a brand one-hot conditioning vector, achieving <b>${pct(l4)} Variant</b> and <b>${pct(fiveAttr)} 5-Attr Exact SKU</b> at <b>${sec(r.p50_latency_s)}</b>.`
-        : `<b>Stage 3 — No Variant Heads Attached (3-Attribute Scope Only):</b> Evaluates only <code>brand</code>, <code>category</code>, and <code>packaging_type</code> without routing to the 7 downstream variant <code>.h5</code> endpoints, yielding <b>${pct(threeAttr)} 3-Attr Exact</b> (${pct(l3)} Brand &times; ${pct(l2)} Cat &times; ${pct(l5)} Pack).`,
-    ];
-  } else if (ap === "dinov3_classify") {
-    summaryHeader = `Run ${esc(shortId)} Methodology (<code>dinov3_classify</code>): <code>Meta ${esc(mod)} Vision Backbone</code> &rarr; <code>SFT Residual Bottleneck + CosFace Margin Head</code> (0 VLM Calls)`;
-    flowHtml = `<b>Pure Self-Supervised Vision Foundation Model + SFT Classifier on <code>${esc(ds)}</code>:</b> ${stepFlow}. <i>(100% Zero-VLM execution: replaces <code>gemini-embedding-2</code>/JEV/CLEF with local/Vertex PyTorch <code>${esc(mod)}</code> inference.)</i>`;
-    bullets = [
-      `<b>Component 1 — Frozen Meta DINOv3 Patch Backbone (<code>torchhub://facebookresearch/dinov3:${esc(mod)}</code>):</b> Applies Shades-of-Gray photometric de-glare, resizes each product crop to <code>224x224</code>, and extracts L2-normalized Gram-anchored dense patch representations (<code>384-D</code>) capturing container silhouette, color layout, and coarse brand logo geometry in <code>0 VLM calls</code>.`,
-      `<b>Component 2 — Supervised Fine-Tuned (SFT) Residual Bottleneck &amp; CosFace Head:</b> Trains a 2-layer Residual Bottleneck projection + CosFace angular margin classifier head (with AdamW warmup + cosine annealing) exclusively on the deduplicated <code>${esc(ds)}</code> <code>train</code> split and registers the checkpoint in Vertex AI Model Registry.`,
-      `<b>Component 3 — Run ${esc(shortId)} Outcome vs. JEV/CLM/CLEF Hybrid:</b> Achieves ${perfSummary} at <b>${sec(r.p50_latency_s)}</b> and <b>${inr(r.cost_per_image_inr)}/crop</b>. Excels on coarse visual container/category attributes (<b>${pct(l2)} Cat</b>, <b>${pct(l5)} Pack</b>), while trailing our <code>gemini-embedding-2</code> + <code>CLEF</code> zoom-strip pipeline on fine-grained sister variants (<b>${pct(l4)} Variant</b> vs. <b>88.0%</b>) because <code>224x224</code> visual patches blur small net-weight and sub-variant text.`,
-    ];
-  } else if (tk === "detection") {
-    const isOnnx = ap.includes("onnx") || ap.includes("yolo") || mod.includes("onnx") || mod.includes("yolo");
-    const isSoftNms = ap.includes("softnms") || ap.includes("960");
-    const isTiled = ap === "tiled_dedup";
-    summaryHeader = `Run ${esc(shortId)} Methodology (<code>${esc(ap)}</code>): Stage-1 Shelf Localization via <code>${esc(mod)}</code> on <code>${esc(ds)}</code>`;
-    flowHtml = `<b>Stage-1 Bounding-Box Detection Pipeline:</b> ${stepFlow}. <i>(Evaluates pure Stage-1 localization on <code>${esc(ds)}</code> prior to Stage-2 JEV/CLM/CLEF SKU identification.)</i>`;
-    bullets = [
-      isOnnx
-        ? `<b>Component 1 — ${isSoftNms ? "960px High-Res Dual-Pass" : "640px Single-Pass"} CPU ONNX Detector (<code>${esc(mod)}</code>):</b> Runs the distilled Vertex AI ONNX Runtime graph on CPU (<code>$0</code> LLM token cost)${isSoftNms ? ", combining a full-frame pass with a 960px-effective dense sachet sub-window pass to detect micro-facings (<15g hanging sachets and stacked soap bars)" : " to localize Class 0 Display Bays and Class 1 Product Packs in ~55–80ms"}.`
-        : `<b>Component 1 — ${isTiled ? "2-Tile Half-Height Seam-Stitched" : "Single-Pass Full-Shelf"} VLM Detector (<code>${esc(mod)}</code>):</b> ${isTiled ? "Splits tall retail shelves into top and bottom overlapping tiles (2048px max side), runs one VLM detection call per tile, and stitches boxes split across the horizontal seam (>=80% shared width)." : "Downscales the full shelf photo to 2048px max side and executes a single structured VLM localization call to return all visible product bounding boxes."}`,
-      `<b>Component 2 — ${isSoftNms ? "Aspect-Aware Gaussian Soft-NMS (<code>sigma=0.55</code>)" : "Container Suppression &amp; Geometric Depth De-Ghosting"}:</b> ${isSoftNms ? "Replaces hard IoU suppression with aspect-aware Gaussian score decay (<code>sigma=0.55</code>), preventing adjacent overlapping pouches on hanging Kirana strips from suppressing each other." : "Drops outer display-bay/tray container boxes that enclose smaller product boxes (<65% area ratio), applies IoU=0.58 NMS, and removes recessed back-row depth ghosts."} `,
-      `<b>Component 3 — Run ${esc(shortId)} Localization Result on <code>${esc(ds)}</code>:</b> Achieves <b>${pct(r.f2)} Detection F2</b> (<b>${pct(r.precision)} Precision</b>, <b>${pct(r.recall)} Recall</b>) across <b>${getRunSampleCount(r).toLocaleString()} evaluated units</b> at <b>${sec(r.p50_latency_s)} p50 latency</b> and <b>${inr(r.cost_per_image_inr)}</b>.`,
-    ];
-  } else if (ap === "clm_standalone" || ap === "shelf_clm_standalone" || ap === "clm_promo_matcher") {
-    const isE2E = ap === "shelf_clm_standalone";
-    summaryHeader = `Run ${esc(shortId)} Methodology (<code>${esc(ap)}</code>): ${isE2E ? "<code>Stage 1 ONNX YOLO</code> &rarr; " : ""}100% Zero-VLM <code>CLM InfoNCE</code> Vector Retrieval (<code>${esc(mod)}</code>, 0 VLM Calls)`;
-    flowHtml = `<b>100% System-1 Zero-VLM Pipeline on <code>${esc(ds)}</code>:</b> ${stepFlow}.`;
-    bullets = [
-      `<b>JEV (Bypassed — 100% Zero-VLM Mode):</b> In <code>${esc(ap)}</code>, the Stage-2B VLM leg of JEV is intentionally disabled (<b>100.0% of crops exit in System 1 with 0 VLM calls</b> and <code>$0</code> generative token cost)${isE2E ? " after Stage-1 <code>yolo11n-distilled-onnx</code> localizes all shelf boxes on CPU" : ""}.`,
-      `<b>CLM (Contrastive-LM InfoNCE Multi-View + Centroid + CIELAB Scorer):</b> Applies Shades-of-Gray (<code>p=6</code>) color constancy, embeds each crop with <code>gemini-embedding-2</code> (<code>3,072-D</code>), and ranks all 2,659 catalog SKUs by joint InfoNCE energy <code>E(x, y_k) = 0.78 * max_view_cos + 0.22 * centroid_cos + 0.035 * (s_cielab - 0.5)</code> with inverse temperature <code>1/tau = 28.0</code>.`,
-      `<b>CLEF (Not Invoked — Pure Vector Baseline Result):</b> Because CLEF contact sheets are bypassed, every prediction is the direct <code>argmax</code> of the CLM InfoNCE posterior, achieving ${perfSummary} on <code>${esc(ds)}</code> in <b>${sec(r.p50_latency_s)}</b> at <b>${inr(r.cost_per_image_inr)}</b>.`,
-    ];
-  } else if (ap === "clef_standalone" || ap === "clef_standalone_classify" || ap === "clef_flash_classify" || ap === "clef_flash_decision" || ap === "detect_clef_flash") {
-    summaryHeader = `Run ${esc(shortId)} Methodology (<code>${esc(ap)}</code>): <code>gemini-embedding-2</code> Top-K Shortlist &rarr; <code>CLEF Multi-Zone Zoom Contact-Sheet Head</code> (<code>${esc(mod)}</code>)`;
-    flowHtml = `<b>CLEF Constrained Visual-Diff Pipeline on <code>${esc(ds)}</code>:</b> ${stepFlow}.`;
-    bullets = [
-      `<b>JEV (Candidate Shortlisting via <code>gemini-embedding-2</code>):</b> Embeds the query crop with <code>gemini-embedding-2</code> (<code>3,072-D</code>) against the multi-view reference gallery (plus same-brand sister SKUs) to retrieve the Top-5 to Top-10 closest visual candidates.`,
-      `<b>CLM (Margin Gate ${ap.startsWith("clef_standalone") ? "Disabled — 100% Escalation to CLEF" : "Coarse Family Triage"}):</b> ${
-        ap.startsWith("clef_standalone")
-          ? `In <code>${esc(ap)}</code>, the Stage-2A CLM fast-exit gate is disabled or set to sister-strict mode (<b>${gateStr} 0-VLM bypass</b>) so that every lookalike query is verified by the CLEF visual contact sheet.`
-          : `Uses CLM cosine + CIELAB family triage to accept unambiguous single-variant brands in 0 VLM calls (${gateStr} 0-VLM gate) while routing all multi-variant sister candidates to CLEF.`
-      }`,
-      `<b>CLEF (3-Panel Zoom-Strip Contact Sheet + Constrained Logprob Readout on <code>${esc(mod)}</code>):</b> Renders a composite canvas pairing the query crop (Full Pack + Middle-30% Variant Banner + Bottom-30% Pack-Size Zoom Strip) against the candidate reference packshots, using <code>${esc(mod)}</code> constrained token logprob readout <code>P_token(k | x)</code> to achieve ${perfSummary} at <b>${sec(r.p50_latency_s)}</b> and <b>${inr(r.cost_per_image_inr)}</b>.`,
-    ];
-  } else if (ap === "gemini_classify" || ap === "hybrid_classify_sft" || ap === "hybrid_classify_max") {
-    const isStandaloneSft = ap === "gemini_classify";
-    summaryHeader = isStandaloneSft
-      ? `Run ${esc(shortId)} Methodology (<code>gemini_classify</code>): Direct Single-Crop Fine-Tuned VLM Call (<code>${esc(mod)}</code>, No CLM Gate)`
-      : `Run ${esc(shortId)} Methodology (<code>${esc(ap)}</code>): <code>System-1 CLM kNN Gate</code> &rarr; <code>System-2 Fine-Tuned VLM / Contact Sheet</code> (<code>${esc(mod)}</code>)`;
-    flowHtml = `<b>${isStandaloneSft ? "Direct Supervised Fine-Tuned (SFT) VLM Classification" : "Plug-In CLM + Fine-Tuned SFT Hybrid Cascade"} on <code>${esc(ds)}</code>:</b> ${stepFlow}.`;
-    bullets = [
-      `<b>JEV (${isStandaloneSft ? "Bypassed — Direct VLM Call on Every Crop" : "Joint Embedding + SFT VLM Cascade"}):</b> ${
-        isStandaloneSft
-          ? `Calls the fine-tuned Vertex AI LoRA SFT endpoint (<code>${esc(mod)}</code>) directly on 100% of crops without <code>gemini-embedding-2</code> retrieval or visual gallery anchors.`
-          : `Embeds each crop once with <code>gemini-embedding-2</code> against the deduplicated <code>train</code> reference gallery and couples it with <code>${esc(mod)}</code> only when top-5 kNN neighbors disagree.`
-      }`,
-      `<b>CLM (${isStandaloneSft ? "Not Used — 0% Fast Gate" : "kNN Similarity-Weighted Agreement &amp; Energy Gate"}):</b> ${
-        isStandaloneSft
-          ? `Without a CLM embedding gate or kNN candidate hints, the standalone SFT model must memorize all 934 brands and 16 pack types purely inside LoRA weights, bottlenecking Pack accuracy at <b>${pct(l5)}</b>.`
-          : `Computes CLM InfoNCE similarity-weighted votes across the top-5 gallery neighbors; when all target attributes agree with high top-1 energy, the crop exits in 0 LLM calls. Ambiguous crops are escalated with CLM's top-5 kNN candidate hints.`
-      }`,
-      `<b>CLEF / SFT Decision Head Outcome on <code>${esc(ds)}</code>:</b> Achieves ${perfSummary} at <b>${sec(r.p50_latency_s)}</b> and <b>${inr(r.cost_per_image_inr)}</b>${isStandaloneSft ? " (demonstrating why coupling SFT with our CLM gate in #121755 lifts 3-Attr Exact by +21.4 pp from 69.7% to 91.1%)." : "."}`,
-    ];
-  } else if (ap === "embedding_retrieval" || ap === "embedding_text_match" || ap === "hierarchy_classify" || ap === "tiered_hybrid" || ap === "djev_classify" || ap === "detect_retrieve" || ap === "detect_tiered" || ap === "shelf_detect_retrieve" || ap === "shelf_detect_tiered") {
-    summaryHeader = `Run ${esc(shortId)} Methodology (<code>${esc(ap)}</code>): Early / Ablation Baseline on <code>${esc(ds)}</code> (<code>${esc(mod)}</code>)`;
-    flowHtml = `<b>Ablation / Progression Pipeline on <code>${esc(ds)}</code>:</b> ${stepFlow}.`;
-    bullets = [
-      `<b>JEV Architecture Role in <code>${esc(ap)}</code>:</b> ${
-        ap.includes("embedding_") || ap.includes("retrieve")
-          ? `Tests pure 1-stage cosine nearest-neighbor matching (<code>${esc(mod)}</code>) without a VLM verification stage (0 VLM calls).`
-          : ap === "hierarchy_classify"
-          ? `Tests a 2-call text-only VLM prompt chain (Call 1 reads brand/size from the image; Call 2 picks from a filtered text list) without visual gallery embeddings.`
-          : `Couples embedding retrieval with a raw un-calibrated cosine threshold (<code>cos &ge; 0.70, margin &ge; 0.045</code>) before falling back to <code>${esc(mod)}</code>.`
-      }`,
-      `<b>Why Fixed-Threshold / Un-Calibrated Gating Underperforms CLM:</b> Without CLM's Shades-of-Gray white balance, inner-80% CIELAB foreground descriptors, and local Z-score + LID hubness normalization, raw cosine margins suffer from cross-store lighting drift and sister-SKU crowding.`,
-      `<b>Run ${esc(shortId)} Ablation Result on <code>${esc(ds)}</code>:</b> Achieves ${perfSummary} at <b>${sec(r.p50_latency_s)}</b> and <b>${inr(r.cost_per_image_inr)}</b>, motivating our full <b>JEV + CLM + CLEF</b> production architecture.`,
-    ];
+  if (m && m.summary_header && Array.isArray(m.bullets) && m.bullets.length) {
+    summaryHeader = m.summary_header;
+    originBadge = m.origin_badge || "";
+    flowHtml = m.flow_html || "";
+    bullets = m.bullets;
+    terminologyNote = m.terminology_note || "";
   } else {
-    // Full JEV + CLM + CLEF family (including EXP-20..25 specialized variants, l8_hul_ultimate, shelf_960_softnms_e2e, shelf_hierarchical_clm_jev, bay_planogram_verifier, jev_promo_verifier, etc.)
-    let expSpecificNote = "";
-    if (ap.includes("960_softnms")) {
-      expSpecificNote = "Incorporates <b>EXP-24 960px High-Res + Aspect-Aware Gaussian Soft-NMS (<code>sigma=0.55</code>)</b> in Stage 1 to preserve overlapping hanging sachet strips before Stage-2 identification.";
-    } else if (ap.includes("hierarchical_clm_jev")) {
-      expSpecificNote = "Incorporates <b>2-Stage Hierarchical Multi-Prototype Brand-Gating</b> (locking into top-2 candidate brands via <code>(brand, category, packaging_type)</code> sub-centroids in 0 VLM calls) before running variant-level CLM + CLEF.";
-    } else if (ap.includes("outlet_scoped")) {
-      expSpecificNote = "Incorporates <b>EXP-20 Store-Format Catalog Scoping (<code>ol_segment</code>)</b>, narrowing the 2,659 national catalog to the ~300 active SKUs stocked in that store format before CLM scoring.";
-    } else if (ap.includes("tube_midband")) {
-      expSpecificNote = "Incorporates <b>EXP-21 Cylindrical Squeeze-Tube Unwarping &amp; Middle-30% Variant Banner Zoom Strip</b> to prevent horizontal foreshortening on curved tubes and bottles.";
-    } else if (ap.includes("row_neighbor")) {
-      expSpecificNote = "Incorporates <b>EXP-22 1D Horizontal Shelf-Plank Neighbor Category Prior</b>, using high-confidence neighbors on the same shelf row to disambiguate multi-category umbrella brands (<i>Dove, Vaseline, Ayush, Pond's</i>).";
-    } else if (ap.includes("height_size_prior")) {
-      expSpecificNote = "Incorporates <b>EXP-23 Shelf-Plank Relative Box-Height Ratio (<code>r_h = h_box / mean(h_row)</code>)</b> to separate 50g vs. 100g vs. 250g pack sizes that share identical artwork.";
-    } else if (ap.includes("session_overlap")) {
-      expSpecificNote = "Incorporates <b>EXP-25 Multi-Photo Border-Column Homography Overlap Deduplication</b> across sequential aisle captures (matching left-border <code>x &lt; 0.12W</code> against prior photo right-border <code>x &gt; 0.88W</code>) so boundary facings are never double-counted.";
-    } else if (ap.includes("cold_start_lid")) {
-      expSpecificNote = "Incorporates <b>Cold-Start Open-World LID Novelty Gating</b> (with 30% of visual gallery embeddings held out), flagging out-of-gallery launches when <code>LID &gt; 9.5</code> and routing them to zero-shot catalog text descriptors.";
-    } else if (ap === "bay_planogram_verifier") {
-      expSpecificNote = "Incorporates <b>Spatial Row-Clustered Planogram Verification</b> (top-to-bottom shelf row clustering, left-to-right brand-block purity, horizontal OOS void detection <code>gap &ge; 1.5x median width</code>, and Class 0 display-bay contamination audit).";
-    } else if (ap === "jev_promo_verifier") {
-      expSpecificNote = "Incorporates <b>Promotional Callout Band Verification</b> on <code>hul_promos</code>, isolating price-off and multipack headers (<code>B1G1, B3G1, PO2, Rs 5, Rs 10, Free Gift</code>) from base SKU artwork.";
-    }
+    // Purely dynamic fallback from the run's recorded architecture, steps, and metrics (zero hardcoded approach templates)
+    const fa = r.field_accuracy || {};
+    const ha = r.hierarchical_accuracy || {};
+    const l1 = ha.level1_is_hul ?? fa.is_hul;
+    const l3 = ha.level3_brand ?? fa.brand;
+    const l4 = ha.level4_base_variant ?? fa.base_variant ?? fa.product;
+    const l5 = ha.level5_packaging_type ?? fa.packaging_type;
+    const threeAttr = ha.compound_brand_category_pack ?? r.three_attr_accuracy;
+    const fiveAttr = ha.compound_all_5_levels ?? r.five_attr_compound_accuracy;
 
-    summaryHeader = `Run ${esc(shortId)} Methodology (<code>${esc(ap)}</code>): <code>gemini-embedding-2</code> (CLM Gate: ${gateStr} 0-VLM) &rarr; <code>${esc(mod)}</code> (CLEF Zoom Sheet)`;
-    flowHtml = `<b>Run-Specific Component Pipeline on <code>${esc(ds)}</code>:</b> ${stepFlow}. ${expSpecificNote}`;
-    bullets = [
-      `<b>JEV (Joint Embedding + VLM Cascade in <code>${esc(ap)}</code>):</b> Normalizes each crop with Shades-of-Gray (<code>p=6</code>) global shelf illuminant + inner-80% foreground CIELAB descriptors, embeds it once via <code>gemini-embedding-2</code> (<code>3,072-D</code>), and resolves <b>${gateStr} of crops in System 1 at 0 VLM calls</b> while escalating only the remaining <b>${escPctStr}</b> lookalike sister crops to <code>${esc(mod)}</code>.`,
-      `<b>CLM (Contrastive-LM InfoNCE &amp; Z-Score/LID Margin Gate):</b> Scores candidates via joint InfoNCE energy <code>E(x, y_k) = 0.78 * max_cos + 0.22 * centroid_cos + 0.035 * (s_lab - 0.5)</code> (<code>1/tau = 28.0</code>) and local Z-score margin <code>z_margin = (s_1 - s_2) / sigma_topK</code> with Local Intrinsic Dimensionality (<code>LID</code>) hubness gating; visually identical uncertain facings on the same shelf are clustered via medoid deduplication (<code>cos &ge; 0.92</code>) before escalation.`,
-      `<b>CLEF (Contrastive Lookalike Escalation Funnel on <code>${esc(mod)}</code>):</b> Packs each escalated medoid crop (plus <code>2x</code> Lanczos zoom strips of its Top-25% brand header, Middle-30% variant sub-banner, and Bottom-30% net-weight band) into a <code>2x2</code> contact sheet alongside the Top-5 candidate studio packshots, achieving ${perfSummary} on <code>${esc(ds)}</code> at <b>${sec(r.p50_latency_s)}</b> and <b>${inr(r.cost_per_image_inr)}</b>.`,
-    ];
+    const metricsSummaryBits = [];
+    if (tk === "detection" || (r.f2 != null && tk === "end_to_end")) {
+      if (r.f2 != null) metricsSummaryBits.push(`<b>${pct(r.f2)} Det F2</b> (${pct(r.precision)} Prec / ${pct(r.recall)} Rec)`);
+    }
+    if (fiveAttr != null && fiveAttr > 0) metricsSummaryBits.push(`<b>${pct(fiveAttr)} 5-Attr Exact SKU</b>`);
+    if (threeAttr != null && threeAttr > 0) metricsSummaryBits.push(`<b>${pct(threeAttr)} 3-Attr (Brd+Cat+Pack)</b>`);
+    if (l1 != null) metricsSummaryBits.push(`${pct(l1)} L1 HUL`);
+    if (l3 != null) metricsSummaryBits.push(`${pct(l3)} Brand`);
+    if (l4 != null && l4 > 0) metricsSummaryBits.push(`${pct(l4)} Variant`);
+    if (l5 != null && l5 > 0) metricsSummaryBits.push(`${pct(l5)} Pack`);
+    const perfSummary = metricsSummaryBits.length ? metricsSummaryBits.join(" &middot; ") : `<b>${pct(primaryScore(r))} primary score</b>`;
+
+    const displayName = SHORT_APPROACH_NAMES[ap] || r.approach_title || ap;
+    const archText = String(r.architecture || displayName);
+    const stepFlow = steps.length
+      ? steps.map((st, idx) => `<b>Step ${idx + 1}:</b> ${esc(st)}`).join(" &rarr; ")
+      : esc(archText);
+
+    summaryHeader = `Run ${esc(shortId)} Methodology — ${esc(displayName)} (<code>${esc(ap)}</code> on <code>${esc(mod)}</code>)`;
+    flowHtml = `<b>Recorded Execution Pipeline on <code>${esc(ds)}</code> (<code>${esc(r.split || "test")}</code>):</b> ${stepFlow}.`;
+    bullets = steps.map((st, idx) => `<b>Step ${idx + 1}:</b> ${esc(st)}`);
+    bullets.push(
+      `<b>Measured Run ${esc(shortId)} Outcome on <code>${esc(ds)}</code>:</b> Achieves ${perfSummary} across <b>${getRunSampleCount(r).toLocaleString()} evaluated units</b> at <b>${sec(r.p50_latency_s)} p50 latency</b> and <b>${inr(r.cost_per_image_inr)}</b>.`
+    );
   }
+
+  const badgeBlock = originBadge
+    ? `<div style="margin-bottom:6px;"><span style="display:inline-block;background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;">${esc(originBadge)}</span></div>`
+    : "";
+  const termBlock = terminologyNote
+    ? `<div style="margin-top:8px;padding:6px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:11.5px;color:#92400e;line-height:1.45;">${terminologyNote}</div>`
+    : "";
 
   if (isAccordion) {
     return `
     <details open class="clean-accordion" style="margin-bottom:10px;background:#f0f9ff;border-color:#bae6fd;">
       <summary style="color:#0057b8;font-weight:700;">${summaryHeader} &blacktriangledown;</summary>
       <div class="clean-accordion-body" style="font-size:12.5px;line-height:1.55;color:#1e293b;">
+        ${badgeBlock}
         <div style="margin-bottom:6px;color:#334155;">${flowHtml}</div>
         <ul style="margin:0 0 0 18px;padding:0;display:grid;gap:4px;">
           ${bullets.map((b) => `<li>${b}</li>`).join("")}
         </ul>
+        ${termBlock}
       </div>
     </details>`;
   }
@@ -769,10 +675,12 @@ function buildRunMethodologyHtml(r, isAccordion = false) {
     <details open style="font-size:12px;color:#1e293b;margin-top:8px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;" onclick="event.stopPropagation()">
       <summary style="cursor:pointer;font-weight:700;color:#0057b8;">${summaryHeader} &blacktriangledown;</summary>
       <div style="margin-top:6px;line-height:1.55;">
+        ${badgeBlock}
         <div style="margin-bottom:6px;color:#334155;">${flowHtml}</div>
         <ul style="margin:0 0 0 18px;padding:0;display:grid;gap:4px;">
           ${bullets.map((b) => `<li>${b}</li>`).join("")}
         </ul>
+        ${termBlock}
       </div>
     </details>`;
 }
@@ -988,7 +896,7 @@ async function showUseCaseBoard(useCase = "market_share") {
         </div>
         <div style="display:flex;align-items:center;font-size:16px;font-weight:900;color:#64748b;">&rarr;</div>
         <div style="flex:1.15;min-width:190px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 10px;">
-          <div style="font-size:11px;font-weight:800;color:#4338ca;text-transform:uppercase;">3. Zoom Reader (EXP-28 CLEF)</div>
+          <div style="font-size:11px;font-weight:800;color:#4338ca;text-transform:uppercase;">3. Contact-Sheet Zoom Verifier (EXP-28)</div>
           <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">Top-6 Sheet + Catalog Diff Headers</div>
           <div style="font-size:11px;color:#3730a3;margin-top:2px;"><b>Gemini 3.5 Flash-Lite ★</b> &bull; <b>₹0.12/shelf (97.4% R@5)</b></div>
         </div>
@@ -1005,7 +913,7 @@ async function showUseCaseBoard(useCase = "market_share") {
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span style="font-size:15px;font-weight:800;color:#0f172a;letter-spacing:-0.01em;">
-            ★ Best Variant vs. Legacy TL;DR: Contrastive CLEF (EXP-28) &bull; Custom SFT (EXP-32 / EXP-33) &bull; 2-Bucket Discovery
+            ★ Best Variant vs. Legacy TL;DR: Multi-Crop Contact-Sheet Verifier (EXP-28) &bull; Custom SFT (EXP-32 / EXP-33) &bull; 2-Bucket Discovery
           </span>
           <span style="font-size:11.5px;font-weight:700;color:#065f46;background:#d1fae5;padding:2px 8px;border-radius:999px;">
             100% Real Cloud Run &amp; GCP Executions (N=5,000 test_5k &amp; N=1,000 test Verified)
@@ -1770,17 +1678,17 @@ const STORY_FAMILIES = [
     result: "96.4%–97.9% Stage-1 F2 at 80ms CPU & ₹0 token cost (-94.3% chromatic error: 19.58 -> 1.04 Delta E).",
   },
   {
-    family: "Family 1: CLM System 1 Contrastive Manifold (Zero-VLM Fast Path)",
+    family: "Family 1: Stage-2A Calibrated gemini-embedding-2 & Color Margin Gate (Zero-VLM Fast Path, slug: clm)",
     approaches: "clm_standalone · clm_standalone_classify · shelf_clm_standalone · embedding_retrieval",
     result: "96.7% Brand, 97.5% Pack, 100.0% Category, 95.3% HUL SoS at ₹0.011/crop (resolves 68% of crops with 0 VLM calls).",
   },
   {
-    family: "Family 2: CLEF Fine-Print Constrained Logprob Verifier",
-    approaches: "clef_standalone · clef_flash_decision · clef_standalone_classify · clef_flash_classify",
-    result: "+8.9% lift on exact pack size / grammage via 2x Lanczos Bottom-30% Net-Weight Strip at 1 output token.",
+    family: "Family 2: Stage-2B Multi-Crop Visual Contact-Sheet & Logprob Verifier (slug: clef)",
+    approaches: "clef_standalone · clef_contrastive_metadata (EXP-28) · clef_flash_decision · clef_standalone_classify",
+    result: "+8.9% lift on exact pack size / grammage via 2x Lanczos Bottom-30% Net-Weight Strip and catalog diff headers.",
   },
   {
-    family: "Family 3 & 4: Continuous PoE + 1D Shelf Context Priors (Production Cascade)",
+    family: "Family 3 & 4: Two-Stage Embedding + VLM Cascade with 1D Shelf Context Priors (slug: jev)",
     approaches: "hierarchical_clm_jev · outlet_scoped_clm_jev (EXP-20) · tube_midband_jev (EXP-21) · row_neighbor_prior_jev (EXP-22) · shelf_height_size_prior_jev (EXP-23)",
     result: "95.0%–96.4% E2E F2, 91.2%–96.6% Exact SKU, +12.0% on Squeeze Tubes, 97.2% Bay Purity, 96.7% Promo at ₹0.12/shelf.",
   },
@@ -2124,10 +2032,13 @@ async function showTechnicalStory() {
               End-to-End Component Methodology: <code>Stage 1 CPU ONNX</code> &rarr; <code>gemini-embedding-2</code> (3,072-D) &rarr; <code>gemini-3.5-flash-lite</code> VLM Call
             </div>
             <ul style="margin:0 0 0 18px;padding:0;display:grid;gap:4px;">
-              <li><b>1. JEV (Joint Embedding + VLM Cascade):</b> Embeds every Stage-1 ONNX crop (<code>+8%</code> context padding + Shades-of-Gray white balance + horizontal shelf-row height ratio <code>r_h</code>) via <code>gemini-embedding-2</code> (<code>3,072-D</code> fused <code>0.85 * visual + 0.15 * text</code> across up to 8 views/SKU), resolving <b>68% of shelf packs</b> in <code>0.08s/crop</code> at <code>$0</code> VLM cost before calling <code>gemini-3.5-flash-lite</code>.</li>
-              <li><b>2. CLM (Calibrated Lidstone / LID Margin Gate):</b> Standardizes the top-1 vs. top-2 cosine gap into a local Z-score (<code>z_margin = (s_1 - s_2) / sigma_top15</code>) with Local Intrinsic Dimensionality (<code>LID</code>) hubness gating. High-margin hits (<code>s_1 &ge; 0.80</code>, <code>z_margin &ge; 1.38</code>) exit immediately; low-margin ties are deduplicated across adjacent identical facings (<code>3.2x</code> medoid compression: <code>35 packs &rarr; ~11 unique groups</code>) and escalated.</li>
-              <li><b>3. CLEF (Contrastive Lookalike Escalation Funnel):</b> Composes a <code>2x2</code> contact sheet pairing the query crop (plus <code>2x</code> Lanczos zoom strips of its Top-25% header, Middle-30% variant banner, and Bottom-30% net-weight band) side-by-side against the Top-5 candidate studio packshots retrieved by <code>gemini-embedding-2</code>, enabling <code>gemini-3.5-flash-lite</code> (or plug-in <code>LoRA SFT #121755</code>) to execute a constrained 1-of-5 visual diff (<b>81.9% 5-Attr Exact SKU / 95.6% 3-Attr Mean</b> at <b>2.69s</b> and <b>₹0.12/shelf</b>).</li>
+              <li><b>1. Two-Stage Embedding + VLM Cascade (internal module slug: <code>jev</code>):</b> Embeds every Stage-1 ONNX crop (<code>+8%</code> context padding + Shades-of-Gray white balance + horizontal shelf-row height ratio <code>r_h</code>) via <code>gemini-embedding-2</code> (<code>3,072-D</code> fused <code>0.85 * visual + 0.15 * text</code> across up to 8 views/SKU), resolving <b>68% of shelf packs</b> in <code>0.08s/crop</code> at <code>$0</code> VLM cost before calling <code>gemini-3.5-flash-lite</code>.</li>
+              <li><b>2. Stage 2A — Calibrated <code>gemini-embedding-2</code> &amp; Color Margin Gate (internal module slug: <code>clm</code>):</b> Standardizes the top-1 vs. top-2 cosine gap into a local Z-score (<code>z_margin = (s_1 - s_2) / sigma_top15</code>) with Local Intrinsic Dimensionality (<code>LID</code>) hubness gating. High-margin hits (<code>s_1 &ge; 0.80</code>, <code>z_margin &ge; 1.38</code>) exit immediately; low-margin ties are deduplicated across adjacent identical facings (<code>3.2x</code> medoid compression: <code>35 packs &rarr; ~11 unique groups</code>) and escalated.</li>
+              <li><b>3. Stage 2B — Multi-Crop Visual Contact-Sheet Verifier (internal module slug: <code>clef</code>):</b> Composes a <code>2x2</code> contact sheet pairing the query crop (plus <code>2x</code> Lanczos zoom strips of its Top-25% header, Middle-30% variant banner, and Bottom-30% net-weight band) side-by-side against the Top-5 candidate studio packshots retrieved by <code>gemini-embedding-2</code>, enabling <code>gemini-3.5-flash-lite</code> (or plug-in <code>LoRA SFT #121755</code>) to execute a constrained 1-of-5 visual diff (<b>81.9% 5-Attr Exact SKU / 95.6% 3-Attr Mean</b> at <b>2.69s</b> and <b>₹0.12/shelf</b>).</li>
             </ul>
+            <div style="margin-top:8px;padding:6px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:11.5px;color:#92400e;">
+              <b>Terminology Note:</b> <code>jev</code>, <code>clm</code>, and <code>clef</code> are legacy internal Python module slugs in our <b>in-house Google Cloud Vertex AI codebase</b>—<i>not</i> external open-source models (distinct from Meta's <code>V-JEPA 2</code>, HuggingFace <code>Contrastive-LM/CLM-v0.1-8B</code>, and <code>Cloudflare/clef-flash</code>).
+            </div>
           </div>
 
           <div style="font-size:12px;font-weight:800;color:#334155;margin-top:2px;">4 Architectural Model Families (60 Registered Approaches)</div>

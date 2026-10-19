@@ -360,13 +360,13 @@ class HybridClassify(ClmStandaloneRetrieval):
     sheet_candidates = "clm"
 
     architecture = (
-        "2-Stage Confidence-Gated Hybrid Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & CLM InfoNCE Gate "
-        f"({MODEL}, 1408-d, 67.9% zero-VLM fast-path at 91.2% accuracy) -> Stage 2 Top-8 Visual Contact-Sheet Verifier "
+        "2-Stage Confidence-Gated Hybrid Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & Calibrated InfoNCE Gate "
+        f"({MODEL}, 3,072-D, 67.9% zero-VLM fast-path at 91.2% accuracy) -> Stage 2 Top-8 Visual Contact-Sheet Verifier "
         "(gemini-3.5-flash-lite on 32.1% ambiguous crops) -> Stage 3 5-Attribute Catalog Taxonomy Reconciliation"
     )
     steps = [
-        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 1408-d): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) while excluding all held-out val/test URIs and store-visit sessions (0 data leakage)",
-        "Stage 2 · 5-Attribute CLM InfoNCE kNN Voting (inv_temp = 160, K = 5): Computes similarity-weighted vote share and margin across all 5 attributes (product, brand, base_variant, packaging_type, category) from the Top-5 nearest catalog neighbors",
+        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 3,072-D): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) while excluding all held-out val/test URIs and store-visit sessions (0 data leakage)",
+        "Stage 2 · 5-Attribute Calibrated InfoNCE kNN Voting (inv_temp = 160, K = 5): Computes similarity-weighted vote share and margin across all 5 attributes (product, brand, base_variant, packaging_type, category) from the Top-5 nearest catalog neighbors",
         "Stage 3 · Per-Attribute Confidence Gate (67.9% Fast-Path at ₹0 VLM Cost): Auto-accepts Stage-1 predictions when all 5 fields exceed confidence thresholds (τ_brand=0.90, τ_cat=0.90, τ_var=0.85, τ_prod=0.85, τ_pack=0.80, energy ≥ 0.85), achieving 91.2% 5-attribute accuracy with 0 LLM calls",
         "Stage 4 · Top-8 Visual Contact-Sheet Escalation (gemini-3.5-flash-lite, 32.1% of Crops): Builds a numbered 8-panel reference contact sheet alongside the query crop for uncertain attributes and merges Stage-2 VLM predictions with high-confidence Stage-1 fields",
         "Stage 5 · 5-Attribute Catalog Taxonomy Reconciliation (project_taxonomy): Snaps base_variant to canonical brand vocabulary, aligns product = Brand__Variant, and projects (category, packaging_type) onto the 46 valid pack_data pairs (96.3% Cat, 95.3% Brand, 90.8% Pack, 78.2% Variant/SKU)",
@@ -707,13 +707,13 @@ class HybridClassifySft(HybridClassify):
     tau_category = 0.6
     min_energy = 0.0
     architecture = (
-        "2-Stage Confidence-Gated Hybrid SFT Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & CLM InfoNCE Gate "
-        f"({MODEL}, 1408-d, 0-LLM fast-path) -> Stage 2 LoRA Fine-Tuned Gemini 3.5 Flash-Lite Conditioned on Top-5 kNN Hints "
+        "2-Stage Confidence-Gated Hybrid SFT Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & Calibrated InfoNCE Gate "
+        f"({MODEL}, 3,072-D, 0-LLM fast-path) -> Stage 2 LoRA Fine-Tuned Gemini 3.5 Flash-Lite Conditioned on Top-5 kNN Hints "
         "-> Stage 3 5-Attribute Catalog Taxonomy Reconciliation"
     )
     steps = [
-        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 1408-d): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) with strict val/test URI and session exclusion",
-        "Stage 2 · 5-Attribute CLM InfoNCE kNN Voting (inv_temp = 160, K = 5): Computes similarity-weighted vote share across product, brand, base_variant, packaging_type, and category",
+        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 3,072-D): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) with strict val/test URI and session exclusion",
+        "Stage 2 · 5-Attribute Calibrated InfoNCE kNN Voting (inv_temp = 160, K = 5): Computes similarity-weighted vote share across product, brand, base_variant, packaging_type, and category",
         "Stage 3 · Per-Attribute Confidence Gate (Fast-Path at ₹0 VLM Cost): Auto-accepts crops where all 5 fields exceed confidence thresholds with 0 LLM calls",
         "Stage 4 · K-Hinted LoRA SFT Escalation (sft_hints): Sends the query crop + Top-5 kNN candidate shortlist (brand, base_variant, product, packaging_type, category) to the 5-attribute LoRA fine-tuned Gemini 3.5 Flash-Lite endpoint and merges uncertain fields",
         "Stage 5 · 5-Attribute Catalog Taxonomy Reconciliation (project_taxonomy): Canonicalizes base_variant against gt-mapping.yml, aligns product = Brand__Variant, and enforces valid 46-class (category, packaging_type) pairs",
@@ -732,13 +732,13 @@ class HybridClassifyMax(HybridClassify):
     tau_category = 0.99
     architecture = (
         "2-Stage High-Precision Hybrid Cascade on Vertex AI: Stage 1 Unanimous Top-5 Gallery kNN Gate "
-        f"({MODEL}, 1408-d, τ=0.99) -> Stage 2 Top-8 Visual Contact-Sheet Verifier "
+        f"({MODEL}, 3,072-D, τ=0.99) -> Stage 2 Top-8 Visual Contact-Sheet Verifier "
         "-> Stage 3 5-Attribute Catalog Taxonomy Reconciliation"
     )
     steps = [
-        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 1408-d): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) with strict val/test URI and session exclusion",
+        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 3,072-D): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) with strict val/test URI and session exclusion",
         "Stage 2 · High-Precision 5-Attribute kNN Voting (inv_temp = 160, K = 5): Ranks Top-5 candidate SKUs and computes vote shares across product, brand, base_variant, packaging_type, and category",
         "Stage 3 · Strict Unanimous Confidence Gate (τ = 0.99, energy ≥ 0.85): Fast-paths only unanimous Top-5 kNN matches at ₹0 VLM cost and escalates all borderline cases",
-        "Stage 4 · Top-8 Visual Contact-Sheet Verification: Renders a numbered 8-candidate reference sheet from the CLM shortlist so Gemini can inspect fine-print variant sub-banners and pack geometry",
+        "Stage 4 · Top-8 Visual Contact-Sheet Verification: Renders a numbered 8-candidate reference sheet from the Stage-2A shortlist so Gemini can inspect fine-print variant sub-banners and pack geometry",
         "Stage 5 · 5-Attribute Catalog Taxonomy Reconciliation (project_taxonomy): Canonicalizes base_variant, aligns product = Brand__Variant, and projects (category, packaging_type) onto the 46 valid pack_data pairs",
     ]

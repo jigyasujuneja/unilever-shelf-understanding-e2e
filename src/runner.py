@@ -91,6 +91,501 @@ def _fmt_label(d: dict | None) -> str:
     return " · ".join(parts) if parts else "nothing"
 
 
+_METHODOLOGY_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "summary_header": {"type": "STRING"},
+        "flow_summary": {"type": "STRING"},
+        "bullets": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": ["summary_header", "flow_summary", "bullets"],
+}
+
+
+def _esc_html(val: object) -> str:
+    s = str(val if val is not None else "")
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _expand_internal_slugs(text: str) -> str:
+    """Expand internal shorthand tokens (CLM, CLEF, JEV) in step strings into plain-English descriptions."""
+    import re
+
+    out = str(text or "")
+    out = re.sub(
+        r"\bCLM-JEV\b",
+        "Two-Stage Embedding Margin Gate + Gemini Contact-Sheet Cascade",
+        out,
+    )
+    out = re.sub(
+        r"\bCLM\b",
+        "Stage-2A Calibrated Embedding & Color Margin Gate",
+        out,
+    )
+    out = re.sub(
+        r"\bCLEF\b",
+        "Stage-2B Multi-Crop Visual Contact-Sheet Verifier",
+        out,
+    )
+    out = re.sub(
+        r"\bJEV\b",
+        "Two-Stage Embedding + VLM Cascade",
+        out,
+    )
+    return out
+
+
+def synthesize_dynamic_methodology(
+    summary: dict,
+    appr: object | None = None,
+    rows: list[dict] | None = None,
+) -> dict:
+    """Dynamically construct a grounded methodology object from the Python approach class, declared steps, trace steps, and run metrics."""
+    import inspect
+
+    from utils.experiment_matrix import APPROACH_INTUITIONS
+
+    ap = str(summary.get("approach") or "")
+    mod = str(summary.get("model") or "")
+    ds = str(summary.get("dataset") or "hul_golden")
+    split = str(summary.get("split") or "test")
+    tk = str(summary.get("task") or "detection")
+    rid = str(summary.get("run_id") or "")
+    parts_id = rid.split("-")
+    short_id = str(summary.get("short_id") or (f"#{parts_id[1]}" if len(parts_id) >= 2 and parts_id[1].isdigit() else f"#{rid[:6]}"))
+    exp_id = str(summary.get("exp_id") or "")
+    exp_prefix = f"[{_esc_html(exp_id)}] " if exp_id else ""
+
+    if appr is None and ap:
+        try:
+            appr = approaches.get(ap)
+        except Exception:
+            appr = None
+
+    ap_meta = APPROACH_INTUITIONS.get(ap, {})
+    clean_title = str(ap_meta.get("display_name") or summary.get("approach_title") or ap)
+    intuition = str(ap_meta.get("intuition") or summary.get("approach_intuition") or "")
+    if not intuition and appr is not None:
+        doc = inspect.getdoc(appr) or ""
+        first_para = doc.strip().split("\n\n")[0].replace("\n", " ").strip()
+        if first_para:
+            intuition = first_para
+
+    arch = str(
+        summary.get("architecture")
+        or getattr(appr, "architecture", "")
+        or ap_meta.get("default_architecture")
+        or clean_title
+    )
+    raw_steps = list(
+        summary.get("steps")
+        or getattr(appr, "steps", [])
+        or ap_meta.get("default_steps", [])
+        or []
+    )
+    if not raw_steps and rows:
+        seen_names: list[str] = []
+        for r_item in rows[:2]:
+            for st in r_item.get("steps") or []:
+                if isinstance(st, dict) and st.get("name"):
+                    nm = str(st["name"])
+                    if nm not in seen_names:
+                        seen_names.append(nm)
+        raw_steps = seen_names
+
+    low_all = f"{ap} {mod} {arch} {' '.join(str(x) for x in raw_steps)}".lower()
+    is_vjepa = "vjepa" in low_all or "v-jepa" in low_all
+    is_ijepa = "ijepa" in low_all or "i-jepa" in low_all
+    is_dinov3 = "dinov3" in low_all or "dinov2" in low_all
+    is_legacy_h5 = ap == "cv_classify" or ".h5" in mod.lower() or "inceptionv3" in low_all
+    is_hf_gpu = ap.startswith("hf_") or "vllm" in low_all or "qwen" in low_all or "cloudflare/clef" in low_all
+    is_onnx_det = tk == "detection" and ("onnx" in low_all or "yolo" in low_all)
+    is_vlm_det = tk == "detection" and not is_onnx_det
+    is_direct_sft = ap == "gemini_classify" or (
+        ("sft" in ap.lower() or "sft" in mod.lower())
+        and not any(k in ap.lower() for k in ("clm", "clef", "jev", "hybrid", "cascade", "dino", "jepa"))
+    )
+
+    if is_vjepa:
+        origin_badge = (
+            "🔬 Standalone Open-Source Vision Backbone + SFT Classifier "
+            "(Meta V-JEPA 2 — 0 Gemini VLM Calls, Does NOT Use gemini-embedding-2, JEV, CLM, or CLEF)"
+        )
+    elif is_ijepa:
+        origin_badge = (
+            "🔬 Standalone Open-Source Vision Backbone + SFT Classifier "
+            "(Meta I-JEPA — 0 Gemini VLM Calls, Does NOT Use gemini-embedding-2, JEV, CLM, or CLEF)"
+        )
+    elif is_dinov3:
+        origin_badge = (
+            "🔬 Standalone Open-Source Vision Backbone + CosFace SFT Classifier "
+            "(Meta DINOv3 — 0 Gemini VLM Calls, Does NOT Use gemini-embedding-2, JEV, CLM, or CLEF)"
+        )
+    elif is_legacy_h5:
+        origin_badge = (
+            "🏛️ Legacy Phase-1 Customer Baseline "
+            "(Keras InceptionV3 .h5 Softmax Endpoints — Zero gemini-embedding-2 / Zero VLM)"
+        )
+    elif is_hf_gpu:
+        origin_badge = (
+            "🖥️ External Open-Weight GPU Benchmark "
+            "(Self-Hosted vLLM on Vertex AI L4 GPU — Compared Against Our Serverless Vertex AI Stack)"
+        )
+    elif is_onnx_det:
+        origin_badge = (
+            "⚡ In-House Distilled CPU ONNX Spatial Detector "
+            "(Cloud Run CPU — ₹0 VLM Token Cost)"
+        )
+    elif is_vlm_det:
+        origin_badge = (
+            "☁️ In-House Google Cloud Vertex AI Gemini Spatial Detector "
+            "(Structured 2D Bounding-Box JSON)"
+        )
+    elif is_direct_sft:
+        origin_badge = (
+            "☁️ In-House Google Cloud Vertex AI Supervised Fine-Tuned (LoRA SFT) Classifier "
+            "(Direct Single-Crop Call — No Contact-Sheet Cascade)"
+        )
+    elif ap in ("jev_laya_zscore_lid", "djev_classify", "coarse_jev_gemini"):
+        origin_badge = (
+            "🎯 100% In-House Google Cloud Vertex AI Pipeline — JEV Decision Model Variant "
+            "(Statistical Z-Score/LID Routing Gate or 5-Level Taxonomy Classifier — Distinct from Base JEV Retrieval Cascade)"
+        )
+    elif ap in ("clm_standalone_classify", "clm_classify"):
+        origin_badge = (
+            "🎯 100% In-House Google Cloud Vertex AI Pipeline — CLM Decision Model Variant "
+            "(Closed-Set 5-Level Taxonomy Decision Classifier — Distinct from Base CLM Zero-VLM Open-Catalog Matcher)"
+        )
+    elif ap in ("clef_flash_decision", "clef_flash_classify", "clef_standalone_classify"):
+        origin_badge = (
+            "🎯 100% In-House Google Cloud Vertex AI Pipeline — CLEF Decision Model Variant "
+            "(Single-Token Logprob Decision Head on Gemini — Distinct from Base CLEF Multi-Crop Contact-Sheet Prompt)"
+        )
+    elif ap in ("clm_standalone", "shelf_clm_standalone", "clm_promo_matcher"):
+        origin_badge = (
+            "⚡ 100% In-House Google Cloud Vertex AI Pipeline — Base CLM Retrieval Technique "
+            "(Stage-2A Zero-VLM gemini-embedding-2 + CIELAB Color Scorer — Distinct from CLM 5-Level Decision Classifier)"
+        )
+    elif ap in ("clef_standalone", "clef_contrastive_metadata", "sft_clm_clef_cascade"):
+        origin_badge = (
+            "🔍 100% In-House Google Cloud Vertex AI Pipeline — Base CLEF Visual Contact-Sheet Technique "
+            "(Multi-Crop 2x Zoom Strips + Catalog Diff Headers — Distinct from Single-Token CLEF Decision Model)"
+        )
+    else:
+        origin_badge = (
+            "☁️ 100% In-House Google Cloud Vertex AI Pipeline "
+            "(Vertex gemini-embedding-2 + Gemini VLM — Base JEV Cascade)"
+        )
+
+    uses_internal_slug = (
+        any(tok in ap.lower() for tok in ("jev", "clm", "clef", "laya"))
+        and not is_vjepa
+        and not is_ijepa
+        and not is_dinov3
+        and not is_legacy_h5
+        and not is_hf_gpu
+    )
+    terminology_note = ""
+    if uses_internal_slug:
+        terminology_note = (
+            "<b>Disambiguating Base Technique vs. Decision Model (<code>JEV</code> vs. <code>JEV Decision</code>, "
+            "<code>CLM</code> vs. <code>CLM Decision</code>, <code>CLEF</code> vs. <code>CLEF Decision</code>):</b> "
+            "<b>(1) <code>JEV</code> Cascade vs. <code>JEV</code> Decision Model:</b> "
+            "Base <code>JEV</code> (<code>jev_laya</code>, <code>hierarchical_clm_jev</code>) is the 2-stage retrieval pipeline "
+            "(<code>gemini-embedding-2</code> 3,072-D + Gemini contact sheet), whereas the <b>JEV Decision Models</b> are "
+            "<code>jev_laya_zscore_lid</code> (statistical Z-score &amp; LID routing gate that decides 0-VLM fast-exit vs. escalation) and "
+            "<code>djev_classify</code> (closed-set 5-level taxonomy decision classifier); "
+            "<b>(2) <code>CLM</code> Matcher vs. <code>CLM</code> Decision Model:</b> "
+            "Base <code>CLM</code> (<code>clm_standalone</code>) is the zero-VLM open-catalog vector + inner-80% CIELAB color scorer, "
+            "whereas the <b>CLM Decision Models</b> (<code>clm_standalone_classify</code>, <code>clm_classify</code>) apply Lidstone prior "
+            "calibration or kNN voting to output a discrete 5-attribute taxonomy decision; "
+            "<b>(3) <code>CLEF</code> Contact Sheet vs. <code>CLEF</code> Decision Model:</b> "
+            "Base <code>CLEF</code> (<code>clef_contrastive_metadata</code> EXP-28, <code>clef_standalone</code>) is the multi-crop 2x zoom "
+            "contact-sheet layout with Catalog Diff Headers, whereas the <b>CLEF Decision Models</b> (<code>clef_flash_decision</code>, "
+            "<code>clef_flash_classify</code>) constrain Gemini (<code>max_output_tokens=4</code>) to emit a single candidate token scored by "
+            "log-probability margin (also distinct from external models Meta <code>V-JEPA 2</code>, HF <code>CLM-v0.1-8B</code>, and <code>Cloudflare/clef-flash</code>)."
+        )
+
+    # Build metrics summary string dynamically from actual recorded fields
+    fa = summary.get("field_accuracy") or {}
+    ha = summary.get("hierarchical_accuracy") or {}
+    l1 = ha.get("level1_is_hul", fa.get("is_hul"))
+    l2 = ha.get("level2_category", fa.get("category"))
+    l3 = ha.get("level3_brand", fa.get("brand"))
+    l4 = ha.get("level4_base_variant", fa.get("base_variant", fa.get("product")))
+    l5 = ha.get("level5_packaging_type", fa.get("packaging_type"))
+    three_attr = ha.get("compound_brand_category_pack", summary.get("three_attr_accuracy"))
+    five_attr = ha.get(
+        "compound_all_5_levels",
+        summary.get("five_attr_compound_accuracy", summary.get("accuracy") if tk not in ("detection", "end_to_end") else None),
+    )
+
+    def _pct(v: object) -> str:
+        if v is None:
+            return "—"
+        try:
+            return f"{float(str(v)) * 100.0:.1f}%"
+        except (TypeError, ValueError):
+            return "—"
+
+    metric_bits: list[str] = []
+    if tk in ("detection", "end_to_end") and summary.get("f2") is not None:
+        metric_bits.append(
+            f"<b>{_pct(summary.get('f2'))} F2</b> ({_pct(summary.get('precision'))} Prec / {_pct(summary.get('recall'))} Rec)"
+        )
+    ard = summary.get("annotated_row_box_metrics") or summary.get("annotated_row_detection_metrics")
+    if isinstance(ard, dict) and ard.get("f2") is not None:
+        metric_bits.append(f"<b>{_pct(ard.get('f2'))} 2D-Zone F2</b>")
+    bsm = summary.get("bay_scoped_metrics")
+    if isinstance(bsm, dict) and bsm.get("f2") is not None:
+        metric_bits.append(f"<b>{_pct(bsm.get('f2'))} Bay-Scoped F2</b>")
+    pm = summary.get("planogram_metrics")
+    if isinstance(pm, dict) and pm.get("mean_brand_block_purity") is not None:
+        metric_bits.append(f"<b>{_pct(pm.get('mean_brand_block_purity'))} Brand-Block Purity</b>")
+    sm = summary.get("sos_metrics")
+    if isinstance(sm, dict) and sm.get("facing_sos_mae") is not None:
+        try:
+            metric_bits.append(f"<b>{float(sm['facing_sos_mae']) * 100.0:.2f} pp Facing SOS MAE</b>")
+        except (TypeError, ValueError):
+            pass
+    if five_attr is not None and float(five_attr or 0) > 0 and tk != "detection":
+        metric_bits.append(f"<b>{_pct(five_attr)} 5-Attr Exact SKU</b>")
+    if three_attr is not None and float(three_attr or 0) > 0:
+        metric_bits.append(f"<b>{_pct(three_attr)} 3-Attr (Brd+Cat+Pack)</b>")
+    if l1 is not None:
+        metric_bits.append(f"{_pct(l1)} L1 HUL")
+    if l2 is not None:
+        metric_bits.append(f"{_pct(l2)} Cat")
+    if l3 is not None:
+        metric_bits.append(f"{_pct(l3)} Brand")
+    if l4 is not None and float(l4 or 0) > 0:
+        metric_bits.append(f"{_pct(l4)} Variant")
+    if l5 is not None and float(l5 or 0) > 0:
+        metric_bits.append(f"{_pct(l5)} Pack")
+    if fa.get("promo_type") is not None:
+        metric_bits.append(f"<b>{_pct(fa.get('promo_type'))} Promo Type</b>")
+
+    perf_summary = " &middot; ".join(metric_bits) if metric_bits else f"<b>{_pct(summary.get('primary_score', summary.get('accuracy', summary.get('f2'))))} primary score</b>"
+
+    gate_val = summary.get("stage2a_zero_vlm_gate_pct")
+    gate_note = ""
+    if gate_val is not None and not is_vjepa and not is_dinov3 and not is_legacy_h5 and tk != "detection":
+        try:
+            gv = float(gate_val)
+            gate_note = f" · Stage-2A Fast-Exit Gate: {gv:.1f}% 0-VLM"
+        except (TypeError, ValueError):
+            pass
+
+    summary_header = (
+        f"Run {_esc_html(short_id)} Methodology — {exp_prefix}{_esc_html(clean_title)} "
+        f"(<code>{_esc_html(ap)}</code> · Model: <code>{_esc_html(mod or 'CPU/ONNX')}</code> "
+        f"on <code>{_esc_html(ds)}/{_esc_html(split)}</code>{_esc_html(gate_note)})"
+    )
+
+    expanded_arch = _esc_html(_expand_internal_slugs(arch))
+    flow_parts = [f"<b>Declared Pipeline Architecture:</b> <code>{expanded_arch}</code>"]
+    if intuition:
+        flow_parts.append(f"<b>How This Technique Works:</b> {_esc_html(_expand_internal_slugs(intuition))}")
+    if summary.get("exp_hypothesis"):
+        flow_parts.append(f"<i>(Experiment Hypothesis: {_esc_html(_expand_internal_slugs(str(summary['exp_hypothesis'])))})</i>")
+    flow_summary = "<br>".join(flow_parts)
+
+    bullets: list[str] = []
+    if raw_steps:
+        for idx, st in enumerate(raw_steps):
+            st_clean = _esc_html(_expand_internal_slugs(str(st)))
+            bullets.append(f"<b>Step {idx + 1}:</b> {st_clean}")
+    else:
+        bullets.append(f"<b>Pipeline Execution:</b> {expanded_arch}")
+
+    if rows:
+        stage_counts: dict[str, int] = {}
+        stage_ms: dict[str, list[float]] = {}
+        stage_calls: dict[str, int] = {}
+        for r_item in rows[:250]:
+            tr_list = r_item.get("trace") or r_item.get("steps") or []
+            if not isinstance(tr_list, list):
+                continue
+            for t_step in tr_list:
+                if not isinstance(t_step, dict):
+                    continue
+                s_name = str(t_step.get("step") or t_step.get("name") or "").strip()
+                if not s_name:
+                    continue
+                stage_counts[s_name] = stage_counts.get(s_name, 0) + 1
+                if t_step.get("ms") is not None:
+                    try:
+                        stage_ms.setdefault(s_name, []).append(float(str(t_step["ms"])))
+                    except (TypeError, ValueError):
+                        pass
+                if t_step.get("calls") is not None:
+                    try:
+                        stage_calls[s_name] = stage_calls.get(s_name, 0) + int(str(t_step["calls"]))
+                    except (TypeError, ValueError):
+                        pass
+        if stage_counts:
+            trace_bits: list[str] = []
+            for s_name, cnt in list(stage_counts.items())[:6]:
+                ms_vals = stage_ms.get(s_name, [])
+                mean_ms = f", {sum(ms_vals) / len(ms_vals):.0f}ms avg" if ms_vals else ""
+                c_tot = stage_calls.get(s_name, 0)
+                c_str = f", {c_tot} API calls" if c_tot > 0 else ""
+                trace_bits.append(f"<code>{_esc_html(s_name)}</code> ({cnt} imgs{mean_ms}{c_str})")
+            bullets.append(
+                f"<b>Live Execution Trace Telemetry (from <code>images.jsonl</code>):</b> {' &rarr; '.join(trace_bits)}."
+            )
+
+    n_units = int(summary.get("eval_samples") or summary.get("total_gt_boxes") or summary.get("images") or 0)
+    p50_s = summary.get("p50_latency_s")
+    p50_str = f"{float(str(p50_s)):.2f}s p50 latency" if p50_s is not None else "recorded latency"
+    rate = float(summary.get("usd_to_inr") or 86.2)
+    cost_inr = float(summary.get("cost_per_image_inr") or (float(summary.get("cost_per_image_usd") or 0.0) * rate))
+    unit_name = str(summary.get("cost_unit") or ("shelf" if ds in ("gtmerch_golden", "ms_json_golden", "mt_json_golden", "hul_talkers_golden", "hul_sessions", "gt_hul_sessions") else "crop"))
+    bullets.append(
+        f"<b>Verified Run {_esc_html(short_id)} Outcome on <code>{_esc_html(ds)}</code> "
+        f"(<code>{_esc_html(split)}</code> · {n_units:,} evaluated {unit_name}s):</b> "
+        f"Achieves {perf_summary} at <b>{p50_str}</b> and <b>₹{cost_inr:.3f}/{unit_name}</b>."
+    )
+
+    return {
+        "summary_header": summary_header,
+        "origin_badge": origin_badge,
+        "terminology_note": terminology_note,
+        "flow_html": flow_summary,
+        "flow_summary": flow_summary,
+        "bullets": bullets,
+        "generated_dynamically": True,
+        "generated_by": "dynamic_introspection",
+    }
+
+
+def generate_run_methodology(
+    summary: dict,
+    rows: list[dict] | None = None,
+    *,
+    appr: object | None = None,
+    config: dict | None = None,
+    log: Callable[[str], None] = print,
+) -> dict:
+    """Dynamically generate a grounded HTML-safe methodology summary for a completed run."""
+    rows_list = rows or []
+    base_meth = synthesize_dynamic_methodology(summary, appr=appr, rows=rows_list)
+    if os.environ.get("SHELF_BENCH_AUTO_METHODOLOGY", "1") == "0":
+        return base_meth
+    if os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get("SHELF_BENCH_AUTO_METHODOLOGY") != "1":
+        return base_meth
+    try:
+        import inspect
+
+        from google import genai
+        from google.genai import types
+
+        if appr is None and summary.get("approach"):
+            try:
+                appr = approaches.get(str(summary["approach"]))
+            except Exception:
+                appr = None
+        cfg = config or load_config()
+        gcp = cfg.get("gcp", {})
+        meth_model = os.environ.get("SHELF_BENCH_METHODOLOGY_MODEL", "gemini-3.5-flash-lite")
+        source_code = ""
+        if appr is not None:
+            try:
+                source_code = inspect.getsource(type(appr))
+            except Exception:
+                source_code = ""
+        sample_steps = []
+        for r in rows_list[:2]:
+            for st in (r.get("trace") or r.get("steps") or []):
+                if isinstance(st, dict) and (st.get("step") or st.get("name")):
+                    sample_steps.append({
+                        "name": st.get("step") or st.get("name"),
+                        "detail": str(st.get("detail") or "")[:180],
+                    })
+        if len(sample_steps) > 8:
+            sample_steps = sample_steps[:8]
+
+        rid = str(summary.get("run_id") or "")
+        parts_id = rid.split("-")
+        short_id = f"#{parts_id[1]}" if len(parts_id) >= 2 and parts_id[1].isdigit() else f"#{rid[:6]}"
+        rate = float(summary.get("usd_to_inr") or 86.2)
+        cost_inr = float(summary.get("cost_per_image_usd") or 0.0) * rate
+        prompt_ctx = {
+            "short_run_id": short_id,
+            "run_id": rid,
+            "approach": summary.get("approach"),
+            "task": summary.get("task"),
+            "dataset": summary.get("dataset"),
+            "model": summary.get("model"),
+            "evaluated_fields": summary.get("evaluated_fields"),
+            "architecture": summary.get("architecture"),
+            "declared_steps": getattr(appr, "steps", []) if appr is not None else [],
+            "sample_trace_steps": sample_steps,
+            "metrics": {
+                "accuracy_all_fields": summary.get("accuracy"),
+                "f2": summary.get("f2"),
+                "precision": summary.get("precision"),
+                "recall": summary.get("recall"),
+                "field_accuracy": summary.get("field_accuracy"),
+                "hierarchical_accuracy": summary.get("hierarchical_accuracy"),
+                "stage2a_zero_vlm_gate_pct": summary.get("stage2a_zero_vlm_gate_pct"),
+                "p50_latency_s": summary.get("p50_latency_s"),
+                "cost_per_image_inr": round(cost_inr, 4),
+            },
+        }
+        prompt = (
+            "Write a technical run methodology summary for an engineering workbench.\n"
+            "Rules:\n"
+            "1. Ground every statement strictly in the Python class source code and run metrics below.\n"
+            "2. Never invent components not present in the code (if the code does not call "
+            "gemini-embedding-2 or a contact sheet, state that explicitly).\n"
+            "3. Avoid opaque internal acronyms (do not lead bullets with JEV, CLM, or CLEF; use plain-English "
+            "stage names like 'Stage 2A Embedding & Color Retrieval', 'Confidence Margin Gate', "
+            "'Stage 2B Visual Contact-Sheet Verifier').\n"
+            "4. Do NOT use em dashes. Keep prose concise, active, and direct.\n"
+            "5. Use only <b> and <code> HTML tags for component names, model names, and numbers.\n"
+            "6. summary_header: 1 line starting with 'Run " + short_id + " Methodology (<code>...</code>): ...'\n"
+            "7. flow_summary: 1 sentence summarizing the step-by-step flow on the dataset.\n"
+            "8. bullets: 3 to 5 concise strings covering each executed step and the final measured metrics. "
+            "Do not wrap bullets in <li> tags.\n\n"
+            f"Run JSON Context:\n{json.dumps(prompt_ctx, indent=2)}\n\n"
+            f"Approach Python Source:\n{source_code[:12000]}"
+        )
+        client = genai.Client(
+            vertexai=True,
+            project=gcp.get("project"),
+            location=gcp.get("location", "global"),
+        )
+        resp = client.models.generate_content(
+            model=meth_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=1200,
+                response_mime_type="application/json",
+                response_schema=_METHODOLOGY_SCHEMA,
+            ),
+        )
+        parsed = json.loads(resp.text or "{}")
+        sh = str(parsed.get("summary_header") or "").strip()
+        fs = str(parsed.get("flow_summary") or "").strip()
+        bs = [str(b).strip() for b in (parsed.get("bullets") or []) if str(b).strip()]
+        if sh and fs and len(bs) >= 2:
+            return {
+                "summary_header": sh,
+                "origin_badge": base_meth["origin_badge"],
+                "terminology_note": base_meth["terminology_note"],
+                "flow_html": fs,
+                "flow_summary": fs,
+                "bullets": bs,
+                "generated_dynamically": True,
+                "generated_by": meth_model,
+            }
+    except Exception as err:
+        log(f"[{summary.get('run_id', 'run')}] auto-methodology fallback to dynamic introspection: {err}")
+    return base_meth
+
+
 def run(
     approach: str,
     model: str,
@@ -824,6 +1319,10 @@ def run(
             set_compute(summary, time.time() - _T_PROCESS, "in-task clock (provisional)")
         else:
             set_compute(summary, 0.0, "local run: compute not priced")
+        try:
+            summary["methodology"] = generate_run_methodology(summary, rows)
+        except Exception as meth_err:
+            log(f"[{run_id}] methodology generation warning: {meth_err}")
         final = {f"shelf_bench.{k}": summary[k] for k in (
             "errors", "tp", "fp", "fn", "precision", "recall", "f2", "accuracy",
             "p50_latency_s", "p95_latency_s", "p99_latency_s", "cost_per_image_usd",
@@ -1253,8 +1752,10 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
         tk_meta = TASK_DEFINITIONS.get(tk, {})
         s["task_id"] = tk_meta.get("task_id", "TASK-RET")
         s["task_title"] = tk_meta.get("title", tk)
-        s["approach_title"] = s.get("approach_title") or ap_meta.get("display_name", ap)
-        s["approach_intuition"] = s.get("approach_intuition") or ap_meta.get("intuition", s.get("architecture", ""))
+        s["approach_title"] = ap_meta.get("display_name") or _expand_internal_slugs(str(s.get("approach_title") or ap))
+        s["approach_intuition"] = ap_meta.get("intuition") or _expand_internal_slugs(
+            str(s.get("approach_intuition") or s.get("architecture", ""))
+        )
         s["primary_score"] = float(s.get("f2", 0.0) if tk in ("detection", "end_to_end") else s.get("accuracy", 0.0))
         # Human-friendly short Run ID & short Model name
         rid = str(s.get("run_id") or p.parent.name)
@@ -1278,6 +1779,7 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
             s["exp_priority"] = matched_ed.get("priority")
             s["exp_title"] = matched_ed.get("title")
             s["exp_hypothesis"] = matched_ed.get("hypothesis")
+        s["methodology"] = synthesize_dynamic_methodology(s)
         runs.append(s)
 
     def official(r: dict) -> bool:
@@ -1335,6 +1837,7 @@ def load_run(run_id: str, results_dir: Path = RESULTS_DIR) -> tuple[dict, list[d
     images = [json.loads(line) for line in img_p.read_text().splitlines() if line] if img_p.exists() else []
     for r in images:
         r["cost_inr"] = round(r["cost_usd"] * rate, 4)
+    summary["methodology"] = generate_run_methodology(summary, images)
     if len(_RUN_DETAIL_CACHE) > 32:
         _RUN_DETAIL_CACHE.pop(next(iter(_RUN_DETAIL_CACHE)))
     _RUN_DETAIL_CACHE[ckey] = (mtime, summary, images)

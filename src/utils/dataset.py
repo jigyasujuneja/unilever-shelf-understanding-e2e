@@ -384,7 +384,7 @@ def _rpc_json(root: str) -> dict:
             return json.loads(direct_path.read_bytes())
         if local_mirror.exists():
             return json.loads(local_mirror.read_bytes())
-    elif local_mirror.exists() and os.environ.get("SHELF_BENCH_FORCE_GCS_MANIFEST") != "1":
+    elif local_mirror.exists() and os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get("SHELF_BENCH_FORCE_GCS_MANIFEST") != "1":
         return json.loads(local_mirror.read_bytes())
     try:
         raw = read_bytes(join(root, RPC_JSON))

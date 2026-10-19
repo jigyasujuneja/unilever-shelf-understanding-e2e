@@ -92,7 +92,7 @@ TASK_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
 }
 
-APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
+APPROACH_INTUITIONS: dict[str, dict[str, Any]] = {
     "shelf_hierarchical_clm_jev": {
         "display_name": "End-to-End Shelf Scanner (ONNX Detector + Brand Filter + Batched Gemini)",
         "intuition": (
@@ -290,7 +290,7 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
         "display_name": "Store-Segment & Scene Category Scoped Matcher (EXP-20)",
         "intuition": (
             "Uses the dominant scene category across all boxes on the shelf to prune out-of-category lookalikes "
-            "(e.g. Oral Care vs Skin Care vs Laundry) before running CLM InfoNCE + Gemini verification."
+            "(e.g. Oral Care vs Skin Care vs Laundry) before running calibrated gemini-embedding-2 (3,072-D) + Gemini verification."
         ),
         "task_id": "TASK-RET",
     },
@@ -298,7 +298,7 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
         "display_name": "End-to-End Store-Segment Scoped Shelf Pipeline (EXP-20)",
         "intuition": (
             "Combines Stage-1 ONNX YOLO box detection with store-segment & scene-category gallery pruning "
-            "before CLM InfoNCE and batched Gemini contact sheets."
+            "before calibrated gemini-embedding-2 matching and batched Gemini contact sheets."
         ),
         "task_id": "TASK-E2E",
     },
@@ -329,7 +329,7 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
     "shelf_row_neighbor_prior": {
         "display_name": "End-to-End Shelf Pipeline with 1D Horizontal Neighbor Brand Prior (EXP-22)",
         "intuition": (
-            "Full-shelf ONNX detection + CLM InfoNCE + 1D horizontal shelf-row neighbor brand/category consistency prior."
+            "Full-shelf ONNX detection + calibrated gemini-embedding-2 matching + 1D horizontal shelf-row neighbor brand/category consistency prior."
         ),
         "task_id": "TASK-E2E",
     },
@@ -344,7 +344,7 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
     "shelf_height_size_prior": {
         "display_name": "End-to-End Shelf Pipeline with Relative Box-Height Size Prior (EXP-23)",
         "intuition": (
-            "Full-shelf ONNX detection + CLM InfoNCE + shelf-plank relative box-height size calibration (h_box / h_row)."
+            "Full-shelf ONNX detection + calibrated gemini-embedding-2 matching + shelf-plank relative box-height size calibration (h_box / h_row)."
         ),
         "task_id": "TASK-E2E",
     },
@@ -357,9 +357,9 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
         "task_id": "TASK-DET",
     },
     "shelf_960_softnms_e2e": {
-        "display_name": "End-to-End 960px Soft-NMS Detector + Gray-World CLM-JEV Pipeline (EXP-24)",
+        "display_name": "End-to-End 960px Soft-NMS Detector + Calibrated Embedding & Contact-Sheet Pipeline (EXP-24)",
         "intuition": (
-            "Pairs the 960px High-Res Gaussian Soft-NMS ONNX detector with Gray-World CLM InfoNCE + batched Gemini contact sheets."
+            "Pairs the 960px High-Res Gaussian Soft-NMS ONNX detector with Shades-of-Gray calibrated gemini-embedding-2 (3,072-D) + batched Gemini contact sheets."
         ),
         "task_id": "TASK-E2E",
     },
@@ -374,65 +374,165 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
     "session_overlap_dedup_e2e": {
         "display_name": "End-to-End Store-Visit Session Overlap Deduplication Pipeline (EXP-25)",
         "intuition": (
-            "Full-shelf ONNX detection + multi-photo store-visit boundary overlap deduplication + CLM-JEV attribution."
+            "Full-shelf ONNX detection + multi-photo store-visit boundary overlap deduplication + calibrated embedding & contact-sheet attribution."
         ),
         "task_id": "TASK-E2E",
     },
     "hf_clef_flash_gpu": {
-        "display_name": "Hugging Face Cloudflare/clef-flash (Qwen3.5-9B) Open-Weight Verifier (EXP-26)",
+        "display_name": "Open-Source HuggingFace Cloudflare/clef-flash (Qwen3.5-9B) Verifier (EXP-26)",
         "intuition": (
-            "Runs open-weight Cloudflare/clef-flash (Qwen/Qwen3.5-9B) on Vertex AI L4 GPU via vLLM with top-16 "
-            "token logprobs on CLEF Bottom-30% Zoom-Strip contact sheets."
+            "External open-weight benchmark: runs HuggingFace Cloudflare/clef-flash (Qwen/Qwen3.5-9B) on Vertex AI L4 GPU via vLLM "
+            "with top-16 token logprobs on Bottom-30% Zoom-Strip contact sheets."
         ),
         "task_id": "TASK-RET",
     },
     "hf_clef_27b_gpu": {
-        "display_name": "Hugging Face Cloudflare/clef-27b (Qwen3.5-27B) Open-Weight Verifier (EXP-26)",
+        "display_name": "Open-Source HuggingFace Cloudflare/clef-27b (Qwen3.5-27B) Verifier (EXP-26)",
         "intuition": (
-            "Runs open-weight Cloudflare/clef-27b (Qwen/Qwen3.5-27B, 4x L4 tensor-parallel) on Vertex AI GPU via vLLM "
-            "on CLEF Bottom-30% Zoom-Strip contact sheets."
+            "External open-weight benchmark: runs HuggingFace Cloudflare/clef-27b (Qwen/Qwen3.5-27B, 4x L4 tensor-parallel) on Vertex AI GPU via vLLM "
+            "on Bottom-30% Zoom-Strip contact sheets."
         ),
         "task_id": "TASK-RET",
     },
     "hf_clm_v01_8b_gpu": {
-        "display_name": "Hugging Face Contrastive-LM/CLM-v0.1-8B (Qwen3-VL-8B) Verifier (EXP-26)",
+        "display_name": "Open-Source HuggingFace Contrastive-LM/CLM-v0.1-8B (Qwen3-VL-8B) Verifier (EXP-26)",
         "intuition": (
-            "Runs open-weight Contrastive-LM/CLM-v0.1-8B (Qwen/Qwen3-VL-8B-Instruct) on Vertex AI L4 GPU via vLLM "
-            "after Stage-2A CLM InfoNCE gating."
+            "External open-weight benchmark: runs HuggingFace Contrastive-LM/CLM-v0.1-8B (Qwen/Qwen3-VL-8B-Instruct) on Vertex AI L4 GPU via vLLM "
+            "after Stage-2A calibrated gemini-embedding-2 gating."
         ),
         "task_id": "TASK-RET",
     },
     "clef_contrastive_metadata": {
-        "display_name": "Contrastive Metadata Zoom Contact Sheet (EXP-28)",
+        "display_name": "Multi-Crop Visual Contact Sheet + Catalog Diff Headers (EXP-28)",
         "intuition": (
-            "Pairs the query crop + 2x Top/Mid/Bottom zoom strips beside Top-6 candidate packshots annotated with "
+            "In-house Vertex AI cascade: pairs the query crop + 2x Top/Mid/Bottom zoom strips beside Top-6 candidate packshots annotated with "
             "dynamic catalog attributes (Brand, Variant, Category, Pack, Size) and pairwise diff tokens."
         ),
         "task_id": "TASK-RET",
     },
     "sft_clm_clef_cascade": {
-        "display_name": "Gemini 3.5 Flash-Lite LoRA SFT + CLM + CLEF Cascade (EXP-29 / EXP-33)",
+        "display_name": "Gemini 3.5 Flash-Lite LoRA SFT + Calibrated Embedding Gate + Contact Sheet (EXP-29 / EXP-33)",
         "intuition": (
-            "Combines k=3 medoid visual gallery prototypes and CLM 5-attribute vote gating with our custom "
-            "Vertex AI Gemini 3.5 Flash-Lite LoRA SFT endpoint and CLEF contact-sheet verification."
+            "In-house Vertex AI cascade: combines k=3 medoid visual gallery prototypes and calibrated gemini-embedding-2 (3,072-D) vote gating with our custom "
+            "Vertex AI Gemini 3.5 Flash-Lite LoRA SFT endpoint and visual contact-sheet verification."
         ),
         "task_id": "TASK-RET",
     },
     "residual_infonce_clm_jev": {
-        "display_name": "Residual InfoNCE Projection Adapter + CLM-JEV (EXP-32)",
+        "display_name": "Residual InfoNCE Projection Adapter + Calibrated Embedding Cascade (EXP-32)",
         "intuition": (
-            "Applies a gallery-trained residual MLP adapter f(x)=norm(x+0.25*W2*GELU(W1*x)) on gemini-embedding-2 "
-            "to sharpen sister-variant separation before CLM gating and Gemini contact-sheet verification."
+            "In-house Vertex AI cascade: applies a gallery-trained residual MLP adapter f(x)=norm(x+0.25*W2*GELU(W1*x)) on gemini-embedding-2 (3,072-D) "
+            "to sharpen sister-variant separation before confidence gating and Gemini contact-sheet verification."
         ),
         "task_id": "TASK-RET",
     },
     "dinov3_classify": {
-        "display_name": "Meta DINOv3 Vision Backbone + CosFace SFT Classifier",
+        "display_name": "Meta DINOv3 Self-Supervised Vision Backbone + CosFace SFT Classifier",
         "intuition": (
-            "Closed-set supervised vision classifier trained on DINOv3 patch features with a residual bottleneck "
-            "and CosFace margin head."
+            "External self-supervised vision backbone benchmark: closed-set supervised classifier trained on frozen Meta DINOv3 patch features (384-D) "
+            "with a residual bottleneck and CosFace margin head (0 VLM calls, no gemini-embedding-2)."
         ),
         "task_id": "TASK-CLS",
+        "default_architecture": "Meta DINOv3 ViT-S/16 (384-D Frozen Vision Backbone) -> Residual Bottleneck + CosFace SFT Head (0 VLM Calls)",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Backbone: Frozen Meta DINOv3 ViT-S/16 Self-Supervised Vision Transformer (CLS + Patch Mean = 768-D, 0 VLM calls)",
+            "3. SFT Head: Residual Bottleneck MLP (768-D -> 512-D -> 256-D) + CosFace Margin Classifier (s=30, m=0.25)",
+            "4. Calibration: Temperature Scaling + Top-5 Centroid Cosine Blending (lambda=0.35)",
+        ],
+    },
+    "dinov3_hierarchical_sft": {
+        "display_name": "Meta DINOv3 ViT-S/16 + Hierarchical Taxonomic SFT Head (EXP-25)",
+        "intuition": (
+            "External self-supervised vision backbone benchmark: pairs frozen Meta DINOv3 ViT-S/16 (768-D CLS+Mean) with a 5-level "
+            "Brand-to-Variant Masked Hierarchical CosFace SFT head (0 VLM calls, no gemini-embedding-2)."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta DINOv3 ViT-S/16 (768-D CLS+Mean) -> 5-Level Taxonomic Masked CosFace SFT Head (0 VLM Calls)",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Backbone: Frozen Meta DINOv3 ViT-S/16 Self-Supervised Vision Transformer (CLS + Patch Mean = 768-D)",
+            "3. Hierarchical SFT Head: Shared Residual Trunk + 5 Parallel CosFace Heads (HUL, Category, Brand, Pack, Variant)",
+            "4. Taxonomic Masking: Soft Brand-to-Variant Probability Routing (M_brand->variant) + Centroid Cosine Blend",
+            "5. Output: Closed-Set 5-Level Prediction with 0 Gemini VLM Calls",
+        ],
+    },
+    "dinov3_triage": {
+        "display_name": "Meta DINOv3 Confidence Triage + Selective Gemini 3.5 Flash-Lite Cascade",
+        "intuition": (
+            "Hybrid self-supervised + VLM triage: routes high-confidence crops through frozen Meta DINOv3 + CosFace at 0 VLM cost and "
+            "escalates only low-margin crops to Gemini 3.5 Flash-Lite with Top-15 DINOv3 shortlist hints."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta DINOv3 ViT-S/16 + CosFace SFT Gate -> Selective Gemini 3.5 Flash-Lite Escalation",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Stage 1 Backbone: Frozen Meta DINOv3 ViT-S/16 + Hierarchical CosFace SFT Classifier",
+            "3. Confidence Triage Gate: Accepts DINOv3 Top-1 when calibrated probability and top1-top2 margin exceed threshold",
+            "4. Stage 2 VLM Escalation: Escalates ambiguous crops to Vertex AI Gemini 3.5 Flash-Lite constrained to Top-15 DINOv3 candidates",
+        ],
+    },
+    "dinov3_vitb_hierarchical": {
+        "display_name": "Meta DINOv3 ViT-B/16 (1,536-D) + Hierarchical Taxonomic SFT Head",
+        "intuition": (
+            "External self-supervised vision backbone benchmark: scales frozen Meta DINOv3 up to ViT-B/16 (768-D CLS + 768-D Patch Mean = 1,536-D) "
+            "with a 5-level Brand-to-Variant Masked CosFace SFT classifier (0 VLM calls, no gemini-embedding-2)."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta DINOv3 ViT-B/16 (1,536-D CLS+Mean) -> 5-Level Taxonomic Masked CosFace SFT Head (0 VLM Calls)",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Backbone: Frozen Meta DINOv3 ViT-B/16 Self-Supervised Vision Transformer (1,536-D CLS + Patch Mean)",
+            "3. Hierarchical SFT Head: Residual Bottleneck Trunk + 5 Parallel CosFace Heads (HUL, Category, Brand, Pack, Variant)",
+            "4. Taxonomic Masking: Soft Brand-to-Variant Probability Routing + Centroid Cosine Blend (0 VLM Calls)",
+        ],
+    },
+    "dinov3_vitb_detr_hierarchical": {
+        "display_name": "End-to-End ONNX RT-DETR + Meta DINOv3 ViT-B/16 Hierarchical SFT Pipeline",
+        "intuition": (
+            "Zero-VLM end-to-end shelf pipeline combining our Stage-1 ONNX RT-DETR v2 shelf detector with a frozen Meta DINOv3 ViT-B/16 "
+            "hierarchical CosFace SFT classifier head (0 VLM calls, no gemini-embedding-2)."
+        ),
+        "task_id": "TASK-E2E",
+        "default_architecture": "Stage 1: ONNX RT-DETR v2 Shelf Detector -> Stage 2: Meta DINOv3 ViT-B/16 + Hierarchical CosFace SFT (0 VLM Calls)",
+        "default_steps": [
+            "1. Stage 1 Detection: Local CPU ONNX RT-DETR v2 (rtdetr_r50vd, 43M params) shelf bounding-box detection",
+            "2. Crop Extraction: Tight bounding-box crop extraction + CLAHE + Gray-World White Balance (224x224)",
+            "3. Stage 2 Backbone: Frozen Meta DINOv3 ViT-B/16 Self-Supervised Vision Transformer (1,536-D CLS + Patch Mean)",
+            "4. Stage 2 Classifier: 5-Level Brand-to-Variant Masked CosFace SFT Head (0 Gemini VLM Calls)",
+        ],
+    },
+    "ijepa_hierarchical": {
+        "display_name": "Meta I-JEPA (ViT-H/14) Self-Supervised Vision Backbone + SFT Hierarchical Head",
+        "intuition": (
+            "External self-supervised vision backbone benchmark: extracts dense semantic patch embeddings from Meta's frozen I-JEPA ViT-H/14 "
+            "(1,280-D, 0 VLM calls, no gemini-embedding-2) paired with a supervised Residual Bottleneck + CosFace hierarchical classifier head."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta I-JEPA ViT-H/14 (facebook/ijepa_vith14_1k, 2,560-D Max+Mean Pool) -> 5-Level Taxonomic CosFace SFT Head",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Backbone: Frozen Meta I-JEPA ViT-H/14 Self-Supervised Vision Transformer (1,280-D Max + 1,280-D Mean Pool = 2,560-D)",
+            "3. Hierarchical SFT Head: Residual Bottleneck (2,560-D -> 512-D -> 384-D) + 5 Parallel CosFace Heads",
+            "4. Taxonomic Masking: Soft Brand-to-Variant Probability Routing (M_brand->variant)",
+            "5. Calibration: Temperature Scaling + Centroid Cosine Blending (lambda=0.35, 0 VLM Calls)",
+        ],
+    },
+    "vjepa2_hierarchical": {
+        "display_name": "Meta V-JEPA 2 Self-Supervised Vision Backbone + SFT Hierarchical Head",
+        "intuition": (
+            "External self-supervised vision backbone benchmark: extracts dense spatio-temporal patch embeddings from Meta's frozen V-JEPA 2 ViT-L/16 "
+            "(1,024-D, 0 VLM calls, no gemini-embedding-2) paired with a supervised Residual Bottleneck + CosFace hierarchical classifier head."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta V-JEPA 2 ViT-L/16 (facebook/vjepa2-vitl-fpc64-256, 2,048-D Max+Mean Pool) -> 5-Level Taxonomic CosFace SFT Head",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (256x256)",
+            "2. Backbone: Frozen Meta V-JEPA 2 ViT-L/16 Self-Supervised Spatio-Temporal Vision Transformer (2,048-D Spatial Max+Mean Pool)",
+            "3. Hierarchical SFT Head: Residual Bottleneck (2,048-D -> 512-D -> 384-D) + 5 Parallel CosFace Heads (HUL, Category, Brand, Pack, Variant)",
+            "4. Taxonomic Masking: Soft Brand-to-Variant Probability Routing (M_brand->variant)",
+            "5. Calibration: Temperature Scaling + Centroid Cosine Blending (lambda=0.35, 0 VLM Calls)",
+        ],
     },
     "cv_classify": {
         "display_name": "Legacy 3-Stage InceptionV3 Cascade (Brand → Pack → 7 Category-Routed Variant Models)",
@@ -442,6 +542,14 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
             "Stage 3 Silo-Routed Variant Classifier across 5 HUL endpoints (wash, skin, p5, oral, gen) and 2 Non-HUL endpoints (nonhul_p6, nonhul_gen)."
         ),
         "task_id": "TASK-CLS",
+        "default_architecture": "Stage 1: InceptionV3 Brand (.h5, 67 classes) -> Stage 2: InceptionV3 Pack (.h5, 46 classes) -> Stage 3: 7 Category-Routed Variant Endpoints (.h5)",
+        "default_steps": [
+            "1. Crop Preprocessing: Resize product crop to 299x299 RGB tensor normalized to [-1, 1] for Keras InceptionV3",
+            "2. Stage 1 Brand Endpoint: Invoke Vertex AI InceptionV3 Brand Classifier (67 classes) -> predicts Brand + HUL vs Non-HUL flag",
+            "3. Stage 2 Pack Endpoint: Invoke Vertex AI InceptionV3 Pack Classifier (46 classes) conditioned on Stage-1 Brand",
+            "4. Stage 3 Silo Routing: Route crop to 1 of 7 specialized InceptionV3 Variant Endpoints (5 HUL silos: wash, skin, p5, oral, gen; 2 Non-HUL silos: nonhul_p6, nonhul_gen)",
+            "5. Taxonomy Mapping: Map 3-stage predictions to canonical 5-level SKU taxonomy (0 Gemini VLM Calls, no gemini-embedding-2)",
+        ],
     },
 }
 
@@ -2145,6 +2253,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                         persisted_vertex_runs.get(s.get("run_id", ""), {}).get("run_context")
                         or f"projects/{project}/locations/{region}/metadataStores/default/contexts/{s.get('run_id', '')[:60]}"
                     ),
+                    "methodology": s.get("methodology") or runner.synthesize_dynamic_methodology(s),
                 }
                 matched_runs.append(run_lite)
                 run_to_experiments.setdefault(str(s.get("run_id")), []).append({
@@ -2165,6 +2274,8 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
             pr_id = str(pr.get("run_id") or "")
             if pr_id and pr_id not in seen_rids:
                 seen_rids.add(pr_id)
+                if not isinstance(pr.get("methodology"), dict):
+                    pr["methodology"] = runner.synthesize_dynamic_methodology(pr)
                 matched_runs.append(pr)
                 run_to_experiments.setdefault(pr_id, []).append({
                     "exp_id": exp_id,
