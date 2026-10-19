@@ -84,14 +84,16 @@ Training Parameters
 | Best-model criterion     |        Highest validation accuracy |
 
 Outputs
-| Output                           | Purpose                                     |
-| -------------------------------- | ------------------------------------------- |
-| `variant_classes.json`           | Model-index-to-class metadata mapping       |
-| `batch_metrics.csv`              | Batch-level training metrics                |
-| `epoch_metrics.csv`              | Epoch-level training and validation metrics |
-| `best_maxvit_brand_variant.pth`  | Best PyTorch state dictionary               |
-| `traced_maxvit_brand_variant.pt` | Best TorchScript model                      |
-| `cache/crops/`                   | Locally cached GCS images                   |
+| Output                           | Purpose                                          |
+| -------------------------------- | -------------------------------------------------|
+| `variant_classes.json`           | Model-index-to-class metadata mapping            |
+| `batch_metrics.csv`              | Batch-level training metrics                     |
+| `epoch_metrics.csv`              | Epoch-level training and validation metrics      |
+| `best_maxvit_brand_variant.pth`  | Best PyTorch state dictionary                    |
+| `traced_maxvit_brand_variant.pt` | Best TorchScript model                           |
+| `cache/crops/`                   | Locally cached GCS images                        |
+| `Model Artifact Path`            | gs://marketshare-datasets/models/maxvit_variants/|
+
 
 Model Accuracy Summary 
 | Epoch | Training Accuracy | Validation Accuracy | Validation Loss |
