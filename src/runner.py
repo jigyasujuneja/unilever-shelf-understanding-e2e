@@ -28,7 +28,7 @@ from PIL import Image
 
 import approaches
 from approaches.base import Context, Trace
-from utils import dataset, metrics, pricing, telemetry
+from utils import dataset, metrics, planogram_engine, pricing, telemetry
 from utils.llm import Gemini, LLMResult, Usage, load_config
 
 RESULTS_DIR = Path("results")
@@ -710,7 +710,8 @@ def run(
     def _one(sample: dataset.Sample, span) -> dict:
         trace = Trace(span=span)
         ctx = Context(model=model, llm=llm, trace=trace,
-                      otel_parent=telemetry.child_context(span), price=price)
+                      otel_parent=telemetry.child_context(span), price=price,
+                      image_id=sample.image_id)
         ctx.detected_asset_boxes = (
             list(getattr(sample, "asset_boxes", []) or [])
             if task == "planogram_compliance"
@@ -721,7 +722,7 @@ def run(
         try:
             image = dataset.open_rgb_normalized(dataset.read_bytes(sample.path))
             if (
-                appr.dataset.startswith(("hul_", "gtmerch", "ms_json"))
+                appr.dataset.startswith(("hul_", "gtmerch", "ms_json", "mt_json"))
                 and (image.width, image.height) != (sample.width, sample.height)
                 and sample.width > 0
                 and sample.height > 0
@@ -736,9 +737,9 @@ def run(
                         ctx.detected_asset_boxes = list(sample.asset_boxes)
                 sample.width, sample.height = image.width, image.height
             trace.step("Load image", f"{image.width}x{image.height} px")
-            if task == "classification":  # the photo is the product
-                ids = [appr.identify(image, ctx)]
+            if task == "classification":  # single-crop photo or multi-box shelf
                 preds = list(sample.boxes)
+                ids = [appr.identify(image, ctx)] if len(preds) <= 1 else identify_all(image, preds, ctx)
             elif task in ("retrieval", "promo_detection", "planogram_compliance"):  # ground-truth boxes given
                 preds = list(sample.boxes)
                 ids = identify_all(image, preds, ctx)
@@ -765,10 +766,24 @@ def run(
             extra["enrichment_metrics"] = metrics.compute_enrichment_buckets(
                 preds, None, sample.boxes, sample.labels, None, m["pairs"]
             )
+            eff_assets = getattr(sample, "asset_boxes", None) or getattr(ctx, "detected_asset_boxes", None)
+            extra["bay_scoped_metrics"] = metrics.score_merchandising_bay_or_hanger(
+                preds, None, sample.boxes, sample.labels, asset_boxes=eff_assets
+            )
+            if getattr(sample, "asset_boxes", None) or getattr(ctx, "detected_asset_boxes", None):
+                am = metrics.match(
+                    list(getattr(ctx, "detected_asset_boxes", []) or []),
+                    list(getattr(sample, "asset_boxes", []) or []),
+                )
+                extra["detected_asset_box_metrics"] = {
+                    "tp": am["tp"], "fp": am["fp"], "fn": am["fn"],
+                    **{k: round(v, 4) for k, v in metrics.scores(am["tp"], am["fp"], am["fn"]).items()},
+                }
             trace.step("Score vs ground truth",
                        f"{m['tp']} correct, {m['fp']} false, {m['fn']} missed "
                        f"({len(sample.boxes)} products in ground truth; "
                        f"in-band F2={extra['annotated_row_box_metrics']['f2']:.2f}, "
+                       f"bay/hanger F2={extra['bay_scoped_metrics']['f2']:.2f}, "
                        f"extra discovered={extra['enrichment_metrics']['extra_unannotated_row_preds']})")
         elif task == "end_to_end":  # right box (IoU >= 0.5) and right product
             gt_ids = [g["sku_id"] for g in sample.labels]
@@ -833,6 +848,16 @@ def run(
                 "scoped_preds": len(psa_preds),
                 **{k: round(v, 4) for k, v in metrics.scores(psa_m["tp"], psa_m["fp"], psa_m["fn"]).items()},
             }
+            eff_assets = getattr(sample, "asset_boxes", None) or getattr(ctx, "detected_asset_boxes", None)
+            extra["bay_scoped_metrics"] = metrics.score_merchandising_bay_or_hanger(
+                preds,
+                ids,
+                sample.boxes,
+                sample.labels,
+                asset_boxes=eff_assets,
+                catalog=catalog,
+                fields=eval_fields,
+            )
             extra["enrichment_metrics"] = metrics.compute_enrichment_buckets(
                 preds, ids, sample.boxes, sample.labels, catalog, m["pairs"]
             )
@@ -874,6 +899,34 @@ def run(
                        f"predicted {_fmt_label(extra['labels'][0]['pred'])}; "
                        f"truth {_fmt_label(sample.labels[0])} "
                        f"({', '.join(f + (' ✓' if ok else ' ✗') for f, ok in extra['labels'][0]['correct'].items())})")
+        if task in ("planogram_compliance", "end_to_end"):
+            existing_plano = next(
+                (
+                    st["info"]
+                    for st in trace.steps
+                    if isinstance(st.get("info"), dict) and "brand_block_purity" in st["info"]
+                ),
+                None,
+            )
+            if existing_plano is not None:
+                extra["planogram_compliance"] = existing_plano
+            else:
+                plano = planogram_engine.evaluate_shelf_planogram(
+                    boxes=preds,
+                    pred_ids=ids,
+                    catalog=catalog,
+                    asset_boxes=getattr(ctx, "detected_asset_boxes", None),
+                    image_size=(sample.width, sample.height),
+                )
+                extra["planogram_compliance"] = plano
+                trace.step(
+                    "Stage 6: Planogram & OOS Void Compliance",
+                    f"Scope={plano['scope_mode']} | HUL SOS={plano['hul_facing_sos']*100:.1f}% | "
+                    f"brand-block purity={plano['brand_block_purity']*100:.1f}% | "
+                    f"OOS voids={plano['oos_void_count']} ({plano['estimated_missing_facings']} missing facings)",
+                    boxes=[v["box"] for v in plano.get("oos_void_boxes", [])],
+                    info=plano,
+                )
         g = price(trace.usage)
         s_usd = pricing.extra_cost(trace.billed, sheet)
         return {
@@ -905,9 +958,9 @@ def run(
                 rows.append(row)
                 flag = f"  ERROR {row['error']}" if row["error"] else ""
                 what = (f"{'✓' if row['tp'] else '✗'} {_fmt_label(row['labels'][0]['pred'])}"
-                        if task == "classification" else
+                        if task == "classification" and row["gt_count"] <= 1 else
                         f"{row['tp']:>3} / {row['gt_count']:>3} identified"
-                        if task in ("retrieval", "promo_detection", "planogram_compliance") else
+                        if task in ("classification", "retrieval", "promo_detection", "planogram_compliance") else
                         f"{row['pred_count']:>4} pred / {row['gt_count']:>4} gt  F2 {row['f2']:.2f}")
                 log(f"  {i:>3}/{len(samples)} {row['image_id']:<16} {what}  "
                     f"{row['latency_s']:.1f}s{flag}")
@@ -929,14 +982,11 @@ def run(
                     f: round(sum(bool(lab["correct"].get(f)) for lab in eval_boxes) / max(1, len(eval_boxes)), 4)
                     for f in eval_fields}
                 if task in ("classification", "retrieval", "promo_detection", "planogram_compliance"):
-                    if "product" in summary["field_accuracy"] and eval_fields == default_fields:
-                        summary["accuracy"] = summary["field_accuracy"]["product"]
-                    else:
-                        summary["accuracy"] = round(
-                            sum(all(bool(lab["correct"].get(f)) for f in eval_fields) for lab in eval_boxes)
-                            / max(1, len(eval_boxes)),
-                            4,
-                        )
+                    summary["accuracy"] = round(
+                        sum(all(bool(lab["correct"].get(f)) for f in eval_fields) for lab in eval_boxes)
+                        / max(1, len(eval_boxes)),
+                        4,
+                    )
                 summary["hierarchical_accuracy"] = metrics.hierarchical_field_scores(eval_boxes)
                 # Macro-averaged accuracy across GT brands and GT variants + HUL vs Non-HUL competitor breakdown
                 from collections import defaultdict
@@ -1116,31 +1166,46 @@ def run(
                     "abstained_facings": abstained_n,
                     "categories_evaluated": len(cat_sos),
                 }
-            # Aggregate Merchandising Planogram & OOS Void Metrics across images
-            plano_steps = [
-                st["info"]
+            # Aggregate Stage 6 Planogram, Brand-Block & OOS Void Metrics across images
+            plano_items = [
+                r["planogram_compliance"]
                 for r in rows
-                for st in r.get("steps", [])
-                if isinstance(st.get("info"), dict) and "brand_block_purity" in st["info"]
+                if isinstance(r.get("planogram_compliance"), dict)
             ]
-            if plano_steps:
-                n_pl = len(plano_steps)
+            if not plano_items:
+                plano_items = [
+                    st["info"]
+                    for r in rows
+                    for st in r.get("steps", [])
+                    if isinstance(st.get("info"), dict) and "brand_block_purity" in st["info"]
+                ]
+            if plano_items:
+                n_pl = len(plano_items)
                 summary["planogram_metrics"] = {
                     "mean_brand_block_purity": round(
-                        sum(float(p.get("brand_block_purity", 0.0)) for p in plano_steps) / n_pl, 4
+                        sum(float(p.get("brand_block_purity", 0.0)) for p in plano_items) / n_pl, 4
+                    ),
+                    "mean_vertical_block_alignment": round(
+                        sum(float(p.get("vertical_block_alignment", 0.0)) for p in plano_items) / n_pl, 4
                     ),
                     "mean_asset_bay_purity": round(
-                        sum(float(p.get("asset_bay_purity", 1.0)) for p in plano_steps) / n_pl, 4
+                        sum(float(p.get("asset_bay_purity", 1.0)) for p in plano_items) / n_pl, 4
                     ),
                     "total_competitor_intrusions": sum(
-                        int(p.get("competitor_intrusion_count", 0)) for p in plano_steps
+                        int(p.get("competitor_intrusion_count", 0)) for p in plano_items
                     ),
-                    "total_oos_voids": sum(int(p.get("oos_void_count", 0)) for p in plano_steps),
+                    "total_oos_voids": sum(int(p.get("oos_void_count", 0)) for p in plano_items),
                     "estimated_missing_facings": sum(
-                        int(p.get("estimated_missing_facings", 0)) for p in plano_steps
+                        int(p.get("estimated_missing_facings", 0)) for p in plano_items
                     ),
                     "mean_empty_shelf_share": round(
-                        sum(float(p.get("empty_shelf_share", 0.0)) for p in plano_steps) / n_pl, 4
+                        sum(float(p.get("empty_shelf_share", 0.0)) for p in plano_items) / n_pl, 4
+                    ),
+                    "bay_scoped_image_count": sum(
+                        1 for p in plano_items if p.get("scope_mode") == "class0_bay_scoped"
+                    ),
+                    "hanger_fallback_image_count": sum(
+                        1 for p in plano_items if p.get("scope_mode") == "full_image_hanger_fallback"
                     ),
                 }
             # Stage-2A / Stage-2B Retrieval & Verification Diagnostics (Recall@1, Recall@5, MRR, 0-VLM Gate %, VLM Net Gain)
@@ -1258,6 +1323,33 @@ def run(
                 "others_catchall_gt_count": em_oth_gt,
                 "others_catchall_resolved_count": em_oth_res,
                 "enrichment_multiplier": round(em_tot / max(em_gt, 1), 2),
+            }
+        if task in ("detection", "end_to_end") and any("bay_scoped_metrics" in r for r in rows):
+            bs_rows = [r["bay_scoped_metrics"] for r in rows if isinstance(r.get("bay_scoped_metrics"), dict)]
+            bs_tp = sum(int(b.get("tp", 0)) for b in bs_rows)
+            bs_fp = sum(int(b.get("fp", 0)) for b in bs_rows)
+            bs_fn = sum(int(b.get("fn", 0)) for b in bs_rows)
+            bs_found = sum(int(b.get("found", 0)) for b in bs_rows)
+            bs_sc = {k: round(v, 4) for k, v in metrics.scores(bs_tp, bs_fp, bs_fn).items()}
+            summary["bay_scoped_metrics"] = {
+                "tp": bs_tp,
+                "fp": bs_fp,
+                "fn": bs_fn,
+                "found": bs_found,
+                "bay_scoped_image_count": sum(1 for b in bs_rows if b.get("scope_mode") == "class0_bay_scoped"),
+                "hanger_fallback_image_count": sum(1 for b in bs_rows if b.get("scope_mode") == "full_image_hanger_fallback"),
+                **bs_sc,
+            }
+        if task == "detection" and any("detected_asset_box_metrics" in r for r in rows):
+            da_rows = [r["detected_asset_box_metrics"] for r in rows if isinstance(r.get("detected_asset_box_metrics"), dict)]
+            da_tp = sum(int(b.get("tp", 0)) for b in da_rows)
+            da_fp = sum(int(b.get("fp", 0)) for b in da_rows)
+            da_fn = sum(int(b.get("fn", 0)) for b in da_rows)
+            summary["detected_asset_box_metrics"] = {
+                "tp": da_tp,
+                "fp": da_fp,
+                "fn": da_fn,
+                **{k: round(v, 4) for k, v in metrics.scores(da_tp, da_fp, da_fn).items()},
             }
         extra_summary = getattr(appr, "summary_extra", None)
         if callable(extra_summary):  # approach-specific aggregates (e.g. hybrid escalation rate)
@@ -1733,8 +1825,8 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
         ds = str(s.get("dataset") or "")
         ap = str(s.get("approach") or "")
         tk = str(s.get("task") or "detection")
-        is_golden = ds.startswith(("hul_", "gt_hul", "gtmerch", "ms_json"))
-        is_shelf = ds in ("gtmerch_golden", "ms_json_golden", "hul_sessions", "gt_hul_sessions", "shelves", "sku110k")
+        is_golden = ds.startswith(("hul_", "gt_hul", "gtmerch", "ms_json", "mt_json"))
+        is_shelf = ds in ("gtmerch_golden", "ms_json_golden", "mt_json_golden", "hul_talkers_golden", "hul_sessions", "gt_hul_sessions", "shelves", "sku110k")
         n_imgs = max(1, int(s.get("images", 1) or 1))
         tp_fn = int(s.get("tp", 0) or 0) + int(s.get("fn", 0) or 0)
         tot_boxes = int(s.get("total_gt_boxes") or (tp_fn if tp_fn > n_imgs else (n_imgs * 25 if is_shelf else n_imgs)))
@@ -1784,7 +1876,7 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
 
     def official(r: dict) -> bool:
         ds = str(r.get("dataset") or "")
-        if ds.startswith(("hul_", "gt_hul", "gtmerch", "ms_json")):
+        if ds.startswith(("hul_", "gt_hul", "gtmerch", "ms_json", "mt_json")):
             n_img = int(r.get("images", 0))
             return (
                 r.get("split") in ("test", "test_5k")
@@ -1799,7 +1891,7 @@ def leaderboard(results_dir: Path = RESULTS_DIR, config: dict | None = None) -> 
 
     def board(r: dict) -> tuple[int, str, int, str]:  # one tab per task and dataset (Golden first)
         ds = str(r["dataset"])
-        is_public = 0 if ds.startswith(("hul_", "gtmerch", "ms_json")) else 1
+        is_public = 0 if ds.startswith(("hul_", "gtmerch", "ms_json", "mt_json")) else 1
         return approaches.base.USE_CASES.index(r["use_case"]), r["task"], is_public, ds
 
     runs.sort(key=lambda r: (board(r), not official(r), -score(r), -r["recall"],
