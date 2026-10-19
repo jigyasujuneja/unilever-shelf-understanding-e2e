@@ -812,8 +812,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "use_case": "market_share",
         "task": "end_to_end",
         "dataset": "gtmerch_golden",
-        "approaches": ["shelf_clm_standalone", "distilled_yolo_onnx", "yolo_sku110k_onnx"],
-        "models": ["gemini-embedding-2", "yolo11n-distilled-onnx", "yolov12s-sku110k-onnx"],
+        "approaches": ["shelf_clm_standalone"],
+        "models": ["gemini-embedding-2"],
         "splits": ["val", "test"],
         "hypothesis": (
             "Combining Distilled YOLO11n ONNX CPU detection with Standalone CLM InfoNCE retrieval delivers "

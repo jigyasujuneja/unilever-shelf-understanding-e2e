@@ -1336,25 +1336,25 @@ async function showUseCaseBoard(useCase = "market_share") {
     </table>
 
     <details class="clean-accordion">
-      <summary>Segmented Accuracy Summary (By Packaging Form &amp; Store Category · 1,000+ Samples) &blacktriangledown;</summary>
+      <summary>Segmented Accuracy Summary (By Packaging Form &amp; Store Category · N=5,000 Verified Samples) &blacktriangledown;</summary>
       <div class="clean-accordion-body">
         <div class="qc-grid">
           <div class="qc-card">
-            <div style="font-weight:700;margin-bottom:6px;">By Packaging Form (46 Category__PackType Classes)</div>
+            <div style="font-weight:700;margin-bottom:6px;">By Packaging Form (N=5,000 #1016-092456 · 46 Category__PackType Classes)</div>
             <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;">
-              &bull; <b>Cartons &amp; Boxes:</b> 97.7% Pack · 91.2% SKU<br>
-              &bull; <b>Bottles (54% volume):</b> 97.0% Pack · 91.8% SKU<br>
-              &bull; <b>Pouches &amp; Sachets:</b> 96.8% Pack · 89.6% SKU<br>
-              &bull; <b>Jars, Bars &amp; Tubes:</b> 94.0%–97.1% Pack · 88.4%–90.4% SKU
+              &bull; <b>Bottles (n=1,198):</b> 93.7% Pack · 85.3% SKU<br>
+              &bull; <b>Pouches &amp; Sachets (n=1,100):</b> 94.6% Pack · 87.8% SKU (94.3% on Sachets)<br>
+              &bull; <b>Jars, Wrappers &amp; Cans (n=979):</b> 92.1% Pack · 85.8% SKU<br>
+              &bull; <b>Tubes &amp; Cartons (n=888):</b> 98.1% Tube / 92.8% Carton Pack · 76.8% / 73.3% SKU
             </div>
           </div>
           <div class="qc-card">
-            <div style="font-weight:700;margin-bottom:6px;">By SKU Ownership (50/50 Stratified)</div>
+            <div style="font-weight:700;margin-bottom:6px;">By SKU Ownership (N=5,000 50/50 Stratified · #1016-092456)</div>
             <div style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;">
-              &bull; <b>Unilever (HUL · 1,094 SKUs):</b> 98.9% L1 · 97.2% Brand · 91.4% SKU<br>
-              &bull; <b>Competitor (Non-HUL · 1,598 SKUs):</b> 98.6% L1 · 96.1% Brand · 88.2% SKU<br>
-              &bull; <b>Sister Variants (1,922 classes):</b> 93.4% Variant · 91.2% SKU<br>
-              &bull; <b>Promotional Packs (240 classes):</b> 96.7% Promo Callout
+              &bull; <b>Unilever (HUL · n=2,523 crops / 1,073 SKUs):</b> 98.4% L1 · 98.1% Brand · <b>88.8% Exact SKU</b><br>
+              &bull; <b>Competitor (Non-HUL · n=2,477 crops / 1,586 SKUs):</b> 98.8% L1 · 94.1% Brand · <b>75.7% Exact SKU</b><br>
+              &bull; <b>Sister Variants (1,922 classes):</b> 82.3% (N=5,000) · 83.5%–84.8% (N=1,000)<br>
+              &bull; <b>Promotional Packs (240 classes · N=1,000 #025000):</b> 84.0% 3-Attr · 93.7% Brand · 73.0% 5-Attr SKU
             </div>
           </div>
         </div>
@@ -1675,22 +1675,22 @@ const STORY_FAMILIES = [
   {
     family: "Stage 0 & Stage 1: Physical Optics + Dual-Class CPU ONNX Detector",
     approaches: "restore_photometry · distilled_yolo_onnx · distilled_yolo_960_softnms · yolo_sku110k_onnx",
-    result: "96.4%–97.9% Stage-1 F2 at 80ms CPU & ₹0 token cost (-94.3% chromatic error: 19.58 -> 1.04 Delta E).",
+    result: "98.1%–100.0% Stage-1 F2 on gt_hul_sessions (800 boxes) · 67.3%–69.0% Annotated-Row F2 on ms_json_golden (5,013 boxes) at 80ms CPU & ₹0 token cost (-94.3% chromatic error: 19.58 -> 1.04 Delta E).",
   },
   {
     family: "Family 1: Stage-2A Calibrated gemini-embedding-2 & Color Margin Gate (Zero-VLM Fast Path, slug: clm)",
     approaches: "clm_standalone · clm_standalone_classify · shelf_clm_standalone · embedding_retrieval",
-    result: "96.7% Brand, 97.5% Pack, 100.0% Category, 95.3% HUL SoS at ₹0.011/crop (resolves 68% of crops with 0 VLM calls).",
+    result: "95.6% Brand, 90.8% Pack, 95.8% Category, 78.9% Exact SKU on N=1,000 (#013247) at ₹0.011/crop (resolves 68% of crops with 0 VLM calls).",
   },
   {
     family: "Family 2: Stage-2B Multi-Crop Visual Contact-Sheet & Logprob Verifier (slug: clef)",
     approaches: "clef_standalone · clef_contrastive_metadata (EXP-28) · clef_flash_decision · clef_standalone_classify",
-    result: "+8.9% lift on exact pack size / grammage via 2x Lanczos Bottom-30% Net-Weight Strip and catalog diff headers.",
+    result: "82.3% Exact SKU / 96.1% Brand on N=5,000 (#1016-092456) & 83.5%–84.8% Exact SKU / 97.4% Brand on N=1,000 (#1015-163309, #025000) via 2x Lanczos Bottom-30% Net-Weight Strip.",
   },
   {
     family: "Family 3 & 4: Two-Stage Embedding + VLM Cascade with 1D Shelf Context Priors (slug: jev)",
     approaches: "hierarchical_clm_jev · outlet_scoped_clm_jev (EXP-20) · tube_midband_jev (EXP-21) · row_neighbor_prior_jev (EXP-22) · shelf_height_size_prior_jev (EXP-23)",
-    result: "95.0%–96.4% E2E F2, 91.2%–96.6% Exact SKU, +12.0% on Squeeze Tubes, 97.2% Bay Purity, 96.7% Promo at ₹0.12/shelf.",
+    result: "76.4% E2E Shelf SKU F2 (90.8% E2E Brand, 1.8% SoS MAE on 800 boxes), 88.8% HUL Exact SKU (N=5,000), 96.9% Bay Purity (#232627), 84.0% 3-Attr / 93.7% Brand Promo (N=1,000 #025000) at ₹0.12/shelf.",
   },
 ];
 
@@ -1704,50 +1704,50 @@ const STORY_LATEST_VS_BASELINE_ROWS = [
   [
     "Stage 1 Shelf & Bay Detection (F2)",
     "51.1% F2 (1-class detector where outer display bays overlap inner SKU packs)",
-    "97.9% F2 on gtmerch_golden (1,126 boxes) · 96.4% F2 on ms_json_golden (1,008 boxes) at 80ms CPU & ₹0 token cost",
-    "+46.8% F2 lift",
+    "98.1%–100.0% F2 on gt_hul_sessions (100 shelves, 800 boxes, #232625) · 67.3%–69.0% Annotated-Row F2 on ms_json_golden (5,013 boxes, #092455) at 80ms CPU & ₹0 token cost",
+    "+17.9% to +48.9% F2 lift",
   ],
   [
     "L1 Corporate Owner (HUL vs. Competitor)",
     "86.8% (W3 baseline; 874 competitor brands grouped under 'Others')",
-    "98.9%–100.0% across 1,200+ samples (with temporal M&A ledger: Horlicks, Pureit, Minimalist, OZiva)",
-    "+12.1% to +13.2% lift",
+    "98.6% on N=5,000 (#1016-092456) · 99.0%–99.3% on N=1,000 (#1015-174314 SFT) with temporal M&A ledger (Horlicks, Pureit, Minimalist, OZiva)",
+    "+11.8% to +12.5% lift",
   ],
   [
     "L2A Store Category (10 Categories)",
     "83.2% mean (W2 range: 72.6%–92.0% across store categories)",
-    "97.7%–100.0% crop / 98.2% shelf across 1,200+ samples (EXP-22 1D horizontal row neighbor prior)",
-    "+14.5% to +16.8% lift",
+    "96.5% on N=5,000 (#1016-092456) · 97.4%–97.7% on N=1,000 (#1015-163309 / #1015-174314 SFT across all 10 store categories)",
+    "+13.3% to +14.5% lift",
   ],
   [
     "L2B Packaging Form (16 Forms / 46 Pairs)",
     "80.6% mean (W6 range: 65.0%–91.0% across pack_data)",
-    "97.5% Strict (16 canonical forms) / 100.0% Dual-Accept (46 Category × Pack-Form pairs, 1,200 samples)",
-    "+16.9% to +19.4% lift",
+    "91.7% on N=5,000 (#1016-092456) · 93.2%–93.3% on N=1,000 (#1015-163309 / #025000) across 16 canonical forms (100% dual-accept taxonomy mapping)",
+    "+11.1% to +12.7% lift",
   ],
   [
     "L3 Canonical Brand (953 Named Brands)",
     "86.8% mean (W3 range: 77.5%–94.0% across brand_data)",
-    "96.8%–98.1% across 953 named HUL & competitor brands (1,200+ samples, 0 schema errors)",
-    "+10.0% to +11.3% lift",
+    "96.1%–96.6% on N=5,000 (#1016-092456, 98.1% on HUL brands) · 97.4%–97.7% on N=1,000 (#025000 / #174314 SFT) across 953 named brands",
+    "+9.3% to +10.9% lift",
   ],
   [
     "L4 Base Variant (1,922 Sister Variants)",
     "76.1% mean (W4 range: 57.4%–85.0% across variant_* silos)",
-    "93.4% overall (+12.0% on Squeeze Tubes via EXP-21 1.15x unwarp + Middle-30% zoom strip, 1,200 samples)",
-    "+17.3% lift",
+    "82.3% on N=5,000 (#1016-092456, 88.8% on HUL SKUs) · 83.5%–84.8% on N=1,000 (#163309 EXP-28 / #025000) across 1,922 HUL & rival variants",
+    "+6.2% to +8.7% lift",
   ],
   [
     "L5 Exact SKU & Pack Size (2,659 SKUs)",
     "50.5% mean (W1 = W4 × W5 compound accuracy, range: 31.9%–70.6%)",
-    "91.2%–96.6% across 1,200+ samples (EXP-20 store-segment scope + EXP-23 plank-height prior + EXP-09 bottom weight strip)",
-    "+40.7% to +46.1% lift",
+    "82.3% on N=5,000 (#1016-092456, 88.8% on HUL SKUs, 75.7% on long-tail rival SKUs) · 83.5%–84.8% on N=1,000 (#163309 / #025000)",
+    "+31.8% to +34.3% lift",
   ],
   [
     "Merchandising & Promo Compliance",
     "75.0% fixed 240-class ViT-B-16 baseline (3–4 week retraining cycle per new promo pack)",
-    "97.2% Bay Purity, 96.7% Zero-Shot Promo (1,200 samples, 5-min reference upload with zero retraining)",
-    "+21.7% Promo · 4 wks → 5 min",
+    "96.9% Bay Purity (#232627, 800 boxes) · 84.0% 3-Attr / 93.7% Brand / 73.0% 5-Attr Zero-Shot Promo (N=1,000 #025000-Lite, 5-min reference upload)",
+    "+9.0% 3-Attr · 4 wks → 5 min",
   ],
   [
     "Unit Economics, Latency & Availability",
@@ -1779,23 +1779,23 @@ async function showTechnicalStory() {
     bodyHtml = `
       <div class="m3-kpi-grid" style="margin-bottom:10px;grid-template-columns:repeat(4,1fr);gap:10px;">
         <div class="m3-kpi-card" style="padding:10px 12px;">
-          <div class="m3-kpi-label" style="font-size:11px;">Exact SKU &amp; Size (L5)</div>
-          <div class="m3-kpi-value" style="font-size:20px;color:var(--ok);">91.2%–96.6% <span style="font-size:12px;color:var(--muted);font-weight:600;">vs 50.5% (W1)</span></div>
-          <div class="m3-kpi-sub" style="font-size:11px;">+40.7% to +46.1% over Phase-1 W1=W4×W5</div>
+          <div class="m3-kpi-label" style="font-size:11px;">Exact SKU &amp; Size (L5 · N=5,000 / N=1,000)</div>
+          <div class="m3-kpi-value" style="font-size:20px;color:var(--ok);">82.3%–84.8% <span style="font-size:12px;color:var(--muted);font-weight:600;">vs 50.5% (W1)</span></div>
+          <div class="m3-kpi-sub" style="font-size:11px;">+31.8% to +34.3% lift (88.8% on HUL SKUs, N=5,000)</div>
         </div>
         <div class="m3-kpi-card" style="padding:10px 12px;">
-          <div class="m3-kpi-label" style="font-size:11px;">Stage-1 Shelf Detection (F2)</div>
-          <div class="m3-kpi-value" style="font-size:20px;color:var(--ok);">97.9% F2 <span style="font-size:12px;color:var(--muted);font-weight:600;">vs 51.1%</span></div>
-          <div class="m3-kpi-sub" style="font-size:11px;">Dual-Class CPU ONNX (80ms, ₹0 token cost)</div>
+          <div class="m3-kpi-label" style="font-size:11px;">L3 Brand (953 Named Brands)</div>
+          <div class="m3-kpi-value" style="font-size:20px;color:var(--ok);">96.6%–97.7% <span style="font-size:12px;color:var(--muted);font-weight:600;">vs 86.8% (W3)</span></div>
+          <div class="m3-kpi-sub" style="font-size:11px;">98.1% on HUL Brands · 98.6% L1 Owner (N=5,000)</div>
         </div>
         <div class="m3-kpi-card" style="padding:10px 12px;">
-          <div class="m3-kpi-label" style="font-size:11px;">Zero-Shot Promo Launch</div>
+          <div class="m3-kpi-label" style="font-size:11px;">Zero-Shot Promo Launch (N=1,000)</div>
           <div class="m3-kpi-value" style="font-size:20px;color:var(--ok);">5 Min <span style="font-size:12px;color:var(--muted);font-weight:600;">vs 3–4 Weeks</span></div>
-          <div class="m3-kpi-sub" style="font-size:11px;">96.7% accuracy on 240 promo SKUs (1,200 samples)</div>
+          <div class="m3-kpi-sub" style="font-size:11px;">84.0% 3-Attr · 93.7% Brand · 73.0% 5-Attr (#025000)</div>
         </div>
         <div class="m3-kpi-card" style="padding:10px 12px;">
           <div class="m3-kpi-label" style="font-size:11px;">Evaluated Scale &amp; Economics</div>
-          <div class="m3-kpi-value" style="font-size:20px;color:var(--accent);">1,000+ Samples <span style="font-size:12px;color:var(--muted);font-weight:600;">· ₹0.12/shelf</span></div>
+          <div class="m3-kpi-value" style="font-size:20px;color:var(--accent);">5,000 Samples <span style="font-size:12px;color:var(--muted);font-weight:600;">· ₹0.12/shelf</span></div>
           <div class="m3-kpi-sub" style="font-size:11px;">👤 Jigyasu Juneja (jjuneja@google.com)</div>
         </div>
       </div>
