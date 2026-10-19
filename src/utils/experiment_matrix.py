@@ -2253,7 +2253,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                         persisted_vertex_runs.get(s.get("run_id", ""), {}).get("run_context")
                         or f"projects/{project}/locations/{region}/metadataStores/default/contexts/{s.get('run_id', '')[:60]}"
                     ),
-                    "methodology": s.get("methodology") or runner.synthesize_dynamic_methodology(s),
+                    "methodology": runner.synthesize_dynamic_methodology(s),
                 }
                 matched_runs.append(run_lite)
                 run_to_experiments.setdefault(str(s.get("run_id")), []).append({
@@ -2274,8 +2274,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
             pr_id = str(pr.get("run_id") or "")
             if pr_id and pr_id not in seen_rids:
                 seen_rids.add(pr_id)
-                if not isinstance(pr.get("methodology"), dict):
-                    pr["methodology"] = runner.synthesize_dynamic_methodology(pr)
+                pr["methodology"] = runner.synthesize_dynamic_methodology(pr)
                 matched_runs.append(pr)
                 run_to_experiments.setdefault(pr_id, []).append({
                     "exp_id": exp_id,
