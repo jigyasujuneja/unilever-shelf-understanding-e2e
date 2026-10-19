@@ -1051,7 +1051,101 @@ def test_de_pr6_gtmerch_audit_split_and_cross_bucket_linker(tmp_path) -> None:
     assert "gs://gtmerch-marketshare/**" in ddls["object_table_and_models_ddl"]
 
 
+def test_match_product_requires_all_evaluated_fields_and_infers_is_hul_from_brand():
+    from utils import metrics
+
+    fields = ("product", "brand", "base_variant", "category", "packaging_type", "is_hul")
+    gt = {
+        "product": "Comfort__Blue_Bottle",
+        "brand": "Comfort",
+        "base_variant": "Blue_Bottle",
+        "category": "Laundry",
+        "packaging_type": "Bottle",
+        "is_hul": True,
+    }
+    pred_wrong_pack = {
+        "product": "Comfort__Blue_Bottle",
+        "brand": "Comfort",
+        "base_variant": "Blue_Bottle",
+        "category": "Laundry",
+        "packaging_type": "Pouch",
+    }
+    m_wrong = metrics.match_product(pred_wrong_pack, gt, fields)
+    assert m_wrong["correct"]["product"] is True
+    assert m_wrong["correct"]["packaging_type"] is False
+    assert m_wrong["correct"]["is_hul"] is True
+    assert m_wrong["tp"] == 0 and m_wrong["fp"] == 1
+
+    pred_all_right_no_is_hul = {
+        "product": "Comfort__Blue_Bottle",
+        "brand": "Comfort",
+        "base_variant": "Blue_Bottle",
+        "category": "Laundry",
+        "packaging_type": "Bottle",
+    }
+    m_right = metrics.match_product(pred_all_right_no_is_hul, gt, fields)
+    assert m_right["correct"]["is_hul"] is True
+    assert m_right["tp"] == 1 and m_right["fp"] == 0
+
+    hier = metrics.hierarchical_field_scores([{"gt": gt, "pred": pred_all_right_no_is_hul, "correct": m_right["correct"]}])
+    assert hier["level1_is_hul"] == 1.0
+    assert hier["compound_all_5_levels"] == 1.0
 
 
+def test_generate_run_methodology_uses_gemini_schema_and_falls_back_cleanly(monkeypatch):
+    import json
+    import types as pytypes
 
+    from google import genai
 
+    import runner
+
+    class DummyAppr:
+        name = "cv_classify"
+        steps = ["Brand .h5", "Pack .h5", "Variant .h5"]
+
+    summary = {
+        "run_id": "1016-093317-cv_classify-marketshare_brand.h5",
+        "approach": "cv_classify",
+        "task": "classification",
+        "dataset": "hul_golden",
+        "model": "marketshare_brand.h5",
+        "evaluated_fields": ["product", "brand", "base_variant", "category", "packaging_type"],
+        "accuracy": 0.4232,
+        "field_accuracy": {"brand": 0.892, "packaging_type": 0.562},
+        "p50_latency_s": 0.25,
+        "cost_per_image_usd": 0.0001,
+        "usd_to_inr": 86.2,
+    }
+    rows = [{"steps": [{"name": "Brand .h5", "detail": "Comfort (0.98)"}]}]
+
+    monkeypatch.setenv("SHELF_BENCH_AUTO_METHODOLOGY", "0")
+    assert runner.generate_run_methodology(DummyAppr(), summary, rows, {}) is None
+
+    monkeypatch.setenv("SHELF_BENCH_AUTO_METHODOLOGY", "1")
+    fake_payload = {
+        "summary_header": "Run #093317 Methodology (<code>cv_classify</code>): 9-Model Chain",
+        "flow_summary": "Chained InceptionV3 classifiers on <code>hul_golden</code>.",
+        "bullets": [
+            "<b>Stage 1:</b> Brand classification.",
+            "<b>Stage 2:</b> Pack classification.",
+            "<b>Stage 3:</b> Variant routing.",
+        ],
+    }
+
+    class FakeModels:
+        def generate_content(self, model, contents, config):
+            assert model == "gemini-3.5-flash-lite"
+            assert "cv_classify" in contents
+            return pytypes.SimpleNamespace(text=json.dumps(fake_payload))
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(genai, "Client", FakeClient)
+    out = runner.generate_run_methodology(DummyAppr(), summary, rows, {"gcp": {"project": "test-p"}})
+    assert out is not None
+    assert out["summary_header"] == fake_payload["summary_header"]
+    assert len(out["bullets"]) == 3
+    assert out["generated_by"] == "gemini-3.5-flash-lite"

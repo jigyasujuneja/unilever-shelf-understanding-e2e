@@ -20,6 +20,9 @@ gcp:
   hul_brands: gs://marketshare-datasets/derived_manifests/hul_brands          # v2.2 50/50 Stratified Brand & M&A benchmark
   hul_sessions: gs://marketshare-datasets/derived_manifests/hul_sessions      # v2.2 Multi-facing store session shelf strips (legacy alias)
   gt_hul_sessions: gs://marketshare-datasets/derived_manifests/gt_hul_sessions  # v2.2 Expanded GT Store-Session shelf strips (100 test / 50 val / 150 train)
+  mt_json_golden: gs://marketshare-datasets/derived_manifests/mt_json_golden  # v2.2 Outlet-grouped MT store shelf manifest
+  hul_talkers_golden: gs://marketshare-datasets/derived_manifests/hul_talkers_golden  # v2.2 Outlet-grouped shelf talker & price tag manifest
+  awp_code_templates: gs://marketshare-datasets/derived_manifests/awp_code_templates  # 63 AWP reference templates index
   results: gs://ul-fs-s-sandbx-16-prj-shelf-images/results        # run outputs from Cloud Run
 
 # Legacy InceptionV3 Keras classifiers for `-a cv_classify`. The .h5 files are registered in Vertex AI
@@ -97,6 +100,10 @@ tuned_models:
     base_model: gemini-3.5-flash-lite
     location: eu
     endpoint: projects/663686437672/locations/eu/endpoints/5662995056441688064
+  marketshare-unified-brand-sft-gemini-3-5-flash-lite:
+    base_model: gemini-3.5-flash-lite
+    location: us
+    endpoint: projects/663686437672/locations/us/endpoints/3779575618526511104
   gemini-3.5-flash-sft:
     base_model: gemini-3.5-flash
     location: global

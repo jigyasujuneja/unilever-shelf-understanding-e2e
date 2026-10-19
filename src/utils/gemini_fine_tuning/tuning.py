@@ -48,6 +48,7 @@ TUNABLE_DATASETS = (
     "rpc",
     "pack",
     "brand",
+    "unified_brand",
     "variant",
     "hul_golden",
     "hul_variants",
@@ -58,7 +59,12 @@ TUNABLE_DATASETS = (
 
 MARKETSHARE_BUCKET = "gs://marketshare-datasets"
 # GCS folders and per-task (train, val) file names of the build_marketshare_*_jsonl outputs.
-SFT_JSONL_DIRS = {"pack": "pack_data/pack/jsonl", "brand": "brand_data/brand/jsonl", "variant": "input_data/jsonl"}
+SFT_JSONL_DIRS = {
+    "pack": "pack_data/pack/jsonl",
+    "brand": "brand_data/brand/jsonl",
+    "unified_brand": "derived_manifests/unified_brand/sft",
+    "variant": "input_data/jsonl",
+}
 SFT_SPLIT_FILES = {
     "all3": ("train_stratified.jsonl", "val_stratified.jsonl"),
     "category": ("train_category_stratified.jsonl", "val_category_stratified.jsonl"),
@@ -84,6 +90,13 @@ PACK_PROMPT = (
 BRAND_PROMPT = (
     'Classify the retail product shown in the image by its brand. '
     'Return ONLY JSON like {"brand":"Dove"}.'
+)
+
+UNIFIED_BRAND_PROMPT = (
+    "Classify the retail product shown in the image by its canonical brand and Unilever (HUL) ownership. "
+    "Output canonical Title_Case_With_Underscores brand names (e.g. Dove, Surf_Excel, Red_Label, Clinic_Plus, "
+    "Nescafe, Maggi, Others). "
+    'Return ONLY JSON like {"brand":"Dove","is_hul":true}.'
 )
 
 VARIANT_CATEGORIES = ("gen", "oral", "p5", "skin", "wash")
@@ -515,6 +528,191 @@ def build_marketshare_brand_jsonl(
     }
 
 
+def build_unified_brand_sft_jsonl(
+    gcs_bucket: str = MARKETSHARE_BUCKET,
+    out_dir: str | Path = "data/tuning/unified_brand",
+    seed: int = 42,
+    val_per_brand: int = 3,
+    train_per_brand: int = 10,
+    upload: bool = True,
+    manifests: list[dict[str, Any]] | None = None,
+    md5_by_uri: dict[str, str] | None = None,
+    clean_local: bool = False,
+) -> dict[str, Any]:
+    """Build zero-leakage ~950-brand SFT JSONL files across all canonical HUL + Competitor + Others brands.
+
+    Combines ``hul_golden`` (gallery + train + val) and ``hul_brands`` (train + val) while strictly
+    excluding every ``test`` and ``test_5k`` URI and every held-out store-visit ``session_id``.
+    """
+    from utils.taxonomy.brands import verify_brand_ownership
+    from utils.taxonomy.filenames import parse_crop_filename
+
+    if manifests is None:
+        manifests = [
+            dataset._rpc_json(dataset.data_root("hul_brands")),
+            dataset._rpc_json(dataset.data_root("hul_golden")),
+        ]
+
+    gcs_dest = f"{gcs_bucket.rstrip('/')}/{SFT_JSONL_DIRS['unified_brand']}"
+    out_p = Path(out_dir)
+    out_p.mkdir(parents=True, exist_ok=True)
+
+    def _session_of_item(item: dict[str, Any]) -> str:
+        sid = str(item.get("session_id") or "").strip()
+        if sid:
+            return sid
+        uri = str(item.get("uri") or "")
+        if not uri:
+            return ""
+        try:
+            return str(parse_crop_filename(uri.rsplit("/", 1)[-1]).get("session_id") or "")
+        except Exception:
+            return ""
+
+    def _resolve_brand_and_hul(lbl: dict[str, Any] | None) -> tuple[str, bool] | None:
+        if not lbl:
+            return None
+        raw_b = str(lbl.get("brand") or "").strip()
+        if not raw_b or raw_b.lower() in _SKIP_NOISE_BRANDS or raw_b.lower() in ("unknown", "none", "null", "na"):
+            return None
+        if raw_b.lower() in ("others", "other"):
+            return "Others", False
+        canon_b = clean_brand_name(raw_b)
+        if not canon_b or canon_b.lower() in _SKIP_NOISE_BRANDS or canon_b == "Unknown":
+            return None
+        is_hul = bool(lbl["is_hul"]) if "is_hul" in lbl else bool(verify_brand_ownership(canon_b)["is_hul"])
+        return canon_b, is_hul
+
+    held_out_uris: set[str] = set()
+    held_out_sessions: set[str] = set()
+    for mf in manifests:
+        splits = mf.get("splits") or {}
+        for sp in ("test", "test_5k"):
+            for it in splits.get(sp) or []:
+                u = str(it.get("uri") or "")
+                if u:
+                    held_out_uris.add(u)
+                sid = _session_of_item(it)
+                if sid:
+                    held_out_sessions.add(sid)
+        for it in splits.get("val") or []:
+            sid = _session_of_item(it)
+            if sid:
+                held_out_sessions.add(sid)
+
+    val_by_brand: dict[str, list[str]] = defaultdict(list)
+    train_by_brand: dict[str, list[str]] = defaultdict(list)
+    hul_by_brand: dict[str, bool] = {}
+    seen_val_uris: set[str] = set()
+    seen_train_uris: set[str] = set()
+
+    # 1. Collect validation crops strictly from val splits (disjoint from test / test_5k)
+    for mf in manifests:
+        classes = mf.get("classes") or {}
+        for it in (mf.get("splits") or {}).get("val") or []:
+            u = str(it.get("uri") or "")
+            if not u or not u.startswith("gs://") or u in held_out_uris or u in seen_val_uris:
+                continue
+            lbls = it.get("labels") or [classes.get(str(p)) for p in (it.get("products") or [])]
+            resolved = _resolve_brand_and_hul(lbls[0] if lbls else None)
+            if not resolved:
+                continue
+            canon_b, is_hul = resolved
+            hul_by_brand.setdefault(canon_b, is_hul)
+            val_by_brand[canon_b].append(u)
+            seen_val_uris.add(u)
+
+    # 2. Collect training crops from gallery + train splits (disjoint from val, test, test_5k, and held-out sessions)
+    for mf in manifests:
+        classes = mf.get("classes") or {}
+        for pid_s, uris in (mf.get("gallery") or {}).items():
+            resolved = _resolve_brand_and_hul(classes.get(str(pid_s)))
+            if not resolved:
+                continue
+            canon_b, is_hul = resolved
+            hul_by_brand.setdefault(canon_b, is_hul)
+            for u in uris:
+                u_str = str(u or "")
+                if not u_str.startswith("gs://") or u_str in held_out_uris or u_str in seen_val_uris or u_str in seen_train_uris:
+                    continue
+                train_by_brand[canon_b].append(u_str)
+                seen_train_uris.add(u_str)
+        for it in (mf.get("splits") or {}).get("train") or []:
+            u = str(it.get("uri") or "")
+            if not u or not u.startswith("gs://") or u in held_out_uris or u in seen_val_uris or u in seen_train_uris:
+                continue
+            sid = _session_of_item(it)
+            if sid and sid in held_out_sessions:
+                continue
+            lbls = it.get("labels") or [classes.get(str(p)) for p in (it.get("products") or [])]
+            resolved = _resolve_brand_and_hul(lbls[0] if lbls else None)
+            if not resolved:
+                continue
+            canon_b, is_hul = resolved
+            hul_by_brand.setdefault(canon_b, is_hul)
+            train_by_brand[canon_b].append(u)
+            seen_train_uris.add(u)
+
+    all_brands = sorted(set(train_by_brand) | set(val_by_brand))
+    conflicted_md5s = _find_conflicted_md5s(train_by_brand, md5_by_uri) | _find_conflicted_md5s(val_by_brand, md5_by_uri)
+    rng = random.Random(seed)
+    all_train_records: list[str] = []
+    train_stratified: list[str] = []
+    val_stratified: list[str] = []
+
+    for brand in all_brands:
+        target = {"brand": brand, "is_hul": bool(hul_by_brand.get(brand, False))}
+        v_raw = _prioritize_originals(val_by_brand.get(brand, []), rng, md5_by_uri, conflicted_md5s)
+        t_raw = _prioritize_originals(train_by_brand.get(brand, []), rng, md5_by_uri, conflicted_md5s)
+
+        v_uris = v_raw[:val_per_brand]
+        v_set = set(v_uris)
+        t_clean = [u for u in t_raw if u not in v_set]
+        t_uris = t_clean[:train_per_brand]
+
+        val_stratified.extend(_sft_line(u, UNIFIED_BRAND_PROMPT, target) for u in v_uris)
+        train_stratified.extend(_sft_line(u, UNIFIED_BRAND_PROMPT, target) for u in t_uris)
+        all_train_records.extend(_sft_line(u, UNIFIED_BRAND_PROMPT, target) for u in t_clean)
+
+    rng.shuffle(train_stratified)
+    rng.shuffle(val_stratified)
+    _assert_disjoint_train_val("unified_brand stratified", train_stratified, val_stratified, md5_by_uri)
+
+    full_train_records = _filter_out_val_records(all_train_records, val_stratified, md5_by_uri)
+    _assert_disjoint_train_val("unified_brand full train", full_train_records, val_stratified, md5_by_uri)
+
+    out_uris = {_extract_uri(r) for r in full_train_records} | {_extract_uri(r) for r in val_stratified}
+    if out_uris & held_out_uris:
+        raise RuntimeError(f"Held-out test leakage detected in unified_brand SFT: {len(out_uris & held_out_uris)} URIs")
+
+    (out_p / "train.jsonl").write_text(
+        "\n".join(full_train_records) + ("\n" if full_train_records else ""), encoding="utf-8"
+    )
+    train_f, val_f = (out_p / f for f in SFT_SPLIT_FILES["all3"])
+    train_f.write_text("\n".join(train_stratified) + ("\n" if train_stratified else ""), encoding="utf-8")
+    val_f.write_text("\n".join(val_stratified) + ("\n" if val_stratified else ""), encoding="utf-8")
+
+    if upload:
+        _upload_sft_dir(out_p, gcs_dest)
+        if clean_local:
+            shutil.rmtree(out_p, ignore_errors=True)
+
+    return {
+        "out_dir": out_p,
+        "train_jsonl": train_f,
+        "val_jsonl": val_f,
+        "full_train_count": len(full_train_records),
+        "train_count": len(train_stratified),
+        "val_count": len(val_stratified),
+        "class_count": len(all_brands),
+        "hul_brand_count": sum(1 for b in all_brands if hul_by_brand.get(b)),
+        "non_hul_brand_count": sum(1 for b in all_brands if not hul_by_brand.get(b)),
+        "gcs_prefix": gcs_dest,
+        "train_uri": f"{gcs_dest}/{train_f.name}",
+        "val_uri": f"{gcs_dest}/{val_f.name}",
+    }
+
+
 def build_marketshare_variant_jsonl(
     gcs_bucket: str = MARKETSHARE_BUCKET,
     out_dir: str | Path = "input_data/jsonl",
@@ -753,6 +951,12 @@ def build_sft_jsonl(
     if dataset_name == "brand":
         return build_marketshare_brand_jsonl(
             out_dir="brand_data/brand/jsonl" if out_dir == "data/tuning" else out_dir,
+            upload=upload,
+            clean_local=clean_local,
+        )
+    if dataset_name == "unified_brand":
+        return build_unified_brand_sft_jsonl(
+            out_dir="data/tuning/unified_brand" if out_dir == "data/tuning" else out_dir,
             upload=upload,
             clean_local=clean_local,
         )
@@ -1002,7 +1206,7 @@ def launch_sft_job(
         )
     cfg = (config or load_config()).get("gcp", {})
     project = cfg.get("project", "ul-fs-s-sandbx-16-prj")
-    target_region = region or cfg.get("region", "us-central1")
+    target_region = region or ("us" if base_model.startswith("gemini-3.5") else cfg.get("region", "us-central1"))
     client = genai.Client(vertexai=True, project=project, location=target_region)
 
     adapter_map = {
@@ -1023,11 +1227,23 @@ def launch_sft_job(
     if val_uri:
         tune_cfg.validation_dataset = types.TuningValidationDataset(gcs_uri=val_uri)
 
-    job = client.tunings.tune(
-        base_model=base_model,
-        training_dataset=types.TuningDataset(gcs_uri=train_uri),
-        config=tune_cfg,
-    )
+    try:
+        job = client.tunings.tune(
+            base_model=base_model,
+            training_dataset=types.TuningDataset(gcs_uri=train_uri),
+            config=tune_cfg,
+        )
+    except Exception as exc:
+        if "not supported" in str(exc).lower() and target_region not in ("us", "eu"):
+            target_region = "eu" if "europe" in target_region else "us"
+            client = genai.Client(vertexai=True, project=project, location=target_region)
+            job = client.tunings.tune(
+                base_model=base_model,
+                training_dataset=types.TuningDataset(gcs_uri=train_uri),
+                config=tune_cfg,
+            )
+        else:
+            raise
     endpoint = getattr(getattr(job, "tuned_model", None), "endpoint", None)
     return {
         "name": job.name,
@@ -1048,7 +1264,7 @@ def list_sft_jobs(config: dict | None = None, region: str | None = None) -> list
 
     cfg = (config or load_config()).get("gcp", {})
     project = cfg.get("project", "ul-fs-s-sandbx-16-prj")
-    regions = [region] if region else [cfg.get("region", "us-central1"), "us-east4", "europe-west4"]
+    regions = [region] if region else ["us", "eu", cfg.get("region", "us-central1"), "us-east4", "europe-west4"]
     out: list[dict] = []
     seen_regions: set[str] = set()
     for reg in regions:

@@ -246,6 +246,8 @@ def resolve_model(model: str, config: dict | None = None) -> tuple[str, str, str
         loc = parts[parts.index("locations") + 1] if "locations" in parts else fallback_region
         base = os.environ.get("SHELF_BENCH_SFT_BASE_MODEL", "gemini-3.5-flash-lite")
         return model, base, loc
+    if model in ("gemini-robotics-er-2.0-preview", "gemini-2.5-pro"):
+        return model, "gemini-3.8-flash", default_loc
     return model, model, default_loc
 
 
@@ -280,7 +282,7 @@ class Gemini:
         self.project = cfg.get("project")
         self.location = loc
         self.fallback_region = cfg.get("region", "us-central1")
-        self.thinking_level = thinking_level if base_model.startswith("gemini-3") else None
+        self.thinking_level = thinking_level if self.target_model.startswith("gemini-3") else None
         self.tier = tier
         self._logprobs_unsupported = False
         self._http_options = (

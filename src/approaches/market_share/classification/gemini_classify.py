@@ -43,6 +43,7 @@ from utils.gemini_fine_tuning.hul_golden_sft import (
     HUL_GOLDEN_INFERENCE_PROMPT as HUL_GOLDEN_SINGLE_PROMPT,
 )
 from utils.gemini_fine_tuning.tuning import (
+    UNIFIED_BRAND_PROMPT,
     VARIANT_BRANDS,
     VARIANT_CATEGORIES,
     clean_variant_name,
@@ -137,6 +138,15 @@ BRAND_SINGLE_SCHEMA = {
     "required": ["brand"],
 }
 
+UNIFIED_BRAND_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "brand": {"type": "string"},
+        "is_hul": {"type": "boolean"},
+    },
+    "required": ["brand", "is_hul"],
+}
+
 
 @register
 class GeminiClassify(Approach):
@@ -204,15 +214,19 @@ class GeminiClassify(Approach):
         fields = tuple(self.evaluated_fields or ())
         fset = set(fields)
 
-        if self.dataset == "hul_brands" or fields == ("brand",):
+        if self.dataset == "hul_brands" or fields == ("brand",) or "unified-brand-sft" in (ctx.model or ""):
             if self.dataset == "hul_variants":
                 res = ctx.ask(image, INPUT_BRAND_ONLY_PROMPT, schema=INPUT_BRAND_ONLY_SCHEMA, max_side=1024)
+            elif "unified-brand-sft" in (ctx.model or ""):
+                res = ctx.ask(image, UNIFIED_BRAND_PROMPT, schema=UNIFIED_BRAND_SCHEMA, max_side=1024)
             else:
                 res = ctx.ask(image, BRAND_SINGLE_PROMPT, schema=BRAND_SINGLE_SCHEMA, max_side=1024)
             data = res.data if isinstance(res.data, dict) else {}
             raw_b = str(data.get("brand") or "")
             brand = normalize_hul_golden_brand(raw_b) if self.dataset != "hul_variants" else raw_b
             pred = {"brand": brand or raw_b}
+            if "is_hul" in data:
+                pred["is_hul"] = bool(data["is_hul"])
             ctx.trace.step(
                 "Gemini single-pass (brand)",
                 f"brand={pred['brand'] or '?'}",

@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("tune", help="build zero-leakage SFT JSONL data and launch/list Vertex AI LoRA tuning jobs")
     s.add_argument("--dataset", default="shelves",
-                   choices=("shelves", "rpc", "pack", "brand", "variant", "hul_golden", "gtmerch_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos"))
+                   choices=("shelves", "rpc", "pack", "brand", "unified_brand", "variant", "hul_golden", "gtmerch_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos"))
     s.add_argument("--task", default="all3", choices=("all3", "category", "brand", "variant", "clef_contrastive"),
                    help="target task when --dataset=variant or 'clef_contrastive' for contact-sheet SFT")
     s.add_argument("--fields", type=int, default=5, choices=(3, 5),
