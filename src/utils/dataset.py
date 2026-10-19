@@ -199,6 +199,8 @@ RPC_FORMAT_SETS = (
     "hul_golden",
     "gtmerch_golden",
     "ms_json_golden",
+    "mt_json_golden",
+    "hul_talkers_golden",
     "hul_variants",
     "hul_brands",
     "hul_packs",
@@ -210,6 +212,8 @@ HUL_FIELDS: dict[str, tuple[str, ...]] = {
     "hul_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
     "gtmerch_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
     "ms_json_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "mt_json_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "hul_talkers_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul", "promo_type"),
     "hul_variants": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
     "hul_brands": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
     "hul_packs": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
@@ -366,7 +370,7 @@ def data_root(name: str) -> str:
     local = (
         SHELVES_LOCAL
         if name == "shelves"
-        else (f"data/{name}" if name.startswith(("hul_", "gt_hul", "gtmerch", "ms_json")) else RPC_LOCAL)
+        else (f"data/{name}" if name.startswith(("hul_", "gt_hul", "gtmerch", "ms_json", "mt_json")) else RPC_LOCAL)
     )
     return local
 
