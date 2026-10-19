@@ -1,0 +1,147 @@
+MaxViT Brand–Variant Classification Experiment Report
+
+Dataset 
+| Item                           | Configuration                                                       |
+| ------------------------------ | ------------------------------------------------------------------- |
+| Dataset name                   | `hul_variants`                                                      |
+| Manifest                       | `gs://marketshare-datasets/derived_manifests/hul_variants/rpc.json` |
+| Task                           | Brand–Variant image classification                                  |
+| Number of canonical classes    | 1,922                                                               |
+| Training sources               | Gallery images + `splits["train"]`                                  |
+| Validation source              | `splits["val"]`                                                     |
+| Test source                    | `splits["test"]`                                                    |
+
+Training Dataset Transformation
+| Transformation                         | Configuration                                  |
+| -------------------------------------- | ---------------------------------------------- |
+| Resize                                 | `224 × 224`                                    |
+| Random horizontal flip                 | Enabled, default probability `0.5`             |
+| Brightness jitter                      | `0.15`                                         |
+| Contrast jitter                        | `0.15`                                         |
+| Tensor conversion                      | Pixel range converted from `0–255` to `0–1`    |
+| RGB mean                               | `[0.485, 0.456, 0.406]`                        |
+| RGB standard deviation                 | `[0.229, 0.224, 0.225]`                        |
+
+Validation Dataset Transformation
+| Transformation                         | Configuration                               |
+| -------------------------------------- | ------------------------------------------- |
+| Bounding-box crop                      | `boxes[0]`,                                 |
+| Resize                                 | `224 × 224`                                 |
+| Resize interpolation                   | Torchvision default in current code         |
+| Random horizontal flip                 | Not applied                                 |
+| Color jitter                           | Not applied                                 |
+| Tensor conversion                      | Pixel range converted from `0–255` to `0–1` |
+| RGB mean                               | `[0.485, 0.456, 0.406]`                     |
+| RGB standard deviation                 | `[0.229, 0.224, 0.225]`                     |
+
+Pretrained Model Data Configuration
+| Parameter          |                   Value | Used in current code |
+| ------------------ | ----------------------: | -------------------: |
+| Input channels     |                       3 |                  Yes |
+| Input height       |                     224 |                  Yes |
+| Input width        |                     224 |                  Yes |
+| Interpolation      |                 Bicubic |     No, not explicit |
+| Mean               | `(0.485, 0.456, 0.406)` |                  Yes |
+| Standard deviation | `(0.229, 0.224, 0.225)` |                  Yes |
+| Crop percentage    |                  `0.95` |                   No |
+| Crop mode          |                  Center |                   No |
+
+
+DataLoader Configuration
+| Parameter          | Training | Validation |
+| ------------------ | -------: | ---------: |
+| Batch size         |       32 |         32 |
+| Shuffle            |      Yes |         No |
+| Number of workers  |        2 |          2 |
+
+Model
+| Item             | Configuration                |
+| ---------------- | ---------------------------- |
+| Model family     | MaxViT                       |
+| Architecture     | `maxvit_tiny_tf_224`         |
+| Model library    | `timm`                       |
+| Initialization   | Pretrained weights           |
+| Input shape      | `3 × 224 × 224`              |
+| Output classes   | 1,922                        |
+| Output           | Raw logits                   |
+| Fine-tuning mode | Complete model fine-tuning   |
+| Frozen layers    | None                         |
+| Prediction       | Highest logit using `argmax` |
+
+Training Parameters
+| Parameter                |                              Value |
+| ------------------------ | ---------------------------------: |
+| Epochs                   |                                  5 |
+| Batch size               |                                 32 |
+| Loss function            |                      Cross-entropy |
+| Label smoothing          |                                0.1 |
+| Optimizer                |                              AdamW |
+| Learning rate            |                             `1e-4` |
+| Weight decay             |                             `1e-2` |
+| Scheduler                |                   Cosine annealing |
+| Minimum learning rate    |                             `1e-6` |
+| Device                   | CUDA when available, otherwise CPU |
+| Best-model criterion     |        Highest validation accuracy |
+
+Outputs
+| Output                           | Purpose                                     |
+| -------------------------------- | ------------------------------------------- |
+| `variant_classes.json`           | Model-index-to-class metadata mapping       |
+| `batch_metrics.csv`              | Batch-level training metrics                |
+| `epoch_metrics.csv`              | Epoch-level training and validation metrics |
+| `best_maxvit_brand_variant.pth`  | Best PyTorch state dictionary               |
+| `traced_maxvit_brand_variant.pt` | Best TorchScript model                      |
+| `cache/crops/`                   | Locally cached GCS images                   |
+
+Model Accuracy Summary 
+| Epoch | Training Accuracy | Validation Accuracy | Validation Loss |
+| ----: | ----------------: | ------------------: | --------------: |
+|     1 |            22.31% |              43.84% |          4.3969 |
+|     2 |            55.11% |              62.79% |          3.2611 |
+|     3 |            77.66% |              70.58% |          2.8301 |
+|     4 |            88.52% |              74.05% |          2.6537 |
+|     5 |            92.53% |              74.95% |          2.6071 |
+
+
+Simple Model-Training Flow
+Read rpc.json from GCS
+        ↓
+Read classes, gallery and dataset splits
+        ↓
+Create SKU ID ↔ model-index mapping
+        ↓
+Combine gallery and training records
+        ↓
+Deduplicate records using image URI
+        ↓
+Create training and validation datasets
+        ↓
+Download images from GCS when requested
+        ↓
+Cache downloaded images locally
+        ↓
+Apply training or validation transformations
+        ↓
+Load images in batches using DataLoader
+        ↓
+Initialize pretrained MaxViT-Tiny
+        ↓
+Replace output layer with 1,922 classes
+        ↓
+Run forward pass
+        ↓
+Calculate cross-entropy loss
+        ↓
+Backpropagate gradients
+        ↓
+Update model using AdamW
+        ↓
+Validate after every epoch
+        ↓
+Update cosine learning-rate scheduler
+        ↓
+Save model when validation accuracy improves
+        ↓
+Export PyTorch and TorchScript models
+        ↓
+Moved the model and Model-index-to-class metadata mapping  manually to GCP for inference
