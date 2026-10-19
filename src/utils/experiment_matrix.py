@@ -551,6 +551,102 @@ APPROACH_INTUITIONS: dict[str, dict[str, Any]] = {
             "5. Taxonomy Mapping: Map 3-stage predictions to canonical 5-level SKU taxonomy (0 Gemini VLM Calls, no gemini-embedding-2)",
         ],
     },
+    "promo_asset_sku_detect": {
+        "display_name": "Gemini 3.5 Flash-Lite Dual-Class Promo Bay & SKU Detector (EXP-34)",
+        "intuition": (
+            "Single-pass structured JSON detector that jointly localizes Class 0 branded promotional display bays "
+            "(headers, coolers, hanging display strips) and Class 1 product SKU boxes inside each bay."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_bay_first_detect": {
+        "display_name": "Bay-First High-Res Crop Detector + Plank Support (EXP-39)",
+        "intuition": (
+            "First detects Class 0 Unilever display bays on the full photo, then crops each bay at native camera "
+            "resolution to detect small sachets, dark back-row bottles, and top-row packs under header signs."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_stage0_clahe_detect": {
+        "display_name": "Stage 0 Dual-Buffer CLAHE + Dual-Class Bay & SKU Detector (EXP-40)",
+        "intuition": (
+            "Applies Shades-of-Gray illuminant balance plus CIELAB L*-channel CLAHE on detector_image for Stage 1 "
+            "box localization while preserving linear color_image for Stage 2 chromatic SKU matching."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_stage15_clutter_detect": {
+        "display_name": "Stage 1.5 3D-Pack vs 2D-Cardboard & Price-Tag Clutter Gate (EXP-41)",
+        "intuition": (
+            "Combines Stage 0 CLAHE and Bay-First crop detection with an open-set-safe Stage 1.5 geometric filter "
+            "that drops 2D printed wing graphics, header banners, and shelf-rail price tags while keeping regional competitors."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_awp_router_detect": {
+        "display_name": "AWP Fixture Archetype & Hanger Fallback Router (EXP-42)",
+        "intuition": (
+            "Classifies each promotional fixture into official Unilever AWP archetypes (WIN, CTU, MB2, MB3, FULLWALL) "
+            "and excludes frameless hanging strips (HAN) from Class 0 bays so hanger fallback triggers cleanly."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "distilled_yolo_stage0_clahe": {
+        "display_name": "Stage 0 Dual-Buffer CLAHE + Distilled ONNX YOLO Detector (EXP-49a)",
+        "intuition": (
+            "Runs CIELAB L* CLAHE strictly on detector_image for 40ms ONNX CPU shelf detection while passing "
+            "linear Shades-of-Gray color_image to Stage 2 product identification."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "shelf_stage0_clahe_e2e": {
+        "display_name": "Market Share Stage 0 Swap: Dual-Buffer CLAHE + ONNX YOLO + Hierarchical CLM-JEV (EXP-49a)",
+        "intuition": (
+            "Tests Stage 0 Dual-Buffer CLAHE photometry in front of our Market Share E2E winner (Distilled ONNX YOLO + "
+            "Hierarchical Brand-Gate CLM InfoNCE + JEV contact sheets)."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "shelf_gemini_detect_e2e": {
+        "display_name": "Market Share Stage 1 Swap: Gemini SinglePassDedup + Hierarchical CLM-JEV (EXP-49b)",
+        "intuition": (
+            "Swaps Stage 1 ONNX YOLO for Gemini single_pass_dedup while keeping Stage 2 Hierarchical Brand-Gate "
+            "CLM InfoNCE + JEV fixed to isolate Stage 1 detection impact on Share-of-Shelf."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "shelf_clef_metadata_e2e": {
+        "display_name": "Market Share Stage 2 Swap: ONNX YOLO + Contrastive Metadata CLEF Zoom-Strip (EXP-49c)",
+        "intuition": (
+            "Swaps Stage 2 Hierarchical CLM-JEV for Contrastive Metadata CLEF Bottom-30% Zoom-Strip contact sheets "
+            "while keeping Stage 1 ONNX YOLO fixed."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "promo_ocr_zoom_verifier": {
+        "display_name": "Dual-Band Top/Bottom Promo Callout OCR Zoom Verifier (EXP-37)",
+        "intuition": (
+            "Zooms 2x into both the top 28% neck/header band and bottom 28% price band of a crop so Gemini reads "
+            "fine-print stickers (₹10 Off, 20% Extra, B1G1, Pack of 3) instead of defaulting to base packshots."
+        ),
+        "task_id": "TASK-PRM",
+    },
+    "talker_price_tag_detect": {
+        "display_name": "3-Class Shelf-Talker & Printed/Handwritten Price-Tag Detector (EXP-47)",
+        "intuition": (
+            "Localizes printed promotional shelf-talker cards (Class 0), printed store rail price tags (Class 1), "
+            "and handwritten marker price tags (Class 2) on Kirana and Modern Trade shelves."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_robotics_spatial_detect": {
+        "display_name": "Gemini Robotics-ER Embodied Spatial Bay & Sachet Detector (EXP-38)",
+        "intuition": (
+            "Uses embodied 2D/3D spatial pointing (gemini-robotics-er-2.0-preview with gemini-2.5-pro fallback) "
+            "to trace tilted Class 0 display bays and separate touching sachets by 3D pack seams."
+        ),
+        "task_id": "TASK-DET",
+    },
 }
 
 
@@ -1489,6 +1585,449 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "target_goal": ">= 84.0% val accuracy and >= 88.0% rare 1-5 crop accuracy",
         "model_family": "hul-hierarchical-brand-pack-gate",
     },
+    {
+        "experiment_id": "P0-EXP-34",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Promotional Asset & SKU Dual-Class Detection with Gemini 3.5 Flash-Lite",
+        "technical_title": "Single-Pass Structured JSON Class 0 Display-Bay & Class 1 SKU Localization on gtmerch_golden",
+        "intuition": (
+            "Tests whether Gemini 3.5 Flash-Lite can jointly detect branded promotional display bays (Class 0) "
+            "and individual product SKUs inside those bays (Class 1) in one structured call."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_sku_detect", "distilled_yolo_onnx"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Joint Class 0 bay + Class 1 SKU structured JSON detection scopes predicted SKUs to the promotional "
+            "display asset and aligns with Part 2 bay-or-hanger scoring."
+        ),
+        "description": (
+            "Runs promo_asset_sku_detect on gtmerch_golden (val N=50, test N=100) and compares Class 0 bay F2, "
+            "Class 1 SKU F2, and Part 2 bay-scoped F2 against distilled_yolo_onnx."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Benchmark Class 0 bay F2 and Part 2 bay-scoped SKU F2 against CPU ONNX YOLO",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-35",
+        "priority": "P1",
+        "task_id": "TASK-CLS",
+        "title": "Unified ~950-Brand Classifier LoRA SFT (HUL + Competitor + Others)",
+        "technical_title": "Zero-Leakage 926-Brand + Others Vertex AI LoRA SFT on Gemini 3.5 Flash-Lite",
+        "intuition": (
+            "Unifies brand classification across all ~950 canonical HUL, Competitor, and Others brands in a single "
+            "fine-tuned model without the legacy 57-brand cap."
+        ),
+        "use_case": "market_share",
+        "task": "classification",
+        "dataset": "hul_brands",
+        "approaches": ["hybrid_classify", "clef_contrastive_metadata"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Building a stratified SFT dataset across all canonical brands in hul_golden + hul_brands (strictly "
+            "excluding test and test_5k URIs and sessions) enables single-crop 950-brand classification."
+        ),
+        "description": (
+            "Builds train_stratified.jsonl and val_stratified.jsonl via build_unified_brand_sft_jsonl (--dataset unified_brand) "
+            "and benchmarks against zero-shot EXP-28 (96.6% Brand, 98.6% HUL accuracy)."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Zero test/session leakage across ~950 brands and >= 95.0% Brand / >= 98.0% HUL accuracy",
+        "model_family": "hul-jev-laya-lora-sft-adapter",
+    },
+    {
+        "experiment_id": "P0-EXP-36",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "GT Merchandising & Full-Shelf E2E + Stage 6 Planogram/OOS Benchmark",
+        "technical_title": "Embedding + Decision Gate + VLM Crop & Full-Shelf Pipeline with Part 2 Bay/Hanger Scoring",
+        "intuition": (
+            "Evaluates our production embedding + decision gate + Gemini 3.5 Flash-Lite pipeline on General Trade "
+            "shelves with Part 2 Class 0 bay/hanger fallback and Stage 6 OOS/Purity audit."
+        ),
+        "use_case": "merchandising",
+        "task": "end_to_end",
+        "dataset": "gtmerch_golden",
+        "approaches": ["shelf_hierarchical_clm_jev", "hybrid_classify", "clef_contrastive_metadata"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["test"],
+        "hypothesis": (
+            "Part 2 bay-scoped scoring removes false-positive penalties from unlabeled background aisle packs on "
+            "gtmerch_golden while full-image hanger shelves still score every SKU."
+        ),
+        "description": (
+            "Runs hybrid_classify and clef_contrastive_metadata on gtmerch_golden crops (test N=200) and "
+            "shelf_hierarchical_clm_jev on gtmerch_golden (test N=100) and gt_hul_sessions (test N=100)."
+        ),
+        "primary_metric": "f2",
+        "target_goal": ">= 70.0% Bay-Scoped E2E F2 and full Stage 6 Planogram/OOS compliance telemetry",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P2-EXP-37",
+        "priority": "P2",
+        "task_id": "TASK-PRM",
+        "title": "Toker Promo Callout OCR Zoom Rubric (B1G1 / Rs Off / % Extra)",
+        "technical_title": "Top/Bottom 25% Neck-Band & Banner OCR Zoom Rubric for Promo Callout Verification",
+        "intuition": (
+            "Targets false-negative promo callouts (where baseline gallery packshots lack promo stickers) by "
+            "explicitly reading neck-band and top/bottom callout banners."
+        ),
+        "use_case": "merchandising",
+        "task": "promo_detection",
+        "dataset": "hul_promos",
+        "approaches": ["jev_promo_verifier"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Adding explicit promo-band OCR extraction prevents baseline studio packshots (promo_type=None) from "
+            "suppressing real B4G1, Rs10 Off, and % Extra stickers on hul_promos."
+        ),
+        "description": (
+            "Evaluates jev_promo_verifier on hul_promos (val/test) to lift promo_type accuracy above the 40.3% baseline."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Lift promo_type accuracy from 40.3% baseline toward >= 65.0%",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P2-EXP-38",
+        "priority": "P2",
+        "task_id": "TASK-DET",
+        "title": "Gemini Robotics-ER Spatial Bay, SKU & 3D Shelf-Plane OOS Audit",
+        "technical_title": "Embodied Spatial Reasoning (gemini-robotics-er-2.0-preview) for Dense 2-Class Localization & Tilted Shelf OOS",
+        "intuition": (
+            "Tests Gemini Robotics-ER's embodied 2D/3D spatial pointing priors on dense Kirana shelf localization "
+            "and tilted shelf-plank Out-of-Stock void detection."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_robotics_spatial_detect", "promo_asset_sku_detect", "bay_planogram_verifier"],
+        "models": ["gemini-robotics-er-2.0-preview", "gemini-2.5-pro"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Embodied spatial post-training improves Class 0 promo bay boundaries, crowded sachet separation, "
+            "and >8-degree tilted shelf-plank OOS gap reasoning."
+        ),
+        "description": (
+            "Registered for execution on gtmerch_golden and gt_hul_sessions (val N=50) once Vertex AI preview "
+            "allowlisting for gemini-robotics-er-2.0-preview is active on ul-fs-s-sandbx-16-prj."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Compare Class 0/1 spatial box F2 and tilted-plank OOS recall against Gemini 3.5 Flash-Lite",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-39",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Bay-First High-Res Crop Detection & Bottom-Plank Containment (EXP-39)",
+        "technical_title": "Two-Stage Class 0 Bay Crop Detection (3264x2448 Native Res) + Header Plank Support Rule",
+        "intuition": (
+            "First detects Class 0 Unilever display bays on the full photo, crops each bay at native camera "
+            "resolution to catch small stacked sachets and dark back-row packs, and keeps top-row bottles whose "
+            "base sits on a plank inside the bay."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_bay_first_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Cropping detected Class 0 bays at native resolution recovers small sachets (<25px) and back-row packs "
+            "lost during 2048px full-shelf downscaling, while bottom-plank containment fixes header-sign boundary drops."
+        ),
+        "description": (
+            "Evaluates promo_asset_bay_first_detect on gtmerch_golden (val N=50, test N=100) against promo_asset_sku_detect."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift Bay-Scoped Recall from 75.9% to >= 86.0% (Bay F2 >= 84.0%)",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-40",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Stage 0 Dual-Buffer Photometry (Shades-of-Gray + CIELAB L* CLAHE) (EXP-40)",
+        "technical_title": "Dual-Buffer Stage 0 Photometric Normalization for Stage 1 Detection Without Stage 2 Chromatic Drift",
+        "intuition": (
+            "Lifts dark back-row shelf shadows and compresses acrylic bulb glare on detector_image for Stage 1 box "
+            "detection while preserving linear Shades-of-Gray color_image for Stage 2 SKU matching."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_stage0_clahe_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Applying CIELAB L*-channel CLAHE (clipLimit=2.0) strictly to ctx.detector_image improves dark-shelf "
+            "box recall without distorting pastel sister-shade hues in Stage 2."
+        ),
+        "description": (
+            "Evaluates promo_asset_stage0_clahe_detect on gtmerch_golden and ms_json_golden at ₹0 extra LLM cost."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift Full-Shelf Recall from 62.0% to >= 74.0% at ₹0 extra token cost",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-41",
+        "priority": "P1",
+        "task_id": "TASK-DET",
+        "title": "Stage 1.5 3D-Pack vs 2D-Cardboard & Price-Tag Clutter Gate (EXP-41)",
+        "technical_title": "Open-Set-Safe Stage 1.5 Geometric & Relief Clutter Filter for Display Wings and Rail Tags",
+        "intuition": (
+            "Filters out 2D printed graphics on cardboard display wings, top header signs, and flat shelf-rail "
+            "price tags while preserving 100% of 3D open-set regional competitor ('Others') packs."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_stage15_clutter_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Filtering 2D structural clutter by wing-border geometry and horizontal luminance relief lifts Class 1 "
+            "precision without deleting uncatalogued competitor products."
+        ),
+        "description": (
+            "Evaluates promo_asset_stage15_clutter_detect on gtmerch_golden (val N=50, test N=100)."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift Bay Precision from 83.8% to >= 91.0% with <1% loss on Others packs",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-42",
+        "priority": "P1",
+        "task_id": "TASK-DET",
+        "title": "Dedicated Class 0 AWP Fixture Archetype & Hanger Fallback Router (EXP-42)",
+        "technical_title": "AWP Fixture Archetype Conditioning (WIN/CTU/MB2/MB3/FULLWALL vs HAN Hanger Fallback)",
+        "intuition": (
+            "Conditions Class 0 detection on official Unilever AWP fixture archetypes so framed display bays are "
+            "found across unseen brands while frameless hanging strips route cleanly to full-image hanger mode."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_awp_router_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Explicit structural fixture archetypes eliminate false Class 0 boxes on frameless sachet hangers and "
+            "generalize Class 0 bay detection beyond the dominant brand stands."
+        ),
+        "description": (
+            "Evaluates promo_asset_awp_router_detect on gtmerch_golden and gt_hul_sessions."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift Class 0 Bay F2 from 74.6% to >= 90.0% with 0 silent hanger misroutes",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-43",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Clean Modern Trade Supermarket Shelf Detection on mt_json_golden (EXP-43)",
+        "technical_title": "Outlet-De-Leaked Modern Trade Detection Benchmark on mt_updated (19,984 Clean Shelves)",
+        "intuition": (
+            "Benchmarks ONNX YOLO and Gemini detectors on 356 clean Modern Trade supermarkets now that the old "
+            "burned-in red-rectangle mt/ images are replaced by mt_updated."
+        ),
+        "use_case": "market_share",
+        "task": "detection",
+        "dataset": "mt_json_golden",
+        "approaches": ["distilled_yolo_960_softnms", "promo_asset_stage0_clahe_detect"],
+        "models": ["yolo11n-distilled-onnx", "gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Clean raw supermarket pixels in mt_json_golden allow neural detection without OpenCV red-line leakage."
+        ),
+        "description": (
+            "Evaluates distilled_yolo_960_softnms and promo_asset_stage0_clahe_detect on mt_json_golden (val N=50, test N=200)."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Establish clean Modern Trade supermarket detection baseline >= 75.0% F2",
+        "model_family": "hul-yolo11n-distilled-detector-onnx",
+    },
+    {
+        "experiment_id": "P0-EXP-44",
+        "priority": "P0",
+        "task_id": "TASK-RET",
+        "title": "Clean Modern Trade Crop Retrieval & 5-Attribute Classification on mt_json_golden (EXP-44)",
+        "technical_title": "5-Attribute Crop Identification on Outlet-De-Leaked Modern Trade Supermarket Crops",
+        "intuition": (
+            "Tests our top retrieval and classification winners on clean Modern Trade supermarket shelf crops "
+            "where multi-pack cartons and wide modern-trade lighting dominate."
+        ),
+        "use_case": "market_share",
+        "task": "retrieval",
+        "dataset": "mt_json_golden",
+        "approaches": ["clef_contrastive_metadata", "hybrid_classify"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Contrastive Metadata CLEF and Hybrid Classify transfer to clean Modern Trade supermarket crops with "
+            ">= 80.0% 5-attribute exact accuracy."
+        ),
+        "description": (
+            "Evaluates clef_contrastive_metadata and hybrid_classify on N=1,000 test crops from mt_json_golden."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Achieve >= 80.0% 5-Attribute Exact Acc and >= 94.0% Brand Acc on MT supermarkets",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-45",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "End-to-End Share-of-Shelf on Clean Modern Trade Supermarkets (EXP-45)",
+        "technical_title": "Full-Shelf End-to-End Market Share & HUL SOS Error on mt_json_golden",
+        "intuition": (
+            "Measures full-shelf End-to-End F2 and HUL Share-of-Shelf error across 200 clean Modern Trade "
+            "supermarket shelves."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "mt_json_golden",
+        "approaches": ["shelf_hierarchical_clm_jev", "shelf_stage0_clahe_e2e"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Hierarchical CLM-JEV with Stage 0 Dual-Buffer CLAHE achieves <= 2.5 pp HUL Facing SOS absolute error "
+            "on Modern Trade supermarkets."
+        ),
+        "description": (
+            "Evaluates shelf_hierarchical_clm_jev and shelf_stage0_clahe_e2e on mt_json_golden (test N=200)."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Keep HUL Facing SOS Absolute Error <= 2.5 pp on Modern Trade supermarkets",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P1-EXP-46",
+        "priority": "P1",
+        "task_id": "TASK-PLN",
+        "title": "AWP Studio Template Planogram Spec Conditioning (EXP-46)",
+        "technical_title": "63-Template AWP_Code Studio Reference Index + Planogram Spec Compliance Audit",
+        "intuition": (
+            "Matches each store display bay against Unilever's 63 official AWP studio fixture templates to verify "
+            "exact tier count, required brand family, and bay purity."
+        ),
+        "use_case": "merchandising",
+        "task": "planogram_compliance",
+        "dataset": "gtmerch_golden",
+        "approaches": ["bay_planogram_verifier"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Conditioning check_planogram_spec on matched AWP_Code studio templates automates exact fixture-level "
+            "planogram rules."
+        ),
+        "description": (
+            "Indexes gs://sos-datasets/awp_vectors/awp_code (63 templates) and evaluates template-conditioned "
+            "planogram compliance on gtmerch_golden."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": ">= 90.0% Class 0 template match accuracy and exact AWP spec compliance audit",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-47",
+        "priority": "P1",
+        "task_id": "TASK-DET",
+        "title": "3-Class Shelf-Talker & Printed/Handwritten Price-Tag Detection (EXP-47)",
+        "technical_title": "Outlet-De-Leaked 3-Class Talker & Price-Tag Localization on hul_talkers_golden",
+        "intuition": (
+            "Detects printed promotional shelf-talker cards, printed store rail price tags, and handwritten "
+            "marker price tags across 532 outlets."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "hul_talkers_golden",
+        "approaches": ["talker_price_tag_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Outlet-grouped 80/10/10 splits fix the raw test split leak and enable balanced 3-class talker/price-tag "
+            "detection."
+        ),
+        "description": (
+            "Evaluates 3-class detection (promo_talker, printed_price_tag, handwritten_price_tag) on hul_talkers_golden."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Achieve >= 82.0% F2 across all 3 talker and price-tag classes",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-48",
+        "priority": "P1",
+        "task_id": "TASK-PRM",
+        "title": "Two-Stage Talker & Price-Tag Discount OCR Extraction (EXP-48)",
+        "technical_title": "Stage 1 Talker/Tag Box Detection + Stage 2 Gemini Flash-Lite Discount & Price OCR",
+        "intuition": (
+            "Crops detected shelf-talkers and price tags so Gemini reads exact ₹ Off, % Off, and MRP vs Offer price "
+            "callouts."
+        ),
+        "use_case": "merchandising",
+        "task": "promo_detection",
+        "dataset": "hul_promos",
+        "approaches": ["promo_ocr_zoom_verifier"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "High-resolution zoom strips on promo bands and shelf-talkers lift discount-type and price-callout OCR "
+            "accuracy above 85%."
+        ),
+        "description": (
+            "Evaluates promo_ocr_zoom_verifier on hul_promos and hul_talkers_golden crops."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": ">= 85.0% discount-type and price-callout extraction accuracy",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-49",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Market Share Stage 0, Stage 1 & Stage 2 Swap Ablations on Current Winners (EXP-49)",
+        "technical_title": "Controlled Stage-Swap Ablations (Stage 0 CLAHE vs Stage 1 Gemini vs Stage 2 Contrastive CLEF) on Market Share E2E",
+        "intuition": (
+            "Isolates the exact effect of swapping Stage 0 photometry, Stage 1 box detector, and Stage 2 SKU "
+            "matcher on our current Market Share winner (shelf_hierarchical_clm_jev)."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "ms_json_golden",
+        "approaches": [
+            "shelf_hierarchical_clm_jev",
+            "shelf_stage0_clahe_e2e",
+            "shelf_gemini_detect_e2e",
+            "shelf_clef_metadata_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Stage 0 Dual-Buffer CLAHE lifts dark-shelf detection recall without hurting Stage 2 CIELAB color "
+            "matching, while Stage 1/2 swaps quantify the cost-accuracy frontier for Market Share SOS."
+        ),
+        "description": (
+            "Compares shelf_hierarchical_clm_jev (baseline) against shelf_stage0_clahe_e2e (EXP-49a), "
+            "shelf_gemini_detect_e2e (EXP-49b), and shelf_clef_metadata_e2e (EXP-49c) on ms_json_golden and mt_json_golden."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Quantify exact F2, 5-Attr Acc, and HUL SOS error impact of Stage 0, 1, and 2 swaps",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
 ]
 
 
@@ -2070,11 +2609,10 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                 plano = s.get("planogram_metrics") or {}
                 h_comp = s.get("hul_vs_competitor_breakdown") or {}
                 sm = dict(s.get("stage_metrics") or {})
-                primary_val = max(
-                    float(s.get(metric_key) or 0.0),
-                    float(s.get("f2") or 0.0),
-                    float(s.get("accuracy") or 0.0),
-                    float(fa.get("product") or 0.0),
+                primary_val = (
+                    float(s.get("f2") or s.get(metric_key) or 0.0)
+                    if tk in ("detection", "end_to_end")
+                    else float(s.get("accuracy") or s.get(metric_key) or 0.0)
                 )
 
                 det_fallback = (

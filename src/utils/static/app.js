@@ -32,13 +32,13 @@ const TASKS = {
   classification: {
     shortLabel: "Crop → 5-Level SKU & Catalog Match",
     tip: "Unified single-crop benchmark: HUL/Rival, Category, Pack Type, Brand, Variant & Exact Catalog SKU",
-    scoreLabel: "5-Attr SKU",
+    scoreLabel: "5-Attr Exact (All 5)",
     scoreKey: "accuracy",
   },
   retrieval: {
     shortLabel: "Crop → 5-Level SKU & Catalog Match",
     tip: "Unified single-crop benchmark: HUL/Rival, Category, Pack Type, Brand, Variant & Exact Catalog SKU",
-    scoreLabel: "5-Attr SKU",
+    scoreLabel: "5-Attr Exact (All 5)",
     scoreKey: "accuracy",
   },
   detection: {
@@ -75,12 +75,22 @@ const DATASETS = {
   ms_json_golden: {
     isGolden: true,
     useCase: "market_share",
-    channel: "MT",
-    chipLabel: "MT Store Shelves · Market Share",
-    pillLabel: "MT · Store Shelves (ms_json)",
+    channel: "GT",
+    chipLabel: "Kirana Store Shelves · Market Share (ms_json)",
+    pillLabel: "GT/MT · Store Shelves (ms_json)",
     unitType: "shelf",
-    shortDesc: "MT Market Share · Clean Client LabelMe Store Shelves",
+    shortDesc: "Market Share · Clean Client LabelMe Store Shelves",
     splits: "140 train · 60 val · 100 test · 151 test_5k",
+  },
+  mt_json_golden: {
+    isGolden: true,
+    useCase: "market_share",
+    channel: "MT",
+    chipLabel: "MT Supermarkets · 356 Outlets (mt_json)",
+    pillLabel: "MT · Supermarkets (mt_json_golden)",
+    unitType: "shelf",
+    shortDesc: "MT Market Share · 1,068 Supermarket Gondolas (356 Disjoint Outlets)",
+    splits: "713 train · 155 val · 200 test",
   },
   hul_variants: {
     isGolden: true,
@@ -152,6 +162,16 @@ const DATASETS = {
     shortDesc: "MT Toker Promo · 240 Promotional & Multipack SKUs",
     splits: "4,000 train · 1,000 val · 1,000 test",
   },
+  hul_talkers_golden: {
+    isGolden: true,
+    useCase: "merchandising",
+    channel: "MT",
+    chipLabel: "Shelf Talkers & Price Tags · 3 Classes",
+    pillLabel: "MT/GT · Talkers & Price Tags",
+    unitType: "shelf",
+    shortDesc: "Shelf Talker Cards, Printed Price Tags & Handwritten Rail Tags (532 Disjoint Outlets)",
+    splits: "3,813 train · 477 val · 477 test",
+  },
   shelves: { isGolden: false, unitType: "shelf", shortDesc: "HoloSelecta Calibration", splits: "Public" },
   rpc: { isGolden: false, unitType: "shelf", shortDesc: "RPC Checkout Calibration", splits: "Public" },
   sku110k: { isGolden: false, unitType: "shelf", shortDesc: "SKU-110K Calibration", splits: "Public" },
@@ -161,6 +181,7 @@ const DATASETS = {
 const SHORT_APPROACH_NAMES = {
   distilled_yolo_onnx: "Dual-ONNX CPU Shelf & Bay Detector",
   distilled_yolo_960_softnms: "960px Aspect-Aware Soft-NMS CPU Detector",
+  distilled_yolo_stage0_clahe: "Stage 0 Luminance CLAHE + 960px Soft-NMS CPU Detector (EXP-43 / EXP-49)",
   yolo_sku110k_onnx: "Single-Pass ONNX CPU Shelf Detector",
   single_pass_dedup: "Single-Pass Gemini Full-Shelf Detector",
   tiled_dedup: "Tiled Multi-Pass Gemini Detector",
@@ -203,36 +224,64 @@ const SHORT_APPROACH_NAMES = {
   gemini_classify: "Single-Pass Gemini 3.5 Flash-Lite 5-Attribute Classifier (Catalog-Grounded SFT / Base)",
   stitched_classify: "Stitched Multi-Crop Gemini Classifier",
   stitched_e2e: "Stitched Multi-Crop End-to-End Pipeline",
-  shelf_hierarchical_clm_jev: "E2E CPU Detector + Brand-Gated Hybrid",
+  shelf_hierarchical_clm_jev: "E2E CPU Detector + Brand-Gated Hybrid (EXP-45 MT Winner)",
   shelf_outlet_scoped_clm_jev: "E2E CPU Detector + Store-Scoped Hybrid",
   shelf_tube_midband_jev: "E2E CPU Detector + Tube Unwarp Verifier",
   shelf_row_neighbor_prior: "E2E CPU Detector + Row Neighbor Prior",
   shelf_height_size_prior: "E2E CPU Detector + Plank-Height Prior",
   shelf_960_softnms_e2e: "E2E 960px Soft-NMS + Brand-Gated Hybrid",
+  shelf_stage0_clahe_e2e: "E2E Dual-Buffer Stage 0 CLAHE + CPU Detector + Hybrid (EXP-49)",
+  shelf_gemini_detect_e2e: "E2E Stage 1 VLM Detector + Stage 2 Hybrid (EXP-49 Ablation)",
+  shelf_clef_metadata_e2e: "E2E Dual-Buffer CLAHE + CPU Detector + Contrastive CLEF Metadata (EXP-49 Winner)",
   session_overlap_dedup_e2e: "E2E 960px Soft-NMS + Session Overlap Dedup",
   shelf_l8_ultimate: "E2E CPU Detector + Lighting + Row Prior",
   detect_l8_ultimate: "E2E Gemini Detector + Lighting Verifier",
   shelf_onnx_jev_laya: "E2E CPU Detector + Contrastive Contact Sheet",
   detect_onnx_jev_laya: "Single-Model ONNX + Contact Sheet",
   shelf_clm_standalone: "Zero-VLM E2E Shelf Pipeline (ONNX + Calibrated gemini-embedding-2)",
-  bay_planogram_verifier: "Display Bay & Row Planogram Auditor",
+  bay_planogram_verifier: "AWP Display Bay & Row Planogram Auditor (EXP-46)",
+  promo_asset_sku_detect: "Dual-Class Promo Bay + SKU Detector (EXP-34)",
+  promo_asset_stage1_crop_detect: "Bay-First Full-Res Crop + SKU Detector (EXP-39)",
+  promo_asset_stage0_clahe_detect: "Stage 0 Luminance CLAHE + Bay-First Detector (EXP-40 / EXP-43)",
+  promo_asset_stage15_clutter_detect: "Bay-First + Stage 0 CLAHE + Stage 1.5 Clutter Filter (EXP-41 Winner)",
+  promo_asset_awp_router_detect: "AWP Template Router + Bay-First Detector (EXP-42)",
+  promo_robotics_detect: "Gemini Robotics-ER 2.0 Dense Spatial Detector (EXP-38)",
+  talker_price_tag_detect: "3-Class Shelf Talker & Rail Price-Tag Detector (EXP-47 Winner)",
   jev_promo_verifier: "Promo Banner Zoom + Gemini Verifier",
+  promo_ocr_zoom_verifier: "2x Top/Bottom Promo Strip Zoom + OCR Verifier (EXP-37 / EXP-48)",
   clm_promo_matcher: "Zero-VLM Promo Embedding Matcher",
 };
 
 const USE_CASES = {
   market_share: {
-    label: "1. MT Market Share (Modern Trade)",
-    subtitle: "Modern Trade shelves (ms_json_golden) and 5-level SKU/Brand/Variant/Pack silos (hul_golden, hul_brands, hul_variants, hul_packs).",
+    label: "1. Market Share (MT Supermarkets, Kirana Walls & Full Catalog)",
+    subtitle: "MT Supermarket gondolas (mt_json_golden · EXP-43/44/45), Kirana store walls (ms_json_golden · EXP-49), and 5-level SKU/Brand/Variant/Pack silos (hul_golden, hul_brands · EXP-35, hul_variants, hul_packs).",
   },
   merchandising: {
-    label: "2. GT & MT Merchandising & Promo",
-    subtitle: "General Trade display bays & planogram SOS (gtmerch_golden), multi-photo store visit sessions (hul_sessions), and MT Toker promo packs (hul_promos).",
+    label: "2. GT & MT Merchandising, Planogram & Display Bays",
+    subtitle: "GT display bays & Stage 1.5 clutter filtering (gtmerch_golden · EXP-41), AWP planogram & OOS void audit (EXP-46), multi-photo store visit sessions (gt_hul_sessions), talkers (hul_talkers_golden · EXP-47), and promos (hul_promos).",
+  },
+  promo_talkers: {
+    label: "3. Shelf Talkers, Rail Price Tags & Promotional Packs",
+    subtitle: "Dedicated audit workspace for 3-class shelf talkers & rail price tags (hul_talkers_golden · EXP-47: 85.0% F2, 89.9% Recall) and 240 MT Toker promotional & multipack SKUs (hul_promos · EXP-37/48).",
   },
 };
 
-const DS_ORDER = ["ms_json_golden", "hul_golden", "hul_variants", "hul_packs", "hul_brands", "gtmerch_golden", "gt_hul_sessions", "hul_sessions", "hul_promos"];
-const MERCH_DATASETS = new Set(["gtmerch_golden", "gt_hul_sessions", "hul_sessions", "hul_promos"]);
+const DS_ORDER = [
+  "mt_json_golden",
+  "ms_json_golden",
+  "hul_golden",
+  "hul_variants",
+  "hul_packs",
+  "hul_brands",
+  "gtmerch_golden",
+  "gt_hul_sessions",
+  "hul_sessions",
+  "hul_talkers_golden",
+  "hul_promos",
+];
+const MERCH_DATASETS = new Set(["gtmerch_golden", "gt_hul_sessions", "hul_sessions", "hul_promos", "hul_talkers_golden"]);
+const PROMO_TALKER_DATASETS = new Set(["hul_talkers_golden", "hul_promos"]);
 const byDsOrder = (a, b) => (DS_ORDER.indexOf(a) + 1 || 99) - (DS_ORDER.indexOf(b) + 1 || 99);
 const taskOf = (r) => {
   const raw = r.task || "detection";
@@ -252,9 +301,17 @@ const useCaseOf = (r) => {
 const infoOf = (t) => TASKS[t] || { shortLabel: t, tip: "", scoreLabel: "Score", scoreKey: "accuracy" };
 const labelsOf = (r) => (!r.labels ? [] : Array.isArray(r.labels) ? r.labels : [r.labels]);
 
+function isLabelAllCorrect(l, evaluatedFields = null) {
+  if (!l || !l.correct || typeof l.correct !== "object") return false;
+  const keys = Array.isArray(evaluatedFields) && evaluatedFields.length ? evaluatedFields : Object.keys(l.correct);
+  if (!keys.length) return false;
+  return keys.every((k) => Boolean(l.correct[k]));
+}
+
 function getEvalScopeMeta(r) {
   const ef = Array.isArray(r.evaluated_fields) ? r.evaluated_fields : [];
   const fa = r.field_accuracy || {};
+  const ds = String(r.dataset || "");
   const has3 = fa.brand != null && fa.category != null && fa.packaging_type != null;
   const mean3 = has3 ? (Number(fa.brand) + Number(fa.category) + Number(fa.packaging_type)) / 3.0 : null;
   const isOracleBrand = String(r.model || "").includes("oracle_brand") || String(r.run_id || "").includes("oracle_brand");
@@ -265,6 +322,24 @@ function getEvalScopeMeta(r) {
       nAttrs: 4,
       scoreLabel: "Oracle GT Brand (Variant Only)",
       badgeHtml: `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Unchained Oracle-Brand Diagnostic: feeds 100% Ground-Truth Brand into legacy variant/pack models (Pack Type = 60.2%, compound 5-Attr = 51.0%). Not an end-to-end model.">Oracle GT Brand Diagnostic</span>`,
+      mean3,
+    };
+  }
+  if (ds === "hul_brands" && ef.includes("brand") && ef.includes("is_hul")) {
+    return {
+      isPartial: false,
+      nAttrs: 2,
+      scoreLabel: "Brand + HUL Exact",
+      badgeHtml: `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates exact Brand (953 classes) + L1 HUL/Rival ownership">953-Brand + HUL</span>`,
+      mean3,
+    };
+  }
+  if (ds === "hul_packs" && ef.includes("packaging_type")) {
+    return {
+      isPartial: false,
+      nAttrs: 2,
+      scoreLabel: "46-Class Cat+Pack",
+      badgeHtml: `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates 46 Category × Packaging Type pairs">46-Class Pack Domain</span>`,
       mean3,
     };
   }
@@ -299,8 +374,8 @@ function getEvalScopeMeta(r) {
     return {
       isPartial: false,
       nAttrs: 5,
-      scoreLabel: "5-Attr SKU",
-      badgeHtml: `<span style="display:inline-block;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates all 5 Unilever hierarchy levels: L1 HUL/Rival, L2 Category, L2 Pack Type, L3 Brand, L4 Variant & L5 Exact SKU">Full 5-Attr SKU</span>`,
+      scoreLabel: "5-Attr Exact (All 5)",
+      badgeHtml: `<span style="display:inline-block;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates all 5 Unilever hierarchy levels: L1 HUL/Rival, L2 Category, L2 Pack Type, L3 Brand, L4 Variant & L5 Exact SKU">Full 5-Attr Exact</span>`,
       mean3,
     };
   }
@@ -481,6 +556,7 @@ let boardTaskFilter = "all";
 let boardDsFilter = "all";
 let boardSplitFilter = "all";
 let boardSampleSizeFilter = "all";
+let boardSubView = "standard";
 let currentImageFilter = "all";
 let storySubTab = "evolution";
 let selectedStoryExpId = "P0-EXP-01";
@@ -516,7 +592,11 @@ window.selectStoryDec = function (decNum) {
 };
 
 window.setUnifiedFilter = function (kind, val, useCase) {
-  if (kind === "task") boardTaskFilter = val;
+  if (kind === "subview") boardSubView = val;
+  if (kind === "task") {
+    boardTaskFilter = val;
+    if (val === "planogram_compliance") boardSubView = "planogram_oos";
+  }
   if (kind === "ds") boardDsFilter = val;
   if (kind === "split") boardSplitFilter = val;
   if (kind === "samples") boardSampleSizeFilter = val;
@@ -690,7 +770,10 @@ function buildRunMethodologyHtml(r, isAccordion = false) {
 // ============================================================================
 async function showUseCaseBoard(useCase = "market_share") {
   const every = (await getJSONCached("/api/leaderboard")).filter(isValidatedGoldenRun);
-  const ucRuns = every.filter((r) => useCaseOf(r) === useCase);
+  const ucRuns =
+    useCase === "promo_talkers"
+      ? every.filter((r) => PROMO_TALKER_DATASETS.has(r.dataset || "") || r.task === "promo_detection")
+      : every.filter((r) => useCaseOf(r) === useCase);
 
   const isFiveLevelCropRun = (r) => {
     const ds = String(r.dataset || "");
@@ -714,8 +797,24 @@ async function showUseCaseBoard(useCase = "market_share") {
     boardDsFilter = "all";
   }
 
+  const isPlanoView =
+    useCase === "merchandising" &&
+    (boardSubView === "planogram_oos" || boardTaskFilter === "planogram_compliance");
+
   const filtered = ucRuns.filter((r) => {
-    if (!matchesTaskFilter(r, boardTaskFilter)) return false;
+    if (isPlanoView && boardTaskFilter === "all") {
+      const tk = taskOf(r);
+      const hasPlano = Boolean(
+        r.planogram_metrics ||
+          r.bay_scoped_metrics ||
+          tk === "planogram_compliance" ||
+          tk === "end_to_end" ||
+          tk === "detection"
+      );
+      if (!hasPlano) return false;
+    } else if (!matchesTaskFilter(r, boardTaskFilter)) {
+      return false;
+    }
     if (boardDsFilter !== "all" && (r.dataset || "hul_golden") !== boardDsFilter) return false;
     if (boardSplitFilter !== "all" && (r.split || "test") !== boardSplitFilter) return false;
     const nSamples = getRunSampleCount(r);
@@ -756,6 +855,8 @@ async function showUseCaseBoard(useCase = "market_share") {
     merchandising__end_to_end: "🏆 Merch Session Dedup E2E Winner",
     merchandising__planogram_compliance: "🏆 Planogram Compliance Winner",
     merchandising__promo_detection: "🏆 Promo Pack Verification Winner",
+    promo_talkers__detection: "🏆 Shelf Talker & Price-Tag Winner",
+    promo_talkers__promo_detection: "🏆 Promo Pack Verification Winner",
   };
 
   // Identify #1 Production Task Winner focused on Gemini 3.5 Flash-Lite / CPU ONNX / Zero-VLM Embeddings
@@ -770,7 +871,7 @@ async function showUseCaseBoard(useCase = "market_share") {
     if (!isModernClientWinnerCandidate(r)) continue;
     const tk = boardTaskFilter === "classification" ? "classification" : taskOf(r);
     const ds = r.dataset || "hul_golden";
-    const isGolden = Boolean(r.is_golden_dataset || ds.startsWith("hul_") || ds.startsWith("gtmerch") || ds.startsWith("gt_hul") || ds.startsWith("ms_json"));
+    const isGolden = Boolean(r.is_golden_dataset || ds.startsWith("hul_") || ds.startsWith("gtmerch") || ds.startsWith("gt_hul") || ds.startsWith("ms_json") || ds.startsWith("mt_json"));
     const is1000 = getRunSampleCount(r) >= 1000;
     const sc = Number(r.primary_score ?? 0);
     const cost = Number(r.cost_per_image_usd ?? 999);
@@ -1239,13 +1340,58 @@ async function showUseCaseBoard(useCase = "market_share") {
         : scopeMeta.isPartial
           ? `<div class="sub-note mono" style="color:#9a3412;font-weight:600;margin-top:2px;">L4 Variant / L5 SKU: <b>Not Evaluated</b></div>`
           : "";
+      const pm = r.planogram_metrics || {};
+      const sm = r.sos_metrics || {};
+      const bsm = r.bay_scoped_metrics || {};
+      const bayCnt = pm.bay_scoped_image_count ?? bsm.bay_scoped_image_count;
+      const hangCnt = pm.hanger_fallback_image_count ?? bsm.hanger_fallback_image_count;
+      const scopeChip =
+        bayCnt != null
+          ? `<span class="sub-note mono" style="color:#065f46;font-weight:700;">Scope: ${bayCnt} Class 0 Bay / ${hangCnt || 0} Hanger</span>`
+          : "";
+      const bayF2Chip =
+        bsm.f2 != null
+          ? ` &middot; <span class="mono" style="color:#1e40af;font-weight:700;">Bay/Hanger F2: ${pct(bsm.f2)}</span>`
+          : "";
 
-      return `
-        <tr onclick="toggleRowDrawer(${idx})" title="Click to expand run details or inspect images" style="${isProdCostWin ? "background:#f0fdf4;" : ""}">
+      const rowCellsHtml = isPlanoView
+        ? `
           <td class="rank">#${idx + 1}${expBadge}</td>
           <td class="wrap-cell">
             <div class="arch-title">${esc(shortTitle)}${winnerPill}${scopeMeta.badgeHtml}</div>
             <span class="sub-note mono">${esc(fmtShortModel(r))} &middot; ${esc(fmtShortRunId(r))} &middot; 👤 ${esc(ownerShort)}</span>
+            ${scopeChip || bayF2Chip ? `<div style="margin-top:2px;">${scopeChip}${bayF2Chip}</div>` : ""}
+          </td>
+          <td style="white-space:normal;min-width:170px;">
+            <span class="ds-pill" title="${esc(dsMeta.shortDesc || dsKey)}">${esc(dsMeta.pillLabel || dsKey)}</span>
+            <span class="sub-note mono">${esc(dsKey)} &middot; ${esc(r.split || "test")} (<b>${sampleLabel}</b>)</span>
+          </td>
+          <td class="num strong">
+            ${pm.mean_brand_block_purity != null ? pct(pm.mean_brand_block_purity) : pct(sc)}
+            <div class="sub-note mono" style="color:#1e40af;font-weight:600;margin-top:2px;">
+              ${pm.mean_vertical_block_alignment != null ? `Vert Align: <b>${pct(pm.mean_vertical_block_alignment)}</b>` : `${esc(scopeMeta.scoreLabel)}: <b>${pct(sc)}</b>`}
+            </div>
+          </td>
+          <td class="num">
+            <b>${pm.mean_asset_bay_purity != null ? pct(pm.mean_asset_bay_purity) : "—"}</b>
+            <div class="sub-note mono" style="margin-top:2px;">Intrusions: <b>${pm.total_competitor_intrusions ?? 0}</b></div>
+          </td>
+          <td class="num">
+            <b>${pm.total_oos_voids != null ? `${pm.total_oos_voids} voids` : "—"}</b>
+            <div class="sub-note mono" style="margin-top:2px;">
+              Missing: <b>${pm.estimated_missing_facings ?? 0}</b> &middot; Empty: <b>${pct(pm.mean_empty_shelf_share || 0)}</b>
+            </div>
+          </td>
+          <td class="num">
+            ${sm.pred_facing_sos != null ? `<div style="margin-bottom:2px;">HUL SOS: <b>${pct(sm.pred_facing_sos)}</b> <span class="muted">(GT ${pct(sm.gt_facing_sos)})</span></div>` : ""}
+            ${fmtSpeedAndCost(r)}
+          </td>`
+        : `
+          <td class="rank">#${idx + 1}${expBadge}</td>
+          <td class="wrap-cell">
+            <div class="arch-title">${esc(shortTitle)}${winnerPill}${scopeMeta.badgeHtml}</div>
+            <span class="sub-note mono">${esc(fmtShortModel(r))} &middot; ${esc(fmtShortRunId(r))} &middot; 👤 ${esc(ownerShort)}</span>
+            ${bayF2Chip ? `<div class="sub-note mono" style="margin-top:2px;">${bayF2Chip.replace(/^ &middot; /, "")}</div>` : ""}
           </td>
           <td style="white-space:normal;min-width:170px;">
             <span class="ds-pill" title="${esc(dsMeta.shortDesc || dsKey)}">${esc(dsMeta.pillLabel || dsKey)}</span>
@@ -1254,7 +1400,11 @@ async function showUseCaseBoard(useCase = "market_share") {
           <td style="white-space:nowrap;"><span class="task-pill" title="${esc(ti.tip)}">${esc(ti.shortLabel)}</span></td>
           <td class="num strong">${pct(sc)} <span class="muted" style="font-size:11px;font-weight:500">${esc(scopeMeta.scoreLabel)} (&plusmn;${ciHw}%)</span>${progressBarHtml(sc)}${subScoreNote}</td>
           <td style="font-size:12px;color:var(--text-secondary);white-space:normal;min-width:240px;line-height:1.45;">${fmtSubMetricsCompact(r)}</td>
-          <td class="num">${fmtSpeedAndCost(r)}</td>
+          <td class="num">${fmtSpeedAndCost(r)}</td>`;
+
+      return `
+        <tr onclick="toggleRowDrawer(${idx})" title="Click to expand run details or inspect images" style="${isProdCostWin ? "background:#f0fdf4;" : ""}">
+          ${rowCellsHtml}
         </tr>
         <tr id="drawer-${idx}" class="drawer-row hidden">
           <td colspan="7">
@@ -1298,6 +1448,39 @@ async function showUseCaseBoard(useCase = "market_share") {
     })
     .join("");
 
+  const subViewHtml =
+    useCase === "merchandising"
+      ? `<div class="board-filters" style="margin-bottom:8px;padding:8px 12px;background:#f8fafc;border:1px solid #cbd5e1;">
+          <div class="filter-group">
+            <span class="filter-label">Merchandising View:</span>
+            <button class="filter-chip${!isPlanoView ? " on" : ""}" onclick="setUnifiedFilter('subview','standard','merchandising')">All Merchandising Tasks</button>
+            <button class="filter-chip${isPlanoView ? " on" : ""}" onclick="setUnifiedFilter('subview','planogram_oos','merchandising')">Planogram &amp; OOS Compliance (Stage 6)</button>
+          </div>
+        </div>`
+      : "";
+
+  const theadRowHtml = isPlanoView
+    ? `
+        <tr>
+          <th># / Exp</th>
+          <th>Approach &amp; Scope (Bay vs. Hanger)</th>
+          <th>Dataset &amp; Sample Size</th>
+          <th class="num">Brand-Block &amp; Vertical Align</th>
+          <th class="num">Bay Purity &amp; Intrusions</th>
+          <th class="num">OOS Voids &amp; Empty Share</th>
+          <th class="num">HUL SOS &amp; Cost</th>
+        </tr>`
+    : `
+        <tr>
+          <th># / Exp</th>
+          <th>Approach &amp; Attribute Scope</th>
+          <th>Dataset &amp; Sample Size</th>
+          <th>Task</th>
+          <th class="num">Primary Score &amp; 3-Attr</th>
+          <th>Per-Level Breakdown</th>
+          <th class="num">Latency &amp; Cost</th>
+        </tr>`;
+
   app.innerHTML = `
     <div class="page-head">
       <div>
@@ -1310,6 +1493,7 @@ async function showUseCaseBoard(useCase = "market_share") {
     </div>
 
     ${winningTriangulationBannerHtml}
+    ${subViewHtml}
 
     <div class="board-filters">
       <div class="filter-group"><span class="filter-label">Task:</span>${taskChips}</div>
@@ -1320,15 +1504,7 @@ async function showUseCaseBoard(useCase = "market_share") {
 
     <table class="board">
       <thead>
-        <tr>
-          <th># / Exp</th>
-          <th>Approach &amp; Attribute Scope</th>
-          <th>Dataset &amp; Sample Size</th>
-          <th>Task</th>
-          <th class="num">Primary Score &amp; 3-Attr</th>
-          <th>Per-Level Breakdown</th>
-          <th class="num">Latency &amp; Cost</th>
-        </tr>
+        ${theadRowHtml}
       </thead>
       <tbody>
         ${rowsHtml || `<tr><td colspan="7" class="empty">No runs match the selected filters.</td></tr>`}
@@ -2094,6 +2270,7 @@ async function showRun(runId) {
   const shortMod = fmtShortModel(s);
   const single = task === "classification";
   const fa = s.field_accuracy || {};
+  const evalFields = Array.isArray(s.evaluated_fields) && s.evaluated_fields.length ? s.evaluated_fields : null;
   const primaryScore = task === "detection" || task === "end_to_end" ? s.f2 : s.accuracy;
   const unitLabel = DATASETS[s.dataset]?.unitType === "shelf" ? "shelf" : "crop";
 
@@ -2106,31 +2283,31 @@ async function showRun(runId) {
       "<th>Truth</th><th>Predicted</th>",
       (r) => {
         const l = labelsOf(r)[0] || {};
-        return `<td>${esc(l.gt?.product || l.gt?.brand || "—")}</td><td>${mark(l.correct?.product ?? l.correct?.brand)} ${esc(l.pred?.product || l.pred?.brand || "none")}</td>`;
+        return `<td>${esc(l.gt?.product || l.gt?.brand || "—")}</td><td>${mark(isLabelAllCorrect(l, evalFields))} ${esc(l.pred?.product || l.pred?.brand || "none")}</td>`;
       },
     ],
     retrieval: [
       "<th class=num>Boxes</th><th class=num>Right</th>",
-      (r) => `<td class="num">${r.gt_count}</td><td class="num">${labelsOf(r).filter((l) => l.correct?.product).length}</td>`,
+      (r) => `<td class="num">${r.gt_count}</td><td class="num">${labelsOf(r).filter((l) => isLabelAllCorrect(l, evalFields)).length}</td>`,
     ],
     promo_detection: [
       "<th class=num>Promos</th><th class=num>Right</th>",
-      (r) => `<td class="num">${r.gt_count}</td><td class="num">${labelsOf(r).filter((l) => l.correct?.product).length}</td>`,
+      (r) => `<td class="num">${r.gt_count}</td><td class="num">${labelsOf(r).filter((l) => isLabelAllCorrect(l, evalFields)).length}</td>`,
     ],
     planogram_compliance: [
       "<th class=num>Facings</th><th class=num>Right</th>",
-      (r) => `<td class="num">${r.gt_count}</td><td class="num">${labelsOf(r).filter((l) => l.correct?.product).length}</td>`,
+      (r) => `<td class="num">${r.gt_count}</td><td class="num">${labelsOf(r).filter((l) => isLabelAllCorrect(l, evalFields)).length}</td>`,
     ],
     end_to_end: [
       "<th class=num>GT</th><th class=num>Boxes</th><th class=num>Right</th><th class=num>F2</th>",
-      (r) => `<td class="num">${r.gt_count}</td><td class="num">${r.pred_count}</td><td class="num">${labelsOf(r).filter((l) => l.correct?.product).length}</td><td class="num">${pct(r.f2)}</td>`,
+      (r) => `<td class="num">${r.gt_count}</td><td class="num">${r.pred_count}</td><td class="num">${labelsOf(r).filter((l) => isLabelAllCorrect(l, evalFields)).length}</td><td class="num">${pct(r.f2)}</td>`,
     ],
   }[task] || ["", () => ""];
 
   const isRowRight = (r) => {
     const lbs = labelsOf(r);
     if (!lbs.length) return (r.f2 ?? 1) >= 0.8;
-    return lbs.every((l) => (l.correct?.product ?? l.correct?.brand) !== false);
+    return lbs.every((l) => isLabelAllCorrect(l, evalFields));
   };
 
   let showAllImages = false;
@@ -2213,6 +2390,19 @@ async function showRun(runId) {
       </div>
     </div>
 
+    ${
+      s.planogram_metrics
+        ? `<div class="m3-kpi-card" style="margin-bottom:12px;padding:10px 14px;font-size:12.5px;line-height:1.5">
+            <b>Stage 6 Planogram &amp; OOS Compliance:</b>
+            Brand-Block Purity: <b>${pct(s.planogram_metrics.mean_brand_block_purity)}</b>
+            ${s.planogram_metrics.mean_vertical_block_alignment != null ? `&middot; Vertical Alignment: <b>${pct(s.planogram_metrics.mean_vertical_block_alignment)}</b>` : ""}
+            &middot; Bay Purity: <b>${pct(s.planogram_metrics.mean_asset_bay_purity ?? 1)}</b>
+            &middot; Competitor Intrusions: <b>${numFmt(s.planogram_metrics.total_competitor_intrusions || 0)}</b>
+            &middot; OOS Voids: <b>${numFmt(s.planogram_metrics.total_oos_voids || 0)}</b> (${numFmt(s.planogram_metrics.estimated_missing_facings || 0)} missing facings, empty share ${pct(s.planogram_metrics.mean_empty_shelf_share || 0)})
+            ${s.planogram_metrics.bay_scoped_image_count != null ? `&middot; Scope: <b>${numFmt(s.planogram_metrics.bay_scoped_image_count)} Class 0 Bay / ${numFmt(s.planogram_metrics.hanger_fallback_image_count || 0)} Full-Image Hanger</b>` : ""}
+          </div>`
+        : ""
+    }
     <!-- Detailed Architecture & Methodology Drill-Down + Run Parameters -->
     ${buildRunMethodologyHtml(s, true)}
     <details class="clean-accordion">
@@ -2256,7 +2446,7 @@ async function showRun(runId) {
         return;
       }
       tbody.querySelectorAll("tr").forEach((x) => x.classList.toggle("sel", x === tr));
-      showImage(runId, tr.dataset.id);
+      showImage(runId, tr.dataset.id, evalFields);
     };
     const firstRow = tbody.querySelector("tr[data-id]");
     firstRow?.click();
@@ -2302,9 +2492,9 @@ function envLine(s) {
   return `${where} · Cost/${unit} = ${parts.join(" + ") || r(0)}`;
 }
 
-const GALLERY_SPLITS = new Set(["rpc", "shelves", "hul_golden", "gtmerch_golden", "ms_json_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos", "gt_hul_sessions", "hul_sessions"]);
+const GALLERY_SPLITS = new Set(["rpc", "shelves", "hul_golden", "gtmerch_golden", "ms_json_golden", "mt_json_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos", "hul_talkers_golden", "gt_hul_sessions", "hul_sessions"]);
 
-function labelTable(d) {
+function labelTable(d, evalFields = null) {
   const labels = labelsOf(d);
   if (!labels.length) return "";
   const fields = Object.keys(labels[0].correct || { product: 1 });
@@ -2331,13 +2521,13 @@ function labelTable(d) {
       .map(
         (l, i) => `
       <tr><td class="num">${i + 1}</td><td>${name(l.gt, "no product")}</td>
-        <td>${name(l.pred, "none")}</td><td>${mark(l.correct?.product ?? l.correct?.brand)}</td></tr>`
+        <td>${name(l.pred, "none")}</td><td>${mark(isLabelAllCorrect(l, evalFields))}</td></tr>`
       )
       .join("")}
     </tbody></table>`;
 }
 
-async function showImage(runId, imageId) {
+async function showImage(runId, imageId, evalFields = null) {
   const v = document.getElementById("viewer");
   const base = `/api/runs/${encodeURIComponent(runId)}/images/${encodeURIComponent(imageId)}`;
   const d = await getJSON(base);
@@ -2351,6 +2541,19 @@ async function showImage(runId, imageId) {
   const dur = (ms) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
   const auditable = !!d.telemetry?.trace_id;
 
+  const pc = d.planogram_compliance;
+  const planoHtml = pc
+    ? `<div class="m3-kpi-card" style="margin-bottom:10px;padding:8px 12px;font-size:12px;line-height:1.45">
+        <b>Stage 6 Planogram:</b>
+        Scope: <b>${pc.scope_mode === "class0_bay_scoped" ? "Class 0 Bay" : "Full-Image Hanger"}</b>
+        &middot; HUL SOS: <b>${pct(pc.hul_facing_sos)}</b> (${numFmt(pc.hul_facings)}/${numFmt(pc.total_facings)})
+        &middot; Brand-Block Purity: <b>${pct(pc.brand_block_purity)}</b>
+        ${pc.vertical_block_alignment != null ? `&middot; Vertical Alignment: <b>${pct(pc.vertical_block_alignment)}</b>` : ""}
+        &middot; Bay Purity: <b>${pct(pc.asset_bay_purity ?? 1)}</b>
+        &middot; OOS Voids: <b>${numFmt(pc.oos_void_count || 0)}</b> (${numFmt(pc.estimated_missing_facings || 0)} missing facings)
+      </div>`
+    : "";
+
   v.innerHTML = `
     <div class="viewer-grid">
       <div>
@@ -2358,7 +2561,8 @@ async function showImage(runId, imageId) {
         <div class="legend" id="legend"></div>
       </div>
       <div>
-        ${labelTable(d)}
+        ${planoHtml}
+        ${labelTable(d, evalFields)}
         <details class="clean-accordion" style="margin-top:10px">
           <summary>Execution Steps &amp; Prompt/Response Audit (${d.steps.length} steps) &blacktriangledown;</summary>
           <div class="clean-accordion-body">
@@ -2404,7 +2608,7 @@ async function showImage(runId, imageId) {
   const select = (i) => {
     selected = i;
     steps.querySelectorAll("li").forEach((li) => li.classList.toggle("sel", +li.dataset.i === i));
-    draw(v.querySelector("canvas"), img, d, i === last ? null : d.steps[i]);
+    draw(v.querySelector("canvas"), img, d, i === last ? null : d.steps[i], evalFields);
   };
 
   steps.addEventListener("click", (e) => {
@@ -2509,7 +2713,7 @@ function textBlock(label, text) {
   return `<details><summary>${label} <span class="muted">(${numFmt(text.length)} chars)</span></summary><pre>${esc(body)}</pre></details>`;
 }
 
-function draw(canvas, img, d, step) {
+function draw(canvas, img, d, step, evalFields = null) {
   const w0 = d.width || img.naturalWidth || 800;
   const h0 = d.height || img.naturalHeight || 800;
   const targetMinW = Math.max(img.naturalWidth || 800, 260);
@@ -2527,12 +2731,30 @@ function draw(canvas, img, d, step) {
   const GREEN = "rgba(34,197,94,.95)";
   const RED = "rgba(239,68,68,.95)";
   const CYAN = "rgba(6,182,212,.95)";
+  const AMBER = "rgba(245,158,11,.95)";
   const legend = document.getElementById("legend");
   const labels = labelsOf(d);
   const assetBoxes = d.asset_boxes || [];
+  const oosVoidBoxes = !step ? (d.planogram_compliance?.oos_void_boxes || []) : [];
+  const extraLegend =
+    (assetBoxes.length ? ` <span class="sw asset"></span>Display Bay (${assetBoxes.length})` : "") +
+    (oosVoidBoxes.length ? ` <span class="sw oos"></span>OOS Void (${oosVoidBoxes.length})` : "");
   if (assetBoxes.length) {
     g.setLineDash([8, 4]);
     assetBoxes.forEach((b) => rect(b, CYAN, 3));
+    g.setLineDash([]);
+  }
+  if (oosVoidBoxes.length) {
+    g.setLineDash([6, 4]);
+    g.font = "bold 11px sans-serif";
+    oosVoidBoxes.forEach((v) => {
+      const vb = v.box || v;
+      rect(vb, AMBER, 2.5);
+      g.fillStyle = AMBER;
+      g.fillRect(vb[0] * k, vb[1] * k, 32, 15);
+      g.fillStyle = "#fff";
+      g.fillText("OOS", vb[0] * k + 4, vb[1] * k + 11);
+    });
     g.setLineDash([]);
   }
   if (!step && labels.length) {
@@ -2543,7 +2765,7 @@ function draw(canvas, img, d, step) {
       labels[0].box[2] - labels[0].box[0] >= w0 * 0.85 &&
       labels[0].box[3] - labels[0].box[1] >= h0 * 0.85;
     labels.forEach((l, i) => {
-      const ok = (l.correct?.product ?? l.correct?.brand) !== false;
+      const ok = isLabelAllCorrect(l, evalFields);
       const c = ok ? GREEN : RED;
       if (l.box) {
         rect(l.box, c, isFullCrop ? 3 : 2.5);
@@ -2555,13 +2777,17 @@ function draw(canvas, img, d, step) {
         }
       }
     });
-    const okCount = labels.filter((l) => (l.correct?.product ?? l.correct?.brand) !== false).length;
-    legend.innerHTML = `<span class="sw right"></span>Match (${okCount}) <span class="sw wrong"></span>Mismatch (${labels.length - okCount})`;
+    const okCount = labels.filter((l) => isLabelAllCorrect(l, evalFields)).length;
+    legend.innerHTML =
+      `<span class="sw right"></span>Match (${okCount}) <span class="sw wrong"></span>Mismatch (${labels.length - okCount})` +
+      extraLegend;
   } else if (!step) {
     const tp = new Set(d.matched || []);
     (d.gt || []).forEach((b) => rect(b, GREEN));
     (d.preds || []).forEach((b, i) => rect(b, tp.has(i) ? "rgba(59,130,246,.95)" : RED));
-    legend.innerHTML = `<span class="sw gt"></span>GT (${d.gt_count || 0}) <span class="sw tp"></span>Matched (${d.tp || 0}) <span class="sw fp"></span>False (${d.fp || 0})`;
+    legend.innerHTML =
+      `<span class="sw gt"></span>GT (${d.gt_count || 0}) <span class="sw tp"></span>Matched (${d.tp || 0}) <span class="sw fp"></span>False (${d.fp || 0})` +
+      extraLegend;
   } else {
     (step.boxes || []).forEach((b) => rect(b, "rgba(59,130,246,.95)"));
     legend.innerHTML = `<span class="sw tp"></span>Step boxes (${(step.boxes || []).length})`;
