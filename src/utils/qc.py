@@ -494,6 +494,89 @@ def run_12_gate_qc(
         "sample_violations": g12_violations[:5],
     })
 
+    # --- Gate 13: outlet_and_md5_split_deleakage ---
+    g13_violations: list[str] = []
+    g13_checked_datasets: list[str] = []
+    for ds_name in ("mt_json_golden", "hul_talkers_golden"):
+        mf_cand = manifests.get(ds_name)
+        if mf_cand is None and not allow_offline_fixture:
+            try:
+                mf_cand = _load_manifest(ds_name, allow_offline_fixture=False)
+            except Exception:
+                mf_cand = None
+        if mf_cand is None:
+            continue
+        g13_checked_datasets.append(ds_name)
+        splits = mf_cand.get("splits", {})
+        outlets_by_sp: dict[str, set[str]] = {}
+        md5_by_sp: dict[str, set[str]] = {}
+        for sp in ("train", "val", "test"):
+            rows_sp = splits.get(sp, [])
+            outlets_by_sp[sp] = {
+                str(r.get("outlet_code")).strip()
+                for r in rows_sp
+                if r.get("outlet_code")
+            }
+            md5_by_sp[sp] = {
+                str(r.get("md5")).strip()
+                for r in rows_sp
+                if r.get("md5")
+            }
+        for a, b in (("train", "val"), ("train", "test"), ("val", "test")):
+            out_ov = outlets_by_sp[a] & outlets_by_sp[b]
+            if out_ov:
+                g13_violations.append(
+                    f"{ds_name}: {len(out_ov)} shared outlet_code(s) between {a} and {b} (e.g. {sorted(out_ov)[:3]})"
+                )
+            md5_ov = md5_by_sp[a] & md5_by_sp[b]
+            if md5_ov:
+                g13_violations.append(
+                    f"{ds_name}: {len(md5_ov)} duplicate image MD5(s) between {a} and {b}"
+                )
+    gates.append({
+        "gate_id": 13,
+        "name": "outlet_and_md5_split_deleakage",
+        "passed": len(g13_violations) == 0,
+        "checked_datasets": g13_checked_datasets,
+        "violations_count": len(g13_violations),
+        "sample_violations": g13_violations[:5],
+    })
+
+    # --- Gate 14: dual_buffer_photometry_integrity ---
+    g14_violations: list[str] = []
+    photo_src = Path("src/utils/photometry.py").read_text()
+    base_src = Path("src/approaches/base.py").read_text()
+    if "def dual_buffer_shelf_photometry" not in photo_src:
+        g14_violations.append("photometry.py is missing dual_buffer_shelf_photometry")
+    if "ctx.color_image if ctx.color_image is not None else image" not in base_src:
+        g14_violations.append("base.py does not route ctx.color_image to Stage 2 identify_boxes")
+    try:
+        import numpy as np
+        from PIL import Image
+
+        from utils.photometry import apply_illuminant, dual_buffer_shelf_photometry
+
+        synth = np.full((32, 32, 3), [210, 175, 185], dtype=np.uint8)
+        synth[:16, :16] = [45, 35, 40]
+        synth_im = Image.fromarray(synth, mode="RGB")
+        det_im, col_im, p_stats = dual_buffer_shelf_photometry(synth_im)
+        expected_col = apply_illuminant(synth_im, p_stats["gains"])
+        col_diff = float(np.abs(np.asarray(col_im, dtype=np.float32) - np.asarray(expected_col, dtype=np.float32)).max())
+        det_diff = float(np.abs(np.asarray(det_im, dtype=np.float32) - np.asarray(col_im, dtype=np.float32)).mean())
+        if col_diff > 1.0:
+            g14_violations.append(f"color_image was distorted by non-linear CLAHE (max diff={col_diff:.2f} > 1.0)")
+        if det_diff < 0.5:
+            g14_violations.append(f"detector_image did not apply L* CLAHE contrast lift (mean diff={det_diff:.2f})")
+    except Exception as exc:
+        g14_violations.append(f"dual_buffer_shelf_photometry runtime check failed: {exc}")
+    gates.append({
+        "gate_id": 14,
+        "name": "dual_buffer_photometry_integrity",
+        "passed": len(g14_violations) == 0,
+        "violations_count": len(g14_violations),
+        "sample_violations": g14_violations[:5],
+    })
+
     passed_count = sum(1 for g in gates if g["passed"])
     return {
         "all_passed": passed_count == len(gates),
@@ -542,7 +625,7 @@ def backfill_results_taxonomy(
         mf = manifests_by_ds[ds]
         cat = catalogs_by_ds[ds]
         prod_map = by_prod_name[ds]
-        fields = dataset.HUL_FIELDS.get(ds, ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"))
+        fields = tuple(s_data.get("evaluated_fields") or dataset.HUL_FIELDS.get(ds, ("product", "brand", "base_variant", "category", "packaging_type", "is_hul")))
         split_rows = mf.get("splits", {}).get(split) or mf.get("splits", {}).get("test") or []
         split_by_img = {str(r.get("image")): r for r in split_rows}
         by_brand_cat: dict[str, list[dict[str, Any]]] = {}
@@ -654,8 +737,10 @@ def backfill_results_taxonomy(
                             gt["is_others_catchall"] = True
                             gt["is_unbranded_outside_bay"] = True
                         changed = True
-                for d_side in (gt, pred):
+                for is_pred_side, d_side in ((False, gt), (True, pred)):
                     if not isinstance(d_side, dict):
+                        continue
+                    if is_pred_side and d_side.get("sku_id") is None:
                         continue
                     s_prod = str(d_side.get("product") or "")
                     s_id = d_side.get("sku_id")
@@ -698,14 +783,25 @@ def backfill_results_taxonomy(
                 for f in fields
             }
             new_ha = metrics.hierarchical_field_scores(eval_boxes)
+            all_fields_acc = round(
+                sum(all(bool((lab.get("correct") or {}).get(f)) for f in fields) for lab in eval_boxes)
+                / max(1, len(eval_boxes)),
+                4,
+            )
             tot_tp = sum(int(r.get("tp", 0)) for r in rows)
             tot_fp = sum(int(r.get("fp", 0)) for r in rows)
             tot_fn = sum(int(r.get("fn", 0)) for r in rows)
             tot_sc = metrics.scores(tot_tp, tot_fp, tot_fn)
+            target_acc = (
+                all_fields_acc
+                if task in ("classification", "retrieval", "promo_detection", "planogram_compliance")
+                else round(tot_sc["accuracy"], 4)
+            )
             if (
                 s_data.get("field_accuracy") != new_fa
                 or s_data.get("hierarchical_accuracy") != new_ha
                 or s_data.get("tp") != tot_tp
+                or s_data.get("accuracy") != target_acc
             ):
                 s_data["tp"] = tot_tp
                 s_data["fp"] = tot_fp
@@ -713,8 +809,7 @@ def backfill_results_taxonomy(
                 for sk, sv in tot_sc.items():
                     s_data[sk] = round(sv, 4)
                 s_data["field_accuracy"] = new_fa
-                if task in ("classification", "retrieval", "promo_detection", "planogram_compliance"):
-                    s_data["accuracy"] = new_fa["product"]
+                s_data["accuracy"] = target_acc
                 s_data["hierarchical_accuracy"] = new_ha
                 changed = True
 

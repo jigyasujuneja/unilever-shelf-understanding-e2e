@@ -191,3 +191,143 @@ def inner_lab_zones(image: Image.Image, zones: int = 3, trim_x: float = 0.10, tr
     desc.extend([neck_taper, top_a_std, top_b_std])
     return desc
 
+
+def _lab_to_rgb(lab: np.ndarray) -> np.ndarray:
+    """Vectorized CIE L*a*b* (D65 reference white) -> sRGB uint8 [0..255]."""
+    L = lab[..., 0]
+    a = lab[..., 1]
+    b = lab[..., 2]
+    fy = (L + 16.0) / 116.0
+    fx = a / 500.0 + fy
+    fz = fy - b / 200.0
+    eps, kappa = 0.008856, 903.3
+    fx3 = fx * fx * fx
+    fz3 = fz * fz * fz
+    xr = np.where(fx3 > eps, fx3, (116.0 * fx - 16.0) / kappa)
+    yr = np.where(L > kappa * eps, fy * fy * fy, L / kappa)
+    zr = np.where(fz3 > eps, fz3, (116.0 * fz - 16.0) / kappa)
+    x = xr * 0.95047
+    y = yr * 1.00000
+    z = zr * 1.08883
+    r_lin = 3.2404542 * x - 1.5371385 * y - 0.4985314 * z
+    g_lin = -0.9692660 * x + 1.8760108 * y + 0.0415560 * z
+    b_lin = 0.0556434 * x - 0.2040259 * y + 1.0572252 * z
+    lin = np.clip(np.stack([r_lin, g_lin, b_lin], axis=-1), 0.0, 1.0)
+    srgb = np.where(
+        lin <= 0.0031308,
+        12.92 * lin,
+        1.055 * (np.maximum(lin, 1e-12) ** (1.0 / 2.4)) - 0.055,
+    )
+    return np.clip(srgb * 255.0, 0.0, 255.0).astype(np.uint8)
+
+
+def _clahe_l_channel(
+    L: np.ndarray,
+    clip_limit: float = 2.0,
+    tile_grid: tuple[int, int] = (8, 8),
+) -> np.ndarray:
+    """Apply bilinearly interpolated tile-based CLAHE to CIELAB L* channel in [0, 100]."""
+    h, w = L.shape
+    ty = max(1, min(int(tile_grid[0]), max(1, h // 4)))
+    tx = max(1, min(int(tile_grid[1]), max(1, w // 4)))
+    q = np.clip(np.round(L * 2.55), 0, 255).astype(np.int32)
+    lut = np.zeros((ty, tx, 256), dtype=np.float32)
+
+    for iy in range(ty):
+        y0 = (iy * h) // ty
+        y1 = ((iy + 1) * h) // ty if iy < ty - 1 else h
+        for ix in range(tx):
+            x0 = (ix * w) // tx
+            x1 = ((ix + 1) * w) // tx if ix < tx - 1 else w
+            tile_q = q[y0:y1, x0:x1]
+            tile_pixels = max(1, tile_q.size)
+            hist = np.bincount(tile_q.ravel(), minlength=256).astype(np.int64)
+            if clip_limit > 0.0:
+                limit = max(1, int(round(clip_limit * tile_pixels / 256.0)))
+                excess = int(np.maximum(hist - limit, 0).sum())
+                hist = np.minimum(hist, limit) + (excess // 256)
+                rem = excess % 256
+                if rem > 0:
+                    hist[:rem] += 1
+            cdf = np.cumsum(hist).astype(np.float32)
+            nonzero = cdf[cdf > 0]
+            cdf_min = float(nonzero[0]) if nonzero.size else 0.0
+            denom = max(1.0, float(tile_pixels) - cdf_min)
+            lut[iy, ix] = np.clip((cdf - cdf_min) / denom * 100.0, 0.0, 100.0)
+
+    gy = np.clip((np.arange(h, dtype=np.float32) + 0.5) * ty / max(1, h) - 0.5, 0.0, ty - 1.0)
+    gx = np.clip((np.arange(w, dtype=np.float32) + 0.5) * tx / max(1, w) - 0.5, 0.0, tx - 1.0)
+    iy0 = np.floor(gy).astype(np.int32)
+    iy1 = np.minimum(iy0 + 1, ty - 1)
+    wy = (gy - iy0)[:, None]
+    ix0 = np.floor(gx).astype(np.int32)
+    ix1 = np.minimum(ix0 + 1, tx - 1)
+    wx = (gx - ix0)[None, :]
+
+    v00 = lut[iy0[:, None], ix0[None, :], q]
+    v01 = lut[iy0[:, None], ix1[None, :], q]
+    v10 = lut[iy1[:, None], ix0[None, :], q]
+    v11 = lut[iy1[:, None], ix1[None, :], q]
+    return (1.0 - wy) * ((1.0 - wx) * v00 + wx * v01) + wy * ((1.0 - wx) * v10 + wx * v11)
+
+
+def enhance_shelf_for_detection(
+    image: Image.Image,
+    clip_limit: float = 2.0,
+    tile_grid: tuple[int, int] = (8, 8),
+) -> Image.Image:
+    """Enhance a full shelf image strictly for Stage 1 box detection (Shades-of-Gray + CIELAB L* CLAHE).
+
+    WARNING: This applies non-linear local contrast enhancement (CLAHE) to lift dark interior
+    shelf shadows and compress acrylic glare. Never pass the returned image into Stage 2 CIELAB
+    color matching (``lab_zones`` / ``inner_lab_zones``); use :func:`dual_buffer_shelf_photometry`
+    so Stage 2 crops come from the linear Shades-of-Gray ``color_image``.
+    """
+    detector_im, _, _ = dual_buffer_shelf_photometry(
+        image, clip_limit=clip_limit, tile_grid=tile_grid
+    )
+    return detector_im
+
+
+def dual_buffer_shelf_photometry(
+    image: Image.Image,
+    clip_limit: float = 2.0,
+    tile_grid: tuple[int, int] = (8, 8),
+) -> tuple[Image.Image, Image.Image, dict]:
+    """Build Stage 0 dual photometric buffers: ``(detector_image, color_image, stats)``.
+
+    - ``color_image``: Linear Shades-of-Gray illuminant-corrected shelf image. Safe for Stage 2
+      product crop embedding and CIELAB sister-shade matching (preserves pastel hues).
+    - ``detector_image``: Non-linear CIELAB ``L*``-channel CLAHE applied on top of ``color_image``.
+      Lifts dark back-row shelf shadows and compresses overhead bulb glare strictly for Stage 1
+      box detection.
+    """
+    rgb = image.convert("RGB")
+    gains = estimate_shelf_illuminant(rgb)
+    color_image = apply_illuminant(rgb, gains)
+    arr = np.asarray(color_image, dtype=np.float32)
+    if arr.shape[0] < 8 or arr.shape[1] < 8:
+        return color_image, color_image, {
+            "gains": gains,
+            "clip_limit": clip_limit,
+            "tile_grid": list(tile_grid),
+            "l_std_before": 0.0,
+            "l_std_after": 0.0,
+        }
+    lab = _rgb_to_lab(arr)
+    l_before = lab[..., 0]
+    l_after = _clahe_l_channel(l_before, clip_limit=clip_limit, tile_grid=tile_grid)
+    lab_enhanced = np.stack([l_after, lab[..., 1], lab[..., 2]], axis=-1)
+    detector_arr = _lab_to_rgb(lab_enhanced)
+    detector_image = Image.fromarray(detector_arr, mode="RGB")
+    return detector_image, color_image, {
+        "gains": gains,
+        "clip_limit": float(clip_limit),
+        "tile_grid": [int(tile_grid[0]), int(tile_grid[1])],
+        "l_mean_before": round(float(l_before.mean()), 2),
+        "l_mean_after": round(float(l_after.mean()), 2),
+        "l_std_before": round(float(l_before.std()), 2),
+        "l_std_after": round(float(l_after.std()), 2),
+    }
+
+

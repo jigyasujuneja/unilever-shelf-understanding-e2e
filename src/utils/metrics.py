@@ -157,6 +157,25 @@ def _variant_tokens_match(p_var: str, g_var: str, brand: str = "") -> bool:
     return False
 
 
+def _pred_is_hul(pred: dict | None) -> bool:
+    """Resolve HUL ownership from pred['is_hul'], falling back to canonical brand lookup when omitted."""
+    if pred is None:
+        return False
+    raw_flag = pred.get("is_hul")
+    if isinstance(raw_flag, bool):
+        return raw_flag
+    if raw_flag is not None and str(raw_flag).strip() != "":
+        return str(raw_flag).strip().lower() in ("true", "1", "yes")
+    from utils.taxonomy.brands import HUL_BRANDS, canonicalize_brand_name
+
+    b_raw = str(pred.get("brand") or pred.get("legacy_brand_name") or "").strip()
+    if not b_raw and pred.get("product") and "__" in str(pred.get("product")):
+        b_raw = str(pred.get("product")).split("__", 1)[0].strip()
+    if not b_raw:
+        return False
+    return canonicalize_brand_name(b_raw).lower() in HUL_BRANDS
+
+
 def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
     """Granularity-aware, legacy-alias-aware, and multi-modal packaging-aware field matcher."""
     if pred is None:
@@ -169,12 +188,14 @@ def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
     # Open-set competitor catch-all shelf boxes (`Others____Others____NA` in LabelMe annotations):
     # strictly require the model to predict a Non-HUL competitor (`is_hul is False`).
     if bool(gt.get("is_others_catchall")):
-        return pred.get("is_hul") is False
+        return _pred_is_hul(pred) is False
 
+    if field == "is_hul":
+        return _pred_is_hul(pred) == bool(g_val)
 
     is_bay_sister_match = (
         bool(gt.get("is_bay_inferred"))
-        and bool(pred.get("is_hul")) == bool(gt.get("is_hul"))
+        and _pred_is_hul(pred) == bool(gt.get("is_hul"))
         and (
             (pred.get("category") is not None and pred.get("category") == gt.get("category"))
             or (pred.get("packaging_type") is not None and pred.get("packaging_type") == gt.get("packaging_type"))
@@ -312,12 +333,11 @@ def match_product(pred: dict | None, gt: dict, fields: Sequence[str]) -> dict:
     ``correct`` says per field (product, brand, category, ...) whether the prediction agrees with the
     ground truth (supporting ``legacy_brand_name``, ``legacy_pack_folder``, multi-modal
     ``allowed_packaging_types``, and brand-only competitor GT).
-    The exact product is the hit: TP if right; a wrong product is FP + FN; no
-    answer is FN. So precision = right / answered, recall = right / all photos.
+    Every evaluated field in ``fields`` must match for ``tp = 1``; a partial or wrong answer is
+    FP + FN, and no answer (``pred is None``) is FN.
     """
     correct = {f: _field_matches(pred, gt, f) for f in fields}
-    # "product" ranks when scored; a --fields subset without it needs every field right.
-    tp = int(correct[fields[0]]) if "product" in fields else int(bool(fields) and all(correct.values()))
+    tp = int(bool(fields) and all(correct.values()))
     return {"tp": tp, "fp": int(pred is not None) - tp, "fn": 1 - tp,
             "matched": [0] if tp else [], "correct": correct}
 
@@ -344,7 +364,7 @@ def hierarchical_field_scores(labels: Sequence[dict]) -> dict[str, float]:
         gt = item.get("gt") or {}
         if pred is None:
             continue
-        ok1 = (bool(pred.get("is_hul")) == bool(gt.get("is_hul"))) or bool(gt.get("is_others_catchall"))
+        ok1 = (_pred_is_hul(pred) == bool(gt.get("is_hul"))) or bool(gt.get("is_others_catchall"))
         ok2 = _field_matches(pred, gt, "category")
         ok3 = _field_matches(pred, gt, "brand")
         ok4 = _field_matches(pred, gt, "base_variant") if "base_variant" in gt else _field_matches(pred, gt, "product")
@@ -633,6 +653,109 @@ def compute_enrichment_buckets(
         "others_catchall_gt_count": others_gt_total,
         "others_catchall_resolved_count": others_resolved,
         "enrichment_multiplier": round(total_preds / max(gt_count, 1), 2),
+    }
+
+
+def _box_inside_any_asset_bay(
+    box: Box,
+    asset_boxes: Sequence[Box],
+    min_containment: float = 0.45,
+) -> bool:
+    """Return True if ``box`` center is inside any Class 0 bay, >= min_containment area overlaps,
+    or its base rests on a plank inside the bay with >= 25% vertical overlap (top-row header rule)."""
+    cx = 0.5 * (box[0] + box[2])
+    cy = 0.5 * (box[1] + box[3])
+    bh = max(1.0, box[3] - box[1])
+    area = max(1.0, (box[2] - box[0]) * bh)
+    for ab in asset_boxes:
+        if ab[0] <= cx <= ab[2] and ab[1] <= cy <= ab[3]:
+            return True
+        ix1 = max(box[0], ab[0])
+        iy1 = max(box[1], ab[1])
+        ix2 = min(box[2], ab[2])
+        iy2 = min(box[3], ab[3])
+        if ix2 > ix1 and iy2 > iy1:
+            if ((ix2 - ix1) * (iy2 - iy1)) / area >= min_containment:
+                return True
+            if ab[0] <= cx <= ab[2] and ab[1] <= box[3] <= ab[3] and (iy2 - iy1) / bh >= 0.25:
+                return True
+    return False
+
+
+def filter_preds_to_asset_bays(
+    preds: Sequence[Box],
+    pred_ids: Sequence | None = None,
+    asset_boxes: Sequence[Box] | None = None,
+    min_containment: float = 0.45,
+) -> tuple[list[Box], list, list[int], str]:
+    """Scope Class 1 SKU boxes to Class 0 promo bays when bays exist; else keep full-image SKUs (hanger fallback)."""
+    if not asset_boxes:
+        return (
+            list(preds),
+            list(pred_ids) if pred_ids is not None else [],
+            list(range(len(preds))),
+            "full_image_hanger_fallback",
+        )
+    kept_preds: list[Box] = []
+    kept_ids: list = []
+    kept_indices: list[int] = []
+    for idx, b in enumerate(preds):
+        if _box_inside_any_asset_bay(b, asset_boxes, min_containment=min_containment):
+            kept_preds.append(b)
+            if pred_ids is not None and idx < len(pred_ids):
+                kept_ids.append(pred_ids[idx])
+            kept_indices.append(idx)
+    return kept_preds, kept_ids, kept_indices, "class0_bay_scoped"
+
+
+def score_merchandising_bay_or_hanger(
+    preds: Sequence[Box],
+    pred_ids: Sequence | None,
+    gt_boxes: Sequence[Box],
+    gt_labels: Sequence[dict] | None = None,
+    asset_boxes: Sequence[Box] | None = None,
+    catalog: dict[int, dict] | None = None,
+    fields: Sequence[str] | None = None,
+    iou_thr: float = 0.5,
+) -> dict:
+    """Score detection or E2E predictions under Unilever's Class 0 bay vs. full-image hanger rule.
+
+    When Class 0 display bays (``asset_boxes``) exist, only SKUs inside the asset boundaries are
+    scored (ignoring background store shelves outside the promo bay). When no Class 0 bay exists
+    (such as hanging strips / hangers), full-image SKU detection and classification are scored.
+    """
+    sc_preds, sc_ids, _, scope_mode = filter_preds_to_asset_bays(
+        preds, pred_ids=pred_ids, asset_boxes=asset_boxes
+    )
+    sc_gt_boxes, sc_gt_labels, _, _ = filter_preds_to_asset_bays(
+        gt_boxes, pred_ids=gt_labels, asset_boxes=asset_boxes
+    )
+    if pred_ids is None:
+        m = match(sc_preds, sc_gt_boxes, thr=iou_thr)
+        found = m["tp"]
+    else:
+        sc_gt_ids = [g.get("sku_id") for g in sc_gt_labels]
+        m = match_identified(
+            sc_preds,
+            sc_ids,
+            sc_gt_boxes,
+            sc_gt_ids,
+            catalog=catalog,
+            gt_labels=sc_gt_labels,
+            fields=tuple(fields) if fields is not None else None,
+        )
+        found = m["found"]
+    sc = scores(m["tp"], m["fp"], m["fn"])
+    return {
+        "scope_mode": scope_mode,
+        "asset_bay_count": len(asset_boxes or []),
+        "scoped_pred_count": len(sc_preds),
+        "scoped_gt_count": len(sc_gt_boxes),
+        "found": found,
+        "tp": m["tp"],
+        "fp": m["fp"],
+        "fn": m["fn"],
+        **{k: round(v, 4) for k, v in sc.items()},
     }
 
 

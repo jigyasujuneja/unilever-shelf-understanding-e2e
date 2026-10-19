@@ -23,8 +23,8 @@ from utils.taxonomy import (
 def test_12_gate_qc_all_pass(tmp_path):
     report = run_12_gate_qc(results_dir=tmp_path, allow_offline_fixture=True)
     assert report["all_passed"] is True
-    assert report["passed_gates"] == 12
-    assert report["total_gates"] == 12
+    assert report["passed_gates"] == 14
+    assert report["total_gates"] == 14
     for gate in report["gates"]:
         assert gate["passed"] is True, f"Gate {gate['gate_id']} ({gate['name']}) failed: {gate}"
         assert gate["violations_count"] == 0
