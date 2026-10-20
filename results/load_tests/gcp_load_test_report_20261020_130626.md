@@ -5,6 +5,15 @@
 **Mock Mode**: 100% Simulated Gemini Calls ($0.00 Token Charges, 0 GCP Quota Used)
 **Actual Google Cloud API Cost**: **$0.00 USD (₹0.00 INR)** | **Actual Quota Consumed**: **0 RPM**
 
+### 🔗 Live Google Cloud Platform Telemetry & Logging Links
+* 📋 **Cloud Run Job Execution**: [Execution Details (`shelf-bench-loadtest-n2fzn`)](https://console.cloud.google.com/run/jobs/executions/details/us-central1/shelf-bench-loadtest-n2fzn?project=ul-fs-s-sandbx-16-prj)
+* 📜 **Cloud Logging Log Stream**: [Cloud Logging Viewer (Filtered to Job)](https://console.cloud.google.com/logs/viewer?project=ul-fs-s-sandbx-16-prj&advancedFilter=resource.type%3D%22cloud_run_job%22%0Aresource.labels.job_name%3D%22shelf-bench-loadtest%22%0Aresource.labels.location%3D%22us-central1%22%0Alabels.%22run.googleapis.com/execution_name%22%3D%22shelf-bench-loadtest-n2fzn%22)
+* 📈 **Cloud Monitoring Dashboard**: [Metrics Explorer (CPU & Memory Utilization)](https://console.cloud.google.com/monitoring/dashboards?project=ul-fs-s-sandbx-16-prj)
+* ⏱️ **Cloud Trace Explorer**: [Cloud Trace Explorer](https://console.cloud.google.com/traces/explorer?project=ul-fs-s-sandbx-16-prj)
+* 📦 **GCS Markdown Report**: `gs://ul-fs-s-sandbx-16-prj-shelf-images/results/load_tests/gcp_load_test_report_20261020_130626.md`
+* 📊 **GCS Telemetry JSON**: `gs://ul-fs-s-sandbx-16-prj-shelf-images/results/load_tests/gcp_load_test_data_20261020_130626.json`
+* 🐙 **GitHub Pull Request**: [Create / View PR #53](https://github.com/Hyper-Automation-Platform/marketshare_poc/pull/new/feat/load-test-embedding-decision-lvm-pipeline)
+
 ---
 
 ## 1. Executive Summary & Delivery Reality
