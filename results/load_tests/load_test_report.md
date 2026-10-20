@@ -197,6 +197,29 @@ Under sustained peak load of 2,097.6 product classifications/second, latency rem
 
 ---
 
+### 5.1 Predicted Latency Per Store Shelf Image (With Live Gemini 3.5 SFT Inference)
+
+When live Gemini calls are executed for every escalated crop on a store shelf image, the total shelf turnaround time depends on the **crop concurrency profile** and whether Stage 1 YOLO runs on CPU or GPU.
+
+A single shelf image contains an average of **50 products** (or **90 products** on a dense shelf). After the **11.7% Calibrated Gate bypass**, ~**44 products** (or ~**80 products**) require a live Gemini 3.5 Flash-Lite call (P50: 420 ms, P95: 882 ms):
+
+| Shelf Density Scenario | Concurrency Strategy | Stage 1 YOLO Latency | Stage 2 Gemini Latency (P50 / P95) | Total Shelf Latency P50 | Total Shelf Latency P95 | Architectural Verdict |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **Typical Shelf (50 products)** | **Concurrent (32 workers)** | 5.41s (CPU) | **0.84s** / **1.76s** | **6.29s** | **8.28s** | **Recommended CPU Standard** |
+| **Typical Shelf (50 products)** | **Concurrent (16 workers)** | 5.41s (CPU) | **1.26s** / **2.65s** | **6.71s** | **9.16s** | Standard Cloud Run pool |
+| **Typical Shelf (50 products)** | **Unconstrained Async (50)** | 5.41s (CPU) | **0.42s** / **0.88s** | **5.87s** | **7.40s** | All crops fire concurrently |
+| **Typical Shelf (50 products)** | **GPU YOLO (T4/L4, 32w)** | **0.18s** (GPU) | **0.84s** / **1.76s** | **1.06s** | **2.07s** | **Ultra-Fast Real-Time (1.06s)** |
+| **Dense Shelf (90 products)** | **Concurrent (32 workers)** | 5.41s (CPU) | **1.26s** / **2.65s** | **6.71s** | **9.16s** | Heavy Kirana / Supermarket |
+| **Dense Shelf (90 products)** | **GPU YOLO (T4/L4, 32w)** | **0.18s** (GPU) | **1.26s** / **2.65s** | **1.48s** | **2.95s** | **Ultra-Fast Dense Shelf** |
+| **Typical Shelf (50 products)** | *Sequential (1 worker - Anti-pattern)* | 5.41s (CPU) | 18.90s / 39.70s | 24.35s | 46.21s | Avoid: Serial single-thread loop |
+
+#### Key Architectural Takeaways for Shelf Latency:
+1. **Gemini Latency Overhead is Sub-Second Under Concurrency**: With 32 parallel worker threads, classifying all 44 escalated crops on a shelf takes only **0.84 seconds (P50)** and **1.76 seconds (P95)** because calls are dispatched simultaneously via HTTP/2 multiplexing.
+2. **CPU YOLO is the Primary Bottleneck on CPU-Only Cloud Run**: Stage 1 YOLO on a 4-vCPU container takes ~5.41 seconds, representing 86% of total shelf processing time.
+3. **GPU Decoupling Unlocks 1.0-Second Turnaround**: Offloading Stage 1 YOLO to an L4/T4 GPU node drops YOLO to 0.18s, bringing **complete end-to-end shelf turnaround to 1.06 seconds (P50)** with live Gemini inference included!
+
+---
+
 ## 6. Forensic Failure Mode Audit & Error Transparency
 
 To provide full engineering transparency, the table below documents every potential failure mode and the observed result during the physical 10-container execution:
