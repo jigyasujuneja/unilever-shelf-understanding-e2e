@@ -43,7 +43,7 @@
 | **Physical Datasets Used** | **`rpc_json`** (shelves & boxes) + **`hul_golden`** (crops) | Real image downloads across dual GCS buckets |
 | **Physical GCS Network I/O** | **1.56 GB** streamed across 22,989 objects at **8.6 MB/s** | **0 errors (0 HTTP 503 SlowDowns, 0 HTTP 429 Rate Limits)** across dual buckets |
 | **Failure Rate / Transparency** | **0 container crashes, 0 dropped frames, 0 GCP retries** | All 10 tasks exited with code `0` |
-| **Predicted Cost per Shelf** | **$0.0101 USD (₹0.97 INR)** on Standard PayGo | Full pipeline: detection + gating + Gemini 3.5 Flash-Lite LoRA SFT |
+| **Predicted Cost per Shelf** | **$0.0210 USD (₹2.02 INR)** for 50 products<br>*(or **$0.0101 USD / ₹0.97 INR** for 24 products)* | Standard PayGo: full detection + gating + Gemini 3.5 LoRA SFT |
 | **Predicted Cost per Product** | **$0.000418 USD (₹0.0401 INR)** on Standard PayGo | After 11.7% gate bypass (4.0 paise per FMCG SKU classification) |
 | **Recommended Cloud Strategy** | Switch from Priority ($0.54/$4.50) to **Standard PayGo ($0.30/$2.50)** | **Saves 44.4% on Gemini spend ($126,558 / month saved at 500k shelves/day)** |
 
@@ -296,14 +296,22 @@ By combining empirical GCP Cloud Run compute costs ($0.0000341 / shelf) with the
 | **TOTAL COST PER PRODUCT (USD)** | **$0.0007545 USD** | **$0.0004196 USD** | **$0.0002104 USD** | Full end-to-end product classification |
 | **TOTAL COST PER PRODUCT (INR)** | **₹0.0724 INR (7.2 paise)** | **₹0.0403 INR (4.0 paise)** | **₹0.0202 INR (2.0 paise)** | **4.0 paise per classified FMCG SKU** |
 
-### B. Unit Cost per Store Shelf Image (Assuming 50 Products per Shelf)
+### B. Unit Cost per Store Shelf Image Across Shelf Density Scenarios
 
-| Architecture Strategy | Total Cost per Shelf (USD) | Total Cost per Shelf (INR) | Component Breakdown |
-| :--- | :---: | :---: | :--- |
-| **Priority PayGo (Dense 11.7% Bypass)** | **$0.0377 USD** | **₹3.62 INR** | Compute: $0.00018 + Gemini: $0.03755 |
-| **Standard PayGo (Dense 11.7% Bypass)** | **$0.0210 USD** | **₹2.02 INR** | **Compute: $0.00018 + Gemini: $0.02082 (-44.4%)** |
-| **Flex PayGo (Dense 11.7% Bypass)** | **$0.0105 USD** | **₹1.01 INR** | Compute: $0.00018 + Gemini: $0.01032 (-72.2%) |
-| **Standard PayGo (Variant 48.8% Bypass)**| **$0.0122 USD** | **₹1.17 INR** | With high variant bypass rate |
+A store shelf's total cost scales directly with the number of products detected by Stage 1 YOLO. After the **11.7% Calibrated Gate bypass**, remaining crops are classified by Gemini 3.5 Flash-Lite LoRA SFT:
+
+| Shelf Density Scenario | Products per Shelf | Priority PayGo ($0.54 / $4.50) | Standard PayGo ($0.30 / $2.50) | Flex PayGo ($0.15 / $1.25) | Operational Context |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Small Shelf / Cooler / Endcap** | **24 products** | **$0.0181 USD (₹1.74 INR)** | **$0.0101 USD (₹0.97 INR)** | **$0.0051 USD (₹0.49 INR)** | Single beverage cooler / checkout rack |
+| **Standard Store Shelf** | **50 products** | **$0.0377 USD (₹3.62 INR)** | **$0.0210 USD (₹2.02 INR)** | **$0.0105 USD (₹1.01 INR)** | General grocery & Kirana baseline |
+| **Dense Supermarket Shelf** | **90 products** | **$0.0679 USD (₹6.52 INR)** | **$0.0378 USD (₹3.63 INR)** | **$0.0189 USD (₹1.82 INR)** | Full multi-tier hypermarket shelf |
+| **Standard Shelf (Variant 48.8% Bypass)** | **50 products** | **$0.0219 USD (₹2.10 INR)** | **$0.0122 USD (₹1.17 INR)** | **$0.0061 USD (₹0.59 INR)** | Shelves with high variant catalog separation |
+
+#### Cost Scaling Math Breakdown:
+$$\text{Cost per Shelf} = \text{Cloud Run Ingress} + (N_{\text{products}} \times \text{Cost per Product})$$
+* **For 24 Products (Small Cooler)**: $24 \times ₹0.0403 \text{ INR} = \mathbf{₹0.97 \text{ INR}} \text{ (\$0.0101 USD)}$.
+* **For 50 Products (Standard Shelf)**: $50 \times ₹0.0403 \text{ INR} = \mathbf{₹2.02 \text{ INR}} \text{ (\$0.0210 USD)}$.
+* **For 90 Products (Dense Shelf)**: $90 \times ₹0.0403 \text{ INR} = \mathbf{₹3.63 \text{ INR}} \text{ (\$0.0378 USD)}$.
 
 ---
 
