@@ -458,7 +458,7 @@ class PipelineLoadTester:
 
                 t_lvm_sub = time.perf_counter_ns()
                 if self.dry_run_vlm:
-                    time.sleep(0.01)
+                    time.sleep(max(0.05, float(np.random.normal(0.42, 0.05))))
                     in_t = 1440
                     out_t = 16
                     n_calls = 1
