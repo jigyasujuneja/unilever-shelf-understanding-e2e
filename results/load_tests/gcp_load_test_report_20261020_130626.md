@@ -53,6 +53,23 @@
 | **5-Min Test (Dense 11.7% Bypass)** | **$460.69 (₹44,221.51)** | **$255.94 (₹24,567.50)** | **$127.97 (₹12,283.75)** | **$204.75 Saved (-44.4%)** |
 | **Daily Scale (25M Crops/Day)** | **$9,490.74 / day** | **$5,272.13 / day** | **$2,636.07 / day** | **$4,218.61 / day ($126,558 / mo)** |
 
+---
+
+## 6. Unit Cost Breakdown: Per Product & Per Shelf Image
+*Unit Definition: 1 Shelf Image = ~50 Product Crops (Evaluated across 12,226 shelves and 611,606 products).*
+
+| Billing Mode & Strategy | Cost / Product Crop (USD) | Cost / Product Crop (INR) | Cost / Shelf Image (USD) | Cost / Shelf Image (INR) | Context & Architecture |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Actual GCP Billed (Load Test)** | **$0.00000006** | **₹0.00000558** | **$0.00000291** | **₹0.000279** | Actual Cloud Run container compute ($0.0356 total) |
+| **Simulated Gemini: Priority PayGo** | **$0.000380** | **₹0.0364** | **$0.0190** | **₹1.82** | Gemini API alone (Empirical 55.5% CLM gate bypass) |
+| **Full Stack: Priority PayGo** | **$0.000550** | **₹0.0528** | **$0.0275** | **₹2.64** | Full baseline EXP-29 / EXP-33 production stack |
+| **Simulated Gemini: Standard PayGo** | **$0.000211** | **₹0.0202** | **$0.0105** | **₹1.01** | Gemini API alone (Without Priority: -44.4% savings) |
+| **Full Stack: Standard PayGo** | **$0.000382** | **₹0.0366** | **$0.0191** | **₹1.83** | **Full pipeline stack (-30.7% total cost reduction)** |
+| **Simulated Gemini: Flex PayGo** | **$0.000105** | **₹0.0101** | **$0.0053** | **₹0.51** | Gemini API alone (Batch/Queue: -72.2% savings) |
+| **Full Stack: Flex PayGo** | **$0.000276** | **₹0.0265** | **$0.0138** | **₹1.33** | **Full pipeline stack (-49.8% total cost reduction)** |
+| **Full Stack: Priority PayGo (Dense Shelf)** | **$0.000924** | **₹0.0887** | **$0.0462** | **₹4.43** | Conservative worst-case (11.7% bypass) |
+
 > [!NOTE]
 > By simulating the Gemini calls within Google Cloud Run, the pipeline validated the full 5-minute peak volume (611,606 products) without consuming any Vertex AI API quota or incurring token charges.
+
 
