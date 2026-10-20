@@ -224,6 +224,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--approach", default="sft_clm_clef_cascade", help="pipeline approach (Option A default: sft_clm_clef_cascade)")
     s.add_argument("--dry-run-vlm", action="store_true", default=True, help="simulate Gemini calls with calibrated latency/tokens")
     s.add_argument("--cloud-run", action="store_true", help="execute 100%% on GCP Cloud Run Job instead of locally")
+    s.add_argument("--tasks", type=int, default=1, help="number of parallel Cloud Run tasks (default: 1)")
+    s.add_argument("--parallelism", type=int, default=None, help="max parallel Cloud Run tasks")
+    s.add_argument("--stress-gcs-io", action="store_true", help="physically download shelf images from GCS in parallel")
     s.add_argument("--image", default=None, help="Artifact Registry container image URI to reuse")
     s.add_argument("--job", default="shelf-bench-loadtest", help="override Cloud Run job name (default: shelf-bench-loadtest)")
     s.add_argument("--cpu", type=int, default=4, help="Cloud Run container vCPU count (default: 4)")
@@ -571,7 +574,18 @@ def main(argv: list[str] | None = None) -> int:
             ]
             if a.dry_run_vlm:
                 cli_args.append("--dry-run-vlm")
-            run_cli_on_cloud(cli_args, image=a.image, tasks=1, cpu=a.cpu, memory_gib=a.memory_gib, job_name=a.job, log=print)
+            if a.stress_gcs_io:
+                cli_args.append("--stress-gcs-io")
+            run_cli_on_cloud(
+                cli_args,
+                image=a.image,
+                tasks=a.tasks,
+                parallelism=a.parallelism or a.tasks,
+                cpu=a.cpu,
+                memory_gib=a.memory_gib,
+                job_name=a.job,
+                log=print,
+            )
         else:
             from utils.load_tester import LoadTestConfig, run_load_test
             cfg = LoadTestConfig(
@@ -580,6 +594,7 @@ def main(argv: list[str] | None = None) -> int:
                 products_per_shelf=a.products_per_shelf,
                 approach=a.approach,
                 dry_run_vlm=a.dry_run_vlm,
+                stress_gcs_io=a.stress_gcs_io,
                 container_cpu=a.cpu,
                 container_ram_gib=a.memory_gib,
             )

@@ -229,6 +229,7 @@ def run_cli_on_cloud(
     cli_args: list[str],
     image: str | None = None,
     tasks: int = 1,
+    parallelism: int | None = None,
     cpu: int = 4,
     memory_gib: int = 8,
     job_name: str | None = None,
@@ -244,7 +245,7 @@ def run_cli_on_cloud(
     cr = dict(job_cfg.get("cloud_run", {}))
     cr["cpu"] = cpu
     cr["memory_gib"] = memory_gib
-    cr["parallelism"] = tasks
+    cr["parallelism"] = parallelism or tasks
     if job_name:
         cr["job"] = job_name
     job_cfg["cloud_run"] = cr
