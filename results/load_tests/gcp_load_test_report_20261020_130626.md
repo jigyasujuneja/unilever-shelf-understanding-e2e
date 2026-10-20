@@ -17,8 +17,33 @@
 * 📦 **GCS Master Report (10-Container Distributed Fleet)**: `gs://ul-fs-s-sandbx-16-prj-shelf-images/results/load_tests/gcp_multi_container_load_test_report_20261020_140308.md`
 * 📦 **GCS Report Artifact (Single-Instance)**: `gs://ul-fs-s-sandbx-16-prj-shelf-images/results/load_tests/gcp_load_test_report_20261020_130626.md`
 * 📊 **GCS Telemetry JSON**: `gs://ul-fs-s-sandbx-16-prj-shelf-images/results/load_tests/gcp_load_test_data_20261020_130626.json`
-* 🗂️ **GCS Distributed Tasks Telemetry**: `gs://ul-fs-s-sandbx-16-prj-shelf-images/results/load_tests/distributed_tasks/`
 * 🐙 **GitHub Pull Request**: [Create / View PR #53](https://github.com/Hyper-Automation-Platform/marketshare_poc/pull/new/feat/load-test-embedding-decision-lvm-pipeline)
+
+---
+
+## 📌 Executive Summary & Test Methodology At-A-Glance
+
+> [!IMPORTANT]
+> **Key Methodology Clarification**:
+> 1. **VLM Inference Simulated / Mocked in Memory**: In both the 5-minute single-instance stress test and the 10-container distributed fleet run, Gemini 3.5 Flash-Lite API calls were **100% simulated in memory** using calibrated token accounting ($0.00 actual Vertex AI token billing, 0 RPM API quota consumed).
+> 2. **Gemini Predicted Costs Empirically Grounded**: All predicted Gemini financial metrics are derived **directly from benchmark run [`1015-162629`](file:///home/riley_gavigan/marketshare_poc/results/1015-162629-sft_clm_clef_cascade-gemini-3.5-flash-lite-priority-hul_variants-val/summary.json)**, which physically executed Gemini 3.5 Flash-Lite with 5-panel CLEF contact sheets and measured exact token consumption:
+>    - **Input / Prompt Tokens**: **1,441.45 tokens / call**
+>    - **Output / Candidate Tokens**: **16.60 tokens / call**
+>    - **Inference Latency**: **420.0 ms P50** / **1,150.0 ms P95**
+> 3. **Physical GCP Resources 100% Real**: Cloud Run compute (40 vCPUs, 160 GiB RAM), multi-threading, network fabric, and GCS object streaming across dual buckets (`RPC/rpc.json` for shelves/boxes and `hul_golden` for crops) were **100% physically exercised on Google Cloud**.
+
+### 💡 High-Level Findings & Financial Reality Matrix
+
+| Category | Empirical Finding / Metric | Strategic Impact |
+| :--- | :--- | :--- |
+| **Real Load Test Billed Cost** | **$0.26 USD (₹24.86 INR)** for 10-container physical run | Cost of running 40 vCPUs / 160 GiB cluster on Cloud Run for 3 minutes |
+| **Load Test Budget Saved** | **$286.15 USD (₹27,467 INR)** saved by simulating VLM | Prevented burning production Vertex AI quota or incurring live token fees |
+| **Physical Scale Demonstrated** | **10 Cloud Run containers** running in parallel (`parallelism: 10`) | Processed **7,593 shelves** (41.92 sh/s) and **379,873 crops** (2,097.6 crops/s) |
+| **Physical GCS Network I/O** | **1.56 GB** streamed across 22,989 objects at **8.6 MB/s** | **0 errors (0 HTTP 503 SlowDowns, 0 HTTP 429 Rate Limits)** across dual buckets |
+| **Failure Rate / Transparency** | **0 container crashes, 0 dropped frames, 0 GCP retries** | All 10 tasks exited with code `0` |
+| **Predicted Cost per Shelf** | **$0.0101 USD (₹0.97 INR)** on Standard PayGo | Full pipeline: detection + gating + Gemini 3.5 Flash-Lite LoRA SFT |
+| **Predicted Cost per Product** | **$0.000418 USD (₹0.0401 INR)** on Standard PayGo | After 11.7% gate bypass (4.0 paise per FMCG SKU classification) |
+| **Recommended Cloud Strategy** | Switch from Priority ($0.54/$4.50) to **Standard PayGo ($0.30/$2.50)** | **Saves 44.4% on Gemini spend ($126,558 / month saved at 500k shelves/day)** |
 
 ---
 
