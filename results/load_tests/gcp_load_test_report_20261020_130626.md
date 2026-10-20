@@ -72,4 +72,23 @@
 > [!NOTE]
 > By simulating the Gemini calls within Google Cloud Run, the pipeline validated the full 5-minute peak volume (611,606 products) without consuming any Vertex AI API quota or incurring token charges.
 
+---
+
+## 7. Reliability, Failure Audit & Cloud Trace Links
+
+### Failure Mode Verification (Execution `shelf-bench-loadtest-n2fzn`)
+* **Uncaught Exceptions / Crashes**: **0** (Container exited cleanly with code `0`).
+* **Dropped Crops / Shelves**: **0** (Queue backlog was 0 at all evaluation checkpoints).
+* **Cloud Run Task Restarts / Retries**: **0** (Executed cleanly on initial attempt).
+* **Severity >= WARNING Logs**: **0** (Zero error or warning logs generated).
+* **HTTP 429 Quota Throttling**: **0** (Simulated in memory to protect live quota).
+* **Ingress Variance**: **-2.19%** (-274 shelves) due to realistic Poisson burst variation ($\sigma=111.8$, within $2.4\sigma$).
+
+### Direct Cloud Console & Logging Traces
+* 📋 **Cloud Run Job Execution**: [Execution Details](https://console.cloud.google.com/run/jobs/executions/details/us-central1/shelf-bench-loadtest-n2fzn?project=ul-fs-s-sandbx-16-prj)
+* 📜 **Cloud Logging Log Stream**: [Cloud Logging Viewer](https://console.cloud.google.com/logs/viewer?project=ul-fs-s-sandbx-16-prj&advancedFilter=resource.type%3D%22cloud_run_job%22%0Aresource.labels.job_name%3D%22shelf-bench-loadtest%22%0Aresource.labels.location%3D%22us-central1%22%0Alabels.%22run.googleapis.com/execution_name%22%3D%22shelf-bench-loadtest-n2fzn%22)
+* 📈 **Cloud Monitoring Dashboard**: [Metrics Explorer](https://console.cloud.google.com/monitoring/dashboards?project=ul-fs-s-sandbx-16-prj)
+* ⏱️ **Cloud Trace Explorer**: [Cloud Trace Explorer](https://console.cloud.google.com/traces/explorer?project=ul-fs-s-sandbx-16-prj)
+
+
 
