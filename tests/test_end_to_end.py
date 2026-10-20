@@ -56,6 +56,9 @@ def test_registry_has_builtin_approaches():
         "talker_price_tag_detect", "promo_ocr_zoom_verifier",
         "distilled_yolo_stage0_clahe", "shelf_stage0_clahe_e2e",
         "shelf_gemini_detect_e2e", "shelf_clef_metadata_e2e",
+        "clef_aspect_scale_prior", "clef_saliency_diff_zoom", "clef_pack_crown_fusion",
+        "hybrid_pack_specialist_clef", "promo_asset_plank_tiling_detect",
+        "shelf_plank_tiling_e2e", "shelf_generalizable_spine_e2e",
     }
     for ap in approaches.all_approaches().values():
         assert ap.architecture and ap.steps
@@ -86,6 +89,9 @@ def test_registry_has_builtin_approaches():
         "promo_asset_awp_router_detect", "promo_robotics_spatial_detect",
         "talker_price_tag_detect", "promo_ocr_zoom_verifier",
         "shelf_stage0_clahe_e2e", "shelf_gemini_detect_e2e", "shelf_clef_metadata_e2e",
+        "clef_aspect_scale_prior", "clef_saliency_diff_zoom", "clef_pack_crown_fusion",
+        "hybrid_pack_specialist_clef", "promo_asset_plank_tiling_detect",
+        "shelf_plank_tiling_e2e", "shelf_generalizable_spine_e2e",
     }
 
 

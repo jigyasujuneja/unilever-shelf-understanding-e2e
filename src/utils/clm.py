@@ -412,4 +412,359 @@ def group_adjacent_shelf_twins(
     return clusters, medoids
 
 
+# ---------------------------------------------------------------------------
+# EXP-50: Aspect-Preserving Cap/Rim Context Crop & Projective Scale Features
+# ---------------------------------------------------------------------------
+
+def letterbox_cap_crop(
+    image: Image.Image,
+    box: tuple[float, float, float, float],
+    *,
+    top_pad: float = 0.12,
+    side_pad: float = 0.06,
+    bottom_pad: float = 0.08,
+) -> Image.Image:
+    """Cut out ``box`` with asymmetric +12% top cap/nozzle/crimp context padding and +8% bottom rim padding."""
+    x1, y1, x2, y2 = box
+    w = max(1.0, x2 - x1)
+    h = max(1.0, y2 - y1)
+    px = w * side_pad
+    py_top = h * top_pad
+    py_bot = h * bottom_pad
+    return image.crop(
+        (
+            max(0.0, x1 - px),
+            max(0.0, y1 - py_top),
+            min(float(image.width), x2 + px),
+            min(float(image.height), y2 + py_bot),
+        )
+    )
+
+
+def compute_container_geometry_features(
+    image: Image.Image,
+    box: tuple[float, float, float, float] | None = None,
+    plank_height: float | None = None,
+) -> dict[str, float]:
+    """Compute universal 3D container geometry features (aspect_ratio, top_crown_taper, bottom_base_width, plank_height_ratio).
+
+    Uses horizontal edge energy across the top-22% crown zone vs the middle-50% body zone to
+    estimate neck/actuator taper (distinguishing Spray/Bottle/Roll_On/Tube from flat-topped
+    Jar/Carton/Sachet/Bar) without any brand-specific rules.
+    """
+    if box is not None:
+        bw = max(1.0, float(box[2] - box[0]))
+        bh = max(1.0, float(box[3] - box[1]))
+    else:
+        bw = max(1.0, float(image.width))
+        bh = max(1.0, float(image.height))
+    aspect_ratio = round(bh / bw, 4)
+    plank_ratio = round(bh / max(1.0, float(plank_height)), 4) if plank_height and plank_height > 0 else 1.0
+
+    gray = np.asarray(image.convert("L").resize((64, 96), Image.Resampling.BILINEAR), dtype=np.float32)
+    gx = np.abs(np.diff(gray, axis=1))
+
+    def _active_span(band_gx: np.ndarray) -> float:
+        col_energy = band_gx.mean(axis=0)
+        thr = float(np.percentile(col_energy, 35)) + 1.5
+        active = np.where(col_energy >= thr)[0]
+        if active.size < 2:
+            return 0.75
+        return float(max(0.15, min(1.0, (active[-1] - active[0] + 1) / float(band_gx.shape[1]))))
+
+    top_span = _active_span(gx[:21, :])       # top 22% crown / cap / nozzle / crimp
+    mid_span = _active_span(gx[24:72, :])     # middle 50% body
+    bot_span = _active_span(gx[72:, :])       # bottom 25% base / gusset
+    crown_taper = round(float(max(0.25, min(1.35, top_span / max(0.20, mid_span)))), 4)
+    base_taper = round(float(max(0.25, min(1.35, bot_span / max(0.20, mid_span)))), 4)
+
+    return {
+        "aspect_ratio": aspect_ratio,
+        "crown_taper": crown_taper,
+        "base_taper": base_taper,
+        "plank_height_ratio": plank_ratio,
+    }
+
+
+_SLENDER_UPRIGHT_PACKS = {"Bottle", "Spray", "Roll_On", "Pump", "Can", "Tin"}
+_SQUAT_WIDE_PACKS = {"Tub", "Bar", "Box", "Bowl", "Tray", "Multi_Pack"}
+_FLEXIBLE_PACKS = {"Pouch", "Sachet", "Bag", "Wrapper"}
+
+
+def _pack_geometry_affinity(pack_type: str, geom: dict[str, float]) -> float:
+    """Universal 3D container geometry compatibility score in [-1.0, +1.0] (zero brand rules)."""
+    if not pack_type:
+        return 0.0
+    ar = float(geom.get("aspect_ratio", 1.35))
+    taper = float(geom.get("crown_taper", 0.85))
+    elong = max(ar, 1.0 / max(0.15, ar))
+    score = 0.0
+    if pack_type in _SLENDER_UPRIGHT_PACKS:
+        if ar >= 1.75:
+            score += 0.55
+        elif ar <= 0.92:
+            score -= 0.65
+        if taper <= 0.78:
+            score += 0.35
+    elif pack_type == "Tube":
+        # Tubes can stand upright (facewash, ar >= 1.55) or lie horizontally (toothpaste, ar <= 0.65)
+        if elong >= 1.60:
+            score += 0.45
+        elif 0.85 <= ar <= 1.20:
+            score -= 0.35
+    elif pack_type == "Jar":
+        # Cylindrical jars have wide mouths (taper >= 0.80) and medium upright height (1.00 <= ar <= 2.25)
+        if 1.00 <= ar <= 2.25:
+            score += 0.35
+        elif ar >= 2.40 and taper <= 0.75:
+            score -= 0.45
+        if taper >= 0.82 and ar <= 2.10:
+            score += 0.20
+    elif pack_type in _SQUAT_WIDE_PACKS:
+        if ar <= 1.05:
+            score += 0.55
+        elif ar >= 1.65:
+            score -= 0.65
+        if taper >= 0.86:
+            score += 0.25
+    elif pack_type in _FLEXIBLE_PACKS:
+        if 0.90 <= ar <= 1.95:
+            score += 0.30
+        if pack_type == "Pouch" and ar >= 1.20:
+            score += 0.15
+        elif pack_type == "Sachet" and taper >= 0.88:
+            score += 0.20
+    elif pack_type in ("Carton", "Tetrapack"):
+        if (1.15 <= ar <= 2.35 or ar <= 0.68) and taper >= 0.82:
+            score += 0.35
+    return max(-1.0, min(1.0, score))
+
+
+def apply_projective_scale_prior(
+    ranked: list[tuple[float, int, str]],
+    geom: dict[str, float],
+    catalog: dict[int, dict] | None,
+    *,
+    weight: float = 0.018,
+    k: int = DEFAULT_K,
+) -> list[tuple[float, int, str]]:
+    """EXP-50: Re-score top-2K candidates with projective container scale & crown-taper compatibility."""
+    if not ranked or not catalog:
+        return ranked
+    head: list[tuple[float, int, str]] = []
+    for s, pid, path in ranked[: 2 * k]:
+        meta = catalog.get(pid) or {}
+        pt = str(meta.get("packaging_type") or meta.get("pack_form") or "")
+        aff = _pack_geometry_affinity(pt, geom)
+        head.append((round(float(s + weight * aff), 6), pid, path))
+    head.sort(reverse=True)
+    return head + ranked[2 * k :]
+
+
+# ---------------------------------------------------------------------------
+# EXP-51: Self-Supervised Reference-Difference Saliency Zoom Strip
+# ---------------------------------------------------------------------------
+
+def compute_reference_diff_band(
+    refs: list[Image.Image],
+    *,
+    band_frac: float = 0.28,
+    min_y: float = 0.14,
+    max_y: float = 0.82,
+) -> tuple[float, float, float]:
+    """Compute self-supervised pixel variance V(x,y) = Var_k(R_k(x,y)) across aligned reference images.
+
+    Returns ``(y1_frac, y2_frac, peak_ratio)`` identifying the horizontal band of height ``band_frac``
+    within ``[min_y, max_y]`` where the top candidate reference packshots differ most visually.
+    """
+    valid_refs = [r for r in refs[:4] if r is not None and r.width > 4 and r.height > 4]
+    if len(valid_refs) < 2:
+        return 0.33, 0.61, 1.0
+
+    grid_w, grid_h = 96, 144
+    stack = np.stack(
+        [
+            np.asarray(r.convert("RGB").resize((grid_w, grid_h), Image.Resampling.BILINEAR), dtype=np.float32)
+            for r in valid_refs
+        ],
+        axis=0,
+    )
+    # Trim 10% left/right borders to focus on the label body rather than background framing
+    x_lo, x_hi = int(grid_w * 0.10), int(grid_w * 0.90)
+    var_map = np.var(stack[:, :, x_lo:x_hi, :], axis=0).mean(axis=(1, 2))  # shape: (grid_h,)
+
+    y_lo = max(0, int(round(min_y * grid_h)))
+    y_hi = min(grid_h, int(round(max_y * grid_h)))
+    win = max(8, int(round(band_frac * grid_h)))
+    if y_hi - y_lo <= win:
+        return 0.33, 0.61, 1.0
+
+    best_sum = -1.0
+    best_start = int(round(0.33 * grid_h))
+    for y_start in range(y_lo, y_hi - win + 1):
+        cur = float(var_map[y_start : y_start + win].sum())
+        if cur > best_sum:
+            best_sum = cur
+            best_start = y_start
+
+    mean_win = float(var_map[y_lo:y_hi].mean()) * win + 1e-5
+    peak_ratio = round(best_sum / mean_win, 3)
+    y1_f = round(best_start / float(grid_h), 3)
+    y2_f = round((best_start + win) / float(grid_h), 3)
+    return y1_f, y2_f, peak_ratio
+
+
+# ---------------------------------------------------------------------------
+# EXP-52: Lidstone-Calibrated 3D Container Specialist + Top-22% Crown Strip
+# ---------------------------------------------------------------------------
+
+def lidstone_pack_posterior(
+    ranked: list[tuple[float, int, str]],
+    geom: dict[str, float],
+    catalog: dict[int, dict] | None,
+    *,
+    eps: float = 0.01,
+    inv_temp: float = 32.0,
+    k: int = DEFAULT_K,
+) -> dict[str, float]:
+    """Compute Lidstone-smoothed (eps=0.01) container packaging_type distribution over top-K candidates + 3D geometry."""
+    if not ranked or not catalog:
+        return {}
+    top = ranked[: max(k, 8)]
+    s1 = top[0][0]
+    raw_votes: dict[str, float] = {}
+    all_packs: set[str] = set()
+    for s, pid, _ in top:
+        meta = catalog.get(pid) or {}
+        pt = str(meta.get("packaging_type") or meta.get("pack_form") or "")
+        if not pt:
+            continue
+        all_packs.add(pt)
+        w_sim = math.exp(max(-25.0, min(25.0, inv_temp * (s - s1))))
+        w_geom = math.exp(0.45 * _pack_geometry_affinity(pt, geom))
+        raw_votes[pt] = raw_votes.get(pt, 0.0) + w_sim * w_geom
+
+    if not all_packs:
+        return {}
+    v_sum = sum(raw_votes.values()) or 1.0
+    n_classes = max(16, len(all_packs))
+    denom = 1.0 + n_classes * eps
+    return {
+        pt: round(((raw_votes.get(pt, 0.0) / v_sum) + eps) / denom, 5)
+        for pt in all_packs
+    }
+
+
+def apply_lidstone_pack_fusion(
+    ranked: list[tuple[float, int, str]],
+    geom: dict[str, float],
+    catalog: dict[int, dict] | None,
+    *,
+    lam: float = 0.014,
+    eps: float = 0.01,
+    k: int = DEFAULT_K,
+) -> tuple[list[tuple[float, int, str]], dict[str, float]]:
+    """EXP-52: Fuse Lidstone-smoothed packaging_type log-prior (+lam * ln P_Lidstone(pack)) into candidate energies."""
+    if not ranked or not catalog:
+        return ranked, {}
+    pack_probs = lidstone_pack_posterior(ranked, geom, catalog, eps=eps, k=k)
+    if not pack_probs:
+        return ranked, {}
+    n_classes = max(16, len(pack_probs))
+    floor_p = eps / (1.0 + n_classes * eps)
+    head: list[tuple[float, int, str]] = []
+    for s, pid, path in ranked[: 2 * k]:
+        meta = catalog.get(pid) or {}
+        pt = str(meta.get("packaging_type") or meta.get("pack_form") or "")
+        p_c = pack_probs.get(pt, floor_p)
+        # Center log-prior relative to uniform 1/n_classes so energies remain well-scaled
+        log_bonus = lam * (math.log(max(1e-6, p_c)) - math.log(1.0 / n_classes))
+        head.append((round(float(s + log_bonus), 6), pid, path))
+    head.sort(reverse=True)
+    return head + ranked[2 * k :], pack_probs
+
+
+def zoom_sheet_saliency_diff(
+    query: Image.Image,
+    refs: list[Image.Image],
+    *,
+    include_crown: bool = False,
+) -> Image.Image:
+    """Single-row contact sheet with Self-Supervised Reference-Difference Saliency Zoom (+ optional Top-22% Crown Strip)."""
+    return zoom_multi_sheet_saliency_diff([query], [refs], include_crown=include_crown)
+
+
+def zoom_multi_sheet_saliency_diff(
+    queries: list[Image.Image],
+    refs_per_query: list[list[Image.Image]],
+    *,
+    include_crown: bool = False,
+    k: int = DEFAULT_K,
+) -> Image.Image:
+    """Render multi-row contact sheet with Full Pack + Self-Supervised Saliency-Diff Strip + Bottom-30% Weight Strip.
+
+    When ``include_crown=True`` (EXP-52 container conflict mode), also includes a dedicated Top-22%
+    Crown/Nozzle/Lid/Crimp Zoom Strip at the top of the zoom stack while keeping cell width at 256px.
+    """
+    cols = max((len(r) for r in refs_per_query), default=k) + 1
+    if include_crown:
+        main_h, crown_h, diff_h, bot_h = 148, 44, 54, 48
+    else:
+        main_h, crown_h, diff_h, bot_h = 148, 0, 54, 48
+    row_h = 28 + main_h + crown_h + diff_h + bot_h
+    out = Image.new("RGB", (CELL * cols, row_h * len(queries)), "white")
+    draw = ImageDraw.Draw(out)
+    try:
+        font = ImageFont.load_default(size=22)
+    except TypeError:
+        font = ImageFont.load_default()
+
+    for r_idx, (q, refs) in enumerate(zip(queries, refs_per_query, strict=True)):
+        y0 = r_idx * row_h
+        y1_diff, y2_diff, _ = compute_reference_diff_band(refs)
+        for c_idx, orig_im in enumerate([q, *refs]):
+            x0 = c_idx * CELL
+            im = orig_im.copy()
+            im.thumbnail((CELL - 10, main_h - 6), Image.Resampling.LANCZOS)
+            out.paste(im, (x0 + (CELL - im.width) // 2, y0 + 26 + (main_h - im.height) // 2))
+
+            ow, oh = max(1, orig_im.width), max(1, orig_im.height)
+            cur_y = y0 + 26 + main_h
+
+            if include_crown and crown_h > 0:
+                crown_band = orig_im.crop((int(ow * 0.08), 0, int(ow * 0.92), max(4, int(oh * 0.24))))
+                crown_band.thumbnail((CELL - 8, crown_h - 4), Image.Resampling.LANCZOS)
+                cy = cur_y + (crown_h - crown_band.height) // 2
+                out.paste(crown_band, (x0 + (CELL - crown_band.width) // 2, cy))
+                draw.line((x0 + 4, cur_y - 1, x0 + CELL - 4, cur_y - 1), fill="#ddd")
+                cur_y += crown_h
+
+            # Self-supervised reference-difference horizontal band [y1_diff, y2_diff]
+            diff_band = orig_im.crop(
+                (int(ow * 0.06), max(0, int(oh * y1_diff)), int(ow * 0.94), min(oh, max(4, int(oh * y2_diff))))
+            )
+            if oh / max(1.0, float(ow)) >= 1.55:
+                diff_band = diff_band.resize(
+                    (max(16, int(diff_band.width * 1.22)), max(12, diff_band.height)),
+                    Image.Resampling.LANCZOS,
+                )
+            diff_band.thumbnail((CELL - 8, diff_h - 4), Image.Resampling.LANCZOS)
+            dy = cur_y + (diff_h - diff_band.height) // 2
+            out.paste(diff_band, (x0 + (CELL - diff_band.width) // 2, dy))
+            draw.line((x0 + 4, cur_y - 1, x0 + CELL - 4, cur_y - 1), fill="#ddd")
+            cur_y += diff_h
+
+            # Bottom-30% net-weight / grammage strip (0.65..0.96 height)
+            bot_band = orig_im.crop((int(ow * 0.10), int(oh * 0.65), int(ow * 0.90), int(oh * 0.96)))
+            bot_band.thumbnail((CELL - 8, bot_h - 4), Image.Resampling.LANCZOS)
+            by = cur_y + (bot_h - bot_band.height) // 2
+            out.paste(bot_band, (x0 + (CELL - bot_band.width) // 2, by))
+            draw.line((x0 + 4, cur_y - 1, x0 + CELL - 4, cur_y - 1), fill="#ddd")
+
+            draw.rectangle((x0, y0, x0 + CELL - 1, y0 + row_h - 1), outline="#999")
+            label = ("Q" if len(queries) == 1 else f"Q{r_idx + 1}") if c_idx == 0 else str(c_idx)
+            draw.text((x0 + 6, y0 + 2), label, fill="red" if c_idx == 0 else "black", font=font)
+    return out
+
+
 

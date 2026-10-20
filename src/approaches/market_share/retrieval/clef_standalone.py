@@ -499,3 +499,434 @@ class ClefContrastiveMetadata(ClefStandaloneRetrieval):
         "Stage B: Render Bottom-30% Zoom-Strip contact sheet + inject candidate Brand/Variant/Pack text & pairwise contrastive token diffs",
         "Execute CLEF constrained schema + token logprob argmax readout + 2-Tier Open-Set Competitor Guard",
     ]
+
+
+@register
+class ClefAspectScalePrior(ClefContrastiveMetadata):
+    """EXP-50: Aspect-Preserving Cap/Rim Context Crop (+12% Top Pad) + Projective Container Scale Prior (h/w, crown_taper)."""
+
+    name = "clef_aspect_scale_prior"
+    use_saliency_diff_zoom: bool = False
+    use_lidstone_pack_crown: bool = False
+    architecture = (
+        f"EXP-50 Aspect-Preserving Cap/Rim Context Crop (+12% top pad) + Projective Scale Prior (h/w, crown_taper) -> "
+        f"{MODEL} top-{CLEF_K} + Contrastive Metadata CLEF Contact Sheet"
+    )
+    steps = [
+        "Setup: embed reference gallery photos and load SKU catalog metadata",
+        "Stage 1.5 Crop: Extract aspect-preserving crop with +12% top cap/nozzle/crimp context padding and measure (h/w, crown_taper, h/h_plank)",
+        "Stage 2A: Re-score top-2K candidates with projective container scale prior (slender Bottle/Spray/Tube vs squat Jar/Tub/Bar)",
+        "Stage 2B: Render CLEF Zoom-Strip contact sheet with physical container geometry & contrastive catalog rubric",
+    ]
+
+    def _crop_box(self, image: Image.Image, box: Box) -> Image.Image:
+        from utils.clm import letterbox_cap_crop
+
+        return letterbox_cap_crop(image, box, top_pad=0.12, side_pad=0.06, bottom_pad=0.08)
+
+    def _rank_with_geometry(
+        self,
+        image: Image.Image,
+        ctx: Context,
+        allowed_ids: set[int] | None = None,
+        box: Box | None = None,
+        plank_height: float | None = None,
+    ) -> tuple[list[tuple[float, int, str]], dict[str, float], dict[str, float]]:
+        from utils.clm import (
+            apply_lidstone_pack_fusion,
+            apply_projective_scale_prior,
+            compute_container_geometry_features,
+        )
+
+        base_ranked = super().ranked(image, ctx, allowed_ids)
+        geom = compute_container_geometry_features(image, box=box, plank_height=plank_height)
+        cat_map = getattr(self, "catalog", None)
+        reranked = apply_projective_scale_prior(base_ranked, geom, cat_map, weight=0.008, k=CLEF_K)
+        pack_probs: dict[str, float] = {}
+        if self.use_lidstone_pack_crown:
+            reranked, pack_probs = apply_lidstone_pack_fusion(reranked, geom, cat_map, lam=0.006, eps=0.01, k=CLEF_K)
+        return reranked, geom, pack_probs
+
+    def _build_rubric_with_geom(
+        self,
+        top: list[tuple[float, int, str]],
+        geom: dict[str, float] | None = None,
+        pack_probs: dict[str, float] | None = None,
+        diff_band: tuple[float, float, float] | None = None,
+        row_idx: int | None = None,
+    ) -> str:
+        base = build_contrastive_candidate_rubric(top, getattr(self, "catalog", None), row_idx=row_idx)
+        extras: list[str] = []
+        if geom:
+            ar = geom.get("aspect_ratio", 1.0)
+            ct = geom.get("crown_taper", 0.85)
+            if ar >= 1.75:
+                shape_hint = "tall-slender container"
+            elif ar <= 0.72:
+                shape_hint = "horizontally-oriented container (bar, tub, or horizontal tube/carton)"
+            elif ar <= 1.20:
+                shape_hint = "wide-squat container"
+            else:
+                shape_hint = "medium-upright container"
+            extras.append(f"Physical Crop Geometry: h/w={ar:.2f} ({shape_hint}), top_crown_taper={ct:.2f}")
+        if diff_band is not None:
+            extras.append(
+                f"Self-Supervised Reference-Diff Zoom Strip covers vertical band y={int(diff_band[0]*100)}%..{int(diff_band[1]*100)}% (variance peak {diff_band[2]:.2f}x)"
+            )
+        if pack_probs:
+            top_packs = sorted(pack_probs.items(), key=lambda kv: -kv[1])[:3]
+            p_str = ", ".join(f"{k}={v:.2f}" for k, v in top_packs)
+            extras.append(f"Calibrated 3D Container Prior: {p_str} (check top crown/nozzle/lid/crimp strip)")
+        if not extras:
+            return base
+        return f"{base}\n" + " | ".join(extras) if base else " | ".join(extras)
+
+    def _clef_single_geom(
+        self,
+        image: Image.Image,
+        top: list[tuple[float, int, str]],
+        ctx: Context,
+        geom: dict[str, float] | None = None,
+        pack_probs: dict[str, float] | None = None,
+    ) -> tuple[int | None, dict[str, Any]]:
+        from utils.clm import (
+            compute_reference_diff_band,
+            zoom_sheet,
+            zoom_sheet_saliency_diff,
+        )
+
+        refs = [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
+        cat_map = getattr(self, "catalog", {}) or {}
+        p1 = str((cat_map.get(top[0][1]) or {}).get("packaging_type") or "") if top else ""
+        p2 = str((cat_map.get(top[1][1]) or {}).get("packaging_type") or "") if len(top) > 1 else ""
+        pack_conflict = bool(p1 and p2 and p1 != p2)
+        include_crown = bool(self.use_lidstone_pack_crown and pack_conflict)
+        diff_band: tuple[float, float, float] | None = None
+
+        if self.use_saliency_diff_zoom or include_crown:
+            diff_band = compute_reference_diff_band(refs)
+            sheet_im = zoom_sheet_saliency_diff(image, refs, include_crown=include_crown)
+        else:
+            sheet_im = zoom_sheet(image, refs)
+
+        base_prompt = CLEF_ZOOM_SINGLE_PROMPT.format(k=len(top))
+        rubric = self._build_rubric_with_geom(
+            top,
+            geom=geom,
+            pack_probs=pack_probs if include_crown else None,
+            diff_band=diff_band,
+        )
+        if rubric:
+            base_prompt = f"{base_prompt}\n\n{rubric}"
+        res = ctx.ask(
+            sheet_im,
+            base_prompt,
+            schema=CLEF_ZOOM_SINGLE_SCHEMA,
+            logprobs=len(top) + 1,
+        )
+        data = res.data if isinstance(res.data, dict) else {}
+        raw_c = data.get("choice")
+        slots = clef_logprob_select(res.meta.get("logprobs"), set(range(0, len(top) + 1)), n_slots=1)
+        choice = slots[0]["choice"] if slots else (raw_c if isinstance(raw_c, int) else None)
+        prob = slots[0]["top1_prob"] if slots else 1.0
+        allow_abstain = self._allow_abstain() if hasattr(self, "_allow_abstain") else False
+        ans, guard_mode = resolve_clef_choice(choice, prob, top, allow_abstain=allow_abstain)
+        return ans, {
+            "choice": choice,
+            "clef_prob": prob,
+            "pack_size": data.get("pack_size", ""),
+            "guard_mode": guard_mode,
+            "geometry": geom,
+            "diff_band": list(diff_band) if diff_band else None,
+            "include_crown": include_crown,
+            "lidstone_pack_probs": pack_probs or None,
+        }
+
+    def identify(
+        self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None
+    ) -> int | None:
+        from utils.clm import compute_zscore_and_lid, infonce_posterior
+
+        ranked, geom, pack_probs = self._rank_with_geometry(image, ctx, allowed_ids)
+        if not ranked:
+            return None
+        top = ranked[:CLEF_K]
+        cat_map = getattr(self, "catalog", {}) or {}
+        s1, id1, _ = top[0]
+        s2, id2, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
+        c1 = cat_map.get(id1) or {}
+        c2 = cat_map.get(id2) or {}
+        same_variant = bool(
+            c1.get("brand")
+            and c1.get("brand") == c2.get("brand")
+            and c1.get("base_variant") == c2.get("base_variant")
+            and c1.get("pack_size") != c2.get("pack_size")
+        )
+        pack_conflict = bool(
+            c1.get("packaging_type")
+            and c2.get("packaging_type")
+            and c1.get("packaging_type") != c2.get("packaging_type")
+        )
+        req_margin = 0.025 if (same_variant or (self.use_lidstone_pack_crown and pack_conflict)) else 0.009
+        zlid = compute_zscore_and_lid([s for s, _, _ in top])
+        p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
+        if (
+            s1 >= 0.75
+            and (s1 - s2) >= req_margin
+            and p_clm >= 0.30
+            and zlid["z_margin"] >= 0.80
+            and zlid["lid"] <= 11.5
+        ):
+            ctx.trace.step(
+                "Stage A CLM + Projective Scale Fast-Gate (0 VLM calls)",
+                f"#{id1} accepted (cos={s1:.3f}, margin={s1 - s2:.3f}, P_CLM={p_clm:.2f}, h/w={geom['aspect_ratio']:.2f})",
+                info={
+                    "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in top],
+                    "top1_sku_id": id1,
+                    "top5_sku_ids": [i for _, i, _ in top],
+                    "clm_top1_prob": p_clm,
+                    "coarse_entropy_conf": ent_conf,
+                    "geometry": geom,
+                    "lidstone_pack_probs": pack_probs or None,
+                    **zlid,
+                    "stage2a_bypassed": True,
+                    "fast_gated_boxes": 1,
+                    "answer": id1,
+                },
+            )
+            return id1
+
+        ans, meta = self._clef_single_geom(image, top, ctx, geom=geom, pack_probs=pack_probs)
+        ctx.trace.step(
+            f"Stage B {self.name} Contact-Sheet",
+            f"panel {meta['choice']} -> #{ans} (P_token={meta['clef_prob']:.2f}, h/w={geom['aspect_ratio']:.2f}, mode={meta['guard_mode']})",
+            info={
+                **meta,
+                "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in top],
+                "top1_sku_id": top[0][1],
+                "top5_sku_ids": [i for _, i, _ in top],
+                "stage2a_bypassed": False,
+            },
+        )
+        return ans
+
+    def identify_boxes(
+        self, image: Image.Image, boxes: list[Box], ctx: Context
+    ) -> list[int | None]:
+        from utils.clm import (
+            compute_zscore_and_lid,
+            group_adjacent_shelf_twins,
+            infonce_posterior,
+            zoom_multi_sheet,
+            zoom_multi_sheet_saliency_diff,
+        )
+        from utils.photometry import inner_lab_zones, restore_photometry
+
+        if not boxes:
+            return []
+        crops = [self._crop_box(image, b) for b in boxes]
+        heights = [max(1.0, b[3] - b[1]) for b in boxes]
+        median_plank_h = float(sorted(heights)[len(heights) // 2]) if heights else None
+
+        restored_crops = [restore_photometry(c)[0] for c in crops]
+        crop_labs = [inner_lab_zones(rc) for rc in restored_crops]
+        twin_clusters, medoid_indices = group_adjacent_shelf_twins(boxes, restored_crops, crop_labs)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            medoid_res = list(
+                pool.map(
+                    lambda m_idx: self._rank_with_geometry(
+                        crops[m_idx], ctx, box=boxes[m_idx], plank_height=median_plank_h
+                    ),
+                    medoid_indices,
+                )
+            )
+        all_ranked: list[list[tuple[float, int, str]]] = [[] for _ in range(len(boxes))]
+        all_geoms: list[dict[str, float]] = [{} for _ in range(len(boxes))]
+        all_pack_probs: list[dict[str, float]] = [{} for _ in range(len(boxes))]
+        for cl, (ranked_m, geom_m, pprobs_m) in zip(twin_clusters, medoid_res, strict=True):
+            for member_idx in cl:
+                all_ranked[member_idx] = ranked_m
+                all_geoms[member_idx] = geom_m
+                all_pack_probs[member_idx] = pprobs_m
+
+        ids: list[int | None] = [None] * len(boxes)
+        valid_indices: list[int] = []
+        cat_map = getattr(self, "catalog", {}) or {}
+        for i, r in enumerate(all_ranked):
+            if not r:
+                continue
+            top = r[:CLEF_K]
+            s1, id1, _ = top[0]
+            s2, id2, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
+            c1 = cat_map.get(id1) or {}
+            c2 = cat_map.get(id2) or {}
+            same_variant = bool(
+                c1.get("brand")
+                and c1.get("brand") == c2.get("brand")
+                and c1.get("base_variant") == c2.get("base_variant")
+                and c1.get("pack_size") != c2.get("pack_size")
+            )
+            pack_conflict = bool(
+                c1.get("packaging_type")
+                and c2.get("packaging_type")
+                and c1.get("packaging_type") != c2.get("packaging_type")
+            )
+            req_margin = 0.025 if (same_variant or (self.use_lidstone_pack_crown and pack_conflict)) else 0.009
+            zlid = compute_zscore_and_lid([s for s, _, _ in top])
+            p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
+            if (
+                s1 >= 0.75
+                and (s1 - s2) >= req_margin
+                and p_clm >= 0.30
+                and zlid["z_margin"] >= 0.80
+                and zlid["lid"] <= 11.5
+            ):
+                ids[i] = id1
+                ctx.trace.step(
+                    "Stage A CLM + Projective Scale Fast-Gate",
+                    f"box {i + 1}: #{id1} accepted (cos={s1:.3f}, margin={s1 - s2:.3f}, P_CLM={p_clm:.2f})",
+                    info={
+                        "box_index": i,
+                        "shortlist": [{"sku_id": k_id, "cosine": round(s, 4)} for s, k_id, _ in top],
+                        "top1_sku_id": id1,
+                        "top5_sku_ids": [k_id for _, k_id, _ in top],
+                        "clm_top1_prob": p_clm,
+                        "coarse_entropy_conf": ent_conf,
+                        "geometry": all_geoms[i],
+                        **zlid,
+                        "stage2a_bypassed": True,
+                        "fast_gated_boxes": 1,
+                        "answer": id1,
+                    },
+                )
+                continue
+            valid_indices.append(i)
+
+        batches = [valid_indices[i : i + CLEF_BATCH] for i in range(0, len(valid_indices), CLEF_BATCH)]
+        allow_abstain = self._allow_abstain()
+
+        def run_batch(batch: list[int]) -> list[tuple[int, int | None, dict[str, Any]]]:
+            if len(batch) == 1:
+                idx = batch[0]
+                ans, meta = self._clef_single_geom(
+                    crops[idx],
+                    all_ranked[idx][:CLEF_K],
+                    ctx,
+                    geom=all_geoms[idx],
+                    pack_probs=all_pack_probs[idx],
+                )
+                return [(idx, ans, meta)]
+            qs = [crops[idx] for idx in batch]
+            tops = [all_ranked[idx][:CLEF_K] for idx in batch]
+            refs_per_q = [
+                [Image.open(io.BytesIO(self.jpeg[p])).convert("RGB") for _, _, p in t]
+                for t in tops
+            ]
+            if self.use_saliency_diff_zoom or self.use_lidstone_pack_crown:
+                sheet_im = zoom_multi_sheet_saliency_diff(
+                    qs, refs_per_q, include_crown=self.use_lidstone_pack_crown
+                )
+            else:
+                sheet_im = zoom_multi_sheet(qs, refs_per_q)
+            batch_prompt = CLEF_ZOOM_BATCH_PROMPT.format(m=len(batch), k=CLEF_K)
+            row_rubrics = []
+            for b_idx, (idx, t_row) in enumerate(zip(batch, tops, strict=True)):
+                r_txt = self._build_rubric_with_geom(
+                    t_row,
+                    geom=all_geoms[idx],
+                    pack_probs=all_pack_probs[idx] if self.use_lidstone_pack_crown else None,
+                    row_idx=b_idx,
+                )
+                if r_txt:
+                    row_rubrics.append(r_txt)
+            if row_rubrics:
+                batch_prompt = f"{batch_prompt}\n\n" + "\n".join(row_rubrics)
+            res = ctx.ask(
+                sheet_im,
+                batch_prompt,
+                schema=CLEF_ZOOM_BATCH_SCHEMA,
+                logprobs=CLEF_K + 1,
+            )
+            data = res.data if isinstance(res.data, dict) else {}
+            raw_c_val = data.get("choices")
+            raw_s_val = data.get("pack_sizes")
+            raw_choices: list[Any] = raw_c_val if isinstance(raw_c_val, list) else []
+            raw_sizes: list[Any] = raw_s_val if isinstance(raw_s_val, list) else []
+            slots = clef_logprob_select(
+                res.meta.get("logprobs"), set(range(0, CLEF_K + 1)), n_slots=len(batch)
+            )
+            out: list[tuple[int, int | None, dict[str, Any]]] = []
+            for b_i, idx in enumerate(batch):
+                top = tops[b_i]
+                c = (
+                    slots[b_i]["choice"]
+                    if b_i < len(slots)
+                    else (raw_choices[b_i] if b_i < len(raw_choices) else None)
+                )
+                prob = slots[b_i]["top1_prob"] if b_i < len(slots) else 1.0
+                psize = str(raw_sizes[b_i]) if b_i < len(raw_sizes) else ""
+                ans, guard_mode = resolve_clef_choice(c, prob, top, allow_abstain=allow_abstain)
+                out.append(
+                    (
+                        idx,
+                        ans,
+                        {
+                            "choice": c,
+                            "clef_prob": prob,
+                            "pack_size": psize,
+                            "guard_mode": guard_mode,
+                            "geometry": all_geoms[idx],
+                            "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in top],
+                        },
+                    )
+                )
+            return out
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for b_out in pool.map(run_batch, batches):
+                for idx, ans, meta in b_out:
+                    ids[idx] = ans
+                    ctx.trace.step(
+                        f"Stage B {self.name} Contact-Sheet",
+                        f"box {idx + 1}: panel {meta['choice']} -> #{ans} (P_token={meta['clef_prob']:.2f}, mode={meta.get('guard_mode', 'panel')})",
+                        info={"box_index": idx, **meta, "answer": ans},
+                    )
+        return ids
+
+
+@register
+class ClefSaliencyDiffZoom(ClefAspectScalePrior):
+    """EXP-51: Self-Supervised Reference-Difference Saliency Zoom Strip (V(x,y) = Var_k(R_k(x,y)))."""
+
+    name = "clef_saliency_diff_zoom"
+    use_saliency_diff_zoom = True
+    use_lidstone_pack_crown = False
+    architecture = (
+        f"EXP-51 Self-Supervised Reference-Difference Saliency Zoom (Var_k(R_k(x,y))) + EXP-50 Projective Scale Prior -> "
+        f"{MODEL} top-{CLEF_K} + 3-Band Saliency-Diff CLEF Contact Sheet"
+    )
+    steps = [
+        "Setup: embed reference gallery photos and load SKU catalog metadata",
+        "Stage 2A: Re-score top-2K candidates with projective container scale prior (h/w, crown_taper)",
+        "Stage 2B (EXP-51 Saliency-Diff Zoom): Compute pixel variance V(x,y) = Var_k(R_k(x,y)) across aligned reference packshots to locate the max-variance horizontal band [y1*, y2*]",
+        "Render 2.5x Lanczos Saliency-Diff Zoom Strip + Bottom-30% Weight Strip and execute CLEF logprob readout",
+    ]
+
+
+@register
+class ClefPackCrownFusion(ClefSaliencyDiffZoom):
+    """EXP-52: Lidstone-Calibrated 3D Container Specialist Fusion + Top-22% Crown/Nozzle Zoom Strip."""
+
+    name = "clef_pack_crown_fusion"
+    use_saliency_diff_zoom = True
+    use_lidstone_pack_crown = True
+    architecture = (
+        f"EXP-52 Lidstone-Calibrated 3D Container Prior (-lambda ln P_Lidstone(pack)) + Top-22% Crown/Nozzle Strip "
+        f"+ EXP-51 Saliency-Diff Zoom + EXP-50 Projective Scale Prior ({MODEL} top-{CLEF_K})"
+    )
+    steps = [
+        "Setup: embed reference gallery photos and load SKU catalog metadata",
+        "Stage 2A (EXP-50 + EXP-52): Fuse projective container geometry (h/w, crown_taper) with Lidstone-smoothed (eps=0.01) 16-class packaging_type log-prior",
+        "Stage 2B (EXP-51 + EXP-52): Render Top-22% Crown/Nozzle/Lid/Crimp Zoom Strip + Self-Supervised Reference-Diff Band + Bottom-30% Weight Strip when candidates conflict on packaging_type",
+        "Execute CLEF constrained schema + token logprob argmax readout + 2-Tier Open-Set Competitor Guard",
+    ]

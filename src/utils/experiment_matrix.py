@@ -647,6 +647,62 @@ APPROACH_INTUITIONS: dict[str, dict[str, Any]] = {
         ),
         "task_id": "TASK-DET",
     },
+    "clef_aspect_scale_prior": {
+        "display_name": "Aspect-Preserving Cap/Rim Crop + Projective Container Scale Prior (EXP-50)",
+        "intuition": (
+            "Adds +12% top cap/nozzle/crimp context padding and scores physical container aspect ratio (h/w), "
+            "top-crown taper, and shelf-plank height ratio (h/h_plank) to separate Bottle/Spray/Tube from Jar/Tub/Bar."
+        ),
+        "task_id": "TASK-RET",
+    },
+    "clef_saliency_diff_zoom": {
+        "display_name": "Self-Supervised Reference-Difference Saliency Zoom Verifier (EXP-51)",
+        "intuition": (
+            "Computes the pixel variance map V(x,y) = Var_k(R_k(x,y)) across aligned studio reference candidates "
+            "to automatically zoom 2.5x into the exact horizontal band where sibling variants differ."
+        ),
+        "task_id": "TASK-RET",
+    },
+    "clef_pack_crown_fusion": {
+        "display_name": "Lidstone-Calibrated 3D Container Specialist + Top-22% Crown/Nozzle Strip CLEF (EXP-52)",
+        "intuition": (
+            "Combines a Lidstone-smoothed (eps=0.01) 16-class container-geometry prior with a dedicated Top-22% "
+            "Crown/Nozzle/Lid/Crimp zoom strip whenever top candidates disagree on packaging_type."
+        ),
+        "task_id": "TASK-RET",
+    },
+    "hybrid_pack_specialist_clef": {
+        "display_name": "5-Attribute Hybrid Cascade with Lidstone 3D Container Prior + Crown/Saliency Zoom (EXP-52)",
+        "intuition": (
+            "Upgrades the 5-attribute hybrid cascade with projective scale features, Lidstone-calibrated 16-class "
+            "container log-priors, and multi-band Crown + Saliency-Diff + Weight contact sheets."
+        ),
+        "task_id": "TASK-CLS",
+    },
+    "promo_asset_plank_tiling_detect": {
+        "display_name": "Physical Shelf-Plank Support Law + Density-Triggered 2x2 Quadrant Tiling Detector (EXP-53)",
+        "intuition": (
+            "Rejects floating unplanked 2D header/wing graphics and back-row depth shoulders inside Class 0 bays, "
+            "and triggers 2x2 overlapping quadrant tiling on ultra-dense (100-189 pack) store walls."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "shelf_plank_tiling_e2e": {
+        "display_name": "End-to-End Plank-Support & Density-Tiled Shelf Pipeline (EXP-53)",
+        "intuition": (
+            "Pairs Stage 0 Dual-Buffer CLAHE and Stage 1 Plank-Support + 2x2 Quadrant Tiling with Stage 2 "
+            "Hierarchical Brand-Gate CLM InfoNCE + JEV contact sheets."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "shelf_generalizable_spine_e2e": {
+        "display_name": "Unified Non-Overfitting Production Spine (EXP-50 + EXP-51 + EXP-52 + EXP-53)",
+        "intuition": (
+            "Combines Stage 0 Dual-Buffer CLAHE, Stage 1 Physical Plank-Support Law & 2x2 Tiling, Stage 1.5 "
+            "Projective Scale & Cap-Pad Crop, and Stage 2 Self-Supervised Saliency-Diff + Lidstone Pack Crown CLEF."
+        ),
+        "task_id": "TASK-E2E",
+    },
 }
 
 
@@ -2028,6 +2084,120 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "target_goal": "Quantify exact F2, 5-Attr Acc, and HUL SOS error impact of Stage 0, 1, and 2 swaps",
         "model_family": "hul-hierarchical-brand-pack-gate",
     },
+    {
+        "experiment_id": "P0-EXP-50",
+        "priority": "P0",
+        "task_id": "TASK-RET",
+        "title": "Aspect-Preserving Cap/Rim Context Crop + Projective Container Scale Prior (EXP-50)",
+        "technical_title": "Stage 1.5 Aspect-Preserving Cap/Rim Context Pad (+12% Top) + Projective Scale Prior (h/w, crown_taper, h/h_plank)",
+        "intuition": (
+            "Preserves the top cap/nozzle/crimp silhouette (+12% top pad) and injects physical container aspect ratio (h/w) "
+            "and top-crown taper into System-1 re-ranking and Stage-2B CLEF rubrics to eliminate Pouch <-> Jar, Jar <-> Sachet, "
+            "and Spray <-> Bottle boundary errors without brand-specific rules."
+        ),
+        "use_case": "market_share",
+        "task": "retrieval",
+        "dataset": "hul_golden",
+        "approaches": ["clef_aspect_scale_prior"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Preserving physical container aspect ratio (h/w) and top-crown taper (w_top22 / w_mid) resolves >= 40% of "
+            "Bucket-2 cross-pack-form errors (Pouch <-> Jar, Bar <-> Carton, Spray <-> Bottle) on val and test."
+        ),
+        "description": (
+            "Evaluates clef_aspect_scale_prior against clef_contrastive_metadata on hul_golden val (N=1,000) and test_5k (N=5,000)."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Lift Packaging Type Acc >= +1.5 pp and 5-Attr Exact SKU Acc >= +1.0 pp on test_5k",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-51",
+        "priority": "P0",
+        "task_id": "TASK-RET",
+        "title": "Self-Supervised Reference-Difference Saliency Zoom Verifier (EXP-51)",
+        "technical_title": "Self-Supervised Reference Pixel-Variance Saliency Band V(x,y) = Var_k(R_k(x,y)) 2.5x Lanczos Zoom Strip",
+        "intuition": (
+            "Automatically locates the exact horizontal band [y1*, y2*] where top candidate studio reference packshots "
+            "differ most visually (via pixel variance V(x,y) = Var_k(R_k(x,y))) and renders a 2.5x Lanczos zoom strip of "
+            "that band alongside the bottom net-weight strip."
+        ),
+        "use_case": "market_share",
+        "task": "retrieval",
+        "dataset": "hul_golden",
+        "approaches": ["clef_saliency_diff_zoom"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Self-supervised reference-difference saliency zoom resolves fine-print sub-variant text on 180-240px Kirana "
+            "crops across all brands and unseen SKUs (LOVO-200) without any hardcoded crop coordinates."
+        ),
+        "description": (
+            "Evaluates clef_saliency_diff_zoom on hul_golden and hul_variants val (N=1,000) and test_5k (N=5,000)."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Lift Base Variant & Exact SKU Acc from 86.2% to >= 88.5% on test_5k (McNemar p < 0.01)",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-52",
+        "priority": "P0",
+        "task_id": "TASK-CLS",
+        "title": "Lidstone-Calibrated 3D Container Specialist Fusion + Top-22% Crown/Nozzle Strip (EXP-52)",
+        "technical_title": "Lidstone-Smoothed (eps=0.01) 16-Class Container Log-Prior (-lambda ln P_Lidstone(pack)) + Top-22% Crown/Nozzle Zoom Strip",
+        "intuition": (
+            "Combines a Lidstone-calibrated 16-class container-geometry prior with a dedicated Top-22% Crown/Nozzle/Lid/Crimp "
+            "zoom strip whenever top candidates disagree on packaging_type (Spray vs Bottle/Can, Roll_On vs Bottle/Tube, Pouch vs Jar)."
+        ),
+        "use_case": "market_share",
+        "task": "classification",
+        "dataset": "hul_golden",
+        "approaches": ["hybrid_pack_specialist_clef", "clef_pack_crown_fusion"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Lidstone-smoothed container log-priors + Top-22% crown/actuator zoom strips lift Spray, Roll_On, and overall "
+            "16-class Packaging Type accuracy to >= 94.0% without hard-masking."
+        ),
+        "description": (
+            "Evaluates hybrid_pack_specialist_clef and clef_pack_crown_fusion on hul_golden and hul_packs val (N=1,000) and test_5k (N=5,000)."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Lift Packaging Type Acc to >= 94.0% and 5-Attr Exact SKU Acc to >= 89.0% on test_5k",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-53",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Physical Shelf-Plank Support Law + Density-Triggered 2x2 Quadrant Tiling (EXP-53)",
+        "technical_title": "Stage 1 Physical Plank-Support Law (y_max Alignment & Shoulder Filter) + Density-Triggered 2x2 Quadrant Tiling",
+        "intuition": (
+            "Enforces physical horizontal shelf-plank support inside WIN/CTU display bays to reject floating 2D header/wing "
+            "graphics and back-row depth shoulders, while triggering 2x2 overlapping quadrant tiling on dense 100-189 pack walls."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": [
+            "promo_asset_plank_tiling_detect",
+            "shelf_plank_tiling_e2e",
+            "shelf_generalizable_spine_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Physical shelf-plank support eliminates >= 50% of in-bay 2D graphic/shoulder false positives while density-triggered "
+            "2x2 quadrant tiling recovers small sachets and dense wall facings."
+        ),
+        "description": (
+            "Evaluates promo_asset_plank_tiling_detect and shelf_generalizable_spine_e2e on gtmerch_golden and ms_json_golden val and test."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift GTMerch Bay Precision >= 93.0%, Bay F2 >= 89.5%, and MS-JSON E2E F2 >= 91.5%",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
 ]
 
 
@@ -2810,7 +2980,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
         seen_rids = {str(r.get("run_id")) for r in matched_runs if r.get("run_id")}
         for pr in persisted_exp_runs.get(exp_id, []):
             pr_id = str(pr.get("run_id") or "")
-            if pr_id and pr_id not in seen_rids:
+            if pr_id and pr_id not in seen_rids and pr.get("approach") in exp["approaches"]:
                 seen_rids.add(pr_id)
                 pr["methodology"] = runner.synthesize_dynamic_methodology(pr)
                 matched_runs.append(pr)

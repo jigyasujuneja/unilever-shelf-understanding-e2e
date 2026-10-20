@@ -1120,7 +1120,8 @@ def test_generate_run_methodology_uses_gemini_schema_and_falls_back_cleanly(monk
     rows = [{"steps": [{"name": "Brand .h5", "detail": "Comfort (0.98)"}]}]
 
     monkeypatch.setenv("SHELF_BENCH_AUTO_METHODOLOGY", "0")
-    assert runner.generate_run_methodology(DummyAppr(), summary, rows, {}) is None
+    fallback = runner.generate_run_methodology(summary, rows, appr=DummyAppr(), config={})
+    assert fallback is not None and fallback["generated_by"] in ("dynamic_introspection", "deterministic_fallback")
 
     monkeypatch.setenv("SHELF_BENCH_AUTO_METHODOLOGY", "1")
     fake_payload = {
@@ -1144,7 +1145,7 @@ def test_generate_run_methodology_uses_gemini_schema_and_falls_back_cleanly(monk
             self.models = FakeModels()
 
     monkeypatch.setattr(genai, "Client", FakeClient)
-    out = runner.generate_run_methodology(DummyAppr(), summary, rows, {"gcp": {"project": "test-p"}})
+    out = runner.generate_run_methodology(summary, rows, appr=DummyAppr(), config={"gcp": {"project": "test-p"}})
     assert out is not None
     assert out["summary_header"] == fake_payload["summary_header"]
     assert len(out["bullets"]) == 3

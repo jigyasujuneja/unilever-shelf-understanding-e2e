@@ -14,8 +14,8 @@ from utils.experiment_matrix import (
 
 
 def test_poc_experiments_and_models_schema():
-    """Verify all 47 prioritized experiments (P0, P1, P2, Moonshot) and 6 model families are well-formed."""
-    assert len(POC_EXPERIMENTS) == 47
+    """Verify all 51 prioritized experiments (P0, P1, P2, Moonshot) and 6 model families are well-formed."""
+    assert len(POC_EXPERIMENTS) == 51
     priorities = {e["priority"] for e in POC_EXPERIMENTS}
     assert priorities == {"P0", "P1", "P2", "Moonshot"}
 
@@ -217,7 +217,7 @@ def test_real_results_catalog_and_v21_backfill():
         return
 
     cat = build_experiments_and_models_catalog(real_results)
-    assert len(cat["experiments"]) == 47
+    assert len(cat["experiments"]) == 51
     assert len(cat["models"]) == 6
     for m in cat["models"]:
         assert "/locations/us-central1/models/" in m["model_resource"]

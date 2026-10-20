@@ -742,3 +742,117 @@ class HybridClassifyMax(HybridClassify):
         "Stage 4 · Top-8 Visual Contact-Sheet Verification: Renders a numbered 8-candidate reference sheet from the Stage-2A shortlist so Gemini can inspect fine-print variant sub-banners and pack geometry",
         "Stage 5 · 5-Attribute Catalog Taxonomy Reconciliation (project_taxonomy): Canonicalizes base_variant, aligns product = Brand__Variant, and projects (category, packaging_type) onto the 46 valid pack_data pairs",
     ]
+
+
+@register
+class HybridPackSpecialistClef(HybridClassify):
+    """EXP-52: 5-Attribute Hybrid Cascade with Lidstone-Calibrated 3D Container Specialist + Saliency-Diff & Crown Zoom Contact Sheet."""
+
+    name = "hybrid_pack_specialist_clef"
+    merge = "all"
+    use_saliency_diff_zoom = True
+    use_lidstone_pack_crown = True
+    tau_packaging_type = 0.86
+    architecture = (
+        "EXP-52 5-Attribute Hybrid Cascade: Stage 1 Disjoint Gallery kNN + Projective Scale & Lidstone 3D Container Prior "
+        f"({MODEL}, eps=0.01) -> Stage 2 Top-22% Crown/Nozzle + Self-Supervised Saliency-Diff Contact-Sheet Verifier "
+        "-> Stage 3 5-Attribute Catalog Taxonomy Reconciliation"
+    )
+    steps = [
+        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 3,072-D) with strict val/test URI and session exclusion",
+        "Stage 2A · Projective Scale (EXP-50) + Lidstone-Calibrated 16-Class Container Specialist Fusion (EXP-52, -lambda ln P_Lidstone(pack))",
+        "Stage 2B · Per-Attribute Confidence Gate (escalates any crop with packaging_type conflict or vote share < 0.86)",
+        "Stage 2C · Multi-Band Contact-Sheet Verifier (Top-22% Crown/Nozzle/Lid/Crimp Strip + Self-Supervised Reference-Diff Band + Bottom-30% Weight Strip)",
+        "Stage 3 · 5-Attribute Catalog Taxonomy Reconciliation (project_taxonomy)",
+    ]
+
+    def stage_a(self, image: Image.Image, ctx: Context) -> dict[str, Any]:
+        from utils.clm import (
+            apply_lidstone_pack_fusion,
+            apply_projective_scale_prior,
+            compute_container_geometry_features,
+        )
+
+        active = self._active_fields()
+        base_ranked = self.ranked(image, ctx)
+        geom = compute_container_geometry_features(image)
+        cat_map = getattr(self, "catalog", None)
+        scaled = apply_projective_scale_prior(base_ranked, geom, cat_map, weight=0.008, k=self.top_k)
+        ranked, pack_probs = apply_lidstone_pack_fusion(scaled, geom, cat_map, lam=0.006, eps=0.01, k=self.top_k)
+        top = ranked[: self.top_k]
+        cands = [(s, self._labels(pid)) for s, pid, _ in top]
+        votes = field_votes(cands, inv_temp=self.inv_temp, k=self.top_k, fields=active)
+        e1 = top[0][0] if top else -1.0
+        e2 = top[1][0] if len(top) > 1 else -1.0
+        thresholds = {
+            "product": self.tau_product,
+            "brand": self.tau_brand,
+            "base_variant": self.tau_base_variant,
+            "packaging_type": self.tau_packaging_type,
+            "category": self.tau_category,
+        }
+        unsure, reason = (
+            gate(votes, e1, thresholds, self.min_energy, fields=active)
+            if top
+            else (list(active), "no neighbours")
+        )
+        return {
+            "ranked": top,
+            "cands": cands,
+            "labels": {f: votes[f]["label"] for f in dict.fromkeys([*active, *FIELDS])},
+            "sku_id": top[0][1] if top else None,
+            "votes": votes,
+            "energy": round(e1, 4),
+            "margin": round(e1 - e2, 4),
+            "unsure": unsure,
+            "reason": reason,
+            "geometry": geom,
+            "pack_probs": pack_probs,
+        }
+
+    def stage_b_call(self, image: Image.Image, a: dict[str, Any], ctx: Context) -> tuple[dict, dict]:
+        from approaches.market_share.retrieval.clef_standalone import ClefAspectScalePrior
+        from utils.clm import apply_lidstone_pack_fusion, apply_projective_scale_prior
+
+        if self.stage_b == "contact_sheet":
+            geom = a.get("geometry") or {}
+            cat_map = getattr(self, "catalog", None)
+            if self.sheet_candidates == "cosine":
+                cos_ranked = EmbeddingRetrieval.ranked(self, image, ctx)
+                scaled = apply_projective_scale_prior(cos_ranked, geom, cat_map, weight=0.008, k=self.top_k)
+                fused, pack_probs = apply_lidstone_pack_fusion(scaled, geom, cat_map, lam=0.006, eps=0.01, k=self.top_k)
+                top = fused[: self.top_k]
+            else:
+                top = a["ranked"]
+                pack_probs = a.get("pack_probs")
+            if not top:
+                return {}, {"error": "no candidates"}
+            sku, meta = ClefAspectScalePrior._clef_single_geom(
+                self,  # type: ignore[arg-type]
+                image,
+                top,
+                ctx,
+                geom=geom,
+                pack_probs=pack_probs,
+            )
+            return self._labels(sku), {**meta, "sku_id": sku, "candidates": [pid for _, pid, _ in top]}
+        return super().stage_b_call(image, a, ctx)
+
+    def _build_rubric_with_geom(
+        self,
+        top: list[tuple[float, int, str]],
+        geom: dict[str, float] | None = None,
+        pack_probs: dict[str, float] | None = None,
+        diff_band: tuple[float, float, float] | None = None,
+        row_idx: int | None = None,
+    ) -> str:
+        from approaches.market_share.retrieval.clef_standalone import ClefAspectScalePrior
+
+        return ClefAspectScalePrior._build_rubric_with_geom(
+            self,  # type: ignore[arg-type]
+            top,
+            geom=geom,
+            pack_probs=pack_probs,
+            diff_band=diff_band,
+            row_idx=row_idx,
+        )

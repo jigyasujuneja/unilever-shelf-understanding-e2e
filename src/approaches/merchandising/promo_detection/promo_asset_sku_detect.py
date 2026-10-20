@@ -266,6 +266,126 @@ def _merge_bay_crop_skus(
     return merged, added
 
 
+def filter_plank_support_and_shoulders(
+    sku_boxes: list[Box],
+    asset_boxes: list[Box],
+    fixture_types: list[str] | None = None,
+) -> tuple[list[Box], list[dict]]:
+    """EXP-53 Stage 1 Physical Plank-Support Law & Depth-Row Shoulder Suppression.
+
+    Inside framed Class 0 display bays (WIN, CTU, MB2, MB3, FULLWALL):
+      1. Clusters in-bay boxes by bottom base coordinate ``y_max`` (within +-6.5% of bay height)
+         to discover physical horizontal shelf planks (planks with >= 2 supported items).
+      2. Rejects isolated floating 2D graphics in the top 28% header zone or outer 7% wing border
+         that do not rest on any multi-item horizontal shelf plank (``|y_max - y_plank| > 0.08 * h_bay``).
+      3. Rejects back-row depth shoulders sticking up behind taller front-row packs on the same plank
+         (horizontal overlap >= 0.62, ``h < 0.68 * h_front``, and ``y_max`` above front pack base).
+    """
+    if not sku_boxes or not asset_boxes:
+        return list(sku_boxes), []
+
+    dropped_indices: set[int] = set()
+    removed: list[dict] = []
+
+    for b_idx, ab in enumerate(asset_boxes):
+        ftype = (fixture_types[b_idx] if fixture_types and b_idx < len(fixture_types) else "WIN").upper()
+        if ftype == "HAN":
+            continue
+        ax1, ay1, ax2, ay2 = ab
+        aw = max(1.0, ax2 - ax1)
+        ah = max(1.0, ay2 - ay1)
+        in_bay_idxs = [
+            i
+            for i, sb in enumerate(sku_boxes)
+            if i not in dropped_indices
+            and (ax1 - 0.02 * aw <= 0.5 * (sb[0] + sb[2]) <= ax2 + 0.02 * aw)
+            and (ay1 - 0.02 * ah <= 0.5 * (sb[1] + sb[3]) <= ay2 + 0.02 * ah)
+        ]
+        if len(in_bay_idxs) < 4:
+            continue
+
+        # Cluster in-bay boxes into horizontal shelf planks by y_max (bottom resting line)
+        sorted_idxs = sorted(in_bay_idxs, key=lambda idx: sku_boxes[idx][3])
+        planks: list[list[int]] = []
+        for idx in sorted_idxs:
+            ym = sku_boxes[idx][3]
+            placed = False
+            for pl in planks:
+                ref_ym = float(np.median([sku_boxes[k][3] for k in pl]))
+                if abs(ym - ref_ym) <= 0.065 * ah:
+                    pl.append(idx)
+                    placed = True
+                    break
+            if not placed:
+                planks.append([idx])
+
+        multi_planks = [pl for pl in planks if len(pl) >= 2]
+        if not multi_planks:
+            continue
+        plank_ys = [float(np.median([sku_boxes[k][3] for k in pl])) for pl in multi_planks]
+
+        # 1. Floating header/wing graphic check (isolated 1-item cluster not resting on any multi-item plank)
+        for idx in in_bay_idxs:
+            if idx in dropped_indices:
+                continue
+            x1, y1, x2, y2 = sku_boxes[idx]
+            cx = 0.5 * (x1 + x2)
+            min_plank_dist = min(abs(y2 - py) for py in plank_ys)
+            in_header_or_wing = (
+                (y2 <= ay1 + 0.28 * ah)
+                or (cx <= ax1 + 0.075 * aw)
+                or (cx >= ax2 - 0.075 * aw)
+            )
+            if min_plank_dist > 0.085 * ah and in_header_or_wing:
+                dropped_indices.add(idx)
+                removed.append(
+                    {
+                        "box": [round(v, 1) for v in sku_boxes[idx]],
+                        "reason": "floating_unplanked_bay_graphic",
+                        "min_plank_dist_frac": round(min_plank_dist / ah, 3),
+                    }
+                )
+
+        # 2. Back-row depth shoulder ghost suppression against front-row plank items
+        multi_plank_members = {k for pl in multi_planks for k in pl if len(pl) >= 2}
+        active_in_bay = [i for i in in_bay_idxs if i not in dropped_indices]
+        for idx in active_in_bay:
+            if idx in dropped_indices:
+                continue
+            x1, y1, x2, y2 = sku_boxes[idx]
+            bw = max(1.0, x2 - x1)
+            bh = max(1.0, y2 - y1)
+            for front_idx in active_in_bay:
+                if front_idx == idx or front_idx in dropped_indices:
+                    continue
+                fx1, fy1, fx2, fy2 = sku_boxes[front_idx]
+                fw = max(1.0, fx2 - fx1)
+                fh = max(1.0, fy2 - fy1)
+                inter_x = max(0.0, min(x2, fx2) - max(x1, fx1))
+                overlap_x = inter_x / max(1.0, min(bw, fw))
+                # True back-row shoulder: horizontally behind front pack, shorter, and bottom edge y2
+                # terminates inside the top shoulder band [fy1 - 0.04*fh, fy1 + 0.42*fh] of the front pack
+                # (never an independent upper shelf tier where y2 <= fy1 or a multi-item plank).
+                if (
+                    overlap_x >= 0.65
+                    and bh < 0.62 * fh
+                    and y1 < fy1 - 0.02 * fh
+                    and (fy1 - 0.04 * fh) <= y2 <= (fy1 + 0.42 * fh)
+                    and (idx not in multi_plank_members or bh < 0.42 * fh)
+                ):
+                    dropped_indices.add(idx)
+                    removed.append(
+                        {
+                            "box": [round(v, 1) for v in sku_boxes[idx]],
+                            "reason": "depth_row_shoulder_ghost",
+                        }
+                    )
+                    break
+
+    kept = [b for i, b in enumerate(sku_boxes) if i not in dropped_indices]
+    return kept, removed
+
+
 @register
 class PromoAssetSkuDetect(Approach):
     """Dual-class Gemini detector for Class 0 promotional display bays and Class 1 product SKUs."""
@@ -278,6 +398,8 @@ class PromoAssetSkuDetect(Approach):
     bay_first_crop: bool = False
     stage15_clutter_gate: bool = False
     awp_template_conditioning: bool = False
+    plank_support_filter: bool = False
+    density_quadrant_tiling: bool = False
 
     architecture = (
         "Gemini single-pass dual-class detector (Class 0 promo_asset bays + Class 1 product_sku "
@@ -288,6 +410,74 @@ class PromoAssetSkuDetect(Approach):
         f"Deduplicate Class 0 promo_asset display bays via greedy NMS at IoU {NMS_IOU} and store on ctx.detected_asset_boxes",
         "Clean Class 1 product_sku boxes via container filter, NMS, and depth-ghost suppression",
     ]
+
+    def _run_density_quadrant_tiling(
+        self, det_image: Image.Image, raw_skus: list[Box], ctx: Context
+    ) -> list[Box]:
+        """EXP-53: Run 2x2 overlapping quadrant tiling when pass 1 indicates a dense shelf wall."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        w, h = float(det_image.width), float(det_image.height)
+        if w < 320 or h < 320:
+            return raw_skus
+        img_area = max(1.0, w * h)
+        areas = [max(1.0, (b[2] - b[0]) * (b[3] - b[1])) / img_area for b in raw_skus]
+        med_area = float(np.median(areas)) if areas else 1.0
+        # Trigger on dense full-shelf walls (>=45 boxes, or >=24 small boxes with median area < 0.45% of frame)
+        if not (len(raw_skus) >= 45 or (len(raw_skus) >= 24 and med_area < 0.0045)):
+            return raw_skus
+
+        quads = [
+            (0.0, 0.0, 0.56 * w, 0.56 * h),
+            (0.44 * w, 0.0, w, 0.56 * h),
+            (0.0, 0.44 * h, 0.56 * w, h),
+            (0.44 * w, 0.44 * h, w, h),
+        ]
+
+        def _detect_quad(qbox: tuple[float, float, float, float]) -> list[Box]:
+            qx1, qy1, qx2, qy2 = qbox
+            qw, qh = qx2 - qx1, qy2 - qy1
+            q_im = det_image.crop((int(round(qx1)), int(round(qy1)), int(round(qx2)), int(round(qy2))))
+            q_res = ctx.ask(
+                q_im,
+                BAY_CROP_PROMPT,
+                schema=SKU_ONLY_SCHEMA,
+                max_side=1536,
+                max_output_tokens=DETECTION_MAX_OUTPUT_TOKENS,
+            )
+            _, local_boxes = parse_promo_and_sku_boxes(q_res.data, qw, qh)
+            global_boxes: list[Box] = []
+            for bx1, by1, bx2, by2 in local_boxes:
+                # Skip partial edge fragments clipped right on an interior quadrant seam
+                if qx1 > 0 and bx1 <= 0.015 * qw:
+                    continue
+                if qx2 < w and bx2 >= 0.985 * qw:
+                    continue
+                if qy1 > 0 and by1 <= 0.015 * qh:
+                    continue
+                if qy2 < h and by2 >= 0.985 * qh:
+                    continue
+                global_boxes.append((bx1 + qx1, by1 + qy1, bx2 + qx1, by2 + qy1))
+            return global_boxes
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            quad_lists = list(pool.map(_detect_quad, quads))
+
+        merged = list(raw_skus)
+        added = 0
+        for q_boxes in quad_lists:
+            for qb in q_boxes:
+                if all(metrics.iou(qb, eb) < 0.45 for eb in merged):
+                    merged.append(qb)
+                    added += 1
+        ctx.trace.step(
+            "EXP-53 Density-Triggered 2x2 Quadrant Tiling",
+            f"Triggered on dense shelf (initial={len(raw_skus)}, med_area={med_area:.4f}) -> +{added} small/wall SKU boxes",
+            boxes=merged,
+            regions=list(quads),
+            info={"initial_boxes": len(raw_skus), "median_area_frac": round(med_area, 5), "added_boxes": added},
+        )
+        return merged
 
     def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
         w, h = image.size
@@ -387,6 +577,9 @@ class PromoAssetSkuDetect(Approach):
                     info={"bay_crop_calls": crop_calls, "added_sku_boxes": total_added},
                 )
 
+        if self.density_quadrant_tiling:
+            raw_skus = self._run_density_quadrant_tiling(det_image, raw_skus, ctx)
+
         if self.stage15_clutter_gate and raw_skus:
             filtered_skus, removed_clutter = filter_stage15_clutter(
                 raw_skus, ctx.detected_asset_boxes, image
@@ -399,6 +592,19 @@ class PromoAssetSkuDetect(Approach):
                     info={"removed_clutter": removed_clutter},
                 )
             raw_skus = filtered_skus
+
+        if self.plank_support_filter and raw_skus and ctx.detected_asset_boxes:
+            plank_skus, removed_plank = filter_plank_support_and_shoulders(
+                raw_skus, ctx.detected_asset_boxes, kept_ftypes
+            )
+            if removed_plank:
+                ctx.trace.step(
+                    "EXP-53 Physical Plank-Support & Shoulder Filter",
+                    f"{len(removed_plank)} unplanked/shoulder box(es) removed -> {len(plank_skus)} plank-supported packs",
+                    boxes=plank_skus,
+                    info={"removed_plank_clutter": removed_plank},
+                )
+            raw_skus = plank_skus
 
         return dedup_traced(raw_skus, ctx)
 
@@ -473,5 +679,28 @@ class PromoAssetAwpRouterDetect(PromoAssetSkuDetect):
         "Stage 0: Build dual photometric buffers (detector_image + color_image)",
         "Stage 1a: AWP-conditioned Gemini pass labels Class 0 fixture archetype (WIN/CTU/MB2/MB3/FULLWALL) and rejects frameless HAN hanger strips as bays",
         "Stage 1b + 1.5: High-res bay crop pass on confirmed Class 0 bays + 2D clutter filter",
+    ]
+
+
+@register
+class PromoAssetPlankTilingDetect(PromoAssetAwpRouterDetect):
+    """EXP-53: Physical Shelf-Plank Support Law + Depth-Row Shoulder Suppression + Density-Triggered 2x2 Quadrant Tiling."""
+
+    name = "promo_asset_plank_tiling_detect"
+    stage0_clahe = True
+    bay_first_crop = True
+    stage15_clutter_gate = True
+    awp_template_conditioning = True
+    plank_support_filter = True
+    density_quadrant_tiling = True
+    architecture = (
+        "EXP-53: Stage 0 CLAHE -> AWP Fixture Router + Bay-First Zoom + Density-Triggered 2x2 Quadrant Tiling "
+        "-> Physical Shelf-Plank Support Law & Depth-Row Shoulder Filter"
+    )
+    steps = [
+        "Stage 0: Build dual photometric buffers (CIELAB L* CLAHE detector_image + linear Shades-of-Gray color_image)",
+        "Stage 1a: AWP-conditioned pass detects Class 0 bays (WIN/CTU/MB2/MB3/FULLWALL) and initial Class 1 SKUs",
+        "Stage 1b: High-res bay crop pass on Class 0 bays OR density-triggered 2x2 overlapping quadrant tiling on dense full-shelf walls",
+        "Stage 1.5 (EXP-53 Plank Law): Enforce multi-item horizontal shelf-plank support (y_max alignment) and suppress back-row depth shoulders",
     ]
 
