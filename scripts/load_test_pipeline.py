@@ -693,13 +693,18 @@ def run_load_test(
     tier: str = "priority",
     out_dir: str = "results/load_tests",
     prod_profile: bool = False,
+    duration_minutes: float | None = None,
 ) -> dict[str, Any]:
-    """Execute full load test across concurrency levels, datasets, or production burst profiles."""
+    """Execute full load test across concurrency levels, datasets, duration, or production burst profiles."""
     cfg = load_config()
     tester = PipelineLoadTester(cfg, tier=tier, dry_run_vlm=dry_run_vlm)
 
-    n_cls = num_cls_samples if num_cls_samples is not None else num_samples
-    n_e2e = num_e2e_samples if num_e2e_samples is not None else min(num_samples, 2)
+    if duration_minutes is not None and duration_minutes > 0:
+        n_cls = num_cls_samples if num_cls_samples is not None else 25
+        n_e2e = num_e2e_samples if num_e2e_samples is not None else 4
+    else:
+        n_cls = num_cls_samples if num_cls_samples is not None else num_samples
+        n_e2e = num_e2e_samples if num_e2e_samples is not None else min(num_samples, 2)
 
     print(f"\n================================================================================")
     print(f"🚀 INITIALIZING LOAD TEST: EMBEDDING + DECISION MODEL + LVM PIPELINES")
@@ -837,6 +842,87 @@ def run_load_test(
             results["prod_phases"].append(phase_record)
             _save_checkpoint()
 
+        return results
+
+    # If a sustained duration load test is requested (e.g. 10 minutes of peak traffic)
+    if duration_minutes is not None and duration_minutes > 0:
+        duration_sec = int(duration_minutes * 60)
+        c = concurrency_levels[-1] if concurrency_levels else 16
+        print(f"\n================================================================================")
+        print(f"⏱️ SUSTAINED DURATION LOAD TEST: {duration_minutes:.1f} MINUTES ({duration_sec}s) AT PEAK CONCURRENCY {c}")
+        print(f"Mode: {mode.upper()} | Target: Continuous Saturation Soak Test | Baseline: {BASELINE_RUN_ID}")
+        print(f"================================================================================")
+
+        telemetry_records: list[RequestTelemetry] = []
+        t_start = time.perf_counter()
+        t_end = t_start + duration_sec
+        req_counter = 0
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=c) as executor:
+            active_futures = set()
+
+            def _submit_next():
+                nonlocal req_counter
+                req_counter += 1
+                if mode == "e2e" or (mode == "both" and req_counter % 12 == 0):
+                    if samples_e2e:
+                        img_id, img_bytes = samples_e2e[req_counter % len(samples_e2e)]
+                        return executor.submit(tester.process_shelf_end_to_end, img_bytes, img_id, c, f"peak-e2e-req{req_counter}")
+                if samples_cls:
+                    img_id, img_bytes = samples_cls[req_counter % len(samples_cls)]
+                    return executor.submit(tester.process_single_crop, img_bytes, img_id, c, f"peak-cls-req{req_counter}")
+                elif samples_e2e:
+                    img_id, img_bytes = samples_e2e[req_counter % len(samples_e2e)]
+                    return executor.submit(tester.process_shelf_end_to_end, img_bytes, img_id, c, f"peak-e2e-req{req_counter}")
+                return None
+
+            # Fill initial queue up to concurrency capacity
+            for _ in range(c):
+                fut = _submit_next()
+                if fut:
+                    active_futures.add(fut)
+
+            last_log_time = t_start
+            while active_futures and time.perf_counter() < t_end + 120:
+                done, active_futures = concurrent.futures.wait(
+                    active_futures, timeout=1.0, return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                for f in done:
+                    try:
+                        rec = f.result()
+                        telemetry_records.append(rec)
+                    except Exception:
+                        pass
+
+                # Replenish workers if still within time window
+                now = time.perf_counter()
+                if now < t_end:
+                    while len(active_futures) < c:
+                        fut = _submit_next()
+                        if fut:
+                            active_futures.add(fut)
+                        else:
+                            break
+
+                # Periodic 60s progress report
+                if (now - last_log_time >= 60.0) or (now >= t_end and not active_futures):
+                    elapsed_min = (now - t_start) / 60.0
+                    tot = len(telemetry_records)
+                    if tot > 0:
+                        qps = tot / (now - t_start)
+                        errs = sum(1 for r in telemetry_records if not r.success)
+                        bypass = sum(r.zero_vlm_gate_count for r in telemetry_records)
+                        tot_items = sum((r.zero_vlm_gate_count + r.vlm_escalated_count) for r in telemetry_records) or tot
+                        bypass_pct = (bypass / tot_items * 100.0) if tot_items else 0.0
+                        print(f"   ⏱️ [T+{elapsed_min:.1f}m / {duration_minutes:.1f}m] Completed: {tot} requests ({tot_items} crops) | "
+                              f"Throughput: {qps:.2f} req/s | Errors: {errs} ({errs/tot*100:.1f}%) | "
+                              f"Gate Bypass: {bypass_pct:.1f}%")
+                    last_log_time = now
+
+        wall_time = time.perf_counter() - t_start
+        bench = aggregate_benchmark(telemetry_records, c, "peak_sustained", wall_time)
+        results["classification"].append(bench)
+        _save_checkpoint()
         return results
 
     # 1. Classification Load Test (hul_variants)
@@ -1138,6 +1224,7 @@ def main():
     parser.add_argument("--e2e-samples", type=int, default=None, help="Number of shelf samples per level (ms_json_golden)")
     parser.add_argument("--cls-samples", type=int, default=None, help="Number of crop samples per level (hul_variants)")
     parser.add_argument("--prod-profile", action="store_true", help="Execute 5-phase production reality burst & trough load test for 500k shelves/day")
+    parser.add_argument("--duration-minutes", type=float, default=None, help="Run sustained soak test for N minutes at peak concurrency")
     parser.add_argument("--dry-run-vlm", action="store_true", help="Simulate VLM latency without incurring live API billing")
     parser.add_argument("--tier", type=str, default="priority", choices=["priority", "standard", "flex"])
     parser.add_argument("--out-dir", type=str, default="results/load_tests", help="Output directory for reports")
@@ -1154,6 +1241,7 @@ def main():
         tier=args.tier,
         out_dir=args.out_dir,
         prod_profile=args.prod_profile,
+        duration_minutes=args.duration_minutes,
     )
 
     report_md = format_markdown_report(results)
