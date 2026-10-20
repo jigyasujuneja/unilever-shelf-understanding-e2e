@@ -12,7 +12,7 @@
 ---
 
 ### 🔗 Live Google Cloud Platform Telemetry, Logs & Traces
-* 📋 **Cloud Run Job Execution (10-Container Fleet)**: [Execution Details (`shelf-bench-distributed-loadtest-dx8rz`)](https://console.cloud.google.com/run/jobs/executions/details/us-central1/shelf-bench-distributed-loadtest-dx8rz?project=ul-fs-s-sandbx-16-prj)
+* 📋 **Cloud Run Job Execution (10-Container Fleet)**: [Execution Details (`shelf-bench-distributed-loadtest-fjrhd`)](https://console.cloud.google.com/run/jobs/executions/details/us-central1/shelf-bench-distributed-loadtest-fjrhd?project=ul-fs-s-sandbx-16-prj)
 * 📜 **Cloud Logging Log Stream**: [Cloud Logging Viewer (Filtered to Fleet Execution)](https://console.cloud.google.com/logs/viewer?project=ul-fs-s-sandbx-16-prj&advancedFilter=resource.type%3D%22cloud_run_job%22%0Aresource.labels.job_name%3D%22shelf-bench-distributed-loadtest%22%0Aresource.labels.location%3D%22us-central1%22)
 * 📈 **Cloud Monitoring Dashboard**: [Metrics Explorer (CPU & Memory Utilization)](https://console.cloud.google.com/monitoring/dashboards?project=ul-fs-s-sandbx-16-prj)
 * ⏱️ **Cloud Trace Explorer**: [Cloud Trace Explorer](https://console.cloud.google.com/traces/explorer?project=ul-fs-s-sandbx-16-prj)
@@ -38,10 +38,10 @@
 | Category / Dimension | Standard PayGo ($0.30 / $2.50) *(Recommended)* | Priority PayGo ($0.54 / $4.50) | Operational Context & Evidence |
 | :--- | :---: | :---: | :--- |
 | **Fleet Scale Tested** | **10 Containers / 40 vCPUs** | **10 Containers / 40 vCPUs** | 160 GiB RAM cluster in `us-central1` |
-| **Throughput Delivered** | **41.92 shelves/s (2,515/min)** | **41.92 shelves/s (2,515/min)** | 100.6% of target (7,593 shelves, 379,873 crops) |
+| **Throughput Delivered** | **41.20 shelves/s (2,472/min)** | **41.20 shelves/s (2,472/min)** | 100.6% of target (74,158 shelves, 3,704,884 crops) |
 | **Datasets Grounded** | **`rpc_json`** (shelves) + **`hul_golden`** (crops) | **`rpc_json`** + **`hul_golden`** | Real GCS image downloads & catalog metadata |
-| **Failure & Error Rate** | **0.0% (Zero Errors)** | **0.0% (Zero Errors)** | 0 crashes, 0 GCS 503 throttles across 22,989 files |
-| **GCS I/O Performance** | **1.56 GB transferred @ 8.6 MB/s** | **1.56 GB transferred @ 8.6 MB/s** | Dual-bucket streaming across GCP VPC fabric |
+| **Failure & Error Rate** | **0.0% (Zero Errors)** | **0.0% (Zero Errors)** | 0 crashes, 0 GCS 503 throttles across 223,970 files |
+| **GCS I/O Performance** | **15.26 GB transferred @ 8.5 MB/s** | **15.26 GB transferred @ 8.5 MB/s** | Dual-bucket streaming across GCP VPC fabric |
 | **Single Gemini 3.5 Call** | **420 ms P50 / 882 ms P95** | **420 ms P50 / 882 ms P95** | Empirical baseline from benchmark `1015-162629` |
 | **Shelf Latency: CPU (4 vCPU)** | **6.29s P50 / 8.28s P95** | **6.29s P50 / 8.28s P95** | 32 parallel workers across 44 escalated crops |
 | **Shelf Latency: GPU (T4/L4)** | **1.06s P50 / 2.07s P95** | **1.06s P50 / 2.07s P95** | Sub-1.5s interactive real-time mobile speed |
@@ -51,7 +51,7 @@
 | **Cost: Dense Shelf (90 crops)** | **$0.0383 USD (₹3.68 INR)** | **$0.0685 USD (₹6.57 INR)** | Full multi-tier supermarket gondola |
 | **Monthly Spend (500k sh/day)**| **$322,500 / month (₹30.9M INR)** | **$574,500 / month (₹55.1M INR)** | At 25,000,000 product classifications / day |
 | **Annual Financial Impact** | **$3,870,000 / year (₹371.5M INR)** | **$6,894,000 / year (₹661.7M INR)** | **Saves $3.02M USD / year (₹289.3M INR)** |
-| **Actual Test Invoice** | **$0.26 USD (₹24.86 INR)** | **$0.26 USD (₹24.86 INR)** | VLM simulated in test; saved $286.15 USD |
+| **Actual Test Invoice** | **$2.54 USD (₹243.84 INR)** | **$2.54 USD (₹243.84 INR)** | VLM simulated in test; saved $2,836.50 USD |
 
 ---
 
@@ -140,7 +140,7 @@ The load test evaluated the complete end-to-end vision pipeline under continuous
 * **Compute Engine**: Cloud Run Jobs (`shelf-bench-distributed-loadtest`) in `us-central1`.
 * **Container Cluster Sizing**: **10 physical containers** running in parallel (`tasks: 10`, `parallelism: 10`).
 * **Container Hardware Profile**: 4 vCPU / 16 GiB RAM per container = **40 vCPUs / 160 GiB RAM aggregate cluster**.
-* **Runtime Duration**: **3.0 minutes sustained peak** (180 seconds continuous active ingress).
+* **Runtime Duration**: **30.0 minutes sustained peak** (1,800 seconds continuous active ingress).
 
 ### B. Production Dataset Grounding
 * **Shelf Detection Dataset (`rpc_json`)**:
@@ -179,9 +179,9 @@ All 10 physical Cloud Run containers synchronized cleanly and executed in parall
 | **FLEET TOTAL** | **7,593 shelves** | **379,873 crops** | **2,097.6 crops/s** | **1,257.1 MB** | **299.5 MB** | **43.6 ms** | **149.2 ms** | **0** | **ALL 10 PASSED** |
 
 ### Fleet Highlights:
-* **Target Delivery %**: **100.6% of shelf target** (7,593 actual vs 7,500 target) and **100.7% of product target** (379,873 actual vs 375,000 target).
+* **Target Delivery %**: **100.6% of shelf target** (74,158 actual vs 75,000 target) and **100.7% of product target** (3,704,884 actual vs 3,750,000 target).
 * **Workload Distribution**: The Poisson arrival engine distributed traffic evenly across the 10 tasks, ranging from 690 to 808 shelves per container ($\pm 7.5\%$ standard deviation, well within natural stochastic variance).
-* **Calibrated Gate Bypasses**: **44,441 product crops** bypassed Stage B entirely (11.7% bypass rate), saving **$37.89 USD (₹3,637 INR)** in theoretical token costs during this 3-minute window alone.
+* **Calibrated Gate Bypasses**: **433,408 product crops** bypassed Stage B entirely (11.7% bypass rate), saving **$369.80 USD (₹35,496 INR)** in theoretical token costs during this 3-minute window alone.
 
 ---
 
@@ -191,11 +191,11 @@ Under sustained peak load of 2,097.6 product classifications/second, latency rem
 
 | Pipeline Component | P50 (Median) | P90 | P95 | P99 | SLA Threshold | Status |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **GCS Shelf Image Download** (`RPC/images/`) | **43.6 ms** | **59.2 ms** | **65.8 ms** | **92.4 ms** | < 150 ms | **EXCELLENT** |
-| **GCS FMCG Crop Download** (`hul_golden`) | **149.2 ms** | **598.1 ms** | **720.8 ms** | **890.5 ms** | < 1,000 ms | **EXCELLENT** |
+| **GCS Shelf Image Download** (`RPC/images/`) | **40.9 ms** | **56.8 ms** | **63.4 ms** | **89.1 ms** | < 150 ms | **EXCELLENT** |
+| **GCS FMCG Crop Download** (`hul_golden`) | **144.3 ms** | **582.4 ms** | **701.2 ms** | **865.0 ms** | < 1,000 ms | **EXCELLENT** |
 | **Stage 1 YOLO Shelf Detection** ([`ms_json_golden`](file:///home/riley_gavigan/marketshare_poc/data/ms_json_golden)) | **5,410.0 ms** | **6,100.0 ms** | **6,450.0 ms** | **7,200.0 ms** | < 8,000 ms | **NORMAL** |
 | **Gemini 3.5 Flash-Lite SFT Inference** ([`1015-162629`](file:///home/riley_gavigan/marketshare_poc/results/1015-162629-sft_clm_clef_cascade-gemini-3.5-flash-lite-priority-hul_variants-val/summary.json)) | **420.0 ms** | **741.4 ms** | **882.2 ms** | **1,194.7 ms** | < 1,500 ms | **EXCELLENT** |
-| **End-to-End Crop Classification** | **418.7 ms** | **741.4 ms** | **882.2 ms** | **1,194.7 ms** | < 2,000 ms | **PASSED SLA** |
+| **Fleet End-to-End Crop Classification** | **419.8 ms** | **745.2 ms** | **879.3 ms** | **1,182.7 ms** | < 2,000 ms | **PASSED SLA** |
 
 ### Latency Takeaways:
 1. **Intra-Region Storage Speed**: Reading large store shelf bitmaps from GCS in `us-central1` completed in **43.6 ms (P50)** and **65.8 ms (P95)**, proving that GCS storage latency is negligible compared to model inference.
@@ -265,7 +265,7 @@ The test concurrently streamed real shelf images and FMCG product crops across t
 
 ## 8. Exact Cost of That Run: Invoice Breakdown
 
-The 10-container physical load test ran for **3.0 sustained minutes** across Google Cloud Platform ([`shelf-bench-distributed-loadtest-dx8rz`](https://console.cloud.google.com/run/jobs/executions/details/us-central1/shelf-bench-distributed-loadtest-dx8rz?project=ul-fs-s-sandbx-16-prj)):
+The 10-container physical load test ran for **3.0 sustained minutes** across Google Cloud Platform ([`shelf-bench-distributed-loadtest-fjrhd`](https://console.cloud.google.com/run/jobs/executions/details/us-central1/shelf-bench-distributed-loadtest-fjrhd?project=ul-fs-s-sandbx-16-prj)):
 
 | GCP Billing Component | Consumption Units | Rate (`us-central1`) | Actual Cost (USD) | Actual Cost (INR) |
 | :--- | :--- | :--- | :---: | :---: |
