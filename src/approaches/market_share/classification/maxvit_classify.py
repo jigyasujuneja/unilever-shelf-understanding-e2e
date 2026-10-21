@@ -16,8 +16,12 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image
-import torch
-from torchvision import transforms
+try:
+    import torch
+    from torchvision import transforms
+except ImportError:
+    torch = None  # type: ignore
+    transforms = None  # type: ignore
 
 from approaches.base import Approach, Box, Context, crop, register
 from utils import dataset
@@ -78,15 +82,25 @@ class MaxVitClassify(Approach):
 
     def __init__(self) -> None:
         super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = (
+            torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if torch is not None
+            else "cpu"
+        )
         self.model: Any = None
         self.idx_to_meta: dict[int, dict[str, Any]] = {}
         self.idx_to_sku: dict[int, int] = {}
         self.sku_to_idx: dict[int, int] = {}
-        self.transform: transforms.Compose | None = None
+        self.transform: Any = None
 
     def setup(self, config: dict, ctx: Context) -> None:
         """Load fine-tuned model artifacts directly from gs://marketshare-datasets/models/maxvit_variants/."""
+        global torch, transforms
+        if torch is None or transforms is None:
+            import torch
+            from torchvision import transforms
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         _preload_nvidia_libraries()
 
         cache_dir = Path("models/maxvit_variants")
@@ -227,13 +241,14 @@ class MaxVitClassify(Approach):
 
         # Mask unallowed classes if allowed_ids is provided (e.g. two-stage brand filter)
         if allowed_ids is not None:
-            mask = torch.full_like(logits, -float("inf"))
             allowed_indices = [
                 idx for idx, sku in self.idx_to_sku.items() if sku in allowed_ids
             ]
-            if allowed_indices:
-                mask[:, allowed_indices] = logits[:, allowed_indices]
-                logits = mask
+            if not allowed_indices:
+                return None
+            mask = torch.full_like(logits, -float("inf"))
+            mask[:, allowed_indices] = logits[:, allowed_indices]
+            logits = mask
 
         pred_idx = int(logits.argmax(dim=-1).item())
         pred_sku = self.idx_to_sku.get(pred_idx)
@@ -242,21 +257,36 @@ class MaxVitClassify(Approach):
         if ctx and hasattr(ctx, "trace") and ctx.trace:
             meta = self.idx_to_meta.get(pred_idx, {})
             probs = torch.softmax(logits, dim=-1)
-            conf = (
-                float(probs[0, pred_idx].item())
-                if logits.shape[-1] > pred_idx
-                else 0.0
-            )
+            k_cand = min(5, logits.shape[-1])
+            top_vals, top_inds = torch.topk(probs, k=k_cand, dim=-1)
+            top5 = []
+            for val, ind in zip(top_vals[0].tolist(), top_inds[0].tolist()):
+                c_sku = self.idx_to_sku.get(ind)
+                c_meta = self.idx_to_meta.get(ind, {})
+                top5.append({
+                    "sku_id": c_sku,
+                    "brand": c_meta.get("brand"),
+                    "base_variant": c_meta.get("base_variant"),
+                    "category": c_meta.get("category"),
+                    "probability": round(float(val), 4),
+                })
+            conf = float(top_vals[0][0].item())
+            margin = float(top_vals[0][0].item() - top_vals[0][1].item()) if k_cand > 1 else 1.0
+
             ctx.trace.step(
                 "MaxViT Classification",
-                f"Predicted SKU {pred_sku} ({meta.get('brand')} - {meta.get('base_variant')}) [conf={conf:.1%}]",
+                f"Predicted SKU {pred_sku} ({meta.get('brand')} - {meta.get('base_variant')}) [conf={conf:.1%}, margin={margin:.3f}]",
                 info={
+                    "model": MODEL_ARCH,
                     "pred_idx": pred_idx,
                     "sku_id": pred_sku,
                     "confidence": round(conf, 4),
+                    "margin": round(margin, 4),
                     "brand": meta.get("brand"),
                     "base_variant": meta.get("base_variant"),
                     "category": meta.get("category"),
+                    "packaging_type": meta.get("packaging_type"),
+                    "top5": top5,
                 },
             )
 
@@ -265,11 +295,62 @@ class MaxVitClassify(Approach):
     def identify_boxes(
         self, image: Image.Image, boxes: list[Box], ctx: Context
     ) -> list[int | None]:
-        """Crop and identify each bounding box on the shelf."""
+        """Crop and identify each bounding box on the shelf in high-throughput batched mode."""
         if not boxes:
             return []
-        crops = [crop(image, b) for b in boxes]
-        return [self.identify(c, ctx) for c in crops]
+        if self.model is None or self.transform is None:
+            return [None] * len(boxes)
+
+        crops = [crop(image, b).convert("RGB") for b in boxes]
+        batch_tensors = [self.transform(c) for c in crops]
+        batch = torch.stack(batch_tensors).to(self.device)
+
+        with torch.no_grad():
+            batch_logits = self.model(batch)
+
+        preds: list[int | None] = []
+        batch_probs = torch.softmax(batch_logits, dim=-1)
+        k_cand = min(5, batch_logits.shape[-1])
+        top_vals, top_inds = torch.topk(batch_probs, k=k_cand, dim=-1)
+
+        for i, box in enumerate(boxes):
+            p_idx = int(batch_logits[i].argmax(dim=-1).item())
+            p_sku = self.idx_to_sku.get(p_idx)
+            preds.append(p_sku)
+
+            if ctx and hasattr(ctx, "trace") and ctx.trace:
+                meta = self.idx_to_meta.get(p_idx, {})
+                conf = float(top_vals[i, 0].item())
+                margin = float(top_vals[i, 0].item() - top_vals[i, 1].item()) if k_cand > 1 else 1.0
+                top5 = []
+                for val, ind in zip(top_vals[i].tolist(), top_inds[i].tolist()):
+                    c_sku = self.idx_to_sku.get(ind)
+                    c_meta = self.idx_to_meta.get(ind, {})
+                    top5.append({
+                        "sku_id": c_sku,
+                        "brand": c_meta.get("brand"),
+                        "base_variant": c_meta.get("base_variant"),
+                        "category": c_meta.get("category"),
+                        "probability": round(float(val), 4),
+                    })
+                ctx.trace.step(
+                    "MaxViT Shelf Box Identification",
+                    f"Box #{i+1}: SKU {p_sku} ({meta.get('brand')} - {meta.get('base_variant')}) [conf={conf:.1%}, margin={margin:.3f}]",
+                    boxes=[box],
+                    info={
+                        "box_index": i,
+                        "model": MODEL_ARCH,
+                        "sku_id": p_sku,
+                        "confidence": round(conf, 4),
+                        "margin": round(margin, 4),
+                        "brand": meta.get("brand"),
+                        "base_variant": meta.get("base_variant"),
+                        "category": meta.get("category"),
+                        "top5": top5,
+                    },
+                )
+
+        return preds
 
 
 @register

@@ -256,6 +256,7 @@ def evaluate(split_name: str = "test", limit: int = 0, batch_size: int = 32, num
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
     # 1. Load Classes & Metadata Mapping
+    storage_client = get_storage_client()
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     classes_json_path = MODEL_DIR / "variant_classes.json"
     if not classes_json_path.exists():
@@ -273,7 +274,6 @@ def evaluate(split_name: str = "test", limit: int = 0, batch_size: int = 32, num
     print(f"Loaded {num_classes} Brand__Variant Classes.")
 
     # 2. Download or read manifest splits
-    storage_client = get_storage_client()
     raw_manifest = read_gcs_bytes(RPC_JSON_URI, storage_client)
     manifest = json.loads(raw_manifest.decode("utf-8"))
     split_records = manifest.get("splits", {}).get(split_name, [])
