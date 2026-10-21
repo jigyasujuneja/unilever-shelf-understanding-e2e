@@ -450,23 +450,39 @@ function fmtSubMetricsCompact(r) {
   const tk = taskOf(r);
   const ard = r.annotated_row_box_metrics || r.annotated_row_detection_metrics;
   const enr = r.enrichment_metrics;
+  const hb = r.human_and_beyond;
+  const t1 = hb?.tier1_named_target_sku;
+  const t2 = hb?.tier2_client_clubbed_parity;
+  const t3 = hb?.tier3_beyond_gt_discovery;
   const zoneHtml = ard && ard.f2 != null
-    ? ` · <span style="color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;padding:1px 5px;border-radius:4px;font-weight:700;" title="Bucket 1: Detection F2 & Precision strictly inside 2D human-annotated shelf pockets">2D Zone F2 <b>${pct(ard.f2)}</b> (P <b>${pct(ard.precision)}</b>)</span>`
+    ? ` · <span style="color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;padding:1px 5px;border-radius:4px;font-weight:700;" title="Tier 2A: Detection F2 & Precision strictly inside 2D human-annotated shelf pockets">2D Zone F2 <b>${pct(ard.f2)}</b> (P <b>${pct(ard.precision)}</b>)</span>`
+    : "";
+  const clubHtml = t2 && t2.f2 != null && (t3?.others_gt_count > 0 || t3?.unannotated_row_facings_discovered > 0)
+    ? ` · <span style="color:#5b21b6;background:#f5f3ff;border:1px solid #ddd6fe;padding:1px 5px;border-radius:4px;font-weight:700;" title="Tier 2B: Apples-to-apples F2 inside annotated scope when non-target SKUs are clubbed into Others matching human protocol">Client Clubbed F2 <b>${pct(t2.f2)}</b></span>`
+    : "";
+  const targetHtml = t1 && t1.matched_box_acc != null && t1.named_gt_count > 0 && t3?.others_gt_count > 0
+    ? ` · <span style="color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;padding:1px 5px;border-radius:4px;font-weight:700;" title="Tier 1: Identification accuracy on matched boxes with explicit human-named SKU labels">Named SKU Acc <b>${pct(t1.matched_box_acc)}</b></span>`
     : "";
   if (tk === "detection") {
     const base = `Recall <b>${pct(r.recall)}</b> · Precision <b>${pct(r.precision)}</b> · Acc <b>${pct(r.accuracy)}</b>`;
     const enrHtml = enr && enr.extra_unannotated_row_preds > 0
-      ? ` · <span style="color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:1px 5px;border-radius:4px;font-weight:700;" title="Bucket 2: Extra valid product facings discovered on unannotated shelf rows">+${enr.extra_unannotated_row_preds} Extra (${enr.enrichment_multiplier}x)</span>`
+      ? ` · <span style="color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:1px 5px;border-radius:4px;font-weight:700;" title="Tier 3: Extra valid product facings discovered on unannotated shelf rows">+${enr.extra_unannotated_row_preds} Beyond-GT (${enr.enrichment_multiplier}x)</span>`
       : "";
     return `${base}${zoneHtml}${enrHtml}`;
   }
   if (tk === "end_to_end") {
     const b = fa.brand != null ? ` · Brand <b>${pct(fa.brand)}</b>` : "";
     const h = fa.is_hul != null ? ` · HUL <b>${pct(fa.is_hul)}</b>` : "";
-    const enrHtml = enr && enr.extra_discovered_sku_instances > 0
-      ? ` · <span style="color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:1px 5px;border-radius:4px;font-weight:700;" title="Bucket 2: Extra named SKU facings discovered on unannotated shelf rows">+${enr.extra_discovered_sku_instances} Extra SKUs (${enr.enrichment_multiplier}x)</span>`
+    const othUp = t3?.others_upgraded_to_exact_sku || enr?.others_catchall_resolved_count || 0;
+    const extraRow = t3?.unannotated_row_facings_discovered || enr?.extra_unannotated_row_preds || 0;
+    const mult = t3?.total_coverage_multiplier || enr?.enrichment_multiplier || 1.0;
+    const beyondParts = [];
+    if (othUp > 0) beyondParts.push(`+${othUp} "Others"→SKU`);
+    if (extraRow > 0) beyondParts.push(`+${extraRow} Unannotated-Row (${mult}x)`);
+    const enrHtml = beyondParts.length
+      ? ` · <span style="color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:1px 5px;border-radius:4px;font-weight:700;" title="Tier 3 Beyond-GT AI Discovery: Human 'Others' boxes upgraded to exact catalog SKUs + extra facings discovered on unannotated shelf rows">${beyondParts.join(" · ")}</span>`
       : "";
-    return `Found <b>${pct(r.found_recall ?? r.recall)}</b> · ID Recall <b>${pct(r.recall)}</b>${b}${h}${zoneHtml}${enrHtml}`;
+    return `Found <b>${pct(r.found_recall ?? r.recall)}</b> · ID Recall <b>${pct(r.recall)}</b>${b}${h}${targetHtml}${clubHtml}${zoneHtml}${enrHtml}`;
   }
   const scope = getEvalScopeMeta(r);
   const items = [];
@@ -2391,6 +2407,40 @@ async function showRun(runId) {
     </div>
 
     ${
+      s.human_and_beyond
+        ? (() => {
+            const hb = s.human_and_beyond;
+            const t1 = hb.tier1_named_target_sku || {};
+            const t2 = hb.tier2_client_clubbed_parity || {};
+            const tz = hb.tier2_annotated_zone_detection || {};
+            const t3 = hb.tier3_beyond_gt_discovery || {};
+            return `<div class="m3-kpi-card" style="margin-bottom:12px;padding:12px 16px;font-size:12.5px;line-height:1.55;border-left:4px solid var(--accent)">
+              <div style="font-weight:700;font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+                <span>Human Annotated &amp; Beyond — 3-Tier Full-Shelf Evaluation Breakdown</span>
+                <span class="muted caption">Separates sparse human annotation artifacts (&ldquo;Others&rdquo; catch-all &amp; unannotated planks) from model quality</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">
+                <div style="background:var(--surface-2,rgba(0,0,0,0.03));padding:8px 10px;border-radius:6px">
+                  <div style="font-weight:700;color:#15803d">Tier 1 · Explicitly Named Target SKUs</div>
+                  <div>Named Target F2: <b>${pct(t1.f2)}</b> &middot; Conditional Acc: <b>${pct(t1.conditional_accuracy)}</b></div>
+                  <div class="muted caption">${numFmt(t1.matched_correct)}/${numFmt(t1.localized_gt_count)} localized named GT boxes matched (${numFmt(t1.gt_count)} total named GT)</div>
+                </div>
+                <div style="background:var(--surface-2,rgba(0,0,0,0.03));padding:8px 10px;border-radius:6px">
+                  <div style="font-weight:700;color:#0369a1">Tier 2 · Client &ldquo;Others&rdquo;-Clubbed Parity</div>
+                  <div>Clubbed F2 (Annotated Rows): <b>${pct(t2.f2)}</b> (R ${pct(t2.recall)} · P ${pct(t2.precision)})</div>
+                  <div class="muted caption">2D Zone Detection F2: <b>${pct(tz.f2)}</b> (R ${pct(tz.recall)} · P ${pct(tz.precision)}) when non-target SKUs club to &ldquo;Others&rdquo;</div>
+                </div>
+                <div style="background:var(--surface-2,rgba(0,0,0,0.03));padding:8px 10px;border-radius:6px">
+                  <div style="font-weight:700;color:#7e22ce">Tier 3 · Beyond-GT AI SKU Discovery</div>
+                  <div><b>+${numFmt(t3.others_upgraded_to_exact_sku || 0)}</b> Human &ldquo;Others&rdquo; &rarr; Exact Brand+SKU (${pct(t3.others_upgrade_rate || 0)})</div>
+                  <div class="muted caption"><b>+${numFmt(t3.unannotated_row_facings_discovered || 0)}</b> extra facings on unannotated rows (<b>${Number(t3.total_coverage_multiplier || 1).toFixed(2)}&times;</b> shelf coverage)</div>
+                </div>
+              </div>
+            </div>`;
+          })()
+        : ""
+    }
+    ${
       s.planogram_metrics
         ? `<div class="m3-kpi-card" style="margin-bottom:12px;padding:10px 14px;font-size:12.5px;line-height:1.5">
             <b>Stage 6 Planogram &amp; OOS Compliance:</b>
@@ -2494,6 +2544,22 @@ function envLine(s) {
 
 const GALLERY_SPLITS = new Set(["rpc", "shelves", "hul_golden", "gtmerch_golden", "ms_json_golden", "mt_json_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos", "hul_talkers_golden", "gt_hul_sessions", "hul_sessions"]);
 
+function _labelBoxTier(l, evalFields = null) {
+  const hasGt = !!l.gt;
+  const hasPred = !!(l.pred && (l.pred.sku_id != null || l.pred.product || l.pred.brand));
+  const ok = isLabelAllCorrect(l, evalFields);
+  if (hasGt && l.gt?.is_others_catchall && hasPred && ok) {
+    return "others_upgraded";
+  }
+  if (ok) {
+    return "target_match";
+  }
+  if (!hasGt && hasPred) {
+    return "beyond_gt_row";
+  }
+  return "mismatch";
+}
+
 function labelTable(d, evalFields = null) {
   const labels = labelsOf(d);
   if (!labels.length) return "";
@@ -2515,13 +2581,26 @@ function labelTable(d, evalFields = null) {
       ? `<img class="ref" loading="lazy" src="/img/${d.split}-ref/${encodeURIComponent(p.sku_id)}" alt="">`
       : "";
   const name = (p, none) => (p ? `${ref(p)}${esc(p.product || p.brand || "—")}` : `<span class="muted">${none}</span>`);
+  const tierBadge = (l) => {
+    const tier = _labelBoxTier(l, evalFields);
+    if (tier === "others_upgraded") {
+      return `<span class="ok" title="Human 'Others' upgraded by AI to exact Brand+SKU" style="color:#7e22ce;font-weight:700">✓ +SKU</span>`;
+    }
+    if (tier === "target_match") {
+      return mark(true);
+    }
+    if (tier === "beyond_gt_row") {
+      return `<span title="AI-discovered SKU on unannotated shelf row" style="color:#0284c7;font-weight:700">+Row SKU</span>`;
+    }
+    return mark(false);
+  };
   return `<table class="small labels boxes">
-    <thead><tr><th>#</th><th>Ground Truth</th><th>Predicted</th><th>Match</th></tr></thead>
+    <thead><tr><th>#</th><th>Ground Truth</th><th>Predicted</th><th>Match / Tier</th></tr></thead>
     <tbody>${labels
       .map(
         (l, i) => `
-      <tr><td class="num">${i + 1}</td><td>${name(l.gt, "no product")}</td>
-        <td>${name(l.pred, "none")}</td><td>${mark(isLabelAllCorrect(l, evalFields))}</td></tr>`
+      <tr><td class="num">${i + 1}</td><td>${name(l.gt, "unannotated shelf row")}</td>
+        <td>${name(l.pred, "none")}</td><td>${tierBadge(l)}</td></tr>`
       )
       .join("")}
     </tbody></table>`;
@@ -2540,6 +2619,22 @@ async function showImage(runId, imageId, evalFields = null) {
   if (last >= 0) d.steps[last].totals = true;
   const dur = (ms) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
   const auditable = !!d.telemetry?.trace_id;
+
+  const hb = d.human_and_beyond;
+  const hbHtml = hb
+    ? (() => {
+        const t1 = hb.tier1_named_target_sku || {};
+        const t2 = hb.tier2_client_clubbed_parity || {};
+        const t3 = hb.tier3_beyond_gt_discovery || {};
+        return `<div class="m3-kpi-card" style="margin-bottom:8px;padding:8px 12px;font-size:12px;line-height:1.45;border-left:3px solid #7e22ce">
+          <b>Human Annotated &amp; Beyond:</b>
+          Named SKU F2: <b>${pct(t1.f2)}</b> (${numFmt(t1.matched_correct)}/${numFmt(t1.gt_count)})
+          &middot; Client Clubbed F2: <b>${pct(t2.f2)}</b>
+          &middot; <span style="color:#7e22ce;font-weight:700">+${numFmt(t3.others_upgraded_to_exact_sku || 0)} &ldquo;Others&rdquo;&rarr;SKU</span>
+          &middot; <span style="color:#0284c7;font-weight:700">+${numFmt(t3.unannotated_row_facings_discovered || 0)} Unannotated-Row SKUs</span>
+        </div>`;
+      })()
+    : "";
 
   const pc = d.planogram_compliance;
   const planoHtml = pc
@@ -2561,6 +2656,7 @@ async function showImage(runId, imageId, evalFields = null) {
         <div class="legend" id="legend"></div>
       </div>
       <div>
+        ${hbHtml}
         ${planoHtml}
         ${labelTable(d, evalFields)}
         <details class="clean-accordion" style="margin-top:10px">
@@ -2729,6 +2825,8 @@ function draw(canvas, img, d, step, evalFields = null) {
     g.strokeRect(b[0] * k, b[1] * k, (b[2] - b[0]) * k, (b[3] - b[1]) * k);
   };
   const GREEN = "rgba(34,197,94,.95)";
+  const PURPLE = "rgba(147,51,234,.95)";
+  const BLUE = "rgba(2,132,199,.95)";
   const RED = "rgba(239,68,68,.95)";
   const CYAN = "rgba(6,182,212,.95)";
   const AMBER = "rgba(245,158,11,.95)";
@@ -2764,9 +2862,25 @@ function draw(canvas, img, d, step, evalFields = null) {
       labels[0].box &&
       labels[0].box[2] - labels[0].box[0] >= w0 * 0.85 &&
       labels[0].box[3] - labels[0].box[1] >= h0 * 0.85;
+    let targetMatchCount = 0;
+    let othersUpgradedCount = 0;
+    let beyondGtRowCount = 0;
+    let mismatchCount = 0;
     labels.forEach((l, i) => {
-      const ok = isLabelAllCorrect(l, evalFields);
-      const c = ok ? GREEN : RED;
+      const tier = _labelBoxTier(l, evalFields);
+      let c = RED;
+      if (tier === "target_match") {
+        c = GREEN;
+        targetMatchCount++;
+      } else if (tier === "others_upgraded") {
+        c = PURPLE;
+        othersUpgradedCount++;
+      } else if (tier === "beyond_gt_row") {
+        c = BLUE;
+        beyondGtRowCount++;
+      } else {
+        mismatchCount++;
+      }
       if (l.box) {
         rect(l.box, c, isFullCrop ? 3 : 2.5);
         if (!isFullCrop) {
@@ -2777,10 +2891,15 @@ function draw(canvas, img, d, step, evalFields = null) {
         }
       }
     });
-    const okCount = labels.filter((l) => isLabelAllCorrect(l, evalFields)).length;
-    legend.innerHTML =
-      `<span class="sw right"></span>Match (${okCount}) <span class="sw wrong"></span>Mismatch (${labels.length - okCount})` +
-      extraLegend;
+    const legendParts = [`<span class="sw right"></span>Named Match (${targetMatchCount})`];
+    if (othersUpgradedCount > 0) {
+      legendParts.push(`<span class="sw" style="background:${PURPLE}"></span>&ldquo;Others&rdquo;&rarr;AI SKU (${othersUpgradedCount})`);
+    }
+    if (beyondGtRowCount > 0) {
+      legendParts.push(`<span class="sw" style="background:${BLUE}"></span>+Unannotated-Row SKU (${beyondGtRowCount})`);
+    }
+    legendParts.push(`<span class="sw wrong"></span>Mismatch (${mismatchCount})`);
+    legend.innerHTML = legendParts.join(" ") + extraLegend;
   } else if (!step) {
     const tp = new Set(d.matched || []);
     (d.gt || []).forEach((b) => rect(b, GREEN));

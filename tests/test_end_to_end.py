@@ -59,6 +59,8 @@ def test_registry_has_builtin_approaches():
         "clef_aspect_scale_prior", "clef_saliency_diff_zoom", "clef_pack_crown_fusion",
         "hybrid_pack_specialist_clef", "promo_asset_plank_tiling_detect",
         "shelf_plank_tiling_e2e", "shelf_generalizable_spine_e2e",
+        "distilled_yolo_960_stage0_clahe", "promo_asset_bay_scoped_plank_detect",
+        "shelf_marketshare_generalizable_e2e", "shelf_merchandising_bay_e2e",
     }
     for ap in approaches.all_approaches().values():
         assert ap.architecture and ap.steps
@@ -92,6 +94,8 @@ def test_registry_has_builtin_approaches():
         "clef_aspect_scale_prior", "clef_saliency_diff_zoom", "clef_pack_crown_fusion",
         "hybrid_pack_specialist_clef", "promo_asset_plank_tiling_detect",
         "shelf_plank_tiling_e2e", "shelf_generalizable_spine_e2e",
+        "promo_asset_bay_scoped_plank_detect", "shelf_marketshare_generalizable_e2e",
+        "shelf_merchandising_bay_e2e",
     }
 
 

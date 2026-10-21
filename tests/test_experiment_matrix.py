@@ -14,8 +14,8 @@ from utils.experiment_matrix import (
 
 
 def test_poc_experiments_and_models_schema():
-    """Verify all 51 prioritized experiments (P0, P1, P2, Moonshot) and 6 model families are well-formed."""
-    assert len(POC_EXPERIMENTS) == 51
+    """Verify all 55 prioritized experiments (P0, P1, P2, Moonshot) and 6 model families are well-formed."""
+    assert len(POC_EXPERIMENTS) == 55
     priorities = {e["priority"] for e in POC_EXPERIMENTS}
     assert priorities == {"P0", "P1", "P2", "Moonshot"}
 
@@ -37,6 +37,7 @@ def test_poc_experiments_and_models_schema():
         "hul_golden",
         "gtmerch_golden",
         "hul_sessions",
+        "gt_hul_sessions",
         "hul_promos",
         "hul_brands",
         "hul_variants",
@@ -217,7 +218,7 @@ def test_real_results_catalog_and_v21_backfill():
         return
 
     cat = build_experiments_and_models_catalog(real_results)
-    assert len(cat["experiments"]) == 51
+    assert len(cat["experiments"]) == 55
     assert len(cat["models"]) == 6
     for m in cat["models"]:
         assert "/locations/us-central1/models/" in m["model_resource"]

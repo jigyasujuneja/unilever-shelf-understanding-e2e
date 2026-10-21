@@ -70,3 +70,42 @@ def test_compute_enrichment_buckets_preserves_both_buckets() -> None:
     assert enr["others_catchall_gt_count"] == 1
     assert enr["others_catchall_resolved_count"] == 1
     assert enr["enrichment_multiplier"] == 2.0
+
+
+def test_compute_human_and_beyond_metrics_three_tiers_and_backfilled_hul_parity() -> None:
+    gt_boxes = [
+        (10.0, 100.0, 50.0, 200.0),   # GT 0: explicitly named target SKU (Dove)
+        (60.0, 105.0, 100.0, 202.0),  # GT 1: non-HUL 'Others' catch-all upgraded to Pantene
+        (110.0, 104.0, 150.0, 201.0), # GT 2: backfilled HUL catch-all (is_others_catchall=True, is_hul=True)
+    ]
+    gt_labels = [
+        {"sku_id": 101, "product": "Dove Hair Fall Rescue", "brand": "Dove", "category": "Hair_Care", "is_hul": True, "is_others_catchall": False},
+        {"sku_id": 999, "product": "Others", "brand": "Others", "category": "Hair_Care", "is_hul": False, "is_others_catchall": True},
+        {"sku_id": 102, "product": "Sunsilk Black Shine", "brand": "Sunsilk", "category": "Hair_Care", "is_hul": True, "is_others_catchall": True},
+    ]
+    preds = [
+        (12.0, 102.0, 48.0, 198.0),   # Matches GT 0 -> Dove
+        (62.0, 106.0, 98.0, 200.0),   # Matches GT 1 -> Pantene (Non-HUL upgraded from 'Others')
+        (112.0, 105.0, 148.0, 199.0), # Matches GT 2 -> Sunsilk (Backfilled HUL catch-all)
+        (20.0, 450.0, 70.0, 550.0),   # Unannotated lower shelf row -> Colgate
+    ]
+    pred_ids = [101, 301, 102, 401]
+    catalog = {
+        101: {"sku_id": 101, "product": "Dove Hair Fall Rescue", "brand": "Dove", "category": "Hair_Care", "is_hul": True},
+        102: {"sku_id": 102, "product": "Sunsilk Black Shine", "brand": "Sunsilk", "category": "Hair_Care", "is_hul": True},
+        301: {"sku_id": 301, "product": "Pantene Advanced Hairfall", "brand": "Pantene", "category": "Hair_Care", "is_hul": False},
+        401: {"sku_id": 401, "product": "Colgate Strong Teeth", "brand": "Colgate", "category": "Oral_Care", "is_hul": False},
+    }
+    hb = metrics.compute_human_and_beyond_metrics(preds, pred_ids, gt_boxes, gt_labels, catalog)
+    assert hb["tier1_named_target_sku"]["gt_count"] == 1
+    assert hb["tier1_named_target_sku"]["matched_correct"] == 1
+    assert hb["tier1_named_target_sku"]["f2"] == 1.0
+    assert hb["tier2_client_clubbed_parity"]["tp"] == 3
+    assert hb["tier2_client_clubbed_parity"]["f2"] == 1.0
+    assert hb["tier3_beyond_gt_discovery"]["others_upgraded_to_exact_sku"] == 2
+    assert hb["tier3_beyond_gt_discovery"]["unannotated_row_facings_discovered"] == 1
+    agg = metrics.aggregate_human_and_beyond_metrics([hb])
+    assert agg is not None
+    assert agg["tier2_client_clubbed_parity"]["f2"] == 1.0
+    assert agg["tier3_beyond_gt_discovery"]["others_upgraded_to_exact_sku"] == 2
+

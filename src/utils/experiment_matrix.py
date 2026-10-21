@@ -696,10 +696,42 @@ APPROACH_INTUITIONS: dict[str, dict[str, Any]] = {
         "task_id": "TASK-E2E",
     },
     "shelf_generalizable_spine_e2e": {
-        "display_name": "Unified Non-Overfitting Production Spine (EXP-50 + EXP-51 + EXP-52 + EXP-53)",
+        "display_name": "Unified Non-Overfitting Production Spine (EXP-50..57)",
         "intuition": (
-            "Combines Stage 0 Dual-Buffer CLAHE, Stage 1 Physical Plank-Support Law & 2x2 Tiling, Stage 1.5 "
-            "Projective Scale & Cap-Pad Crop, and Stage 2 Self-Supervised Saliency-Diff + Lidstone Pack Crown CLEF."
+            "Combines Stage 0 Dual-Buffer CLAHE, Scene-Adaptive Stage 1 (960px Soft-NMS ONNX / Bay-Scoped Plank Law), "
+            "Stage 1.5 Projective Scale & Cap-Pad Crop, and Stage 2 Unstarved Multi-Prototype Brand-Gate + Saliency-Diff/Crown CLEF."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "distilled_yolo_960_stage0_clahe": {
+        "display_name": "Stage 0 Dual-Buffer CLAHE + 960px High-Res Gaussian Soft-NMS ONNX Detector (EXP-55)",
+        "intuition": (
+            "Pairs Stage 0 Shades-of-Gray + CIELAB L* CLAHE photometry with 960px high-res sub-window sachet refinement "
+            "and aspect-aware Gaussian Soft-NMS at $0 VLM token cost."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_bay_scoped_plank_detect": {
+        "display_name": "AWP Bay Router + Physical Plank-Support Law + Pre-Embedding Bay Gate Detector (EXP-55 + EXP-57)",
+        "intuition": (
+            "Enforces physical horizontal shelf-plank support inside Class 0 display bays and prunes out-of-bay "
+            "background store shelves before Stage 2 crop embedding and VLM verification."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "shelf_marketshare_generalizable_e2e": {
+        "display_name": "Open-Shelf Market Share Full-Shelf Spine (EXP-54 + EXP-55 + EXP-56)",
+        "intuition": (
+            "Pairs $0-token 960px Soft-NMS + Stage 0 CLAHE detection with Unstarved Multi-Prototype Brand-Gate, "
+            "Projective Scale + Lidstone Pack Priors, 1D Shelf-Plank Consensus, and Resolution-Adaptive Saliency Zoom."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "shelf_merchandising_bay_e2e": {
+        "display_name": "Promo-Bay Merchandising Full-Shelf Spine with Pre-Embedding Bay Gate (EXP-54 + EXP-55 + EXP-57)",
+        "intuition": (
+            "Scopes full-shelf detection to Class 0 promo display bays (WIN/CTU/MB2/MB3) before Stage 2 embedding, "
+            "eliminating 61% of background shelf embeddings while running Unstarved Brand-Gate + Stage 6 Planogram/OOS."
         ),
         "task_id": "TASK-E2E",
     },
@@ -2198,6 +2230,123 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "target_goal": "Lift GTMerch Bay Precision >= 93.0%, Bay F2 >= 89.5%, and MS-JSON E2E F2 >= 91.5%",
         "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
     },
+    {
+        "experiment_id": "P0-EXP-54",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Unstarved Multi-Prototype Brand-Gate + 1D Shelf-Plank Row Consensus (EXP-54)",
+        "technical_title": "Multi-Prototype Brand-Gate (SKU Centroids + Global Top-2K Floor) + 1D Shelf-Plank Consensus + Backfilled HUL Parity",
+        "intuition": (
+            "Fixes Single-SKU Brand-Gate Starvation where 1-SKU brands starved 35-SKU HUL brands on 40.5% of full-shelf crops, "
+            "adds 1D horizontal shelf-plank category consensus, and resolves backfilled HUL catch-all parity on gtmerch_golden."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "ms_json_golden",
+        "approaches": [
+            "shelf_marketshare_generalizable_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Restoring SKU-level centroids into brand_subcentroids with a Top-8 brand gate (margin<=0.08) and a global_best[:2*K] "
+            "shortlist floor eliminates candidate starvation (0% crops < 10 candidates) and lifts Annotated-Row F2 from 69.2% to >=76.5%."
+        ),
+        "description": (
+            "Evaluates shelf_marketshare_generalizable_e2e and shelf_generalizable_spine_e2e on ms_json_golden and gtmerch_golden."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "0% candidate starvation (<10 candidates) and >= 76.5% Annotated-Row / Client-Clubbed F2 on ms_json_golden",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-55",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Stage 0 CLAHE + 960px Gaussian Soft-NMS ONNX & Bay-Scoped Plank Detection (EXP-55)",
+        "technical_title": "Unified Scene-Adaptive Stage 1: 960px Soft-NMS ONNX + Stage 0 CLAHE (Open-Shelf) & AWP Bay-Scoped Plank Law (Promo-Bay)",
+        "intuition": (
+            "Combines Stage 0 Dual-Buffer CLAHE with 960px High-Res Gaussian Soft-NMS ONNX ($0 token cost) for open shelves "
+            "and AWP Bay-Scoped Plank-Support filtering for merchandising promo bays."
+        ),
+        "use_case": "market_share",
+        "task": "detection",
+        "dataset": "ms_json_golden",
+        "approaches": [
+            "distilled_yolo_960_stage0_clahe",
+            "promo_asset_bay_scoped_plank_detect",
+        ],
+        "models": ["yolo11n-distilled-onnx", "gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Running 960px Soft-NMS ONNX on Stage 0 CLAHE buffers recovers small hanging sachets and dark back-row packs at $0 VLM "
+            "token cost while pruning out-of-bay background shelves on gtmerch_golden."
+        ),
+        "description": (
+            "Evaluates distilled_yolo_960_stage0_clahe and promo_asset_bay_scoped_plank_detect across ms_json_golden and gtmerch_golden."
+        ),
+        "primary_metric": "f2",
+        "target_goal": ">= 84.0% Annotated-Zone Detection F2 on ms_json_golden at ₹0.003/img Stage-1 cost",
+        "model_family": "hul-yolo11n-distilled-detector-onnx",
+    },
+    {
+        "experiment_id": "P0-EXP-56",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Resolution-Adaptive Saliency-Diff Zoom + Lidstone Pack Spine on Kirana Shelves (EXP-56)",
+        "technical_title": "Resolution-Adaptive Stage 2B (Crop >=64px Saliency-Diff/Crown Sheet vs <64px Compact 4-Row Multi-Sheet)",
+        "intuition": (
+            "Applies EXP-51 Self-Supervised Reference-Diff Saliency Zoom + EXP-52 Crown Strip on >=64px Kirana crops while "
+            "keeping compact 4-row multi-sheets on tiny <64px full-shelf thumbnails."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "gt_hul_sessions",
+        "approaches": [
+            "shelf_marketshare_generalizable_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Gating Saliency-Diff + Crown Zoom strips by crop resolution (>=64px) resolves same-brand sister variants and "
+            "pack-type confusions on gt_hul_sessions without degrading tiny 35px full-shelf thumbnails."
+        ),
+        "description": (
+            "Evaluates shelf_generalizable_spine_e2e and shelf_marketshare_generalizable_e2e on gt_hul_sessions val and test."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift gt_hul_sessions Full-Shelf E2E F2 from 73.12% to >= 80.5% at <= ₹0.25/image",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-57",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Class-0 Bay-Scoped Pre-Embedding Gate & Production Unit-Cost Compression (EXP-57)",
+        "technical_title": "Pre-Embedding Class-0 Display-Bay Gate + 8-Crop Batched Contact Sheets for 5x-8x E2E Cost Compression",
+        "intuition": (
+            "Prunes out-of-bay background store shelf detections before Stage 2 crop embedding and VLM verification on "
+            "gtmerch_golden, cutting full-shelf E2E cost into the ₹0.22-₹0.45/image production band."
+        ),
+        "use_case": "merchandising",
+        "task": "end_to_end",
+        "dataset": "gtmerch_golden",
+        "approaches": [
+            "shelf_merchandising_bay_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Filtering out-of-bay background shelf detections prior to Stage 2 embedding eliminates ~61% of wasted crop "
+            "embeddings and VLM contact-sheet calls while improving in-bay precision and Client-Clubbed F2."
+        ),
+        "description": (
+            "Evaluates shelf_merchandising_bay_e2e and shelf_generalizable_spine_e2e on gtmerch_golden val and test."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Cut gtmerch_golden E2E cost from ₹2.27/img to <= ₹0.45/img while lifting Client-Clubbed F2 >= 75.0%",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
 ]
 
 
@@ -2955,6 +3104,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                     "annotated_row_box_metrics": s.get("annotated_row_box_metrics"),
                     "annotated_row_detection_metrics": s.get("annotated_row_box_metrics") or s.get("annotated_row_detection_metrics"),
                     "enrichment_metrics": s.get("enrichment_metrics"),
+                    "human_and_beyond": s.get("human_and_beyond"),
                     "is_exact_dataset": ds == exp["dataset"] or (exp["dataset"] in ("hul_sessions", "gt_hul_sessions") and ds in ("hul_sessions", "gt_hul_sessions")),
                     "is_golden_dataset": ds in golden_ds_set,
                     "vertex_run_context": (

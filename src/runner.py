@@ -766,6 +766,9 @@ def run(
             extra["enrichment_metrics"] = metrics.compute_enrichment_buckets(
                 preds, None, sample.boxes, sample.labels, None, m["pairs"]
             )
+            extra["human_and_beyond"] = metrics.compute_human_and_beyond_metrics(
+                preds, None, sample.boxes, sample.labels, None, m["pairs"], eval_fields=eval_fields
+            )
             eff_assets = getattr(sample, "asset_boxes", None) or getattr(ctx, "detected_asset_boxes", None)
             extra["bay_scoped_metrics"] = metrics.score_merchandising_bay_or_hanger(
                 preds, None, sample.boxes, sample.labels, asset_boxes=eff_assets
@@ -860,6 +863,9 @@ def run(
             )
             extra["enrichment_metrics"] = metrics.compute_enrichment_buckets(
                 preds, ids, sample.boxes, sample.labels, catalog, m["pairs"]
+            )
+            extra["human_and_beyond"] = metrics.compute_human_and_beyond_metrics(
+                preds, ids, sample.boxes, sample.labels, catalog, m["pairs"], eval_fields=eval_fields
             )
             extra["stage2_fast_gate_count"] = fast_gated
             extra["labels"] = [
@@ -1324,6 +1330,10 @@ def run(
                 "others_catchall_resolved_count": em_oth_res,
                 "enrichment_multiplier": round(em_tot / max(em_gt, 1), 2),
             }
+        if task in ("detection", "end_to_end") and any("human_and_beyond" in r for r in rows):
+            hb_agg = metrics.aggregate_human_and_beyond_metrics(rows)
+            if hb_agg is not None:
+                summary["human_and_beyond"] = hb_agg
         if task in ("detection", "end_to_end") and any("bay_scoped_metrics" in r for r in rows):
             bs_rows = [r["bay_scoped_metrics"] for r in rows if isinstance(r.get("bay_scoped_metrics"), dict)]
             bs_tp = sum(int(b.get("tp", 0)) for b in bs_rows)
