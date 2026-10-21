@@ -105,6 +105,11 @@ gcloud ai endpoints deploy-model 3648281285786337280 \
 - **Endpoint Display Name:** `marketshare-maxvit-vertex-endpoint`
 - **Console Link:** [Vertex AI Endpoint 3648281285786337280](https://console.cloud.google.com/vertex-ai/online-prediction/endpoints/3648281285786337280?project=ul-fs-s-sandbx-16-prj)
 
+### 4.1 Container Serving & Health Probe Requirements
+Vertex AI Endpoint deployments require the prediction container to run a persistent HTTP server listening on port 8080 answering health checks and prediction payloads:
+1. **Custom Image (`shelf-bench:latest`):** Because `Dockerfile` specifies `ENTRYPOINT ["shelf-bench"]`, `--container-args="serve"` or a custom prediction server wrapper must be specified in the `containerSpec`.
+2. **Google Pre-Built PyTorch Container:** Alternatively, Google's standard TorchServe image `us-docker.pkg.dev/vertex-ai/prediction/pytorch-cpu.2-4:latest` (or `pytorch-gpu.2-4:latest`) can be used directly with `traced_maxvit_brand_variant.pt`.
+
 ---
 
 ## 5. Production Telemetry & Observability
