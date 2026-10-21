@@ -238,71 +238,7 @@ class MaxVitClassify(Approach):
 
         otel_parent = getattr(ctx, "otel_parent", None) if ctx else None
 
-        # 1. Image preprocessing
-        t_prep_start = time.perf_counter()
-        rgb_img = image.convert("RGB")
-        tensor = self.transform(rgb_img).unsqueeze(0).to(self.device)
-        t_prep = time.perf_counter() - t_prep_start
-
-        # 2. Forward inference through fine-tuned MaxViT
-        t_infer_start = time.perf_counter()
-        with torch.no_grad():
-            logits = self.model(tensor)
-        if torch is not None and torch.cuda.is_available() and self.device.type == "cuda":
-            torch.cuda.synchronize()
-        t_infer = time.perf_counter() - t_infer_start
-
-        # 3. Post-processing & Candidate Masking
-        t_post_start = time.perf_counter()
-        if allowed_ids is not None:
-            allowed_indices = [
-                idx for idx, sku in self.idx_to_sku.items() if sku in allowed_ids
-            ]
-            if not allowed_indices:
-                return None
-            mask = torch.full_like(logits, -float("inf"))
-            mask[:, allowed_indices] = logits[:, allowed_indices]
-            logits = mask
-
-        pred_idx = int(logits.argmax(dim=-1).item())
-        pred_sku = self.idx_to_sku.get(pred_idx)
-        meta = self.idx_to_meta.get(pred_idx, {})
-        probs = torch.softmax(logits, dim=-1)
-        k_cand = min(5, logits.shape[-1])
-        top_vals, top_inds = torch.topk(probs, k=k_cand, dim=-1)
-        top5 = []
-        for val, ind in zip(top_vals[0].tolist(), top_inds[0].tolist()):
-            c_sku = self.idx_to_sku.get(ind)
-            c_meta = self.idx_to_meta.get(ind, {})
-            top5.append({
-                "sku_id": c_sku,
-                "brand": c_meta.get("brand"),
-                "base_variant": c_meta.get("base_variant"),
-                "category": c_meta.get("category"),
-                "probability": round(float(val), 4),
-            })
-        conf = float(top_vals[0][0].item())
-        margin = float(top_vals[0][0].item() - top_vals[0][1].item()) if k_cand > 1 else 1.0
-        t_post = time.perf_counter() - t_post_start
-        t_total = t_prep + t_infer + t_post
-
-        # 4. Transparent 100% all-in cost calculation
-        cost_sheet = getattr(ctx, "sheet", None) if ctx else None
-        cost_breakdown = pricing.maxvit_all_in_cost(
-            infer_seconds=t_infer,
-            batch_size=1,
-            sheet=cost_sheet,
-        )
-
-        # 5. Bill compute unit to runner trace for catalog pricing audit
-        if ctx and hasattr(ctx, "bill") and callable(ctx.bill):
-            try:
-                ctx.bill("maxvit_compute_second", round(t_infer, 6))
-            except Exception:
-                pass
-
-        # 6. OpenTelemetry Span & Correlated Cloud Logging
-        span_attrs = {
+        initial_attrs = {
             "gen_ai.operation.name": "classify_crop",
             "gen_ai.provider.name": "google.maxvit",
             "gen_ai.request.model": MODEL_ARCH,
@@ -313,27 +249,95 @@ class MaxVitClassify(Approach):
             "shelf_bench.input_resolution": "224x224",
             "shelf_bench.num_classes": len(self.idx_to_sku),
             "shelf_bench.weights_source": GCS_MODEL_PATH,
-            "shelf_bench.latency.preprocess_ms": round(t_prep * 1000, 2),
-            "shelf_bench.latency.inference_ms": round(t_infer * 1000, 2),
-            "shelf_bench.latency.postprocess_ms": round(t_post * 1000, 2),
-            "shelf_bench.latency.total_ms": round(t_total * 1000, 2),
-            "shelf_bench.throughput.fps": round(1.0 / max(t_total, 1e-6), 1),
-            "shelf_bench.pred_sku_id": pred_sku,
-            "shelf_bench.confidence": round(conf, 4),
-            "shelf_bench.margin": round(margin, 4),
-            "shelf_bench.brand": meta.get("brand"),
-            "shelf_bench.base_variant": meta.get("base_variant"),
-            "shelf_bench.category": meta.get("category"),
-            "shelf_bench.packaging_type": meta.get("packaging_type"),
-            "shelf_bench.cost.token_cost_usd": 0.0,
-            "shelf_bench.cost.compute_cost_usd": round(cost_breakdown["compute_cost_usd"], 8),
-            "shelf_bench.cost.compute_cost_inr": round(cost_breakdown["compute_cost_inr"], 6),
-            "shelf_bench.cost.storage_cost_usd": round(cost_breakdown["storage_cost_usd"], 8),
-            "shelf_bench.cost.all_in_cost_usd": round(cost_breakdown["all_in_cost_usd"], 8),
-            "shelf_bench.cost.all_in_cost_inr": round(cost_breakdown["all_in_cost_inr"], 6),
         }
 
-        with telemetry.span(f"maxvit {MODEL_ARCH}", parent=otel_parent, **span_attrs) as span:
+        with telemetry.span(f"maxvit {MODEL_ARCH}", parent=otel_parent, **initial_attrs) as span:
+            # 1. Image preprocessing
+            t_prep_start = time.perf_counter()
+            rgb_img = image.convert("RGB")
+            tensor = self.transform(rgb_img).unsqueeze(0).to(self.device)
+            t_prep = time.perf_counter() - t_prep_start
+
+            # 2. Forward inference through fine-tuned MaxViT
+            t_infer_start = time.perf_counter()
+            with torch.no_grad():
+                logits = self.model(tensor)
+            if torch is not None and torch.cuda.is_available() and self.device.type == "cuda":
+                torch.cuda.synchronize()
+            t_infer = time.perf_counter() - t_infer_start
+
+            # 3. Post-processing & Candidate Masking
+            t_post_start = time.perf_counter()
+            if allowed_ids is not None:
+                allowed_indices = [
+                    idx for idx, sku in self.idx_to_sku.items() if sku in allowed_ids
+                ]
+                if not allowed_indices:
+                    return None
+                mask = torch.full_like(logits, -float("inf"))
+                mask[:, allowed_indices] = logits[:, allowed_indices]
+                logits = mask
+
+            pred_idx = int(logits.argmax(dim=-1).item())
+            pred_sku = self.idx_to_sku.get(pred_idx)
+            meta = self.idx_to_meta.get(pred_idx, {})
+            probs = torch.softmax(logits, dim=-1)
+            k_cand = min(5, logits.shape[-1])
+            top_vals, top_inds = torch.topk(probs, k=k_cand, dim=-1)
+            top5 = []
+            for val, ind in zip(top_vals[0].tolist(), top_inds[0].tolist()):
+                c_sku = self.idx_to_sku.get(ind)
+                c_meta = self.idx_to_meta.get(ind, {})
+                top5.append({
+                    "sku_id": c_sku,
+                    "brand": c_meta.get("brand"),
+                    "base_variant": c_meta.get("base_variant"),
+                    "category": c_meta.get("category"),
+                    "probability": round(float(val), 4),
+                })
+            conf = float(top_vals[0][0].item())
+            margin = float(top_vals[0][0].item() - top_vals[0][1].item()) if k_cand > 1 else 1.0
+            t_post = time.perf_counter() - t_post_start
+            t_total = t_prep + t_infer + t_post
+
+            # 4. Transparent 100% all-in cost calculation
+            cost_sheet = getattr(ctx, "sheet", None) if ctx else None
+            cost_breakdown = pricing.maxvit_all_in_cost(
+                infer_seconds=t_infer,
+                batch_size=1,
+                sheet=cost_sheet,
+            )
+
+            # 5. Bill compute unit to runner trace for catalog pricing audit
+            if ctx and hasattr(ctx, "bill") and callable(ctx.bill):
+                try:
+                    ctx.bill("maxvit_compute_second", round(t_infer, 6))
+                except Exception:
+                    pass
+
+            # 6. Update OpenTelemetry Span Attributes & Cloud Logging
+            span_attrs = {
+                "shelf_bench.latency.preprocess_ms": round(t_prep * 1000, 2),
+                "shelf_bench.latency.inference_ms": round(t_infer * 1000, 2),
+                "shelf_bench.latency.postprocess_ms": round(t_post * 1000, 2),
+                "shelf_bench.latency.total_ms": round(t_total * 1000, 2),
+                "shelf_bench.throughput.fps": round(1.0 / max(t_total, 1e-6), 1),
+                "shelf_bench.pred_sku_id": pred_sku,
+                "shelf_bench.confidence": round(conf, 4),
+                "shelf_bench.margin": round(margin, 4),
+                "shelf_bench.brand": meta.get("brand"),
+                "shelf_bench.base_variant": meta.get("base_variant"),
+                "shelf_bench.category": meta.get("category"),
+                "shelf_bench.packaging_type": meta.get("packaging_type"),
+                "shelf_bench.cost.token_cost_usd": 0.0,
+                "shelf_bench.cost.compute_cost_usd": round(cost_breakdown["compute_cost_usd"], 8),
+                "shelf_bench.cost.compute_cost_inr": round(cost_breakdown["compute_cost_inr"], 6),
+                "shelf_bench.cost.storage_cost_usd": round(cost_breakdown["storage_cost_usd"], 8),
+                "shelf_bench.cost.all_in_cost_usd": round(cost_breakdown["all_in_cost_usd"], 8),
+                "shelf_bench.cost.all_in_cost_inr": round(cost_breakdown["all_in_cost_inr"], 6),
+            }
+            telemetry.set_attrs(span, span_attrs)
+
             telemetry.log(
                 span,
                 "maxvit_prediction",
@@ -409,78 +413,7 @@ class MaxVitClassify(Approach):
 
         otel_parent = getattr(ctx, "otel_parent", None) if ctx else None
 
-        # 1. Batch cropping and tensor preprocessing
-        t_prep_start = time.perf_counter()
-        crops = [crop(image, b).convert("RGB") for b in boxes]
-        batch_tensors = [self.transform(c) for c in crops]
-        batch = torch.stack(batch_tensors).to(self.device)
-        t_prep = time.perf_counter() - t_prep_start
-
-        # 2. Batch forward inference
-        t_infer_start = time.perf_counter()
-        with torch.no_grad():
-            batch_logits = self.model(batch)
-        if torch is not None and torch.cuda.is_available() and self.device.type == "cuda":
-            torch.cuda.synchronize()
-        t_infer = time.perf_counter() - t_infer_start
-
-        # 3. Batch post-processing
-        t_post_start = time.perf_counter()
-        preds: list[int | None] = []
-        batch_probs = torch.softmax(batch_logits, dim=-1)
-        k_cand = min(5, batch_logits.shape[-1])
-        top_vals, top_inds = torch.topk(batch_probs, k=k_cand, dim=-1)
-        per_box_info = []
-
-        for i, box in enumerate(boxes):
-            p_idx = int(batch_logits[i].argmax(dim=-1).item())
-            p_sku = self.idx_to_sku.get(p_idx)
-            preds.append(p_sku)
-            meta = self.idx_to_meta.get(p_idx, {})
-            conf = float(top_vals[i, 0].item())
-            margin = float(top_vals[i, 0].item() - top_vals[i, 1].item()) if k_cand > 1 else 1.0
-            top5 = []
-            for val, ind in zip(top_vals[i].tolist(), top_inds[i].tolist()):
-                c_sku = self.idx_to_sku.get(ind)
-                c_meta = self.idx_to_meta.get(ind, {})
-                top5.append({
-                    "sku_id": c_sku,
-                    "brand": c_meta.get("brand"),
-                    "base_variant": c_meta.get("base_variant"),
-                    "category": c_meta.get("category"),
-                    "probability": round(float(val), 4),
-                })
-            per_box_info.append({
-                "box_index": i,
-                "box": [round(v, 1) for v in box],
-                "sku_id": p_sku,
-                "confidence": round(conf, 4),
-                "margin": round(margin, 4),
-                "brand": meta.get("brand"),
-                "base_variant": meta.get("base_variant"),
-                "category": meta.get("category"),
-                "top5": top5,
-            })
-        t_post = time.perf_counter() - t_post_start
-        t_total = t_prep + t_infer + t_post
-
-        # 4. Transparent 100% all-in cost calculation for the shelf batch
-        cost_sheet = getattr(ctx, "sheet", None) if ctx else None
-        cost_breakdown = pricing.maxvit_all_in_cost(
-            infer_seconds=t_infer,
-            batch_size=len(boxes),
-            sheet=cost_sheet,
-        )
-
-        # 5. Bill compute unit to runner trace
-        if ctx and hasattr(ctx, "bill") and callable(ctx.bill):
-            try:
-                ctx.bill("maxvit_compute_second", round(t_infer, 6))
-            except Exception:
-                pass
-
-        # 6. OpenTelemetry Batch Span & Cloud Logging
-        batch_span_attrs = {
+        initial_batch_attrs = {
             "gen_ai.operation.name": "classify_shelf_boxes",
             "gen_ai.provider.name": "google.maxvit",
             "gen_ai.request.model": MODEL_ARCH,
@@ -490,21 +423,96 @@ class MaxVitClassify(Approach):
             "shelf_bench.batch_size": len(boxes),
             "shelf_bench.input_resolution": "224x224",
             "shelf_bench.num_classes": len(self.idx_to_sku),
-            "shelf_bench.latency.preprocess_ms": round(t_prep * 1000, 2),
-            "shelf_bench.latency.inference_ms": round(t_infer * 1000, 2),
-            "shelf_bench.latency.postprocess_ms": round(t_post * 1000, 2),
-            "shelf_bench.latency.total_ms": round(t_total * 1000, 2),
-            "shelf_bench.throughput.fps": round(len(boxes) / max(t_total, 1e-6), 1),
-            "shelf_bench.cost.token_cost_usd": 0.0,
-            "shelf_bench.cost.compute_cost_usd": round(cost_breakdown["compute_cost_usd"], 8),
-            "shelf_bench.cost.compute_cost_inr": round(cost_breakdown["compute_cost_inr"], 6),
-            "shelf_bench.cost.storage_cost_usd": round(cost_breakdown["storage_cost_usd"], 8),
-            "shelf_bench.cost.all_in_cost_usd": round(cost_breakdown["all_in_cost_usd"], 8),
-            "shelf_bench.cost.all_in_cost_inr": round(cost_breakdown["all_in_cost_inr"], 6),
-            "shelf_bench.cost.per_crop_inr": round(cost_breakdown["per_crop_inr"], 6),
         }
 
-        with telemetry.span(f"maxvit_batch {MODEL_ARCH}", parent=otel_parent, **batch_span_attrs) as span:
+        with telemetry.span(f"maxvit_batch {MODEL_ARCH}", parent=otel_parent, **initial_batch_attrs) as span:
+            # 1. Batch cropping and tensor preprocessing
+            t_prep_start = time.perf_counter()
+            crops = [crop(image, b).convert("RGB") for b in boxes]
+            batch_tensors = [self.transform(c) for c in crops]
+            batch = torch.stack(batch_tensors).to(self.device)
+            t_prep = time.perf_counter() - t_prep_start
+
+            # 2. Batch forward inference
+            t_infer_start = time.perf_counter()
+            with torch.no_grad():
+                batch_logits = self.model(batch)
+            if torch is not None and torch.cuda.is_available() and self.device.type == "cuda":
+                torch.cuda.synchronize()
+            t_infer = time.perf_counter() - t_infer_start
+
+            # 3. Batch post-processing
+            t_post_start = time.perf_counter()
+            preds: list[int | None] = []
+            batch_probs = torch.softmax(batch_logits, dim=-1)
+            k_cand = min(5, batch_logits.shape[-1])
+            top_vals, top_inds = torch.topk(batch_probs, k=k_cand, dim=-1)
+            per_box_info = []
+
+            for i, box in enumerate(boxes):
+                p_idx = int(batch_logits[i].argmax(dim=-1).item())
+                p_sku = self.idx_to_sku.get(p_idx)
+                preds.append(p_sku)
+                meta = self.idx_to_meta.get(p_idx, {})
+                conf = float(top_vals[i, 0].item())
+                margin = float(top_vals[i, 0].item() - top_vals[i, 1].item()) if k_cand > 1 else 1.0
+                top5 = []
+                for val, ind in zip(top_vals[i].tolist(), top_inds[i].tolist()):
+                    c_sku = self.idx_to_sku.get(ind)
+                    c_meta = self.idx_to_meta.get(ind, {})
+                    top5.append({
+                        "sku_id": c_sku,
+                        "brand": c_meta.get("brand"),
+                        "base_variant": c_meta.get("base_variant"),
+                        "category": c_meta.get("category"),
+                        "probability": round(float(val), 4),
+                    })
+                per_box_info.append({
+                    "box_index": i,
+                    "box": [round(v, 1) for v in box],
+                    "sku_id": p_sku,
+                    "confidence": round(conf, 4),
+                    "margin": round(margin, 4),
+                    "brand": meta.get("brand"),
+                    "base_variant": meta.get("base_variant"),
+                    "category": meta.get("category"),
+                    "top5": top5,
+                })
+            t_post = time.perf_counter() - t_post_start
+            t_total = t_prep + t_infer + t_post
+
+            # 4. Transparent 100% all-in cost calculation for the shelf batch
+            cost_sheet = getattr(ctx, "sheet", None) if ctx else None
+            cost_breakdown = pricing.maxvit_all_in_cost(
+                infer_seconds=t_infer,
+                batch_size=len(boxes),
+                sheet=cost_sheet,
+            )
+
+            # 5. Bill compute unit to runner trace
+            if ctx and hasattr(ctx, "bill") and callable(ctx.bill):
+                try:
+                    ctx.bill("maxvit_compute_second", round(t_infer, 6))
+                except Exception:
+                    pass
+
+            # 6. OpenTelemetry Batch Span Attributes & Cloud Logging
+            batch_span_attrs = {
+                "shelf_bench.latency.preprocess_ms": round(t_prep * 1000, 2),
+                "shelf_bench.latency.inference_ms": round(t_infer * 1000, 2),
+                "shelf_bench.latency.postprocess_ms": round(t_post * 1000, 2),
+                "shelf_bench.latency.total_ms": round(t_total * 1000, 2),
+                "shelf_bench.throughput.fps": round(len(boxes) / max(t_total, 1e-6), 1),
+                "shelf_bench.cost.token_cost_usd": 0.0,
+                "shelf_bench.cost.compute_cost_usd": round(cost_breakdown["compute_cost_usd"], 8),
+                "shelf_bench.cost.compute_cost_inr": round(cost_breakdown["compute_cost_inr"], 6),
+                "shelf_bench.cost.storage_cost_usd": round(cost_breakdown["storage_cost_usd"], 8),
+                "shelf_bench.cost.all_in_cost_usd": round(cost_breakdown["all_in_cost_usd"], 8),
+                "shelf_bench.cost.all_in_cost_inr": round(cost_breakdown["all_in_cost_inr"], 6),
+                "shelf_bench.cost.per_crop_inr": round(cost_breakdown["per_crop_inr"], 6),
+            }
+            telemetry.set_attrs(span, batch_span_attrs)
+
             telemetry.log(
                 span,
                 "maxvit_batch_prediction",
