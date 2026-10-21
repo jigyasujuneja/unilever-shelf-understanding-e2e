@@ -1,13 +1,16 @@
 # Architectural Review & Executive Decision: Google MaxViT-Tiny (`MaxVIT` Branch) vs. Production Hybrid Cascade
 
-**Document Status:** Final Technical Audit & Decision (Updated Post-Implementation of PR Fixes)  
+**Document Status:** Final Technical Audit & Decision (Updated Post-Implementation of PR Fixes & Benchmark Reruns)  
 **Target Repository:** `marketshare_poc` (Git Branch: `MaxVIT` targeting `main`)  
-**Corroborated Run IDs:**
+**Corroborated Run IDs & Traces:**
 - Baseline Prototype: [`1019-174125-maxvit_classify-maxvit_tiny_tf_224-hul_variants`](file:///home/riley_gavigan/marketshare_poc/results/1019-174125-maxvit_classify-maxvit_tiny_tf_224-hul_variants/summary.json)
 - 1,000-Crop Test Benchmark: [`1021-121329-maxvit_classify-maxvit_tiny_tf_224-hul_golden`](file:///home/riley_gavigan/marketshare_poc/results/1021-121329-maxvit_classify-maxvit_tiny_tf_224-hul_golden/summary.json)
 - Telemetry & Cost Transparency Verification: [`1021-124936-maxvit_classify-maxvit_tiny_tf_224-hul_golden`](file:///home/riley_gavigan/marketshare_poc/results/1021-124936-maxvit_classify-maxvit_tiny_tf_224-hul_golden/summary.json)
 - Unified 5,000-Sample Stratified Local Benchmark: [`1021-131533-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all`](file:///home/riley_gavigan/marketshare_poc/results/1021-131533-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all/summary.json)
 - Unified 5,000-Sample Cloud Run Job Benchmark: [`1021-134829-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all`](file:///home/riley_gavigan/marketshare_poc/results/1021-134829-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all/summary.json)
+  - [Cloud Trace Waterfall (5k Run)](https://console.cloud.google.com/traces/explorer;traceId=3b9e86ee6d4d8677268775dd585f1a12?project=ul-fs-s-sandbx-16-prj)
+- Clean Non-Trained Held-Out Test Rerun ($N=1,000$, Post-Telemetry Fix): [`1021-154920-maxvit_classify-maxvit_tiny_tf_224-hul_golden`](file:///home/riley_gavigan/marketshare_poc/results/1021-154920-maxvit_classify-maxvit_tiny_tf_224-hul_golden/summary.json)
+  - [Cloud Trace Waterfall (1k Clean Test Rerun)](https://console.cloud.google.com/traces/explorer;traceId=020e1b23fb99232b96d4186dde0787a1?project=ul-fs-s-sandbx-16-prj)
 
 ---
 
@@ -74,8 +77,68 @@ From the official experiment log in [`MaxVIT_tiny_224_experiment.txt`](file:///h
 * **Epoch 3:** Train Acc: 77.66% | Val Acc: 70.58% | Val Loss: 2.8301
 * **Epoch 5:** Train Acc: **92.53%** | Val Acc: **74.95%** | Val Loss: 2.6071
 
-> [!WARNING]
-> Between Epoch 3 and Epoch 5, training accuracy advanced by **+14.87%**, while validation accuracy only improved by **+4.37%** and validation loss began plateauing. The resulting **17.58% generalization gap** is a classic signature of vision transformer overparameterization on low-data classes.
+### 3. Forensic Dissection of the 5,000-Crop Cloud Run Benchmark (`1021-134829`)
+
+To stress-test MaxViT at scale, a 5,000-crop evaluation was dispatched to Cloud Run (`shelf-bench-2wzk7` in `us-central1`) using `--dataset hul_golden --split all --limit 5000`.
+
+The headline metrics appeared exceptionally high:
+* **Evaluated Samples:** 5,000 crops
+* **Exact SKU Accuracy:** **93.60%** (4,680 / 5,000)
+* **Brand Accuracy:** **97.10%**
+* **HUL Attribution (`is_hul`):** **99.14%**
+* **Facing Share-of-Shelf (SoS) Error:** **0.66%**
+* **Compute Unit Cost:** **$0.0000193 USD (~₹0.0018 INR)** per image, 0 VLM tokens.
+* **Trace URL:** [Cloud Trace 3b9e86ee6d4d8677268775dd585f1a12](https://console.cloud.google.com/traces/explorer;traceId=3b9e86ee6d4d8677268775dd585f1a12?project=ul-fs-s-sandbx-16-prj)
+
+#### The Leakage Discovery: Why 93.60% is an Overfitted Metric
+A forensic row-by-row audit across all 5,000 entries in [`images.jsonl`](file:///home/riley_gavigan/marketshare_poc/results/1021-134829-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all/images.jsonl) revealed severe train-set contamination caused by using `--split all`:
+
+| Dataset Split Origin | Sample Count in Run | Evaluated Share | Exact SKU Accuracy | What it Represents |
+| :--- | :---: | :---: | :---: | :--- |
+| **`train` Split** | **4,031 crops** | **80.6%** | **95.26%** (3,840 / 4,031) | Memorized training data |
+| **`test` Split** | **486 crops** | **9.7%** | **87.24%** (424 / 486) | Truly unseen held-out test data |
+| **`val` Split** | **483 crops** | **9.7%** | **86.13%** (416 / 483) | Truly unseen held-out validation data |
+| **Combined (`all`)** | **5,000 crops** | **100.0%** | **93.60%** (4,680 / 5,000) | Blended aggregate |
+
+Because the model was evaluated on samples where 80.6% were present during fine-tuning, the **8.5% generalization gap** between train (95.3%) and test/val (86.1%–87.2%) proves definitive memorization.
+
+---
+
+### 4. Clean Held-Out Test Rerun ($N=1,000$, `1021-154920`)
+
+To establish the genuine, non-contaminated performance of MaxViT on unseen packaging, a clean evaluation was rerun strictly on the held-out `test` split ($N = 1,000$):
+
+* **Run ID:** [`1021-154920-maxvit_classify-maxvit_tiny_tf_224-hul_golden`](file:///home/riley_gavigan/marketshare_poc/results/1021-154920-maxvit_classify-maxvit_tiny_tf_224-hul_golden/summary.json)
+* **Dataset & Split:** `hul_golden` — **`split: test`** *(0 training images)*
+* **Exact SKU Accuracy:** **87.10%** (871 / 1,000 correct, 95% CI: `[84.9%, 89.0%]`)
+* **Hierarchical Accuracy:**
+  * Level 1 (`is_hul` attribution): **99.00%**
+  * Level 2 (`category` accuracy): **97.30%**
+  * Level 3 (`brand` accuracy): **96.80%**
+  * Level 4 (`base_variant` accuracy): **87.10%**
+  * Level 5 (`packaging_type` accuracy): **95.40%**
+  * Compound (Brand + Category + Pack): **94.20%**
+* **Facing Share-of-Shelf (SoS) Error:** **0.20%** (Pred SoS: 0.502 vs GT SoS: 0.500)
+* **Unit Economics:** **$0.0000204 USD (~₹0.00195 INR)** per image, 0 VLM tokens.
+* **Trace URL:** [Cloud Trace 020e1b23fb99232b96d4186dde0787a1](https://console.cloud.google.com/traces/explorer;traceId=020e1b23fb99232b96d4186dde0787a1?project=ul-fs-s-sandbx-16-prj)
+
+**Conclusion:** The true generalization baseline of MaxViT on unseen packaging crops is **87.10%**.
+
+---
+
+### 5. Model Provenance & Training Infrastructure Audit
+
+| Audit Item | Detailed Specification |
+| :--- | :--- |
+| **Model Author / Trainer** | Muthu Rattina Dhinesh (*LTIMindtree / Unilever*) |
+| **Training Date** | October 16–19, 2026 |
+| **Training Notebook** | [`MaxVITtraining.ipynb`](file:///home/riley_gavigan/marketshare_poc/MaxVITtraining.ipynb) |
+| **GCP Cloud Region** | **`us-central1-a`** (Iowa, USA) |
+| **Vertex AI Instance** | `projects/ul-fs-s-sandbx-16-prj/locations/us-central1-a/instances/instance-dhinesh` |
+| **Compute Hardware** | `n1-standard-32` (32 vCPUs, 120 GB RAM) with **1 × NVIDIA Tesla T4 GPU** |
+| **Runtime Container** | `us-docker.pkg.dev/deeplearning-platform-release/gcr.io/workbench-notebooks:m20261011-2130-rc0` |
+| **Target Retail Domain** | Hindustan Unilever Limited (HUL), Indian packaging retail catalog (1,922 classes) |
+| **Central Weights Storage** | `gs://marketshare-datasets/models/maxvit_variants/best_maxvit_brand_variant.pth` (Dual-Region Europe `EUR7`) |
 
 ---
 
@@ -149,6 +212,10 @@ During the initial review of the unmerged prototype, 5 defects were identified. 
   * Instrumented with nested child spans (`maxvit maxvit_tiny_tf_224` and `maxvit_batch maxvit_tiny_tf_224`) under the image span in Google Cloud Trace.
   * Structured JSON logs emitted via `telemetry.log()` tagged with `trace` and `span_id`.
   * Implemented `pricing.maxvit_all_in_cost()` calculating compute vCPU/RAM seconds, amortized GCS weights storage, $0.00 VLM tokens, and live GCP Billing Catalog API rates.
+
+### Defect 6: Trace Span Scoping & Sub-Pixel UI Culling in Cloud Trace
+* **Initial Issue:** In `maxvit_classify.py`, `with telemetry.span(...) as span:` was placed *after* preprocessing, CUDA forward passes, and post-processing were complete. The span only captured logging calls, resulting in a recorded duration of only ~0.05ms (50 microseconds). In the Google Cloud Trace UI waterfall, this sub-millisecond span fell below the sub-pixel rendering threshold and was culled from view unless zoomed to microsecond intervals.
+* **Resolution (Commit `47a8747`):** Refactored both `identify` and `identify_boxes` so `with telemetry.span(...)` cleanly wraps the entire execution lifecycle (preprocessing, CUDA inference, candidate masking, and postprocessing). Spans now reflect their authentic ~80ms–250ms duration and render visibly for 100% of images in Google Cloud Trace.
 
 ---
 
