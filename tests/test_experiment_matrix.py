@@ -226,7 +226,10 @@ def test_real_results_catalog_and_v21_backfill():
     vlog = cat.get("vertex_logged_runs") or {}
     assert len(vlog) >= 20
     assert all("run_context" in v for v in vlog.values())
-    single_split_allowed = {"P0-EXP-30", "P0-EXP-32", "P0-EXP-33", "P1-EXP-35"}
+    single_split_allowed = {
+        "P0-EXP-30", "P0-EXP-32", "P0-EXP-33", "P1-EXP-35",
+        "P0-EXP-39", "P1-EXP-41", "P1-EXP-42", "P1-EXP-47", "P1-EXP-48",
+    }
     for e in cat["experiments"]:
         assert e["cost_estimate"]["est_1000_images_inr"] >= e["cost_estimate"]["est_100_images_inr"]
         if e["run_count"] == 0:

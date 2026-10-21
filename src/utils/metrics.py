@@ -622,26 +622,26 @@ def compute_enrichment_buckets(
     extra_skus: set[int] = set()
     extra_brands: set[str] = set()
     extra_categories: set[str] = set()
-    if pred_ids is not None and catalog is not None:
+    if pred_ids is not None:
         for idx in extra_indices:
             pid = pred_ids[idx] if idx < len(pred_ids) else None
             if pid is None:
                 continue
-            meta = catalog.get(pid) or {}
+            meta = pid if isinstance(pid, dict) else ((catalog.get(pid) if catalog is not None else None) or {})
             if meta.get("sku_id") is not None:
                 extra_skus.add(int(meta["sku_id"]))
-            if meta.get("brand"):
+            if meta.get("brand") and str(meta.get("brand")) not in ("Others", "Unknown"):
                 extra_brands.add(str(meta["brand"]))
-            if meta.get("category"):
+            if meta.get("category") and str(meta.get("category")) not in ("Others", "Unknown"):
                 extra_categories.add(str(meta["category"]))
 
-    others_gt_total = sum(1 for g in (gt_labels or []) if bool(g.get("is_others_catchall")))
+    others_gt_total = sum(1 for g in (gt_labels or []) if isinstance(g, dict) and bool(g.get("is_others_catchall")))
     others_resolved = 0
-    if pairs and pred_ids is not None and catalog is not None and gt_labels is not None:
+    if pairs and pred_ids is not None and gt_labels is not None:
         for p_idx, g_idx in pairs.items():
-            if g_idx < len(gt_labels) and bool(gt_labels[g_idx].get("is_others_catchall")):
+            if g_idx < len(gt_labels) and isinstance(gt_labels[g_idx], dict) and bool(gt_labels[g_idx].get("is_others_catchall")):
                 pid = pred_ids[p_idx] if p_idx < len(pred_ids) else None
-                meta = catalog.get(pid) if pid is not None else None
+                meta = pid if isinstance(pid, dict) else (catalog.get(pid) if (catalog is not None and pid is not None) else None)
                 if meta and meta.get("brand") and str(meta.get("brand")) not in ("Others", "Unknown"):
                     others_resolved += 1
 
@@ -710,7 +710,7 @@ def compute_human_and_beyond_metrics(
 
     named_gt_indices = [
         j for j, g in enumerate(gt_labels)
-        if not bool(g.get("is_others_catchall"))
+        if isinstance(g, dict) and not bool(g.get("is_others_catchall"))
     ]
     named_gt_keys = {
         (str(gt_labels[j].get("brand") or "").lower(), str(gt_labels[j].get("base_variant") or gt_labels[j].get("product") or "").lower())
@@ -723,7 +723,7 @@ def compute_human_and_beyond_metrics(
     matched_total = len(eff_pairs)
 
     for p_idx, g_idx in eff_pairs.items():
-        if g_idx >= len(gt_labels):
+        if g_idx >= len(gt_labels) or not isinstance(gt_labels[g_idx], dict):
             continue
         gt = gt_labels[g_idx]
         pid = pred_ids[p_idx] if p_idx < len(pred_ids) else None
