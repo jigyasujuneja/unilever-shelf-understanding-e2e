@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "gen_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
         s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
                        help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
-    s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
+    s.add_argument("--split", default=d.get("split", "test"), choices=(*dataset.SPLITS, "all"))
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
     s.add_argument("--workers", type=int, default=d.get("workers", 4))
@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "gen_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
         s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
                        help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
-    s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
+    s.add_argument("--split", default=d.get("split", "test"), choices=(*dataset.SPLITS, "all"))
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
     s.add_argument("--workers", type=int, default=d.get("workers", 4))
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         help="export standalone legacy_mapping_table.jsonl or score joined legacy Brand (ABrand) + Pack (Category__PackType) + Variant predictions",
     )
     s.add_argument("-d", "--dataset", default="hul_golden", help="Golden dataset name (default: hul_golden)")
-    s.add_argument("--split", default="test", choices=dataset.SPLITS)
+    s.add_argument("--split", default="test", choices=(*dataset.SPLITS, "all"))
     s.add_argument("--root", default=None, help="Override dataset root directory or GCS URI")
     s.add_argument(
         "--export-mapping",
