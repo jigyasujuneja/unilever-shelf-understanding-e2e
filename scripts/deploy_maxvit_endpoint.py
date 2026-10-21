@@ -63,7 +63,13 @@ def register_model_if_missing(
                 "1,922-Class Variant Classifier on hul_variants."
             ),
             "artifactUri": artifact_uri,
-            "containerSpec": {"imageUri": container_uri},
+            "containerSpec": {
+                "imageUri": container_uri,
+                "args": ["serve"],
+                "ports": [{"containerPort": 8080}],
+                "predictRoute": "/api/predict",
+                "healthRoute": "/",
+            },
             "labels": {
                 "accuracy": "0-871",
                 "classes": "1922",

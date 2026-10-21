@@ -61,6 +61,10 @@ gcloud ai models upload \
   --display-name=marketshare-maxvit-tiny-tf-224 \
   --artifact-uri=gs://marketshare-datasets/models/maxvit_variants \
   --container-image-uri=us-central1-docker.pkg.dev/ul-fs-s-sandbx-16-prj/cloud-run-source-deploy/shelf-bench:latest \
+  --container-args="serve" \
+  --container-ports=8080 \
+  --container-health-route="/" \
+  --container-predict-route="/api/predict" \
   --description="[market_share/classification] Google MaxViT Tiny 1,922-Class Variant Classifier."
 ```
 
