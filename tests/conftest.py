@@ -62,7 +62,7 @@ def fake_sheet(models, promotions=()):
         "gemini": {m: table for m in models},
         "cloud_run": {"vcpu_second": {"usd": 1.8e-5}, "gib_second": {"usd": 2e-6}},
         "storage": {"class_a_op": {"usd": 5e-6}, "class_b_op": {"usd": 4e-7}},
-        "extra": {"embedding_image": {"usd": 1e-4}},
+        "extra": {"embedding_image": {"usd": 1e-4}, "maxvit_compute_second": {"usd": 1.8e-5}},
         "promotions": list(promotions),
     }
 

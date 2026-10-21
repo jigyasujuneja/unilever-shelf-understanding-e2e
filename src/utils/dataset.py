@@ -517,6 +517,10 @@ def load_split_jsonl(
 
 @lru_cache(maxsize=64)
 def load_rpc(split: str, root: str) -> dict[str, Sample]:
+    if split == "all":
+        cat = rpc_catalog(root)
+        rows = _rpc_split_rows("test", root) + _rpc_split_rows("val", root) + _rpc_split_rows("train", root)
+        return _rows_to_samples(rows, cat=cat, root=root)
     if split not in SPLITS:
         raise ValueError(f"the rpc dataset has splits {SPLITS}, got {split!r}")
     cat = rpc_catalog(root)

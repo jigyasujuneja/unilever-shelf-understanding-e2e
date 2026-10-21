@@ -642,7 +642,7 @@ def run(
     # The approach's own clients and indexes (embeddings, AlloyDB, ...). What it bills here is
     # a one-off setup cost (e.g. embedding a reference gallery), reported apart from cost/img.
     # Zero-leakage invariant: setup_ctx NEVER receives eval samples or test/val ground-truth labels.
-    setup_ctx = Context(model=model, llm=llm, price=price)
+    setup_ctx = Context(model=model, llm=llm, price=price, sheet=sheet)
     t_setup = time.perf_counter()
     appr.setup(config, setup_ctx)
     setup_s = time.perf_counter() - t_setup
@@ -711,7 +711,7 @@ def run(
         trace = Trace(span=span)
         ctx = Context(model=model, llm=llm, trace=trace,
                       otel_parent=telemetry.child_context(span), price=price,
-                      image_id=sample.image_id)
+                      image_id=sample.image_id, sheet=sheet)
         ctx.detected_asset_boxes = (
             list(getattr(sample, "asset_boxes", []) or [])
             if task == "planogram_compliance"

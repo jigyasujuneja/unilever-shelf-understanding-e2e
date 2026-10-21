@@ -144,6 +144,7 @@ class Context:
     color_image: Image.Image | None = None
     detected_fixture_type: str | None = None
     image_id: str | None = None
+    sheet: dict | None = None
 
     def ask(self, image: Image.Image, prompt: str, **kw) -> LLMResult:
         """Call the run's Gemini model. kw: schema=<JSON schema>, max_side=<px downscale>.
