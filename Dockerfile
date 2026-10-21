@@ -6,6 +6,8 @@ COPY experiments ./experiments
 COPY scripts ./scripts
 # Optional pip extras, e.g. --build-arg EXTRAS=cv (TensorFlow for the legacy CV prediction server)
 ARG EXTRAS=
-RUN mkdir -p /app/results && pip install --no-cache-dir ".${EXTRAS:+[$EXTRAS]}"
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir timm \
+    && mkdir -p /app/results && pip install --no-cache-dir ".${EXTRAS:+[$EXTRAS]}"
 ENV PYTHONUNBUFFERED=1 SHELF_BENCH_CONFIG=/app/config.yaml
 ENTRYPOINT ["shelf-bench"]
