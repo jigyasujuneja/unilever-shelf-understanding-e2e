@@ -2862,6 +2862,8 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
     run_to_experiments: dict[str, list[dict[str, Any]]] = {}
 
     golden_ds_set = {
+        "mt_json_golden",
+        "hul_talkers_golden",
         "hul_golden",
         "gtmerch_golden",
         "ms_json_golden",
@@ -2917,10 +2919,10 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                 ds == exp["dataset"]
                 or (exp["dataset"] in ("hul_sessions", "gt_hul_sessions") and ds in ("hul_sessions", "gt_hul_sessions"))
                 or (exp["dataset"] == "hul_golden" and ds in ("hul_golden", "hul_variants", "hul_packs", "hul_brands", "hul_sessions", "gt_hul_sessions"))
-                or (exp["dataset"] == "gtmerch_golden" and ds in ("gtmerch_golden", "ms_json_golden", "hul_sessions", "gt_hul_sessions", "hul_golden"))
-                or (exp["dataset"] == "ms_json_golden" and ds in ("ms_json_golden", "gtmerch_golden", "hul_sessions", "gt_hul_sessions", "hul_golden"))
-                or (exp["dataset"] in ("hul_promos", "hul_sessions", "gt_hul_sessions", "hul_brands") and ds in (exp["dataset"], "hul_sessions", "gt_hul_sessions", "hul_golden", "gtmerch_golden", "ms_json_golden"))
-            ) and (tk == exp["task"] or (exp["dataset"] in ("hul_golden", "gtmerch_golden", "ms_json_golden", "hul_sessions", "gt_hul_sessions") and ap in exp["approaches"])):
+                or (exp["dataset"] == "gtmerch_golden" and ds in ("gtmerch_golden", "ms_json_golden", "mt_json_golden", "hul_sessions", "gt_hul_sessions", "hul_golden"))
+                or (exp["dataset"] in ("ms_json_golden", "mt_json_golden") and ds in ("ms_json_golden", "mt_json_golden", "gtmerch_golden", "hul_sessions", "gt_hul_sessions", "hul_golden"))
+                or (exp["dataset"] in ("hul_promos", "hul_talkers_golden", "hul_sessions", "gt_hul_sessions", "hul_brands") and ds in (exp["dataset"], "hul_promos", "hul_talkers_golden", "hul_sessions", "gt_hul_sessions", "hul_golden", "gtmerch_golden", "ms_json_golden"))
+            ) and (tk == exp["task"] or (exp["dataset"] in ("hul_golden", "gtmerch_golden", "ms_json_golden", "mt_json_golden", "hul_talkers_golden", "hul_promos", "hul_sessions", "gt_hul_sessions") and ap in exp["approaches"])):
                 fa = s.get("field_accuracy") or {}
                 hier = s.get("hierarchical_accuracy") or {}
                 macro = s.get("macro_accuracy") or {}
