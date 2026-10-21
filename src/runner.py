@@ -935,7 +935,8 @@ def run(
                 )
         g = price(trace.usage)
         s_usd = pricing.extra_cost(trace.billed, sheet)
-        return {
+        contract_err = classify_contract_error(error, trace.steps, latency)
+        row_out = {
             "image_id": sample.image_id,
             "width": sample.width,
             "height": sample.height,
@@ -950,11 +951,14 @@ def run(
             "billed": trace.billed,
             "cost_list_usd": g["list_usd"],  # Gemini, catalog list price
             "error": error,
+            "contract_error": contract_err,
             "preds": [[round(v, 1) for v in b] for b in preds],
             "matched": m["matched"],
             "steps": trace.steps,
             **extra,
         }
+        row_out["p2p_policy_gate"] = evaluate_p2p_payout_policy_gate(row_out)
+        return row_out
 
     try:
         rows: list[dict] = []
@@ -1700,17 +1704,97 @@ def push(
     return n
 
 
+def classify_contract_error(
+    error_str: str | None,
+    steps: list[dict] | None = None,
+    latency_s: float = 0.0,
+) -> str | None:
+    """Classify infrastructure, timeout, or structured-output contract errors separately from model reasoning misses."""
+    if error_str:
+        low = str(error_str).lower()
+        if any(k in low for k in ("deadline", "timed out", "timeout")):
+            return "api_timeout"
+        if any(k in low for k in ("429", "resource_exhausted", "quota")):
+            return "rate_limit_exhausted"
+        return "runtime_exception"
+    for st in steps or []:
+        if not isinstance(st, dict):
+            continue
+        for c in st.get("calls") or []:
+            if not isinstance(c, dict):
+                continue
+            ce = c.get("contract_error")
+            if ce:
+                return str(ce)
+            if c.get("truncated"):
+                return "truncated_max_tokens"
+    if latency_s > 180.0:
+        return "pt180s_sla_exceeded"
+    return None
+
+
+def evaluate_p2p_payout_policy_gate(row: dict, sla_seconds: float = 180.0) -> dict:
+    """Deterministic P2P Store Payout Blast-Radius Gate (Ch. 2 & Ch. 8).
+
+    In Unilever P2P compliance (``W_1 = W_4 * W_5 / 100``), a timeout (> 180s) or infrastructure/contract
+    fault must never auto-zero a store representative's payout (``Earning = 0``). Quarantines faulted
+    sessions for retry/spillover while preserving store payout eligibility.
+    """
+    err = row.get("error")
+    lat = float(row.get("latency_s", 0.0) or 0.0)
+    c_err = row.get("contract_error") or classify_contract_error(err, row.get("steps"), lat)
+    if err or c_err or lat > sla_seconds:
+        reason = str(c_err or ("pt180s_sla_exceeded" if lat > sla_seconds else "runtime_exception"))
+        return {
+            "action": "quarantine_retry_preserve_payout",
+            "zero_payout_blocked": True,
+            "reason": reason,
+            "sla_seconds": sla_seconds,
+        }
+    return {
+        "action": "allow_payout_scoring",
+        "zero_payout_blocked": False,
+        "reason": "ok",
+        "sla_seconds": sla_seconds,
+    }
+
+
 def summarize(rows: list[dict]) -> dict:
     tp, fp, fn = (sum(r[k] for r in rows) for k in ("tp", "fp", "fn"))
     lat = [r["latency_s"] for r in rows]
     usage = Usage()
+    by_contract_err: dict[str, int] = {}
+    valid_rows: list[dict] = []
+    quarantined = 0
     for r in rows:
         usage = usage + Usage(**r["usage"])
+        ce = r.get("contract_error") or classify_contract_error(
+            r.get("error"), r.get("steps"), float(r.get("latency_s", 0.0) or 0.0)
+        )
+        if ce:
+            by_contract_err[ce] = by_contract_err.get(ce, 0) + 1
+        elif not r.get("error"):
+            valid_rows.append(r)
+        gate = r.get("p2p_policy_gate") or evaluate_p2p_payout_policy_gate(r)
+        if gate.get("zero_payout_blocked"):
+            quarantined += 1
+    v_tp = sum(r["tp"] for r in valid_rows)
+    v_fp = sum(r["fp"] for r in valid_rows)
+    v_fn = sum(r["fn"] for r in valid_rows)
+    v_scores = metrics.scores(v_tp, v_fp, v_fn) if valid_rows else {"accuracy": 0.0, "f2": 0.0}
     return {
         "images": len(rows),
         "errors": sum(1 for r in rows if r["error"]),
         "tp": tp, "fp": fp, "fn": fn,
         **{k: round(v, 4) for k, v in metrics.scores(tp, fp, fn).items()},
+        "contract_errors": {
+            "total_contract_errors": sum(by_contract_err.values()),
+            "by_type": by_contract_err,
+            "valid_response_images": len(valid_rows),
+            "valid_response_accuracy": round(v_scores["accuracy"], 4),
+            "valid_response_f2": round(v_scores["f2"], 4),
+            "p2p_quarantined_images": quarantined,
+        },
         "p50_latency_s": round(metrics.percentile(lat, 50), 3),
         "p95_latency_s": round(metrics.percentile(lat, 95), 3),
         "p99_latency_s": round(metrics.percentile(lat, 99), 3),

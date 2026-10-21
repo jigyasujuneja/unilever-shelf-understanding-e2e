@@ -190,16 +190,47 @@ def image_to_jpeg(img: Image.Image, max_side: int | None = None) -> bytes:
     return buf.getvalue()
 
 
-def parse_json(text: str) -> Any:
-    """Parse model JSON, tolerating ```json fences and trailing truncation of long box lists."""
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+def wrap_untrusted_shelf_text(raw_text: str | None) -> str:
+    """Isolate untrusted OCR / shelf-extracted text inside <untrusted_context> delimiters (Ch. 3A).
+
+    Neutralizes any embedded closing delimiter tags so adversarial or noisy shelf text cannot
+    break out of the data boundary and override structured output instructions.
+    """
+    if not raw_text:
+        return "<untrusted_context></untrusted_context>"
+    sanitized = re.sub(r"</?\s*untrusted_context\s*>", "[filtered_tag]", str(raw_text), flags=re.I)
+    return f"<untrusted_context>{sanitized}</untrusted_context>"
+
+
+def parse_json_with_status(text: str, *, truncated: bool = False) -> tuple[Any, str]:
+    """Parse model JSON and return ``(parsed_data, contract_status)``.
+
+    Distinguishes clean JSON responses (``'ok'``) from contract/truncation errors
+    (``'empty_response'``, ``'truncated_max_tokens'``, ``'truncated_max_tokens_box_salvage'``,
+    ``'json_parse_box_salvage'``, ``'json_parse_error'``).
+    """
+    if not text or not text.strip():
+        return [], "empty_response"
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     try:
-        return json.loads(text)
+        parsed = json.loads(cleaned)
+        return parsed, ("truncated_max_tokens" if truncated else "ok")
     except json.JSONDecodeError:
         # Output hit the token limit mid-list: keep every complete [a,b,c,d] we got.
-        quads = re.findall(r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,"
-                           r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]", text)
-        return [[float(v) for v in q] for q in quads]
+        quads = re.findall(
+            r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,"
+            r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]",
+            cleaned,
+        )
+        boxes = [[float(v) for v in q] for q in quads]
+        if boxes:
+            return boxes, ("truncated_max_tokens_box_salvage" if truncated else "json_parse_box_salvage")
+        return [], ("truncated_max_tokens" if truncated else "json_parse_error")
+
+
+def parse_json(text: str) -> Any:
+    """Parse model JSON, tolerating ```json fences and trailing truncation of long box lists."""
+    return parse_json_with_status(text)[0]
 
 
 TIERS = ("standard", "priority", "flex")
@@ -368,18 +399,24 @@ class Gemini:
                 ]
                 lp_steps.append({"token": str(tok), "logprob": round(float(lp), 5), "top": top_list})
 
+        finish_hf = choice0.get("finish_reason")
+        is_trunc_hf = str(finish_hf or "").lower() in ("length", "max_tokens")
+        parsed_hf, status_hf = parse_json_with_status(text, truncated=is_trunc_hf) if text else ([], "empty_response")
         meta: dict[str, Any] = {
             "attempts": 1,
             "model_version": hf_repo,
-            "finish_reason": choice0.get("finish_reason"),
+            "finish_reason": finish_hf,
             "tier_requested": self.tier,
             "temperature": 0.0,
             "image_bytes": len(jpeg),
             "response_chars": len(text),
+            "truncated": is_trunc_hf,
+            "contract_status": status_hf,
+            "contract_error": None if status_hf == "ok" else status_hf,
         }
         if lp_steps:
             meta["logprobs"] = lp_steps
-        return LLMResult(parse_json(text) if text else [], usage, seconds, text, meta)
+        return LLMResult(parsed_hf, usage, seconds, text, meta)
 
     def __call__(
         self,
@@ -466,6 +503,8 @@ class Gemini:
         cand = (resp.candidates or [None])[0]
         finish = getattr(getattr(cand, "finish_reason", None), "name", None)
         lp_steps = serialize_logprobs(getattr(cand, "logprobs_result", None))
+        is_trunc = finish == "MAX_TOKENS"
+        parsed_data, contract_status = parse_json_with_status(text, truncated=is_trunc)
         meta = {
             "attempts": attempt + 1,
             "retry_errors": retries_seen,
@@ -480,11 +519,13 @@ class Gemini:
             "image_bytes": len(jpeg),
             "response_chars": len(text),
             # Output hit max_output_tokens: parse_json kept only the complete boxes.
-            "truncated": finish == "MAX_TOKENS",
+            "truncated": is_trunc,
+            "contract_status": contract_status,
+            "contract_error": None if contract_status == "ok" else contract_status,
         }
         if lp_steps:
             meta["logprobs"] = lp_steps
-        return LLMResult(parse_json(text) if text else [], usage, seconds, text, meta)
+        return LLMResult(parsed_data, usage, seconds, text, meta)
 
 
 def _retryable(e: Exception) -> bool:
