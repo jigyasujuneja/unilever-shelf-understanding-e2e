@@ -961,10 +961,40 @@ def run(
         return row_out
 
     try:
+        import threading
+
+        ckpt_env = os.environ.get("SHELF_BENCH_CHECKPOINT_FILE", "").strip()
+        ckpt_path = Path(ckpt_env).resolve() if ckpt_env else None
+        ckpt_rows: dict[str, dict] = {}
+        if ckpt_path is not None and ckpt_path.is_file():
+            for line in ckpt_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    r_obj = json.loads(line)
+                    if isinstance(r_obj, dict) and r_obj.get("image_id") and not r_obj.get("error"):
+                        ckpt_rows[str(r_obj["image_id"])] = r_obj
+                except Exception:
+                    continue
+        ckpt_lock = threading.Lock()
+
+        def one_or_ckpt(sample: Sample) -> dict:
+            if sample.image_id in ckpt_rows:
+                cached_row = dict(ckpt_rows[sample.image_id])
+                cached_row["resumed_from_checkpoint"] = True
+                return cached_row
+            row_val = one(sample)
+            if ckpt_path is not None and not row_val.get("error"):
+                with ckpt_lock:
+                    ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+                    with ckpt_path.open("a", encoding="utf-8") as cf:
+                        cf.write(json.dumps(row_val) + "\n")
+            return row_val
+
         rows: list[dict] = []
         t_start = time.perf_counter()
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-            for i, row in enumerate(pool.map(one, samples), 1):
+            for i, row in enumerate(pool.map(one_or_ckpt, samples), 1):
                 rows.append(row)
                 flag = f"  ERROR {row['error']}" if row["error"] else ""
                 what = (f"{'✓' if row['tp'] else '✗'} {_fmt_label(row['labels'][0]['pred'])}"

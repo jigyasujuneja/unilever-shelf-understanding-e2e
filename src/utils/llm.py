@@ -455,6 +455,21 @@ class Gemini:
             cfg.response_logprobs = True
             cfg.logprobs = int(logprobs)
         jpeg = image_to_jpeg(image, max_side)
+        cache_dir = _resolve_vlm_cache_dir()
+        cache_key_str: str | None = None
+        if cache_dir is not None:
+            cache_key_str = vlm_cache_key(
+                self.target_model,
+                jpeg,
+                prompt,
+                schema=schema,
+                thinking_level=self.thinking_level,
+                logprobs=int(logprobs) if (logprobs and logprobs > 0 and not self._logprobs_unsupported) else None,
+                max_output_tokens=resolved_max_tokens,
+            )
+            cached_res = _VLMResponseCache.load(cache_dir, cache_key_str)
+            if cached_res is not None:
+                return cached_res
         contents = [types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), prompt]
         span = otel_trace.get_current_span()  # the call's span, opened by Context.ask
         retries_seen: list[str] = []
@@ -522,10 +537,122 @@ class Gemini:
             "truncated": is_trunc,
             "contract_status": contract_status,
             "contract_error": None if contract_status == "ok" else contract_status,
+            "cache_hit": False,
         }
+        if cache_key_str is not None:
+            meta["cache_key"] = cache_key_str
         if lp_steps:
             meta["logprobs"] = lp_steps
-        return LLMResult(parsed_data, usage, seconds, text, meta)
+        res_out = LLMResult(parsed_data, usage, seconds, text, meta)
+        if cache_dir is not None and cache_key_str is not None and contract_status == "ok":
+            _VLMResponseCache.save(cache_dir, cache_key_str, res_out)
+        return res_out
+
+
+def vlm_cache_key(
+    model: str,
+    jpeg_bytes: bytes,
+    prompt: str,
+    schema: dict | None = None,
+    thinking_level: str | None = None,
+    logprobs: int | None = None,
+    max_output_tokens: int | None = None,
+) -> str:
+    """Compute a deterministic SHA-256 content-addressed cache key for a VLM request (Ch. 6A)."""
+    import hashlib
+
+    img_sha = hashlib.sha256(jpeg_bytes).hexdigest()
+    payload = json.dumps(
+        {
+            "model": model,
+            "image_sha256": img_sha,
+            "prompt": prompt,
+            "schema": schema,
+            "thinking_level": thinking_level,
+            "logprobs": int(logprobs) if logprobs else None,
+            "max_output_tokens": int(max_output_tokens) if max_output_tokens else None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _resolve_vlm_cache_dir() -> Path | None:
+    custom = os.environ.get("SHELF_BENCH_VLM_CACHE_DIR", "").strip()
+    if custom:
+        return Path(custom).resolve()
+    if os.environ.get("SHELF_BENCH_VLM_CACHE") == "1":
+        return (Path(__file__).resolve().parents[2] / ".cache" / "vlm_responses").resolve()
+    return None
+
+
+class _VLMResponseCache:
+    """Thread-safe content-addressed JSON disk cache for VLM responses."""
+
+    @staticmethod
+    def load(cache_dir: Path, key: str) -> LLMResult | None:
+        safe_key = re.sub(r"[^a-f0-9]", "", key.lower())
+        if len(safe_key) != 64:
+            return None
+        p = cache_dir / safe_key[:2] / f"{safe_key}.json"
+        if not p.is_file():
+            return None
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            u_dict = obj.get("usage") or {}
+            usage = Usage(
+                input_tokens=int(u_dict.get("input_tokens", 0)),
+                output_tokens=int(u_dict.get("output_tokens", 0)),
+                thinking_tokens=int(u_dict.get("thinking_tokens", 0)),
+                calls=int(u_dict.get("calls", 1)),
+                traffic=dict(u_dict.get("traffic") or {}),
+                buckets=dict(u_dict.get("buckets") or {}),
+            )
+            meta = dict(obj.get("meta") or {})
+            meta["cache_hit"] = True
+            meta["cache_key"] = safe_key
+            return LLMResult(
+                data=obj.get("data"),
+                usage=usage,
+                seconds=0.0,
+                text=str(obj.get("text") or ""),
+                meta=meta,
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def save(cache_dir: Path, key: str, result: LLMResult) -> None:
+        safe_key = re.sub(r"[^a-f0-9]", "", key.lower())
+        if len(safe_key) != 64:
+            return
+        sub = cache_dir / safe_key[:2]
+        sub.mkdir(parents=True, exist_ok=True)
+        target = sub / f"{safe_key}.json"
+        tmp = sub / f".{safe_key}.{os.getpid()}.{random.randint(1000, 9999)}.tmp"
+        payload = {
+            "data": result.data,
+            "text": result.text,
+            "seconds": round(result.seconds, 4),
+            "usage": {
+                "input_tokens": result.usage.input_tokens,
+                "output_tokens": result.usage.output_tokens,
+                "thinking_tokens": result.usage.thinking_tokens,
+                "calls": result.usage.calls,
+                "traffic": result.usage.traffic,
+                "buckets": result.usage.buckets,
+            },
+            "meta": {k: v for k, v in result.meta.items() if k not in ("cache_hit",)},
+        }
+        try:
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            tmp.replace(target)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _retryable(e: Exception) -> bool:
