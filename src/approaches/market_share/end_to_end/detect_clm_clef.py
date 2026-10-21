@@ -39,6 +39,7 @@ from approaches.market_share.retrieval.clm_info_nce import (
     RowNeighborPriorClmJev,
     SessionOverlapDedupClmJev,
     ShelfHeightSizePriorClmJev,
+    SftClmClefCascade,
     TubeMidbandJev,
 )
 from approaches.market_share.retrieval.clm_standalone import ClmStandaloneRetrieval
@@ -231,6 +232,25 @@ SessionOverlapDedupE2E = compose(
         "Setup: load ONNX YOLO detector + embed reference gallery views, SKU centroids & CIELAB",
         "Stage 1: Single-pass ONNX YOLO detects all shelf boxes in ~40ms (0 VLM calls)",
         "Stage 2: Multi-Photo Store-Visit Session Overlap Deduplication + CLM InfoNCE + JEV",
+    ],
+)
+
+Shelf960SftClmClefE2E = compose(
+    "shelf_960_sft_clm_clef_e2e",
+    DistilledYolo960SoftNms,
+    SftClmClefCascade,
+    dataset="rpc",
+    also_calls=[ONNX_MODEL_ID, MODEL],
+    architecture=(
+        f"EXP-29 / EXP-33: Stage 1 960px High-Res + Gaussian Soft-NMS ONNX Detector ({ONNX_MODEL_ID}) -> "
+        "Stage 2 Calibrated 5-Attribute CLM InfoNCE Vote Gate + Contrastive CLEF Contact Sheet (Gemini 3.5 Flash-Lite / LoRA SFT)"
+    ),
+    steps=[
+        "Setup: load 960px Soft-NMS ONNX detector + build multi-prototype (Brand, Category, Pack) sub-centroids & catalog",
+        "Stage 1: 960px High-Res + Aspect-Aware Gaussian Soft-NMS ONNX detection ($0 token cost)",
+        "Stage 2A: CLM InfoNCE + Z-score/LID gate intersected with 5-attribute softmax vote shares (0 VLM calls on confident crops)",
+        "Stage 2B: Escalate uncertain crops to 5-panel CLEF Zoom Contact Sheet with EXP-28 catalog metadata & contrastive token diffs",
+        "Stage 2C: Enforce (Brand, Base_Variant) -> Category -> Valid Category__PackType catalog consistency",
     ],
 )
 
@@ -745,8 +765,3 @@ ShelfMerchandisingBayE2E = compose(
         "Stage 2B + Stage 6: Batched Contact-Sheet Verification + Class 0 Bay-Scoped Planogram & OOS Void Compliance",
     ],
 )
-
-
-
-
-

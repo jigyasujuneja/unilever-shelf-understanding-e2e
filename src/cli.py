@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--image", default=None, help="reuse pre-built Artifact Registry image URI instead of rebuilding")
     s.add_argument("--job", default=None, help="override Cloud Run job name (e.g. shelf-bench-5k-exp28)")
     s.add_argument("--pull", action="store_true", help="pull finished runs into local results/ (default: finalize directly on GCS with zero local files)")
-    s.add_argument("--no-pull", action="store_true", help="keep results 100% on GCS without pulling to local results/")
+    s.add_argument("--no-pull", action="store_true", help="keep results 100%% on GCS without pulling to local results/")
 
     s = sub.add_parser("deploy-cv-endpoints",
                        help="register the legacy .h5 models in Vertex AI Model Registry and deploy their Vertex AI Endpoints")
@@ -216,6 +216,22 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--brand-preds", default=None, help="JSON/JSONL file mapping image_id -> raw legacy brand (e.g. ADove)")
     s.add_argument("--pack-preds", default=None, help="JSON/JSONL file mapping image_id -> raw legacy Category__PackType (e.g. Hair_Care__Bottle)")
     s.add_argument("--variant-preds", default=None, help="JSON/JSONL file mapping image_id -> raw legacy variant (e.g. ADove__Hair_Fall_Rescue)")
+
+    s = sub.add_parser("load-test", help="run national peak load test & autoscaling analysis on Google Cloud Run")
+    s.add_argument("--duration-minutes", type=float, default=5.0, help="duration in minutes (default: 5.0)")
+    s.add_argument("--shelves-per-min", type=float, default=2500.0, help="ingress shelves per minute (default: 2500.0)")
+    s.add_argument("--products-per-shelf", type=float, default=50.0, help="products per shelf (default: 50.0)")
+    s.add_argument("--approach", default="clef_contrastive_metadata", help="pipeline approach (Option 2 winner default: clef_contrastive_metadata)")
+    s.add_argument("--tier", default="standard", choices=["standard", "priority", "flex"], help="pricing tier (default: standard - recommended pay-as-you-go)")
+    s.add_argument("--dry-run-vlm", action="store_true", default=True, help="simulate Gemini calls with calibrated latency/tokens")
+    s.add_argument("--cloud-run", action="store_true", help="execute 100%% on GCP Cloud Run Job instead of locally")
+    s.add_argument("--tasks", type=int, default=1, help="number of parallel Cloud Run tasks (default: 1)")
+    s.add_argument("--parallelism", type=int, default=None, help="max parallel Cloud Run tasks")
+    s.add_argument("--stress-gcs-io", action="store_true", help="physically download shelf images from GCS in parallel")
+    s.add_argument("--image", default=None, help="Artifact Registry container image URI to reuse")
+    s.add_argument("--job", default="shelf-bench-loadtest", help="override Cloud Run job name (default: shelf-bench-loadtest)")
+    s.add_argument("--cpu", type=int, default=4, help="Cloud Run container vCPU count (default: 4)")
+    s.add_argument("--memory-gib", type=int, default=16, help="Cloud Run container RAM GiB (default: 16)")
 
     s = sub.add_parser(
         "compare",
@@ -556,6 +572,45 @@ def main(argv: list[str] | None = None) -> int:
                 variant_preds=_load_pred_map(a.variant_preds, "base_variant"),
             )
             print(json.dumps({k: v for k, v in report.items() if k != "labels"}, indent=2))
+    elif a.cmd == "load-test":
+        if a.cloud_run:
+            from utils.cloud import run_cli_on_cloud
+            cli_args = [
+                "load-test",
+                "--duration-minutes", str(a.duration_minutes),
+                "--shelves-per-min", str(a.shelves_per_min),
+                "--products-per-shelf", str(a.products_per_shelf),
+                "--approach", a.approach,
+                "--tier", a.tier,
+            ]
+            if a.dry_run_vlm:
+                cli_args.append("--dry-run-vlm")
+            if a.stress_gcs_io:
+                cli_args.append("--stress-gcs-io")
+            run_cli_on_cloud(
+                cli_args,
+                image=a.image,
+                tasks=a.tasks,
+                parallelism=a.parallelism or a.tasks,
+                cpu=a.cpu,
+                memory_gib=a.memory_gib,
+                job_name=a.job,
+                log=print,
+            )
+        else:
+            from utils.load_tester import LoadTestConfig, run_load_test
+            cfg = LoadTestConfig(
+                duration_minutes=a.duration_minutes,
+                shelves_per_min=a.shelves_per_min,
+                products_per_shelf=a.products_per_shelf,
+                approach=a.approach,
+                tier=a.tier,
+                dry_run_vlm=a.dry_run_vlm,
+                stress_gcs_io=a.stress_gcs_io,
+                container_cpu=a.cpu,
+                container_ram_gib=a.memory_gib,
+            )
+            run_load_test(cfg)
     elif a.cmd == "compare":
         import json
 

@@ -229,8 +229,10 @@ def run_cli_on_cloud(
     cli_args: list[str],
     image: str | None = None,
     tasks: int = 1,
+    parallelism: int | None = None,
     cpu: int = 4,
     memory_gib: int = 8,
+    job_name: str | None = None,
     log=print,
 ) -> str:
     """Execute any ``shelf-bench`` subcommand on Cloud Run Jobs in ``us-central1`` with zero local execution."""
@@ -243,7 +245,9 @@ def run_cli_on_cloud(
     cr = dict(job_cfg.get("cloud_run", {}))
     cr["cpu"] = cpu
     cr["memory_gib"] = memory_gib
-    cr["parallelism"] = tasks
+    cr["parallelism"] = parallelism or tasks
+    if job_name:
+        cr["job"] = job_name
     job_cfg["cloud_run"] = cr
     job_url = deploy_job(s, project, region, image, cli_args, tasks, job_cfg)
     log(f"Executing `shelf-bench {' '.join(cli_args)}` on Cloud Run job {job_url.rsplit('/', 1)[-1]} ({region}) ...")
