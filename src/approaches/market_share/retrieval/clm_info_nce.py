@@ -247,6 +247,7 @@ class L8HulUltimate(ClmContrastive):
     ) -> tuple[int | None, float, dict]:
         from approaches.market_share.retrieval.clef_standalone import (
             build_contrastive_candidate_rubric,
+            verify_pack_size_sister_sku,
         )
 
         refs = [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
@@ -287,6 +288,9 @@ class L8HulUltimate(ClmContrastive):
             fallback_cosine=self.fallback_cosine,
             min_confidence=self.min_jev_confidence,
         )
+        ans, overridden = verify_pack_size_sister_sku(ans, pack_size, top, cat_map)
+        if overridden:
+            meta["pack_size_verified_override"] = True
         meta["pack_size"] = pack_size
         return ans, conf, meta
 
@@ -298,6 +302,7 @@ class L8HulUltimate(ClmContrastive):
     ) -> list[tuple[int | None, float, dict]]:
         from approaches.market_share.retrieval.clef_standalone import (
             build_contrastive_candidate_rubric,
+            verify_pack_size_sister_sku,
         )
 
         if len(queries) == 1:
@@ -345,8 +350,12 @@ class L8HulUltimate(ClmContrastive):
                 fallback_cosine=self.fallback_cosine,
                 min_confidence=self.min_jev_confidence,
             )
+            row_ps = pack_sizes[idx] if idx < len(pack_sizes) else ""
+            ans, overridden = verify_pack_size_sister_sku(ans, row_ps, top, cat_map)
+            if overridden:
+                meta["pack_size_verified_override"] = True
             if idx < len(pack_sizes):
-                meta["pack_size"] = pack_sizes[idx]
+                meta["pack_size"] = row_ps
             out.append((ans, conf, meta))
         return out
 

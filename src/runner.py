@@ -1027,6 +1027,24 @@ def run(
                         / max(1, len(eval_boxes)),
                         4,
                     )
+                    valid_boxes = [
+                        lab
+                        for r in rows
+                        if not (
+                            r.get("error")
+                            or r.get("contract_error")
+                            or classify_contract_error(
+                                r.get("error"), r.get("steps"), float(r.get("latency_s", 0.0) or 0.0)
+                            )
+                        )
+                        for lab in r.get("labels", [])
+                    ]
+                    if valid_boxes and isinstance(summary.get("contract_errors"), dict):
+                        summary["contract_errors"]["valid_response_accuracy"] = round(
+                            sum(all(bool(lab["correct"].get(f)) for f in eval_fields) for lab in valid_boxes)
+                            / max(1, len(valid_boxes)),
+                            4,
+                        )
                 summary["hierarchical_accuracy"] = metrics.hierarchical_field_scores(eval_boxes)
                 # Macro-averaged accuracy across GT brands and GT variants + HUL vs Non-HUL competitor breakdown
                 from collections import defaultdict
