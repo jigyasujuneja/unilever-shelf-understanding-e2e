@@ -137,14 +137,114 @@ def clef_logprob_select(
     return slots[-n_slots:] if len(slots) >= n_slots else slots
 
 
+_PACK_SIZE_TOKEN_RE = None
+
+
+def normalize_pack_size_token(raw: str | None) -> str:
+    """Normalize visible or catalog pack-size text (e.g. '100 gm', '0.5 kg', '250ML') into a canonical token."""
+    import re
+
+    global _PACK_SIZE_TOKEN_RE
+    if not raw:
+        return ""
+    if _PACK_SIZE_TOKEN_RE is None:
+        _PACK_SIZE_TOKEN_RE = re.compile(
+            r"(?<!\d)(\d+(?:\.\d+)?)\s*(ml|ltrs?|litres?|liters?|l|gms?|grams?|g|kg|oz|pcs|pieces?|sachets?|tabs?|cubes?)\b",
+            re.I,
+        )
+    cleaned = str(raw).replace("__", " ").replace("_", " ")
+    m = _PACK_SIZE_TOKEN_RE.search(cleaned)
+    if not m:
+        return ""
+    val = float(m.group(1))
+    unit = m.group(2).lower()
+    if unit in ("gm", "gms", "gram", "grams", "g"):
+        unit = "g"
+    elif unit == "kg":
+        if val <= 10.0:
+            val *= 1000.0
+            unit = "g"
+    elif unit in ("ltr", "ltrs", "litre", "litres", "liter", "liters", "l"):
+        if val <= 10.0:
+            val *= 1000.0
+            unit = "ml"
+        else:
+            unit = "l"
+    elif unit in ("piece", "pieces", "pcs"):
+        unit = "pcs"
+    elif unit in ("sachet", "sachets"):
+        unit = "sachet"
+    elif unit in ("tab", "tabs"):
+        unit = "tabs"
+    elif unit in ("cube", "cubes"):
+        unit = "cubes"
+    num_str = str(int(round(val))) if abs(val - round(val)) < 1e-4 else f"{val:.1f}".rstrip("0").rstrip(".")
+    return f"{num_str}{unit}"
+
+
+def verify_pack_size_sister_sku(
+    chosen_id: int | None,
+    extracted_pack_size: str | None,
+    ranked_candidates: list[tuple[float, int]],
+    catalog: dict[int, dict[str, Any]] | None,
+    *,
+    max_cos_drop: float = 0.08,
+) -> tuple[int | None, bool]:
+    """Layer-5 deterministic post-generation verifier for sister-SKU pack-size disambiguation.
+
+    When the VLM extracts a visible ``pack_size`` token (e.g. ``'100g'``) that conflicts with the
+    chosen candidate's catalog size (e.g. ``'50g'``), checks the shortlist for a same-brand,
+    same-variant sister SKU whose catalog size matches ``extracted_pack_size`` within ``max_cos_drop``.
+    """
+    if chosen_id is None or not extracted_pack_size or not catalog or not ranked_candidates:
+        return chosen_id, False
+    target_sz = normalize_pack_size_token(extracted_pack_size)
+    if not target_sz:
+        return chosen_id, False
+    chosen_meta = catalog.get(chosen_id) or {}
+    chosen_sz = normalize_pack_size_token(
+        str(chosen_meta.get("pack_size") or chosen_meta.get("size") or chosen_meta.get("product") or "")
+    )
+    if chosen_sz == target_sz:
+        return chosen_id, False
+    chosen_brand = str(chosen_meta.get("brand") or "").strip().lower()
+    if not chosen_brand:
+        return chosen_id, False
+    chosen_var = str(
+        chosen_meta.get("base_variant") or chosen_meta.get("variant") or ""
+    ).strip().lower()
+    cos_by_id = {cid: float(cos) for cos, cid in ranked_candidates}
+    chosen_cos = cos_by_id.get(chosen_id, float(ranked_candidates[0][0]))
+    for cos, cid in ranked_candidates:
+        if cid == chosen_id:
+            continue
+        if (chosen_cos - float(cos)) > max_cos_drop:
+            continue
+        c_meta = catalog.get(cid) or {}
+        c_brand = str(c_meta.get("brand") or "").strip().lower()
+        if c_brand != chosen_brand:
+            continue
+        c_var = str(c_meta.get("base_variant") or c_meta.get("variant") or "").strip().lower()
+        if chosen_var and c_var and c_var != chosen_var:
+            continue
+        c_sz = normalize_pack_size_token(
+            str(c_meta.get("pack_size") or c_meta.get("size") or c_meta.get("product") or "")
+        )
+        if c_sz == target_sz:
+            return cid, True
+    return chosen_id, False
+
+
 def resolve_clef_choice(
     choice: int | None,
     prob: float,
     top: list[tuple[float, int, str]],
     *,
     allow_abstain: bool = False,
+    extracted_pack_size: str | None = None,
+    catalog: dict[int, dict[str, Any]] | None = None,
 ) -> tuple[int | None, str]:
-    """Resolve CLEF integer choice via 2-Tier Open-Set Competitor Guard + Log-Linear Energy Veto.
+    """Resolve CLEF integer choice via 2-Tier Open-Set Competitor Guard + Log-Linear Energy Veto + Layer-5 Pack-Size Verifier.
 
     - Valid panel ``1..K``: applies Log-Linear Energy Veto when ``choice > 1``, ``(s1 - sk) > 0.045``,
       and ``prob < 0.90`` (preventing low-confidence logprob flips against a dominant visual top-1).
@@ -154,22 +254,40 @@ def resolve_clef_choice(
       * Tier 2 (``0.45 <= s1 < 0.72``): Open-set competitor guard -> abstain ``None`` when
         ``allow_abstain=True``, or fallback to ``top[0][1]`` on closed-set catalog tasks.
       * Tier 3 (``s1 < 0.45``): Out-of-catalog / severe occlusion -> abstain ``None``.
+    - Layer 5 Post-Generation Pack-Size Verifier: when ``extracted_pack_size`` and ``catalog`` are
+      provided, deterministically verifies the resolved SKU against same-brand/same-variant sisters.
     """
     if not top:
         return None, "empty"
     s1, id1, _ = top[0]
+    ans_id: int | None
+    mode: str
     if isinstance(choice, int) and 1 <= choice <= len(top):
         sk, idk, _ = top[choice - 1]
         if choice > 1 and (s1 - sk) > 0.045 and prob < 0.90:
-            return id1, "energy_veto_top1"
-        return idk, f"panel_{choice}"
-    if s1 >= 0.72:
-        return id1, "tier1_high_cos_top1"
-    if s1 >= 0.45:
+            ans_id, mode = id1, "energy_veto_top1"
+        else:
+            ans_id, mode = idk, f"panel_{choice}"
+    elif s1 >= 0.72:
+        ans_id, mode = id1, "tier1_high_cos_top1"
+    elif s1 >= 0.45:
         if allow_abstain:
-            return None, "tier2_open_set_competitor_abstain"
-        return id1, "tier2_closed_set_top1"
-    return (None, "tier3_low_cos_abstain") if allow_abstain else (id1, "tier3_closed_set_top1")
+            ans_id, mode = None, "tier2_open_set_competitor_abstain"
+        else:
+            ans_id, mode = id1, "tier2_closed_set_top1"
+    else:
+        ans_id, mode = (None, "tier3_low_cos_abstain") if allow_abstain else (id1, "tier3_closed_set_top1")
+
+    if ans_id is not None and extracted_pack_size and catalog:
+        verified_id, overridden = verify_pack_size_sister_sku(
+            ans_id,
+            extracted_pack_size,
+            [(s, pid) for s, pid, _ in top],
+            catalog,
+        )
+        if overridden:
+            return verified_id, f"{mode}+layer5_pack_size_verified"
+    return ans_id, mode
 
 
 @register
@@ -233,11 +351,19 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
         choice = slots[0]["choice"] if slots else (raw_c if isinstance(raw_c, int) else None)
         prob = slots[0]["top1_prob"] if slots else 1.0
         allow_abstain = self._allow_abstain() if hasattr(self, "_allow_abstain") else False
-        ans, guard_mode = resolve_clef_choice(choice, prob, top, allow_abstain=allow_abstain)
+        psize_str = str(data.get("pack_size") or "")
+        ans, guard_mode = resolve_clef_choice(
+            choice,
+            prob,
+            top,
+            allow_abstain=allow_abstain,
+            extracted_pack_size=psize_str,
+            catalog=getattr(self, "catalog", None),
+        )
         return ans, {
             "choice": choice,
             "clef_prob": prob,
-            "pack_size": data.get("pack_size", ""),
+            "pack_size": psize_str,
             "guard_mode": guard_mode,
         }
 
@@ -455,7 +581,14 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
                 )
                 prob = slots[b_i]["top1_prob"] if b_i < len(slots) else 1.0
                 psize = str(raw_sizes[b_i]) if b_i < len(raw_sizes) else ""
-                ans, guard_mode = resolve_clef_choice(c, prob, top, allow_abstain=allow_abstain)
+                ans, guard_mode = resolve_clef_choice(
+                    c,
+                    prob,
+                    top,
+                    allow_abstain=allow_abstain,
+                    extracted_pack_size=psize,
+                    catalog=getattr(self, "catalog", None),
+                )
                 out.append(
                     (
                         idx,
@@ -630,11 +763,19 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
         choice = slots[0]["choice"] if slots else (raw_c if isinstance(raw_c, int) else None)
         prob = slots[0]["top1_prob"] if slots else 1.0
         allow_abstain = self._allow_abstain() if hasattr(self, "_allow_abstain") else False
-        ans, guard_mode = resolve_clef_choice(choice, prob, top, allow_abstain=allow_abstain)
+        psize_str = str(data.get("pack_size") or "")
+        ans, guard_mode = resolve_clef_choice(
+            choice,
+            prob,
+            top,
+            allow_abstain=allow_abstain,
+            extracted_pack_size=psize_str,
+            catalog=getattr(self, "catalog", None),
+        )
         return ans, {
             "choice": choice,
             "clef_prob": prob,
-            "pack_size": data.get("pack_size", ""),
+            "pack_size": psize_str,
             "guard_mode": guard_mode,
             "geometry": geom,
             "diff_band": list(diff_band) if diff_band else None,
@@ -865,7 +1006,14 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
                 )
                 prob = slots[b_i]["top1_prob"] if b_i < len(slots) else 1.0
                 psize = str(raw_sizes[b_i]) if b_i < len(raw_sizes) else ""
-                ans, guard_mode = resolve_clef_choice(c, prob, top, allow_abstain=allow_abstain)
+                ans, guard_mode = resolve_clef_choice(
+                    c,
+                    prob,
+                    top,
+                    allow_abstain=allow_abstain,
+                    extracted_pack_size=psize,
+                    catalog=getattr(self, "catalog", None),
+                )
                 out.append(
                     (
                         idx,

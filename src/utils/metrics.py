@@ -887,11 +887,181 @@ def aggregate_human_and_beyond_metrics(rows: Sequence[dict]) -> dict | None:
             "others_upgraded_to_exact_sku": oth_res,
             "others_upgraded_pct": oth_rate,
             "others_upgrade_rate": oth_rate,
+            "rogan_gladen_others_upgrade_rate": rogan_gladen_prevalence(oth_rate, n_samples=oth_gt)["corrected_rate"] if oth_gt > 0 else 0.0,
             "unannotated_row_facings_discovered": unann,
             "extra_unique_skus": ex_skus,
             "extra_unique_brands": ex_brands,
             "total_coverage_multiplier": round(tot_pred / max(1, tot_gt), 2),
         },
+    }
+
+
+def rogan_gladen_prevalence(
+    observed_rate: float,
+    tpr: float = 0.96,
+    tnr: float = 0.94,
+    n_samples: int = 0,
+) -> dict:
+    """Rogan-Gladen (1978) prevalence bias correction for VLM Judge / Enrichment acceptance rates.
+
+    Adjusts raw judge acceptance ``p_obs`` using calibrated judge sensitivity (``tpr``) and
+    specificity (``tnr``):
+        p_hat = clip((p_obs + tnr - 1) / (tpr + tnr - 1), 0.0, 1.0)
+    """
+    p_obs = max(0.0, min(1.0, float(observed_rate)))
+    youden_j = float(tpr) + float(tnr) - 1.0
+    if youden_j <= 1e-6:
+        p_hat = p_obs
+    else:
+        p_hat = max(0.0, min(1.0, (p_obs + float(tnr) - 1.0) / youden_j))
+    ci_half = 0.0
+    if n_samples > 0 and youden_j > 1e-6:
+        se_obs = math.sqrt(max(0.0, p_obs * (1.0 - p_obs)) / n_samples)
+        ci_half = min(1.0, 1.96 * (se_obs / youden_j))
+    return {
+        "observed_rate": round(p_obs, 4),
+        "corrected_rate": round(p_hat, 4),
+        "ci95_low": round(max(0.0, p_hat - ci_half), 4),
+        "ci95_high": round(min(1.0, p_hat + ci_half), 4),
+        "judge_tpr": round(float(tpr), 4),
+        "judge_tnr": round(float(tnr), 4),
+        "youden_j": round(youden_j, 4),
+    }
+
+
+def _exact_binomial_two_sided_pvalue(b: int, c: int) -> float:
+    """Exact two-sided binomial p-value for McNemar discordant counts (b, c) under p=0.5."""
+    n = b + c
+    if n <= 0:
+        return 1.0
+    k = min(b, c)
+    # Use normal approximation with continuity correction when n > 200 to avoid overflow
+    if n > 200:
+        z = (abs(b - c) - 1.0) / math.sqrt(float(n))
+        return round(min(1.0, max(0.0, math.erfc(z / math.sqrt(2.0)))), 6)
+    tail = sum(math.comb(n, i) for i in range(0, k + 1)) / (2.0 ** n)
+    return round(min(1.0, 2.0 * tail), 6)
+
+
+def paired_mcnemar_test(
+    rows_a: Sequence[dict],
+    rows_b: Sequence[dict],
+    *,
+    alpha: float = 0.05,
+) -> dict:
+    """Paired McNemar significance test & discordant regression analysis across two runs on the same split.
+
+    Aligns items by ``(image_id, box_index)`` when per-box ``labels`` exist (with non-null ``gt``),
+    or by ``image_id`` (comparing ``tp > 0 and fp == 0 and fn == 0`` or ``f2 >= 0.80``) for shelf runs.
+    Returns the 2x2 contingency table ``(a_both_correct, b_regressions, c_fixes, d_both_wrong)``,
+    McNemar's chi-squared statistic, exact two-sided binomial p-value, paired accuracy lift with
+    paired 95% CI, and sample lists of fixed vs. regressed items.
+    """
+    def _extract_outcomes(rows: Sequence[dict]) -> dict[str, bool]:
+        outcomes: dict[str, bool] = {}
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            iid = str(r.get("image_id") or "")
+            if not iid:
+                continue
+            labels = r.get("labels")
+            if isinstance(labels, list) and labels and any(isinstance(l, dict) and l.get("gt") is not None for l in labels):
+                for idx, lab in enumerate(labels):
+                    if not isinstance(lab, dict) or lab.get("gt") is None:
+                        continue
+                    corr = lab.get("correct")
+                    if isinstance(corr, dict) and corr:
+                        ok = all(bool(v) for v in corr.values())
+                    else:
+                        ok = bool(lab.get("tp", 0))
+                    key = f"{iid}" if len(labels) == 1 else f"{iid}#box{idx}"
+                    outcomes[key] = ok
+            else:
+                gt_c = int(r.get("gt_count", 0))
+                tp_c = int(r.get("tp", 0))
+                f2_v = float(r.get("f2", 0.0))
+                ok = (tp_c == gt_c and int(r.get("fp", 0)) == 0) if gt_c <= 1 else (f2_v >= 0.75)
+                outcomes[iid] = ok
+        return outcomes
+
+    map_a = _extract_outcomes(rows_a)
+    map_b = _extract_outcomes(rows_b)
+    shared_keys = sorted(set(map_a).intersection(map_b))
+    n = len(shared_keys)
+    if n == 0:
+        return {
+            "paired_n": 0,
+            "a_both_correct": 0,
+            "b_regressions": 0,
+            "c_fixes": 0,
+            "d_both_wrong": 0,
+            "acc_a": 0.0,
+            "acc_b": 0.0,
+            "paired_lift": 0.0,
+            "paired_ci95_half": 0.0,
+            "mcnemar_chi2": 0.0,
+            "mcnemar_chi2_cc": 0.0,
+            "p_value": 1.0,
+            "significant": False,
+            "verdict": "no_shared_samples",
+            "fixed_ids": [],
+            "regressed_ids": [],
+        }
+
+    a_both = 0
+    b_reg = 0
+    c_fix = 0
+    d_wrong = 0
+    fixed_ids: list[str] = []
+    regressed_ids: list[str] = []
+
+    for k in shared_keys:
+        ok_a = map_a[k]
+        ok_b = map_b[k]
+        if ok_a and ok_b:
+            a_both += 1
+        elif ok_a and not ok_b:
+            b_reg += 1
+            regressed_ids.append(k)
+        elif not ok_a and ok_b:
+            c_fix += 1
+            fixed_ids.append(k)
+        else:
+            d_wrong += 1
+
+    discordant = b_reg + c_fix
+    chi2 = ((b_reg - c_fix) ** 2) / discordant if discordant > 0 else 0.0
+    chi2_cc = (max(0.0, abs(b_reg - c_fix) - 1.0) ** 2) / discordant if discordant > 0 else 0.0
+    p_val = _exact_binomial_two_sided_pvalue(b_reg, c_fix)
+    lift = (c_fix - b_reg) / n
+    var_lift = max(0.0, (discordant - ((c_fix - b_reg) ** 2) / n)) / (n * n)
+    ci_half = 1.96 * math.sqrt(var_lift)
+    sig = bool(p_val < alpha and discordant > 0)
+    if sig and c_fix > b_reg:
+        verdict = "significant_improvement"
+    elif sig and b_reg > c_fix:
+        verdict = "significant_regression"
+    else:
+        verdict = "statistically_indistinguishable"
+
+    return {
+        "paired_n": n,
+        "a_both_correct": a_both,
+        "b_regressions": b_reg,
+        "c_fixes": c_fix,
+        "d_both_wrong": d_wrong,
+        "acc_a": round((a_both + b_reg) / n, 4),
+        "acc_b": round((a_both + c_fix) / n, 4),
+        "paired_lift": round(lift, 4),
+        "paired_ci95_half": round(ci_half, 4),
+        "mcnemar_chi2": round(chi2, 4),
+        "mcnemar_chi2_cc": round(chi2_cc, 4),
+        "p_value": p_val,
+        "significant": sig,
+        "verdict": verdict,
+        "fixed_ids": fixed_ids[:50],
+        "regressed_ids": regressed_ids[:50],
     }
 
 

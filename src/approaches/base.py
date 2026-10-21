@@ -211,6 +211,8 @@ class Context:
                 "retry_errors": m.get("retry_errors") or None,
                 "finish_reason": m.get("finish_reason"),
                 "truncated": m.get("truncated"),
+                "contract_status": m.get("contract_status"),
+                "contract_error": m.get("contract_error"),
                 "thinking_level": m.get("thinking_level"),
                 "image": [image.width, image.height],
                 "max_side": kw.get("max_side"),

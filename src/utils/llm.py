@@ -190,16 +190,47 @@ def image_to_jpeg(img: Image.Image, max_side: int | None = None) -> bytes:
     return buf.getvalue()
 
 
-def parse_json(text: str) -> Any:
-    """Parse model JSON, tolerating ```json fences and trailing truncation of long box lists."""
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+def wrap_untrusted_shelf_text(raw_text: str | None) -> str:
+    """Isolate untrusted OCR / shelf-extracted text inside <untrusted_context> delimiters (Ch. 3A).
+
+    Neutralizes any embedded closing delimiter tags so adversarial or noisy shelf text cannot
+    break out of the data boundary and override structured output instructions.
+    """
+    if not raw_text:
+        return "<untrusted_context></untrusted_context>"
+    sanitized = re.sub(r"</?\s*untrusted_context\s*>", "[filtered_tag]", str(raw_text), flags=re.I)
+    return f"<untrusted_context>{sanitized}</untrusted_context>"
+
+
+def parse_json_with_status(text: str, *, truncated: bool = False) -> tuple[Any, str]:
+    """Parse model JSON and return ``(parsed_data, contract_status)``.
+
+    Distinguishes clean JSON responses (``'ok'``) from contract/truncation errors
+    (``'empty_response'``, ``'truncated_max_tokens'``, ``'truncated_max_tokens_box_salvage'``,
+    ``'json_parse_box_salvage'``, ``'json_parse_error'``).
+    """
+    if not text or not text.strip():
+        return [], "empty_response"
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     try:
-        return json.loads(text)
+        parsed = json.loads(cleaned)
+        return parsed, ("truncated_max_tokens" if truncated else "ok")
     except json.JSONDecodeError:
         # Output hit the token limit mid-list: keep every complete [a,b,c,d] we got.
-        quads = re.findall(r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,"
-                           r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]", text)
-        return [[float(v) for v in q] for q in quads]
+        quads = re.findall(
+            r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,"
+            r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]",
+            cleaned,
+        )
+        boxes = [[float(v) for v in q] for q in quads]
+        if boxes:
+            return boxes, ("truncated_max_tokens_box_salvage" if truncated else "json_parse_box_salvage")
+        return [], ("truncated_max_tokens" if truncated else "json_parse_error")
+
+
+def parse_json(text: str) -> Any:
+    """Parse model JSON, tolerating ```json fences and trailing truncation of long box lists."""
+    return parse_json_with_status(text)[0]
 
 
 TIERS = ("standard", "priority", "flex")
@@ -368,18 +399,24 @@ class Gemini:
                 ]
                 lp_steps.append({"token": str(tok), "logprob": round(float(lp), 5), "top": top_list})
 
+        finish_hf = choice0.get("finish_reason")
+        is_trunc_hf = str(finish_hf or "").lower() in ("length", "max_tokens")
+        parsed_hf, status_hf = parse_json_with_status(text, truncated=is_trunc_hf) if text else ([], "empty_response")
         meta: dict[str, Any] = {
             "attempts": 1,
             "model_version": hf_repo,
-            "finish_reason": choice0.get("finish_reason"),
+            "finish_reason": finish_hf,
             "tier_requested": self.tier,
             "temperature": 0.0,
             "image_bytes": len(jpeg),
             "response_chars": len(text),
+            "truncated": is_trunc_hf,
+            "contract_status": status_hf,
+            "contract_error": None if status_hf == "ok" else status_hf,
         }
         if lp_steps:
             meta["logprobs"] = lp_steps
-        return LLMResult(parse_json(text) if text else [], usage, seconds, text, meta)
+        return LLMResult(parsed_hf, usage, seconds, text, meta)
 
     def __call__(
         self,
@@ -418,6 +455,21 @@ class Gemini:
             cfg.response_logprobs = True
             cfg.logprobs = int(logprobs)
         jpeg = image_to_jpeg(image, max_side)
+        cache_dir = _resolve_vlm_cache_dir()
+        cache_key_str: str | None = None
+        if cache_dir is not None:
+            cache_key_str = vlm_cache_key(
+                self.target_model,
+                jpeg,
+                prompt,
+                schema=schema,
+                thinking_level=self.thinking_level,
+                logprobs=int(logprobs) if (logprobs and logprobs > 0 and not self._logprobs_unsupported) else None,
+                max_output_tokens=resolved_max_tokens,
+            )
+            cached_res = _VLMResponseCache.load(cache_dir, cache_key_str)
+            if cached_res is not None:
+                return cached_res
         contents = [types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), prompt]
         span = otel_trace.get_current_span()  # the call's span, opened by Context.ask
         retries_seen: list[str] = []
@@ -466,6 +518,8 @@ class Gemini:
         cand = (resp.candidates or [None])[0]
         finish = getattr(getattr(cand, "finish_reason", None), "name", None)
         lp_steps = serialize_logprobs(getattr(cand, "logprobs_result", None))
+        is_trunc = finish == "MAX_TOKENS"
+        parsed_data, contract_status = parse_json_with_status(text, truncated=is_trunc)
         meta = {
             "attempts": attempt + 1,
             "retry_errors": retries_seen,
@@ -480,11 +534,125 @@ class Gemini:
             "image_bytes": len(jpeg),
             "response_chars": len(text),
             # Output hit max_output_tokens: parse_json kept only the complete boxes.
-            "truncated": finish == "MAX_TOKENS",
+            "truncated": is_trunc,
+            "contract_status": contract_status,
+            "contract_error": None if contract_status == "ok" else contract_status,
+            "cache_hit": False,
         }
+        if cache_key_str is not None:
+            meta["cache_key"] = cache_key_str
         if lp_steps:
             meta["logprobs"] = lp_steps
-        return LLMResult(parse_json(text) if text else [], usage, seconds, text, meta)
+        res_out = LLMResult(parsed_data, usage, seconds, text, meta)
+        if cache_dir is not None and cache_key_str is not None and contract_status == "ok":
+            _VLMResponseCache.save(cache_dir, cache_key_str, res_out)
+        return res_out
+
+
+def vlm_cache_key(
+    model: str,
+    jpeg_bytes: bytes,
+    prompt: str,
+    schema: dict | None = None,
+    thinking_level: str | None = None,
+    logprobs: int | None = None,
+    max_output_tokens: int | None = None,
+) -> str:
+    """Compute a deterministic SHA-256 content-addressed cache key for a VLM request (Ch. 6A)."""
+    import hashlib
+
+    img_sha = hashlib.sha256(jpeg_bytes).hexdigest()
+    payload = json.dumps(
+        {
+            "model": model,
+            "image_sha256": img_sha,
+            "prompt": prompt,
+            "schema": schema,
+            "thinking_level": thinking_level,
+            "logprobs": int(logprobs) if logprobs else None,
+            "max_output_tokens": int(max_output_tokens) if max_output_tokens else None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _resolve_vlm_cache_dir() -> Path | None:
+    custom = os.environ.get("SHELF_BENCH_VLM_CACHE_DIR", "").strip()
+    if custom:
+        return Path(custom).resolve()
+    if os.environ.get("SHELF_BENCH_VLM_CACHE") == "1":
+        return (Path(__file__).resolve().parents[2] / ".cache" / "vlm_responses").resolve()
+    return None
+
+
+class _VLMResponseCache:
+    """Thread-safe content-addressed JSON disk cache for VLM responses."""
+
+    @staticmethod
+    def load(cache_dir: Path, key: str) -> LLMResult | None:
+        safe_key = re.sub(r"[^a-f0-9]", "", key.lower())
+        if len(safe_key) != 64:
+            return None
+        p = cache_dir / safe_key[:2] / f"{safe_key}.json"
+        if not p.is_file():
+            return None
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            u_dict = obj.get("usage") or {}
+            usage = Usage(
+                input_tokens=int(u_dict.get("input_tokens", 0)),
+                output_tokens=int(u_dict.get("output_tokens", 0)),
+                thinking_tokens=int(u_dict.get("thinking_tokens", 0)),
+                calls=int(u_dict.get("calls", 1)),
+                traffic=dict(u_dict.get("traffic") or {}),
+                buckets=dict(u_dict.get("buckets") or {}),
+            )
+            meta = dict(obj.get("meta") or {})
+            meta["cache_hit"] = True
+            meta["cache_key"] = safe_key
+            return LLMResult(
+                data=obj.get("data"),
+                usage=usage,
+                seconds=0.0,
+                text=str(obj.get("text") or ""),
+                meta=meta,
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def save(cache_dir: Path, key: str, result: LLMResult) -> None:
+        safe_key = re.sub(r"[^a-f0-9]", "", key.lower())
+        if len(safe_key) != 64:
+            return
+        sub = cache_dir / safe_key[:2]
+        sub.mkdir(parents=True, exist_ok=True)
+        target = sub / f"{safe_key}.json"
+        tmp = sub / f".{safe_key}.{os.getpid()}.{random.randint(1000, 9999)}.tmp"
+        payload = {
+            "data": result.data,
+            "text": result.text,
+            "seconds": round(result.seconds, 4),
+            "usage": {
+                "input_tokens": result.usage.input_tokens,
+                "output_tokens": result.usage.output_tokens,
+                "thinking_tokens": result.usage.thinking_tokens,
+                "calls": result.usage.calls,
+                "traffic": result.usage.traffic,
+                "buckets": result.usage.buckets,
+            },
+            "meta": {k: v for k, v in result.meta.items() if k not in ("cache_hit",)},
+        }
+        try:
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            tmp.replace(target)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _retryable(e: Exception) -> bool:
