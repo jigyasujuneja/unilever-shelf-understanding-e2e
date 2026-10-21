@@ -27,7 +27,10 @@ from approaches.market_share.classification.shelf_l8_ultimate import (
     build_pack_and_zoom_canvas,
     enrich_catalog_entry,
 )
-from approaches.market_share.retrieval.clef_standalone import clef_logprob_select
+from approaches.market_share.retrieval.clef_standalone import (
+    clef_logprob_select,
+    verify_pack_size_sister_sku,
+)
 from utils.embeddings import GEMINI_EMBEDDING, MODELS, SKUS, VertexEmbeddings
 from utils.photometry import restore_photometry
 
@@ -52,7 +55,7 @@ class ClefStandaloneClassify(Approach):
         "Setup: auto-enrich catalog (brand, variant, pack form, size) and fuse visual gallery centroids + structured text",
         f"Retrieve top-{CLEF_CLASSIFY_SHORTLIST} catalog candidates (+ same-brand sisters) by embedding cosine",
         "Build 3-Panel Zoom Canvas (Full Pack + Variant Zoom + Bottom-35% Size Zoom) for 100% of queries",
-        "Execute CLEF constrained {'pack_size', 'sku_id'} schema + direct token logprob readout",
+        "Execute CLEF constrained {'pack_size', 'sku_id'} schema + direct token logprob readout + Layer-5 pack_size verification",
     ]
 
     def setup(self, config: dict, ctx: Context) -> None:
@@ -128,13 +131,22 @@ class ClefStandaloneClassify(Approach):
             else (int(raw_sku) if isinstance(raw_sku, int) and raw_sku in cands else top_id)
         )
         prob = slots[0]["top1_prob"] if slots else 1.0
+        size_read = str(data.get("pack_size") or "")
+        cand_set = set(cand_ids)
+        ranked_cands = [(s, i) for s, i in ranked if i in cand_set]
+        verified_sku, size_overridden = verify_pack_size_sister_sku(
+            picked, size_read, ranked_cands, cands
+        )
+        if verified_sku is not None and verified_sku in cands:
+            picked = verified_sku
         ctx.trace.step(
             "Standalone CLEF 3-Panel Zoom-Canvas",
-            f"id {picked}: {cands[picked]['product']} (P_token={prob:.2f}, size_read={data.get('pack_size', '')!r})",
+            f"id {picked}: {cands[picked]['product']} (P_token={prob:.2f}, size_read={size_read!r}, layer5_verified={size_overridden})",
             info={
                 "sku_id": picked,
                 "clef_prob": prob,
-                "size_read": data.get("pack_size", ""),
+                "size_read": size_read,
+                "layer5_pack_size_verified": size_overridden,
                 "candidates": len(cands),
             },
         )
