@@ -285,17 +285,16 @@ const PROMO_TALKER_DATASETS = new Set(["hul_talkers_golden", "hul_promos"]);
 const byDsOrder = (a, b) => (DS_ORDER.indexOf(a) + 1 || 99) - (DS_ORDER.indexOf(b) + 1 || 99);
 const taskOf = (r) => {
   const raw = r.task || "detection";
-  const ds = r.dataset || "";
-  if ((raw === "retrieval" || raw === "classification") && DATASETS[ds]?.unitType === "crop") {
+  if (raw === "retrieval" || raw === "classification") {
     return "classification";
   }
   return raw;
 };
 const useCaseOf = (r) => {
   const ds = r.dataset || "";
+  if (r.task === "planogram_compliance" || r.task === "promo_detection") return "merchandising";
   if (MERCH_DATASETS.has(ds)) return "merchandising";
   if (DATASETS[ds]?.useCase) return DATASETS[ds].useCase;
-  if (r.task === "planogram_compliance" || r.task === "promo_detection") return "merchandising";
   return r.use_case || "market_share";
 };
 const infoOf = (t) => TASKS[t] || { shortLabel: t, tip: "", scoreLabel: "Score", scoreKey: "accuracy" };
@@ -322,6 +321,16 @@ function getEvalScopeMeta(r) {
       nAttrs: 4,
       scoreLabel: "Oracle GT Brand (Variant Only)",
       badgeHtml: `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Unchained Oracle-Brand Diagnostic: feeds 100% Ground-Truth Brand into legacy variant/pack models (Pack Type = 60.2%, compound 5-Attr = 51.0%). Not an end-to-end model.">Oracle GT Brand Diagnostic</span>`,
+      mean3,
+    };
+  }
+  if (r.primary_score_label) {
+    return {
+      isPartial: false,
+      nAttrs: 5,
+      scoreLabel: r.primary_score_label,
+      rawScoreNote: r.raw_primary_score_label || null,
+      badgeHtml: `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluated inside human-annotated shelf zones / target bays while preserving Beyond-GT discovery">${esc(r.primary_score_label)}</span>`,
       mean3,
     };
   }
@@ -623,7 +632,9 @@ window.selectStoryDec = function (decNum) {
   showTechnicalStory();
 };
 
+let lastFilterKind = "all";
 window.setUnifiedFilter = function (kind, val, useCase) {
+  lastFilterKind = kind;
   if (kind === "subview") boardSubView = val;
   if (kind === "task") {
     boardTaskFilter = val;
@@ -835,28 +846,56 @@ async function showUseCaseBoard(useCase = "market_share") {
     useCase === "merchandising" &&
     (boardSubView === "planogram_oos" || boardTaskFilter === "planogram_compliance");
 
-  const filtered = ucRuns.filter((r) => {
-    if (isPlanoView && boardTaskFilter === "all") {
-      const tk = taskOf(r);
-      const hasPlano = Boolean(
-        r.planogram_metrics ||
-          r.bay_scoped_metrics ||
-          tk === "planogram_compliance" ||
-          tk === "end_to_end" ||
-          tk === "detection"
-      );
-      if (!hasPlano) return false;
-    } else if (!matchesTaskFilter(r, boardTaskFilter)) {
-      return false;
+  const runFilterPass = (tkF, dsF, spF, szF) =>
+    ucRuns.filter((r) => {
+      if (isPlanoView && tkF === "all") {
+        const tk = taskOf(r);
+        const hasPlano = Boolean(
+          r.planogram_metrics ||
+            r.bay_scoped_metrics ||
+            tk === "planogram_compliance" ||
+            tk === "end_to_end" ||
+            tk === "detection"
+        );
+        if (!hasPlano) return false;
+      } else if (!matchesTaskFilter(r, tkF)) {
+        return false;
+      }
+      if (dsF !== "all" && (r.dataset || "hul_golden") !== dsF) return false;
+      if (spF !== "all" && (r.split || "test") !== spF) return false;
+      const nSamples = getRunSampleCount(r);
+      if (szF === "5000" && nSamples < 5000) return false;
+      if (szF === "1000" && nSamples < 1000) return false;
+      if (szF === "500" && nSamples < 500) return false;
+      return true;
+    });
+
+  let filtered = runFilterPass(boardTaskFilter, boardDsFilter, boardSplitFilter, boardSampleSizeFilter);
+  // Auto-resolve conflicting cross-filters (e.g. Shelf Detection task + Crop dataset, or Crop dataset + 5,000 sample filter)
+  if (filtered.length === 0 && ucRuns.length > 0) {
+    if (runFilterPass(boardTaskFilter, boardDsFilter, "all", "all").length > 0) {
+      boardSplitFilter = "all";
+      boardSampleSizeFilter = "all";
+    } else if (lastFilterKind === "ds" && boardDsFilter !== "all") {
+      boardTaskFilter = "all";
+      if (runFilterPass("all", boardDsFilter, boardSplitFilter, boardSampleSizeFilter).length === 0) {
+        boardSplitFilter = "all";
+        boardSampleSizeFilter = "all";
+      }
+    } else if (lastFilterKind === "task" && boardTaskFilter !== "all") {
+      boardDsFilter = "all";
+      if (runFilterPass(boardTaskFilter, "all", boardSplitFilter, boardSampleSizeFilter).length === 0) {
+        boardSplitFilter = "all";
+        boardSampleSizeFilter = "all";
+      }
+    } else {
+      boardTaskFilter = "all";
+      boardDsFilter = "all";
+      boardSplitFilter = "all";
+      boardSampleSizeFilter = "all";
     }
-    if (boardDsFilter !== "all" && (r.dataset || "hul_golden") !== boardDsFilter) return false;
-    if (boardSplitFilter !== "all" && (r.split || "test") !== boardSplitFilter) return false;
-    const nSamples = getRunSampleCount(r);
-    if (boardSampleSizeFilter === "5000" && nSamples < 5000) return false;
-    if (boardSampleSizeFilter === "1000" && nSamples < 1000) return false;
-    if (boardSampleSizeFilter === "500" && nSamples < 500) return false;
-    return true;
-  });
+    filtered = runFilterPass(boardTaskFilter, boardDsFilter, boardSplitFilter, boardSampleSizeFilter);
+  }
 
   // Helper: only our modern hybrid/CLEF/CLM/JEV/ONNX/SFT architectures on full task taxonomy qualify as Use-Case Task Winners
   // (excludes Phase-1 legacy .h5 baselines, partial 1-attr/2-attr diagnostic runs, and naive zero-shot VLM baselines)
@@ -905,8 +944,9 @@ async function showUseCaseBoard(useCase = "market_share") {
     if (!isModernClientWinnerCandidate(r)) continue;
     const tk = boardTaskFilter === "classification" ? "classification" : taskOf(r);
     const ds = r.dataset || "hul_golden";
+    const isShelfDs = DATASETS[ds]?.unitType === "shelf";
     const isGolden = Boolean(r.is_golden_dataset || ds.startsWith("hul_") || ds.startsWith("gtmerch") || ds.startsWith("gt_hul") || ds.startsWith("ms_json") || ds.startsWith("mt_json"));
-    const is1000 = getRunSampleCount(r) >= 1000;
+    const is1000 = isShelfDs ? Number(r.images || 0) >= 15 : getRunSampleCount(r) >= 1000;
     const sc = Number(r.primary_score ?? 0);
     const cost = Number(r.cost_per_image_usd ?? 999);
     const modStr = String(r.model || "").toLowerCase();
@@ -942,8 +982,8 @@ async function showUseCaseBoard(useCase = "market_share") {
   for (const v of bestProdByTask.values()) prodCostWinnerRunIds.add(v.run_id);
   for (const v of bestByDsTask.values()) dsTaskWinnerRunIds.add(v.run_id);
 
-  // Order leaderboard: Crowned Gemini 3.5 Flash-Lite / ONNX Production Winners first,
-  // full 5-attribute runs before Oracle-Brand diagnostic runs, then by primary KPI score descending.
+  // Order leaderboard: full 5-attribute runs before Oracle-Brand diagnostic runs, then by primary KPI score descending
+  // (when filtering by a single task, boost its #1 Production Winner to the top).
   filtered.sort((a, b) => {
     const scopeA = getEvalScopeMeta(a);
     const scopeB = getEvalScopeMeta(b);
@@ -951,12 +991,18 @@ async function showUseCaseBoard(useCase = "market_share") {
     const isOracleB = scopeB.isOracleDiagnostic ? 1 : 0;
     if (isOracleA !== isOracleB) return isOracleA - isOracleB;
 
-    const isWinA = prodCostWinnerRunIds.has(a.run_id) ? 1 : 0;
-    const isWinB = prodCostWinnerRunIds.has(b.run_id) ? 1 : 0;
-    if (isWinB !== isWinA) return isWinB - isWinA;
+    if (boardTaskFilter !== "all") {
+      const isWinA = prodCostWinnerRunIds.has(a.run_id) ? 1 : 0;
+      const isWinB = prodCostWinnerRunIds.has(b.run_id) ? 1 : 0;
+      if (isWinB !== isWinA) return isWinB - isWinA;
+    }
 
     const scDiff = Number(b.primary_score ?? 0) - Number(a.primary_score ?? 0);
     if (Math.abs(scDiff) > 1e-6) return scDiff;
+
+    const isWinA = prodCostWinnerRunIds.has(a.run_id) ? 1 : 0;
+    const isWinB = prodCostWinnerRunIds.has(b.run_id) ? 1 : 0;
+    if (isWinB !== isWinA) return isWinB - isWinA;
 
     const isDsWinA = dsTaskWinnerRunIds.has(a.run_id) ? 1 : 0;
     const isDsWinB = dsTaskWinnerRunIds.has(b.run_id) ? 1 : 0;
@@ -978,7 +1024,7 @@ async function showUseCaseBoard(useCase = "market_share") {
   const dsAllLabel = useCase === "merchandising" ? `All GT & MT Merch Datasets (${availDatasets.length})` : `All MT Datasets (${availDatasets.length})`;
   const dsChips = [
     ["all", dsAllLabel],
-    ...availDatasets.map((d) => [d, DATASETS[d]?.chipLabel || d]),
+    ...availDatasets.map((d) => [d, `${DATASETS[d]?.chipLabel || d} (${ucRuns.filter((r) => (r.dataset || "hul_golden") === d).length})`]),
   ]
     .map(
       ([d, lbl]) =>
@@ -1369,11 +1415,13 @@ async function showUseCaseBoard(useCase = "market_share") {
         : `${nEvalUnits.toLocaleString()} samples`;
       const ownerShort = r.owner || "jjuneja";
       const ownerStr = ownerShort === "rgavigan" ? "Riley Gavigan (rgavigan@google.com)" : ownerShort.includes("@") ? ownerShort : "Jigyasu Juneja (jjuneja@google.com)";
-      const subScoreNote = !scopeMeta.isPartial && scopeMeta.mean3 != null
-        ? `<div class="sub-note mono" style="color:#1e40af;font-weight:600;margin-top:2px;">3-Attr (B/C/P): <b>${pct(scopeMeta.mean3)}</b></div>`
-        : scopeMeta.isPartial
-          ? `<div class="sub-note mono" style="color:#9a3412;font-weight:600;margin-top:2px;">L4 Variant / L5 SKU: <b>Not Evaluated</b></div>`
-          : "";
+      const subScoreNote = scopeMeta.rawScoreNote
+        ? `<div class="sub-note mono" style="color:#475569;font-weight:600;margin-top:2px;">${esc(scopeMeta.rawScoreNote)}</div>`
+        : !scopeMeta.isPartial && scopeMeta.mean3 != null
+          ? `<div class="sub-note mono" style="color:#1e40af;font-weight:600;margin-top:2px;">3-Attr (B/C/P): <b>${pct(scopeMeta.mean3)}</b></div>`
+          : scopeMeta.isPartial
+            ? `<div class="sub-note mono" style="color:#9a3412;font-weight:600;margin-top:2px;">L4 Variant / L5 SKU: <b>Not Evaluated</b></div>`
+            : "";
       const pm = r.planogram_metrics || {};
       const sm = r.sos_metrics || {};
       const bsm = r.bay_scoped_metrics || {};
