@@ -217,6 +217,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--pack-preds", default=None, help="JSON/JSONL file mapping image_id -> raw legacy Category__PackType (e.g. Hair_Care__Bottle)")
     s.add_argument("--variant-preds", default=None, help="JSON/JSONL file mapping image_id -> raw legacy variant (e.g. ADove__Hair_Fall_Rescue)")
 
+    s = sub.add_parser(
+        "compare",
+        help="run paired McNemar significance test & discordant regression breakdown across two runs",
+    )
+    s.add_argument("run_a", help="Baseline run ID or directory in results/")
+    s.add_argument("run_b", help="Candidate run ID or directory in results/")
+    s.add_argument("--results", type=Path, default=runner.RESULTS_DIR)
+    s.add_argument("--alpha", type=float, default=0.05)
+
     a = p.parse_args(argv)
     if a.cmd in ("run", "cloud-run"):
         if not a.model:
@@ -547,6 +556,24 @@ def main(argv: list[str] | None = None) -> int:
                 variant_preds=_load_pred_map(a.variant_preds, "base_variant"),
             )
             print(json.dumps({k: v for k, v in report.items() if k != "labels"}, indent=2))
+    elif a.cmd == "compare":
+        import json
+
+        from utils import metrics
+
+        def _load_run_rows(rdir: Path, rname: str) -> list[dict]:
+            cand = Path(rname)
+            p_img = cand / "images.jsonl" if cand.is_dir() else rdir / rname / "images.jsonl"
+            if not p_img.exists():
+                raise FileNotFoundError(f"Missing images.jsonl for run: {rname} ({p_img})")
+            return [json.loads(line) for line in p_img.read_text().splitlines() if line.strip()]
+
+        rows_a = _load_run_rows(a.results, a.run_a)
+        rows_b = _load_run_rows(a.results, a.run_b)
+        res = metrics.paired_mcnemar_test(rows_a, rows_b, alpha=a.alpha)
+        res["run_a"] = a.run_a
+        res["run_b"] = a.run_b
+        print(json.dumps(res, indent=2))
     return 0
 
 
