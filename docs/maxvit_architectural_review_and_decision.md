@@ -6,7 +6,8 @@
 - Baseline Prototype: [`1019-174125-maxvit_classify-maxvit_tiny_tf_224-hul_variants`](file:///home/riley_gavigan/marketshare_poc/results/1019-174125-maxvit_classify-maxvit_tiny_tf_224-hul_variants/summary.json)
 - 1,000-Crop Test Benchmark: [`1021-121329-maxvit_classify-maxvit_tiny_tf_224-hul_golden`](file:///home/riley_gavigan/marketshare_poc/results/1021-121329-maxvit_classify-maxvit_tiny_tf_224-hul_golden/summary.json)
 - Telemetry & Cost Transparency Verification: [`1021-124936-maxvit_classify-maxvit_tiny_tf_224-hul_golden`](file:///home/riley_gavigan/marketshare_poc/results/1021-124936-maxvit_classify-maxvit_tiny_tf_224-hul_golden/summary.json)
-- Unified 5,000-Sample Stratified Benchmark: [`1021-131533-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all`](file:///home/riley_gavigan/marketshare_poc/results/1021-131533-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all/summary.json)
+- Unified 5,000-Sample Stratified Local Benchmark: [`1021-131533-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all`](file:///home/riley_gavigan/marketshare_poc/results/1021-131533-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all/summary.json)
+- Unified 5,000-Sample Cloud Run Job Benchmark: [`1021-134829-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all`](file:///home/riley_gavigan/marketshare_poc/results/1021-134829-maxvit_classify-maxvit_tiny_tf_224-hul_golden-all/summary.json)
 
 ---
 
