@@ -50,6 +50,18 @@ def test_registry_has_builtin_approaches():
         "shelf_height_size_prior", "shelf_960_softnms_e2e", "shelf_960_sft_clm_clef_e2e", "session_overlap_dedup_e2e",
         "shelf_clm_standalone", "shelf_clef_standalone",
         "clm_promo_matcher", "jev_promo_verifier", "bay_planogram_verifier",
+        "promo_asset_sku_detect", "promo_asset_bay_first_detect",
+        "promo_asset_stage0_clahe_detect", "promo_asset_stage15_clutter_detect",
+        "promo_asset_awp_router_detect", "promo_robotics_spatial_detect",
+        "talker_price_tag_detect", "promo_ocr_zoom_verifier",
+        "distilled_yolo_stage0_clahe", "shelf_stage0_clahe_e2e",
+        "shelf_gemini_detect_e2e", "shelf_clef_metadata_e2e",
+        "clef_aspect_scale_prior", "clef_saliency_diff_zoom", "clef_pack_crown_fusion",
+        "hybrid_pack_specialist_clef", "promo_asset_plank_tiling_detect",
+        "shelf_plank_tiling_e2e", "shelf_generalizable_spine_e2e",
+        "distilled_yolo_960_stage0_clahe", "promo_asset_bay_scoped_plank_detect",
+        "shelf_marketshare_generalizable_e2e", "shelf_merchandising_bay_e2e",
+        "maxvit_classify", "maxvit_retrieval",
     }
     for ap in approaches.all_approaches().values():
         assert ap.architecture and ap.steps
@@ -75,6 +87,16 @@ def test_registry_has_builtin_approaches():
         "shelf_height_size_prior", "shelf_960_softnms_e2e", "shelf_960_sft_clm_clef_e2e", "session_overlap_dedup_e2e",
         "shelf_clef_standalone",
         "jev_promo_verifier", "bay_planogram_verifier",
+        "promo_asset_sku_detect", "promo_asset_bay_first_detect",
+        "promo_asset_stage0_clahe_detect", "promo_asset_stage15_clutter_detect",
+        "promo_asset_awp_router_detect", "promo_robotics_spatial_detect",
+        "talker_price_tag_detect", "promo_ocr_zoom_verifier",
+        "shelf_stage0_clahe_e2e", "shelf_gemini_detect_e2e", "shelf_clef_metadata_e2e",
+        "clef_aspect_scale_prior", "clef_saliency_diff_zoom", "clef_pack_crown_fusion",
+        "hybrid_pack_specialist_clef", "promo_asset_plank_tiling_detect",
+        "shelf_plank_tiling_e2e", "shelf_generalizable_spine_e2e",
+        "promo_asset_bay_scoped_plank_detect", "shelf_marketshare_generalizable_e2e",
+        "shelf_merchandising_bay_e2e",
     }
 
 

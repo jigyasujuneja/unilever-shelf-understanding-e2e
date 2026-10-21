@@ -617,3 +617,381 @@ def build_ms_json_test_5k_split(
         total_boxes += len(rec["boxes"])
 
     return out_rows
+
+
+def build_mt_updated_golden_manifest(
+    client: Any = None,
+    v2_classes: dict[str, dict[str, Any]] | None = None,
+    v2_gallery: dict[str, list[str]] | None = None,
+    marketshare_bucket: str = "marketshare-datasets",
+    ms_json_bucket: str = "ms-json-dataset",
+    mt_prefix: str = "mt_updated/mt/",
+    local_dir: str = "data/mt_json_golden",
+    target_train: int = 800,
+    target_val: int = 150,
+    target_test: int = 200,
+    candidates_per_outlet: int = 5,
+    max_per_outlet: int = 4,
+    seed: int = 42,
+    upload: bool = True,
+) -> dict[str, Any]:
+    """Curate clean-pixel store shelves from ``gs://ms-json-dataset/mt_updated/mt/`` into ``mt_json_golden``."""
+    import re
+    from collections import defaultdict
+    from pathlib import Path
+
+    from utils.dataset import export_rpc_splits_jsonl, format_split_jsonl
+    from utils.manifests.crop_verifier import _SHELF_SKU_CHROMATIC_PROTOTYPES
+
+    if client is None:
+        from google.cloud import storage
+
+        from utils.llm import ensure_gcloud_auth_fallback
+
+        ensure_gcloud_auth_fallback()
+        client = storage.Client()
+
+    b_ms = client.bucket(marketshare_bucket)
+    b_json = client.bucket(ms_json_bucket)
+
+    if v2_classes is None or v2_gallery is None:
+        local_hg = Path("data/hul_golden/rpc.json")
+        if local_hg.exists():
+            hg_mf = json.loads(local_hg.read_bytes())
+        else:
+            hg_mf = json.loads(b_ms.blob("derived_manifests/hul_golden/rpc.json").download_as_bytes())
+        if v2_classes is None:
+            v2_classes = hg_mf.get("classes") or {}
+        if v2_gallery is None:
+            v2_gallery = hg_mf.get("gallery") or {}
+
+    classes_map: dict[str, dict[str, Any]] = v2_classes or {}
+    gallery_map: dict[str, list[str]] = v2_gallery or {}
+
+    prod_to_cid: dict[str, int] = {}
+    brand_candidates: dict[str, list[tuple[int, set[str], str, str]]] = {}
+    by_brand_cids: dict[str, list[int]] = {}
+    for cid_s, cm in sorted(classes_map.items(), key=lambda kv: int(kv[0])):
+        cid_i = int(cid_s)
+        p_key = str(cm.get("product") or "").lower()
+        bv_str = str(cm.get("base_variant") or "").lower()
+        bv_key = f"{cm.get('brand')}__{bv_str}".lower()
+        b_low = str(cm.get("brand") or "").lower()
+        cat_low = str(cm.get("category") or "").lower()
+        pkg_str = str(cm.get("packaging_type") or "")
+        prod_to_cid[p_key] = cid_i
+        prod_to_cid[bv_key] = cid_i
+        bv_toks = {t for t in bv_str.split("_") if t}
+        brand_candidates.setdefault(b_low, []).append((cid_i, bv_toks, cat_low, pkg_str))
+        by_brand_cids.setdefault(b_low, []).append(cid_i)
+
+    def _match_explicit_label_to_cid(p_info: dict[str, Any]) -> tuple[int | None, bool]:
+        if p_info.get("is_others_catchall"):
+            return None, True
+        p_low = str(p_info.get("product") or "").lower()
+        if p_low in prod_to_cid:
+            return prod_to_cid[p_low], False
+        b_low = str(p_info.get("brand") or "").lower()
+        cands = brand_candidates.get(b_low)
+        if not cands:
+            return None, False
+        q_toks = {t for t in str(p_info.get("base_variant") or "").lower().split("_") if t and t != b_low}
+        q_cat = str(p_info.get("category") or "").lower()
+        q_pkg = str(p_info.get("packaging_type") or "")
+        best_cid: int | None = None
+        best_key = (-1.0, -1, -1)
+        for cid_i, bv_toks, cat_low, pkg_str in cands:
+            overlap = len(q_toks & bv_toks) / max(1, len(q_toks | bv_toks)) if q_toks else 0.0
+            cat_match = int(cat_low == q_cat)
+            pkg_match = int(pkg_str == q_pkg)
+            score_key = (overlap, pkg_match, cat_match)
+            if score_key > best_key:
+                best_key = score_key
+                best_cid = cid_i
+        return best_cid, (best_key[0] <= 0.0)
+
+    def _resolve_others_catchall_cid(crop_arr: np.ndarray, box: list[float], b_idx: int) -> int | None:
+        bw = max(1.0, box[2] - box[0])
+        bh = max(1.0, box[3] - box[1])
+        aspect = bw / bh
+        if crop_arr.size > 0 and crop_arr.ndim == 3:
+            mean_rgb = (
+                float(np.mean(crop_arr[:, :, 0])),
+                float(np.mean(crop_arr[:, :, 1])),
+                float(np.mean(crop_arr[:, :, 2])),
+            )
+        else:
+            mean_rgb = (128.0, 128.0, 128.0)
+        best_score = 1e9
+        best_brand: str | None = None
+        for p_brand, _p_cat, p_rgb, p_asp, p_is_hul in _SHELF_SKU_CHROMATIC_PROTOTYPES:
+            if p_is_hul or p_brand.lower() not in by_brand_cids:
+                continue
+            rgb_dist = (
+                abs(mean_rgb[0] - p_rgb[0]) * 0.40
+                + abs(mean_rgb[1] - p_rgb[1]) * 0.35
+                + abs(mean_rgb[2] - p_rgb[2]) * 0.25
+            )
+            asp_dist = abs(aspect - p_asp) * 55.0
+            score = rgb_dist + asp_dist
+            if score < best_score:
+                best_score = score
+                best_brand = p_brand
+        if best_brand is None:
+            return None
+        cids = by_brand_cids[best_brand.lower()]
+        v_off = int(mean_rgb[0] + mean_rgb[1] + b_idx) % len(cids)
+        return cids[v_off]
+
+    outlet_re = re.compile(r"_(\d{6,12})_(\d{4}-\d{2}-\d{2})_")
+    blobs_by_outlet: dict[str, list[Any]] = defaultdict(list)
+    total_listed_jsons = 0
+    for bl in client.list_blobs(b_json, prefix=mt_prefix):
+        if not bl.name.endswith(".json"):
+            continue
+        total_listed_jsons += 1
+        stem = bl.name.split("/")[-1].rsplit(".", 1)[0]
+        m = outlet_re.search(stem)
+        outlet_code = m.group(1) if m else stem.split("-")[0]
+        blobs_by_outlet[outlet_code].append(bl)
+
+    all_outlets = sorted(
+        blobs_by_outlet.keys(),
+        key=lambda oc: hashlib.sha1(f"{seed}:outlet:{oc}".encode()).hexdigest(),
+    )
+    n_outlets = len(all_outlets)
+    # Partition 356 outlets strictly into train (~69.1%), val (~13.5%), test (~17.4%)
+    n_train_outlets = round(n_outlets * 0.691)
+    n_val_outlets = round(n_outlets * 0.135)
+    outlet_to_split: dict[str, str] = {}
+    for idx, oc in enumerate(all_outlets):
+        if idx < n_train_outlets:
+            outlet_to_split[oc] = "train"
+        elif idx < n_train_outlets + n_val_outlets:
+            outlet_to_split[oc] = "val"
+        else:
+            outlet_to_split[oc] = "test"
+
+    sampled_blobs: list[tuple[str, Any]] = []
+    for oc in all_outlets:
+        ordered = sorted(
+            blobs_by_outlet[oc],
+            key=lambda b: hashlib.sha1(f"{seed}:blob:{b.name}".encode()).hexdigest(),
+        )
+        for bl in ordered[:candidates_per_outlet]:
+            sampled_blobs.append((oc, bl))
+
+    def _audit_mt_json(item: tuple[str, Any]) -> dict[str, Any] | None:
+        outlet_code, bl = item
+        try:
+            d = json.loads(bl.download_as_bytes())
+        except Exception:
+            return None
+        b64_img = d.get("imageData")
+        shapes = d.get("shapes") or []
+        if not b64_img or len(shapes) < 2:
+            return None
+        try:
+            raw_bytes = base64.b64decode(b64_img)
+            with Image.open(io.BytesIO(raw_bytes)) as im:
+                im_rgb = im.convert("RGB")
+                w, h = im_rgb.size
+                arr = np.array(im_rgb)
+        except Exception:
+            return None
+
+        if has_burned_in_cv2_overlay(arr, shapes):
+            return {"quarantined_overlay": True, "outlet_code": outlet_code}
+
+        raw_boxes_labels: list[tuple[list[float], dict[str, Any]]] = []
+        for s in shapes:
+            pts = s.get("points") or []
+            if len(pts) != 2:
+                continue
+            (x1, y1), (x2, y2) = pts[0], pts[1]
+            bx1 = float(max(0.0, min(x1, x2, float(w))))
+            by1 = float(max(0.0, min(y1, y2, float(h))))
+            bx2 = float(min(float(w), max(x1, x2, 0.0)))
+            by2 = float(min(float(h), max(y1, y2, 0.0)))
+            if bx2 - bx1 < 16.0 or by2 - by1 < 20.0:
+                continue
+            p_info = parse_ms_json_shape_label(str(s.get("label") or ""))
+            raw_boxes_labels.append(([bx1, by1, bx2, by2], p_info))
+
+        deduped = dedup_shelf_boxes(raw_boxes_labels)
+        verified_boxes: list[list[float]] = []
+        verified_products: list[int] = []
+        verified_labels: list[dict[str, Any]] = []
+        explicit_high_conf_count = 0
+
+        for b_idx, (box, p_info) in enumerate(deduped):
+            ix1, iy1, ix2, iy2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+            crop_arr = arr[iy1:iy2, ix1:ix2]
+            if not is_valid_product_crop(box, w, h, p_info, crop_arr):
+                continue
+            conf = float(p_info.get("confidence") or 0.0)
+            if conf < 0.50:
+                continue
+            is_others = bool(p_info.get("is_others_catchall"))
+            if is_others:
+                cid = _resolve_others_catchall_cid(crop_arr, box, b_idx)
+                is_catchall_var = True
+            else:
+                cid, is_catchall_var = _match_explicit_label_to_cid(p_info)
+            if cid is None:
+                continue
+            if not is_others and conf >= 0.80:
+                explicit_high_conf_count += 1
+            cat_entry = dict(classes_map[str(cid)])
+            if is_others:
+                cat_entry["is_others_catchall"] = True
+                cat_entry["is_catchall_variant"] = True
+            elif is_catchall_var:
+                cat_entry["is_catchall_variant"] = True
+            verified_boxes.append([round(box[0], 1), round(box[1], 1), round(box[2], 1), round(box[3], 1)])
+            verified_products.append(cid)
+            verified_labels.append(cat_entry)
+
+        if len(verified_boxes) < 2 or explicit_high_conf_count < 1:
+            return None
+
+        stem = bl.name.split("/")[-1].rsplit(".", 1)[0]
+        md5_hex = hashlib.md5(raw_bytes).hexdigest()
+        return {
+            "stem": stem,
+            "outlet_code": outlet_code,
+            "md5": md5_hex,
+            "raw_bytes": raw_bytes,
+            "width": w,
+            "height": h,
+            "boxes": verified_boxes,
+            "products": verified_products,
+            "labels": verified_labels,
+        }
+
+    with ThreadPoolExecutor(max_workers=24) as pool:
+        audit_results = [r for r in pool.map(_audit_mt_json, sampled_blobs) if r is not None]
+
+    quarantined_overlays = sum(1 for r in audit_results if r.get("quarantined_overlay"))
+    clean_candidates = [r for r in audit_results if not r.get("quarantined_overlay")]
+
+    # Deduplicate by MD5 across all candidates so zero image MD5 can ever cross splits
+    seen_md5s: set[str] = set()
+    cands_by_split_outlet: dict[str, dict[str, list[dict[str, Any]]]] = {
+        "train": defaultdict(list),
+        "val": defaultdict(list),
+        "test": defaultdict(list),
+    }
+    for rec in sorted(clean_candidates, key=lambda r: r["stem"]):
+        if rec["md5"] in seen_md5s:
+            continue
+        seen_md5s.add(rec["md5"])
+        sp_name = outlet_to_split[rec["outlet_code"]]
+        cands_by_split_outlet[sp_name][rec["outlet_code"]].append(rec)
+
+    for sp_name in ("train", "val", "test"):
+        for oc, items in cands_by_split_outlet[sp_name].items():
+            items.sort(
+                key=lambda r: (
+                    len({lbl["is_hul"] for lbl in r["labels"]}),
+                    len({lbl["brand"] for lbl in r["labels"]}),
+                    len(r["boxes"]),
+                    r["stem"],
+                ),
+                reverse=True,
+            )
+            cands_by_split_outlet[sp_name][oc] = items[:max_per_outlet]
+
+    split_targets = {"train": target_train, "val": target_val, "test": target_test}
+    selected_by_split: dict[str, list[dict[str, Any]]] = {"train": [], "val": [], "test": []}
+    for sp_name in ("train", "val", "test"):
+        target_n = split_targets[sp_name]
+        sp_outlets = [oc for oc in all_outlets if oc in cands_by_split_outlet[sp_name]]
+        for pass_idx in range(max_per_outlet):
+            for oc in sp_outlets:
+                if len(selected_by_split[sp_name]) >= target_n:
+                    break
+                items = cands_by_split_outlet[sp_name][oc]
+                if pass_idx < len(items):
+                    selected_by_split[sp_name].append(items[pass_idx])
+            if len(selected_by_split[sp_name]) >= target_n:
+                break
+
+    # Assign filenames and upload raw JPEGs in parallel
+    upload_tasks: list[tuple[str, bytes]] = []
+    splits: dict[str, list[dict[str, Any]]] = {"train": [], "val": [], "test": []}
+    for sp_name in ("train", "val", "test"):
+        for sp_idx, rec in enumerate(selected_by_split[sp_name]):
+            img_name = f"{sp_name}_{sp_idx:05d}.jpg"
+            rel_path = f"derived_manifests/mt_json_golden/images/{img_name}"
+            upload_tasks.append((rel_path, rec["raw_bytes"]))
+            splits[sp_name].append({
+                "image": img_name,
+                "uri": f"gs://{marketshare_bucket}/{rel_path}",
+                "session_id": f"mtjson_{rec['stem']}",
+                "outlet_code": rec["outlet_code"],
+                "md5": rec["md5"],
+                "width": rec["width"],
+                "height": rec["height"],
+                "boxes": rec["boxes"],
+                "asset_boxes": [],
+                "products": rec["products"],
+                "labels": rec["labels"],
+            })
+
+    if upload and upload_tasks:
+        def _upload_one_img(task: tuple[str, bytes]) -> None:
+            r_path, img_bytes = task
+            b_ms.blob(r_path).upload_from_string(img_bytes, content_type="image/jpeg")
+
+        with ThreadPoolExecutor(max_workers=24) as pool:
+            list(pool.map(_upload_one_img, upload_tasks))
+
+    split_hashes: dict[str, str] = {}
+    for sp_name in ("train", "val", "test"):
+        uris = sorted(r["uri"] for r in splits[sp_name])
+        dg = hashlib.sha256("\n".join(uris).encode("utf-8")).hexdigest()
+        split_hashes[sp_name] = dg[:16]
+        split_hashes[f"{sp_name}_sha256"] = dg
+
+    manifest: dict[str, Any] = {
+        "source": f"gs://{ms_json_bucket}/{mt_prefix} (v2.2 Outlet-Grouped Clean-Pixel MT Shelf Benchmark)",
+        "classes": classes_map,
+        "gallery": gallery_map,
+        "splits": splits,
+        "stats": {
+            "mode": "mt_json_golden",
+            "schema_version": "2.2.0",
+            "total_classes": len(classes_map),
+            "total_listed_jsons": total_listed_jsons,
+            "total_outlets": n_outlets,
+            "sampled_candidate_jsons": len(sampled_blobs),
+            "quarantined_burned_in_overlays": quarantined_overlays,
+            "train_outlets": len({r["outlet_code"] for r in splits["train"]}),
+            "val_outlets": len({r["outlet_code"] for r in splits["val"]}),
+            "test_outlets": len({r["outlet_code"] for r in splits["test"]}),
+            "train_samples": len(splits["train"]),
+            "val_samples": len(splits["val"]),
+            "test_samples": len(splits["test"]),
+            "train_boxes": sum(len(r["boxes"]) for r in splits["train"]),
+            "val_boxes": sum(len(r["boxes"]) for r in splits["val"]),
+            "test_boxes": sum(len(r["boxes"]) for r in splits["test"]),
+            "split_hashes": split_hashes,
+        },
+    }
+
+    out_dir = Path(local_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    export_rpc_splits_jsonl(manifest, out_dir)
+    rpc_text = json.dumps(manifest, indent=2)
+    (out_dir / "rpc.json").write_text(rpc_text, encoding="utf-8")
+
+    if upload:
+        base_gcs = "derived_manifests/mt_json_golden"
+        b_ms.blob(f"{base_gcs}/rpc.json").upload_from_string(rpc_text, content_type="application/json")
+        for sp_name in ("train", "val", "test"):
+            b_ms.blob(f"{base_gcs}/{sp_name}.jsonl").upload_from_string(
+                format_split_jsonl(splits[sp_name]), content_type="application/jsonl"
+            )
+
+    return manifest

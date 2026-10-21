@@ -92,7 +92,7 @@ TASK_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
 }
 
-APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
+APPROACH_INTUITIONS: dict[str, dict[str, Any]] = {
     "shelf_hierarchical_clm_jev": {
         "display_name": "End-to-End Shelf Scanner (ONNX Detector + Brand Filter + Batched Gemini)",
         "intuition": (
@@ -290,7 +290,7 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
         "display_name": "Store-Segment & Scene Category Scoped Matcher (EXP-20)",
         "intuition": (
             "Uses the dominant scene category across all boxes on the shelf to prune out-of-category lookalikes "
-            "(e.g. Oral Care vs Skin Care vs Laundry) before running CLM InfoNCE + Gemini verification."
+            "(e.g. Oral Care vs Skin Care vs Laundry) before running calibrated gemini-embedding-2 (3,072-D) + Gemini verification."
         ),
         "task_id": "TASK-RET",
     },
@@ -298,7 +298,7 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
         "display_name": "End-to-End Store-Segment Scoped Shelf Pipeline (EXP-20)",
         "intuition": (
             "Combines Stage-1 ONNX YOLO box detection with store-segment & scene-category gallery pruning "
-            "before CLM InfoNCE and batched Gemini contact sheets."
+            "before calibrated gemini-embedding-2 matching and batched Gemini contact sheets."
         ),
         "task_id": "TASK-E2E",
     },
@@ -329,7 +329,7 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
     "shelf_row_neighbor_prior": {
         "display_name": "End-to-End Shelf Pipeline with 1D Horizontal Neighbor Brand Prior (EXP-22)",
         "intuition": (
-            "Full-shelf ONNX detection + CLM InfoNCE + 1D horizontal shelf-row neighbor brand/category consistency prior."
+            "Full-shelf ONNX detection + calibrated gemini-embedding-2 matching + 1D horizontal shelf-row neighbor brand/category consistency prior."
         ),
         "task_id": "TASK-E2E",
     },
@@ -344,7 +344,7 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
     "shelf_height_size_prior": {
         "display_name": "End-to-End Shelf Pipeline with Relative Box-Height Size Prior (EXP-23)",
         "intuition": (
-            "Full-shelf ONNX detection + CLM InfoNCE + shelf-plank relative box-height size calibration (h_box / h_row)."
+            "Full-shelf ONNX detection + calibrated gemini-embedding-2 matching + shelf-plank relative box-height size calibration (h_box / h_row)."
         ),
         "task_id": "TASK-E2E",
     },
@@ -357,9 +357,9 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
         "task_id": "TASK-DET",
     },
     "shelf_960_softnms_e2e": {
-        "display_name": "End-to-End 960px Soft-NMS Detector + Gray-World CLM-JEV Pipeline (EXP-24)",
+        "display_name": "End-to-End 960px Soft-NMS Detector + Calibrated Embedding & Contact-Sheet Pipeline (EXP-24)",
         "intuition": (
-            "Pairs the 960px High-Res Gaussian Soft-NMS ONNX detector with Gray-World CLM InfoNCE + batched Gemini contact sheets."
+            "Pairs the 960px High-Res Gaussian Soft-NMS ONNX detector with Shades-of-Gray calibrated gemini-embedding-2 (3,072-D) + batched Gemini contact sheets."
         ),
         "task_id": "TASK-E2E",
     },
@@ -374,65 +374,165 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
     "session_overlap_dedup_e2e": {
         "display_name": "End-to-End Store-Visit Session Overlap Deduplication Pipeline (EXP-25)",
         "intuition": (
-            "Full-shelf ONNX detection + multi-photo store-visit boundary overlap deduplication + CLM-JEV attribution."
+            "Full-shelf ONNX detection + multi-photo store-visit boundary overlap deduplication + calibrated embedding & contact-sheet attribution."
         ),
         "task_id": "TASK-E2E",
     },
     "hf_clef_flash_gpu": {
-        "display_name": "Hugging Face Cloudflare/clef-flash (Qwen3.5-9B) Open-Weight Verifier (EXP-26)",
+        "display_name": "Open-Source HuggingFace Cloudflare/clef-flash (Qwen3.5-9B) Verifier (EXP-26)",
         "intuition": (
-            "Runs open-weight Cloudflare/clef-flash (Qwen/Qwen3.5-9B) on Vertex AI L4 GPU via vLLM with top-16 "
-            "token logprobs on CLEF Bottom-30% Zoom-Strip contact sheets."
+            "External open-weight benchmark: runs HuggingFace Cloudflare/clef-flash (Qwen/Qwen3.5-9B) on Vertex AI L4 GPU via vLLM "
+            "with top-16 token logprobs on Bottom-30% Zoom-Strip contact sheets."
         ),
         "task_id": "TASK-RET",
     },
     "hf_clef_27b_gpu": {
-        "display_name": "Hugging Face Cloudflare/clef-27b (Qwen3.5-27B) Open-Weight Verifier (EXP-26)",
+        "display_name": "Open-Source HuggingFace Cloudflare/clef-27b (Qwen3.5-27B) Verifier (EXP-26)",
         "intuition": (
-            "Runs open-weight Cloudflare/clef-27b (Qwen/Qwen3.5-27B, 4x L4 tensor-parallel) on Vertex AI GPU via vLLM "
-            "on CLEF Bottom-30% Zoom-Strip contact sheets."
+            "External open-weight benchmark: runs HuggingFace Cloudflare/clef-27b (Qwen/Qwen3.5-27B, 4x L4 tensor-parallel) on Vertex AI GPU via vLLM "
+            "on Bottom-30% Zoom-Strip contact sheets."
         ),
         "task_id": "TASK-RET",
     },
     "hf_clm_v01_8b_gpu": {
-        "display_name": "Hugging Face Contrastive-LM/CLM-v0.1-8B (Qwen3-VL-8B) Verifier (EXP-26)",
+        "display_name": "Open-Source HuggingFace Contrastive-LM/CLM-v0.1-8B (Qwen3-VL-8B) Verifier (EXP-26)",
         "intuition": (
-            "Runs open-weight Contrastive-LM/CLM-v0.1-8B (Qwen/Qwen3-VL-8B-Instruct) on Vertex AI L4 GPU via vLLM "
-            "after Stage-2A CLM InfoNCE gating."
+            "External open-weight benchmark: runs HuggingFace Contrastive-LM/CLM-v0.1-8B (Qwen/Qwen3-VL-8B-Instruct) on Vertex AI L4 GPU via vLLM "
+            "after Stage-2A calibrated gemini-embedding-2 gating."
         ),
         "task_id": "TASK-RET",
     },
     "clef_contrastive_metadata": {
-        "display_name": "Contrastive Metadata Zoom Contact Sheet (EXP-28)",
+        "display_name": "Multi-Crop Visual Contact Sheet + Catalog Diff Headers (EXP-28)",
         "intuition": (
-            "Pairs the query crop + 2x Top/Mid/Bottom zoom strips beside Top-6 candidate packshots annotated with "
+            "In-house Vertex AI cascade: pairs the query crop + 2x Top/Mid/Bottom zoom strips beside Top-6 candidate packshots annotated with "
             "dynamic catalog attributes (Brand, Variant, Category, Pack, Size) and pairwise diff tokens."
         ),
         "task_id": "TASK-RET",
     },
     "sft_clm_clef_cascade": {
-        "display_name": "Gemini 3.5 Flash-Lite LoRA SFT + CLM + CLEF Cascade (EXP-29 / EXP-33)",
+        "display_name": "Gemini 3.5 Flash-Lite LoRA SFT + Calibrated Embedding Gate + Contact Sheet (EXP-29 / EXP-33)",
         "intuition": (
-            "Combines k=3 medoid visual gallery prototypes and CLM 5-attribute vote gating with our custom "
-            "Vertex AI Gemini 3.5 Flash-Lite LoRA SFT endpoint and CLEF contact-sheet verification."
+            "In-house Vertex AI cascade: combines k=3 medoid visual gallery prototypes and calibrated gemini-embedding-2 (3,072-D) vote gating with our custom "
+            "Vertex AI Gemini 3.5 Flash-Lite LoRA SFT endpoint and visual contact-sheet verification."
         ),
         "task_id": "TASK-RET",
     },
     "residual_infonce_clm_jev": {
-        "display_name": "Residual InfoNCE Projection Adapter + CLM-JEV (EXP-32)",
+        "display_name": "Residual InfoNCE Projection Adapter + Calibrated Embedding Cascade (EXP-32)",
         "intuition": (
-            "Applies a gallery-trained residual MLP adapter f(x)=norm(x+0.25*W2*GELU(W1*x)) on gemini-embedding-2 "
-            "to sharpen sister-variant separation before CLM gating and Gemini contact-sheet verification."
+            "In-house Vertex AI cascade: applies a gallery-trained residual MLP adapter f(x)=norm(x+0.25*W2*GELU(W1*x)) on gemini-embedding-2 (3,072-D) "
+            "to sharpen sister-variant separation before confidence gating and Gemini contact-sheet verification."
         ),
         "task_id": "TASK-RET",
     },
     "dinov3_classify": {
-        "display_name": "Meta DINOv3 Vision Backbone + CosFace SFT Classifier",
+        "display_name": "Meta DINOv3 Self-Supervised Vision Backbone + CosFace SFT Classifier",
         "intuition": (
-            "Closed-set supervised vision classifier trained on DINOv3 patch features with a residual bottleneck "
-            "and CosFace margin head."
+            "External self-supervised vision backbone benchmark: closed-set supervised classifier trained on frozen Meta DINOv3 patch features (384-D) "
+            "with a residual bottleneck and CosFace margin head (0 VLM calls, no gemini-embedding-2)."
         ),
         "task_id": "TASK-CLS",
+        "default_architecture": "Meta DINOv3 ViT-S/16 (384-D Frozen Vision Backbone) -> Residual Bottleneck + CosFace SFT Head (0 VLM Calls)",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Backbone: Frozen Meta DINOv3 ViT-S/16 Self-Supervised Vision Transformer (CLS + Patch Mean = 768-D, 0 VLM calls)",
+            "3. SFT Head: Residual Bottleneck MLP (768-D -> 512-D -> 256-D) + CosFace Margin Classifier (s=30, m=0.25)",
+            "4. Calibration: Temperature Scaling + Top-5 Centroid Cosine Blending (lambda=0.35)",
+        ],
+    },
+    "dinov3_hierarchical_sft": {
+        "display_name": "Meta DINOv3 ViT-S/16 + Hierarchical Taxonomic SFT Head (EXP-25)",
+        "intuition": (
+            "External self-supervised vision backbone benchmark: pairs frozen Meta DINOv3 ViT-S/16 (768-D CLS+Mean) with a 5-level "
+            "Brand-to-Variant Masked Hierarchical CosFace SFT head (0 VLM calls, no gemini-embedding-2)."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta DINOv3 ViT-S/16 (768-D CLS+Mean) -> 5-Level Taxonomic Masked CosFace SFT Head (0 VLM Calls)",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Backbone: Frozen Meta DINOv3 ViT-S/16 Self-Supervised Vision Transformer (CLS + Patch Mean = 768-D)",
+            "3. Hierarchical SFT Head: Shared Residual Trunk + 5 Parallel CosFace Heads (HUL, Category, Brand, Pack, Variant)",
+            "4. Taxonomic Masking: Soft Brand-to-Variant Probability Routing (M_brand->variant) + Centroid Cosine Blend",
+            "5. Output: Closed-Set 5-Level Prediction with 0 Gemini VLM Calls",
+        ],
+    },
+    "dinov3_triage": {
+        "display_name": "Meta DINOv3 Confidence Triage + Selective Gemini 3.5 Flash-Lite Cascade",
+        "intuition": (
+            "Hybrid self-supervised + VLM triage: routes high-confidence crops through frozen Meta DINOv3 + CosFace at 0 VLM cost and "
+            "escalates only low-margin crops to Gemini 3.5 Flash-Lite with Top-15 DINOv3 shortlist hints."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta DINOv3 ViT-S/16 + CosFace SFT Gate -> Selective Gemini 3.5 Flash-Lite Escalation",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Stage 1 Backbone: Frozen Meta DINOv3 ViT-S/16 + Hierarchical CosFace SFT Classifier",
+            "3. Confidence Triage Gate: Accepts DINOv3 Top-1 when calibrated probability and top1-top2 margin exceed threshold",
+            "4. Stage 2 VLM Escalation: Escalates ambiguous crops to Vertex AI Gemini 3.5 Flash-Lite constrained to Top-15 DINOv3 candidates",
+        ],
+    },
+    "dinov3_vitb_hierarchical": {
+        "display_name": "Meta DINOv3 ViT-B/16 (1,536-D) + Hierarchical Taxonomic SFT Head",
+        "intuition": (
+            "External self-supervised vision backbone benchmark: scales frozen Meta DINOv3 up to ViT-B/16 (768-D CLS + 768-D Patch Mean = 1,536-D) "
+            "with a 5-level Brand-to-Variant Masked CosFace SFT classifier (0 VLM calls, no gemini-embedding-2)."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta DINOv3 ViT-B/16 (1,536-D CLS+Mean) -> 5-Level Taxonomic Masked CosFace SFT Head (0 VLM Calls)",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Backbone: Frozen Meta DINOv3 ViT-B/16 Self-Supervised Vision Transformer (1,536-D CLS + Patch Mean)",
+            "3. Hierarchical SFT Head: Residual Bottleneck Trunk + 5 Parallel CosFace Heads (HUL, Category, Brand, Pack, Variant)",
+            "4. Taxonomic Masking: Soft Brand-to-Variant Probability Routing + Centroid Cosine Blend (0 VLM Calls)",
+        ],
+    },
+    "dinov3_vitb_detr_hierarchical": {
+        "display_name": "End-to-End ONNX RT-DETR + Meta DINOv3 ViT-B/16 Hierarchical SFT Pipeline",
+        "intuition": (
+            "Zero-VLM end-to-end shelf pipeline combining our Stage-1 ONNX RT-DETR v2 shelf detector with a frozen Meta DINOv3 ViT-B/16 "
+            "hierarchical CosFace SFT classifier head (0 VLM calls, no gemini-embedding-2)."
+        ),
+        "task_id": "TASK-E2E",
+        "default_architecture": "Stage 1: ONNX RT-DETR v2 Shelf Detector -> Stage 2: Meta DINOv3 ViT-B/16 + Hierarchical CosFace SFT (0 VLM Calls)",
+        "default_steps": [
+            "1. Stage 1 Detection: Local CPU ONNX RT-DETR v2 (rtdetr_r50vd, 43M params) shelf bounding-box detection",
+            "2. Crop Extraction: Tight bounding-box crop extraction + CLAHE + Gray-World White Balance (224x224)",
+            "3. Stage 2 Backbone: Frozen Meta DINOv3 ViT-B/16 Self-Supervised Vision Transformer (1,536-D CLS + Patch Mean)",
+            "4. Stage 2 Classifier: 5-Level Brand-to-Variant Masked CosFace SFT Head (0 Gemini VLM Calls)",
+        ],
+    },
+    "ijepa_hierarchical": {
+        "display_name": "Meta I-JEPA (ViT-H/14) Self-Supervised Vision Backbone + SFT Hierarchical Head",
+        "intuition": (
+            "External self-supervised vision backbone benchmark: extracts dense semantic patch embeddings from Meta's frozen I-JEPA ViT-H/14 "
+            "(1,280-D, 0 VLM calls, no gemini-embedding-2) paired with a supervised Residual Bottleneck + CosFace hierarchical classifier head."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta I-JEPA ViT-H/14 (facebook/ijepa_vith14_1k, 2,560-D Max+Mean Pool) -> 5-Level Taxonomic CosFace SFT Head",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (224x224)",
+            "2. Backbone: Frozen Meta I-JEPA ViT-H/14 Self-Supervised Vision Transformer (1,280-D Max + 1,280-D Mean Pool = 2,560-D)",
+            "3. Hierarchical SFT Head: Residual Bottleneck (2,560-D -> 512-D -> 384-D) + 5 Parallel CosFace Heads",
+            "4. Taxonomic Masking: Soft Brand-to-Variant Probability Routing (M_brand->variant)",
+            "5. Calibration: Temperature Scaling + Centroid Cosine Blending (lambda=0.35, 0 VLM Calls)",
+        ],
+    },
+    "vjepa2_hierarchical": {
+        "display_name": "Meta V-JEPA 2 Self-Supervised Vision Backbone + SFT Hierarchical Head",
+        "intuition": (
+            "External self-supervised vision backbone benchmark: extracts dense spatio-temporal patch embeddings from Meta's frozen V-JEPA 2 ViT-L/16 "
+            "(1,024-D, 0 VLM calls, no gemini-embedding-2) paired with a supervised Residual Bottleneck + CosFace hierarchical classifier head."
+        ),
+        "task_id": "TASK-CLS",
+        "default_architecture": "Meta V-JEPA 2 ViT-L/16 (facebook/vjepa2-vitl-fpc64-256, 2,048-D Max+Mean Pool) -> 5-Level Taxonomic CosFace SFT Head",
+        "default_steps": [
+            "1. Preprocessing: CLAHE + Gray-World White Balance + Aspect-Preserving Letterbox (256x256)",
+            "2. Backbone: Frozen Meta V-JEPA 2 ViT-L/16 Self-Supervised Spatio-Temporal Vision Transformer (2,048-D Spatial Max+Mean Pool)",
+            "3. Hierarchical SFT Head: Residual Bottleneck (2,048-D -> 512-D -> 384-D) + 5 Parallel CosFace Heads (HUL, Category, Brand, Pack, Variant)",
+            "4. Taxonomic Masking: Soft Brand-to-Variant Probability Routing (M_brand->variant)",
+            "5. Calibration: Temperature Scaling + Centroid Cosine Blending (lambda=0.35, 0 VLM Calls)",
+        ],
     },
     "cv_classify": {
         "display_name": "Legacy 3-Stage InceptionV3 Cascade (Brand → Pack → 7 Category-Routed Variant Models)",
@@ -442,6 +542,198 @@ APPROACH_INTUITIONS: dict[str, dict[str, str]] = {
             "Stage 3 Silo-Routed Variant Classifier across 5 HUL endpoints (wash, skin, p5, oral, gen) and 2 Non-HUL endpoints (nonhul_p6, nonhul_gen)."
         ),
         "task_id": "TASK-CLS",
+        "default_architecture": "Stage 1: InceptionV3 Brand (.h5, 67 classes) -> Stage 2: InceptionV3 Pack (.h5, 46 classes) -> Stage 3: 7 Category-Routed Variant Endpoints (.h5)",
+        "default_steps": [
+            "1. Crop Preprocessing: Resize product crop to 299x299 RGB tensor normalized to [-1, 1] for Keras InceptionV3",
+            "2. Stage 1 Brand Endpoint: Invoke Vertex AI InceptionV3 Brand Classifier (67 classes) -> predicts Brand + HUL vs Non-HUL flag",
+            "3. Stage 2 Pack Endpoint: Invoke Vertex AI InceptionV3 Pack Classifier (46 classes) conditioned on Stage-1 Brand",
+            "4. Stage 3 Silo Routing: Route crop to 1 of 7 specialized InceptionV3 Variant Endpoints (5 HUL silos: wash, skin, p5, oral, gen; 2 Non-HUL silos: nonhul_p6, nonhul_gen)",
+            "5. Taxonomy Mapping: Map 3-stage predictions to canonical 5-level SKU taxonomy (0 Gemini VLM Calls, no gemini-embedding-2)",
+        ],
+    },
+    "promo_asset_sku_detect": {
+        "display_name": "Gemini 3.5 Flash-Lite Dual-Class Promo Bay & SKU Detector (EXP-34)",
+        "intuition": (
+            "Single-pass structured JSON detector that jointly localizes Class 0 branded promotional display bays "
+            "(headers, coolers, hanging display strips) and Class 1 product SKU boxes inside each bay."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_bay_first_detect": {
+        "display_name": "Bay-First High-Res Crop Detector + Plank Support (EXP-39)",
+        "intuition": (
+            "First detects Class 0 Unilever display bays on the full photo, then crops each bay at native camera "
+            "resolution to detect small sachets, dark back-row bottles, and top-row packs under header signs."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_stage0_clahe_detect": {
+        "display_name": "Stage 0 Dual-Buffer CLAHE + Dual-Class Bay & SKU Detector (EXP-40)",
+        "intuition": (
+            "Applies Shades-of-Gray illuminant balance plus CIELAB L*-channel CLAHE on detector_image for Stage 1 "
+            "box localization while preserving linear color_image for Stage 2 chromatic SKU matching."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_stage15_clutter_detect": {
+        "display_name": "Stage 1.5 3D-Pack vs 2D-Cardboard & Price-Tag Clutter Gate (EXP-41)",
+        "intuition": (
+            "Combines Stage 0 CLAHE and Bay-First crop detection with an open-set-safe Stage 1.5 geometric filter "
+            "that drops 2D printed wing graphics, header banners, and shelf-rail price tags while keeping regional competitors."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_awp_router_detect": {
+        "display_name": "AWP Fixture Archetype & Hanger Fallback Router (EXP-42)",
+        "intuition": (
+            "Classifies each promotional fixture into official Unilever AWP archetypes (WIN, CTU, MB2, MB3, FULLWALL) "
+            "and excludes frameless hanging strips (HAN) from Class 0 bays so hanger fallback triggers cleanly."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "distilled_yolo_stage0_clahe": {
+        "display_name": "Stage 0 Dual-Buffer CLAHE + Distilled ONNX YOLO Detector (EXP-49a)",
+        "intuition": (
+            "Runs CIELAB L* CLAHE strictly on detector_image for 40ms ONNX CPU shelf detection while passing "
+            "linear Shades-of-Gray color_image to Stage 2 product identification."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "shelf_stage0_clahe_e2e": {
+        "display_name": "Market Share Stage 0 Swap: Dual-Buffer CLAHE + ONNX YOLO + Hierarchical CLM-JEV (EXP-49a)",
+        "intuition": (
+            "Tests Stage 0 Dual-Buffer CLAHE photometry in front of our Market Share E2E winner (Distilled ONNX YOLO + "
+            "Hierarchical Brand-Gate CLM InfoNCE + JEV contact sheets)."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "shelf_gemini_detect_e2e": {
+        "display_name": "Market Share Stage 1 Swap: Gemini SinglePassDedup + Hierarchical CLM-JEV (EXP-49b)",
+        "intuition": (
+            "Swaps Stage 1 ONNX YOLO for Gemini single_pass_dedup while keeping Stage 2 Hierarchical Brand-Gate "
+            "CLM InfoNCE + JEV fixed to isolate Stage 1 detection impact on Share-of-Shelf."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "shelf_clef_metadata_e2e": {
+        "display_name": "Market Share Stage 2 Swap: ONNX YOLO + Contrastive Metadata CLEF Zoom-Strip (EXP-49c)",
+        "intuition": (
+            "Swaps Stage 2 Hierarchical CLM-JEV for Contrastive Metadata CLEF Bottom-30% Zoom-Strip contact sheets "
+            "while keeping Stage 1 ONNX YOLO fixed."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "promo_ocr_zoom_verifier": {
+        "display_name": "Dual-Band Top/Bottom Promo Callout OCR Zoom Verifier (EXP-37)",
+        "intuition": (
+            "Zooms 2x into both the top 28% neck/header band and bottom 28% price band of a crop so Gemini reads "
+            "fine-print stickers (₹10 Off, 20% Extra, B1G1, Pack of 3) instead of defaulting to base packshots."
+        ),
+        "task_id": "TASK-PRM",
+    },
+    "talker_price_tag_detect": {
+        "display_name": "3-Class Shelf-Talker & Printed/Handwritten Price-Tag Detector (EXP-47)",
+        "intuition": (
+            "Localizes printed promotional shelf-talker cards (Class 0), printed store rail price tags (Class 1), "
+            "and handwritten marker price tags (Class 2) on Kirana and Modern Trade shelves."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_robotics_spatial_detect": {
+        "display_name": "Gemini Robotics-ER Embodied Spatial Bay & Sachet Detector (EXP-38)",
+        "intuition": (
+            "Uses embodied 2D/3D spatial pointing (gemini-robotics-er-2.0-preview with gemini-2.5-pro fallback) "
+            "to trace tilted Class 0 display bays and separate touching sachets by 3D pack seams."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "clef_aspect_scale_prior": {
+        "display_name": "Aspect-Preserving Cap/Rim Crop + Projective Container Scale Prior (EXP-50)",
+        "intuition": (
+            "Adds +12% top cap/nozzle/crimp context padding and scores physical container aspect ratio (h/w), "
+            "top-crown taper, and shelf-plank height ratio (h/h_plank) to separate Bottle/Spray/Tube from Jar/Tub/Bar."
+        ),
+        "task_id": "TASK-RET",
+    },
+    "clef_saliency_diff_zoom": {
+        "display_name": "Self-Supervised Reference-Difference Saliency Zoom Verifier (EXP-51)",
+        "intuition": (
+            "Computes the pixel variance map V(x,y) = Var_k(R_k(x,y)) across aligned studio reference candidates "
+            "to automatically zoom 2.5x into the exact horizontal band where sibling variants differ."
+        ),
+        "task_id": "TASK-RET",
+    },
+    "clef_pack_crown_fusion": {
+        "display_name": "Lidstone-Calibrated 3D Container Specialist + Top-22% Crown/Nozzle Strip CLEF (EXP-52)",
+        "intuition": (
+            "Combines a Lidstone-smoothed (eps=0.01) 16-class container-geometry prior with a dedicated Top-22% "
+            "Crown/Nozzle/Lid/Crimp zoom strip whenever top candidates disagree on packaging_type."
+        ),
+        "task_id": "TASK-RET",
+    },
+    "hybrid_pack_specialist_clef": {
+        "display_name": "5-Attribute Hybrid Cascade with Lidstone 3D Container Prior + Crown/Saliency Zoom (EXP-52)",
+        "intuition": (
+            "Upgrades the 5-attribute hybrid cascade with projective scale features, Lidstone-calibrated 16-class "
+            "container log-priors, and multi-band Crown + Saliency-Diff + Weight contact sheets."
+        ),
+        "task_id": "TASK-CLS",
+    },
+    "promo_asset_plank_tiling_detect": {
+        "display_name": "Physical Shelf-Plank Support Law + Density-Triggered 2x2 Quadrant Tiling Detector (EXP-53)",
+        "intuition": (
+            "Rejects floating unplanked 2D header/wing graphics and back-row depth shoulders inside Class 0 bays, "
+            "and triggers 2x2 overlapping quadrant tiling on ultra-dense (100-189 pack) store walls."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "shelf_plank_tiling_e2e": {
+        "display_name": "End-to-End Plank-Support & Density-Tiled Shelf Pipeline (EXP-53)",
+        "intuition": (
+            "Pairs Stage 0 Dual-Buffer CLAHE and Stage 1 Plank-Support + 2x2 Quadrant Tiling with Stage 2 "
+            "Hierarchical Brand-Gate CLM InfoNCE + JEV contact sheets."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "shelf_generalizable_spine_e2e": {
+        "display_name": "Unified Non-Overfitting Production Spine (EXP-50..57)",
+        "intuition": (
+            "Combines Stage 0 Dual-Buffer CLAHE, Scene-Adaptive Stage 1 (960px Soft-NMS ONNX / Bay-Scoped Plank Law), "
+            "Stage 1.5 Projective Scale & Cap-Pad Crop, and Stage 2 Unstarved Multi-Prototype Brand-Gate + Saliency-Diff/Crown CLEF."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "distilled_yolo_960_stage0_clahe": {
+        "display_name": "Stage 0 Dual-Buffer CLAHE + 960px High-Res Gaussian Soft-NMS ONNX Detector (EXP-55)",
+        "intuition": (
+            "Pairs Stage 0 Shades-of-Gray + CIELAB L* CLAHE photometry with 960px high-res sub-window sachet refinement "
+            "and aspect-aware Gaussian Soft-NMS at $0 VLM token cost."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_bay_scoped_plank_detect": {
+        "display_name": "AWP Bay Router + Physical Plank-Support Law + Pre-Embedding Bay Gate Detector (EXP-55 + EXP-57)",
+        "intuition": (
+            "Enforces physical horizontal shelf-plank support inside Class 0 display bays and prunes out-of-bay "
+            "background store shelves before Stage 2 crop embedding and VLM verification."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "shelf_marketshare_generalizable_e2e": {
+        "display_name": "Open-Shelf Market Share Full-Shelf Spine (EXP-54 + EXP-55 + EXP-56)",
+        "intuition": (
+            "Pairs $0-token 960px Soft-NMS + Stage 0 CLAHE detection with Unstarved Multi-Prototype Brand-Gate, "
+            "Projective Scale + Lidstone Pack Priors, 1D Shelf-Plank Consensus, and Resolution-Adaptive Saliency Zoom."
+        ),
+        "task_id": "TASK-E2E",
+    },
+    "shelf_merchandising_bay_e2e": {
+        "display_name": "Promo-Bay Merchandising Full-Shelf Spine with Pre-Embedding Bay Gate (EXP-54 + EXP-55 + EXP-57)",
+        "intuition": (
+            "Scopes full-shelf detection to Class 0 promo display bays (WIN/CTU/MB2/MB3) before Stage 2 embedding, "
+            "eliminating 61% of background shelf embeddings while running Unstarved Brand-Gate + Stage 6 Planogram/OOS."
+        ),
+        "task_id": "TASK-E2E",
     },
 }
 
@@ -704,8 +996,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "use_case": "market_share",
         "task": "end_to_end",
         "dataset": "gtmerch_golden",
-        "approaches": ["shelf_clm_standalone", "distilled_yolo_onnx", "yolo_sku110k_onnx"],
-        "models": ["gemini-embedding-2", "yolo11n-distilled-onnx", "yolov12s-sku110k-onnx"],
+        "approaches": ["shelf_clm_standalone"],
+        "models": ["gemini-embedding-2"],
         "splits": ["val", "test"],
         "hypothesis": (
             "Combining Distilled YOLO11n ONNX CPU detection with Standalone CLM InfoNCE retrieval delivers "
@@ -1381,6 +1673,745 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "target_goal": ">= 84.0% val accuracy and >= 88.0% rare 1-5 crop accuracy",
         "model_family": "hul-hierarchical-brand-pack-gate",
     },
+    {
+        "experiment_id": "P0-EXP-34",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Promotional Asset & SKU Dual-Class Detection with Gemini 3.5 Flash-Lite",
+        "technical_title": "Single-Pass Structured JSON Class 0 Display-Bay & Class 1 SKU Localization on gtmerch_golden",
+        "intuition": (
+            "Tests whether Gemini 3.5 Flash-Lite can jointly detect branded promotional display bays (Class 0) "
+            "and individual product SKUs inside those bays (Class 1) in one structured call."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_sku_detect", "distilled_yolo_onnx"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Joint Class 0 bay + Class 1 SKU structured JSON detection scopes predicted SKUs to the promotional "
+            "display asset and aligns with Part 2 bay-or-hanger scoring."
+        ),
+        "description": (
+            "Runs promo_asset_sku_detect on gtmerch_golden (val N=50, test N=100) and compares Class 0 bay F2, "
+            "Class 1 SKU F2, and Part 2 bay-scoped F2 against distilled_yolo_onnx."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Benchmark Class 0 bay F2 and Part 2 bay-scoped SKU F2 against CPU ONNX YOLO",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-35",
+        "priority": "P1",
+        "task_id": "TASK-CLS",
+        "title": "Unified ~950-Brand Classifier LoRA SFT (HUL + Competitor + Others)",
+        "technical_title": "Zero-Leakage 926-Brand + Others Vertex AI LoRA SFT on Gemini 3.5 Flash-Lite",
+        "intuition": (
+            "Unifies brand classification across all ~950 canonical HUL, Competitor, and Others brands in a single "
+            "fine-tuned model without the legacy 57-brand cap."
+        ),
+        "use_case": "market_share",
+        "task": "classification",
+        "dataset": "hul_brands",
+        "approaches": ["hybrid_classify", "clef_contrastive_metadata"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Building a stratified SFT dataset across all canonical brands in hul_golden + hul_brands (strictly "
+            "excluding test and test_5k URIs and sessions) enables single-crop 950-brand classification."
+        ),
+        "description": (
+            "Builds train_stratified.jsonl and val_stratified.jsonl via build_unified_brand_sft_jsonl (--dataset unified_brand) "
+            "and benchmarks against zero-shot EXP-28 (96.6% Brand, 98.6% HUL accuracy)."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Zero test/session leakage across ~950 brands and >= 95.0% Brand / >= 98.0% HUL accuracy",
+        "model_family": "hul-jev-laya-lora-sft-adapter",
+    },
+    {
+        "experiment_id": "P0-EXP-36",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "GT Merchandising & Full-Shelf E2E + Stage 6 Planogram/OOS Benchmark",
+        "technical_title": "Embedding + Decision Gate + VLM Crop & Full-Shelf Pipeline with Part 2 Bay/Hanger Scoring",
+        "intuition": (
+            "Evaluates our production embedding + decision gate + Gemini 3.5 Flash-Lite pipeline on General Trade "
+            "shelves with Part 2 Class 0 bay/hanger fallback and Stage 6 OOS/Purity audit."
+        ),
+        "use_case": "merchandising",
+        "task": "end_to_end",
+        "dataset": "gtmerch_golden",
+        "approaches": ["shelf_hierarchical_clm_jev", "hybrid_classify", "clef_contrastive_metadata"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["test"],
+        "hypothesis": (
+            "Part 2 bay-scoped scoring removes false-positive penalties from unlabeled background aisle packs on "
+            "gtmerch_golden while full-image hanger shelves still score every SKU."
+        ),
+        "description": (
+            "Runs hybrid_classify and clef_contrastive_metadata on gtmerch_golden crops (test N=200) and "
+            "shelf_hierarchical_clm_jev on gtmerch_golden (test N=100) and gt_hul_sessions (test N=100)."
+        ),
+        "primary_metric": "f2",
+        "target_goal": ">= 70.0% Bay-Scoped E2E F2 and full Stage 6 Planogram/OOS compliance telemetry",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P2-EXP-37",
+        "priority": "P2",
+        "task_id": "TASK-PRM",
+        "title": "Toker Promo Callout OCR Zoom Rubric (B1G1 / Rs Off / % Extra)",
+        "technical_title": "Top/Bottom 25% Neck-Band & Banner OCR Zoom Rubric for Promo Callout Verification",
+        "intuition": (
+            "Targets false-negative promo callouts (where baseline gallery packshots lack promo stickers) by "
+            "explicitly reading neck-band and top/bottom callout banners."
+        ),
+        "use_case": "merchandising",
+        "task": "promo_detection",
+        "dataset": "hul_promos",
+        "approaches": ["jev_promo_verifier"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Adding explicit promo-band OCR extraction prevents baseline studio packshots (promo_type=None) from "
+            "suppressing real B4G1, Rs10 Off, and % Extra stickers on hul_promos."
+        ),
+        "description": (
+            "Evaluates jev_promo_verifier on hul_promos (val/test) to lift promo_type accuracy above the 40.3% baseline."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Lift promo_type accuracy from 40.3% baseline toward >= 65.0%",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P2-EXP-38",
+        "priority": "P2",
+        "task_id": "TASK-DET",
+        "title": "Gemini Robotics-ER Spatial Bay, SKU & 3D Shelf-Plane OOS Audit",
+        "technical_title": "Embodied Spatial Reasoning (gemini-robotics-er-2.0-preview) for Dense 2-Class Localization & Tilted Shelf OOS",
+        "intuition": (
+            "Tests Gemini Robotics-ER's embodied 2D/3D spatial pointing priors on dense Kirana shelf localization "
+            "and tilted shelf-plank Out-of-Stock void detection."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_robotics_spatial_detect", "promo_asset_sku_detect", "bay_planogram_verifier"],
+        "models": ["gemini-robotics-er-2.0-preview", "gemini-2.5-pro"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Embodied spatial post-training improves Class 0 promo bay boundaries, crowded sachet separation, "
+            "and >8-degree tilted shelf-plank OOS gap reasoning."
+        ),
+        "description": (
+            "Registered for execution on gtmerch_golden and gt_hul_sessions (val N=50) once Vertex AI preview "
+            "allowlisting for gemini-robotics-er-2.0-preview is active on ul-fs-s-sandbx-16-prj."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Compare Class 0/1 spatial box F2 and tilted-plank OOS recall against Gemini 3.5 Flash-Lite",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-39",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Bay-First High-Res Crop Detection & Bottom-Plank Containment (EXP-39)",
+        "technical_title": "Two-Stage Class 0 Bay Crop Detection (3264x2448 Native Res) + Header Plank Support Rule",
+        "intuition": (
+            "First detects Class 0 Unilever display bays on the full photo, crops each bay at native camera "
+            "resolution to catch small stacked sachets and dark back-row packs, and keeps top-row bottles whose "
+            "base sits on a plank inside the bay."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_bay_first_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Cropping detected Class 0 bays at native resolution recovers small sachets (<25px) and back-row packs "
+            "lost during 2048px full-shelf downscaling, while bottom-plank containment fixes header-sign boundary drops."
+        ),
+        "description": (
+            "Evaluates promo_asset_bay_first_detect on gtmerch_golden (val N=50, test N=100) against promo_asset_sku_detect."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift Bay-Scoped Recall from 75.9% to >= 86.0% (Bay F2 >= 84.0%)",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-40",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Stage 0 Dual-Buffer Photometry (Shades-of-Gray + CIELAB L* CLAHE) (EXP-40)",
+        "technical_title": "Dual-Buffer Stage 0 Photometric Normalization for Stage 1 Detection Without Stage 2 Chromatic Drift",
+        "intuition": (
+            "Lifts dark back-row shelf shadows and compresses acrylic bulb glare on detector_image for Stage 1 box "
+            "detection while preserving linear Shades-of-Gray color_image for Stage 2 SKU matching."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_stage0_clahe_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Applying CIELAB L*-channel CLAHE (clipLimit=2.0) strictly to ctx.detector_image improves dark-shelf "
+            "box recall without distorting pastel sister-shade hues in Stage 2."
+        ),
+        "description": (
+            "Evaluates promo_asset_stage0_clahe_detect on gtmerch_golden and ms_json_golden at ₹0 extra LLM cost."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift Full-Shelf Recall from 62.0% to >= 74.0% at ₹0 extra token cost",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-41",
+        "priority": "P1",
+        "task_id": "TASK-DET",
+        "title": "Stage 1.5 3D-Pack vs 2D-Cardboard & Price-Tag Clutter Gate (EXP-41)",
+        "technical_title": "Open-Set-Safe Stage 1.5 Geometric & Relief Clutter Filter for Display Wings and Rail Tags",
+        "intuition": (
+            "Filters out 2D printed graphics on cardboard display wings, top header signs, and flat shelf-rail "
+            "price tags while preserving 100% of 3D open-set regional competitor ('Others') packs."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_stage15_clutter_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Filtering 2D structural clutter by wing-border geometry and horizontal luminance relief lifts Class 1 "
+            "precision without deleting uncatalogued competitor products."
+        ),
+        "description": (
+            "Evaluates promo_asset_stage15_clutter_detect on gtmerch_golden (val N=50, test N=100)."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift Bay Precision from 83.8% to >= 91.0% with <1% loss on Others packs",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-42",
+        "priority": "P1",
+        "task_id": "TASK-DET",
+        "title": "Dedicated Class 0 AWP Fixture Archetype & Hanger Fallback Router (EXP-42)",
+        "technical_title": "AWP Fixture Archetype Conditioning (WIN/CTU/MB2/MB3/FULLWALL vs HAN Hanger Fallback)",
+        "intuition": (
+            "Conditions Class 0 detection on official Unilever AWP fixture archetypes so framed display bays are "
+            "found across unseen brands while frameless hanging strips route cleanly to full-image hanger mode."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": ["promo_asset_awp_router_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Explicit structural fixture archetypes eliminate false Class 0 boxes on frameless sachet hangers and "
+            "generalize Class 0 bay detection beyond the dominant brand stands."
+        ),
+        "description": (
+            "Evaluates promo_asset_awp_router_detect on gtmerch_golden and gt_hul_sessions."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift Class 0 Bay F2 from 74.6% to >= 90.0% with 0 silent hanger misroutes",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-43",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Clean Modern Trade Supermarket Shelf Detection on mt_json_golden (EXP-43)",
+        "technical_title": "Outlet-De-Leaked Modern Trade Detection Benchmark on mt_updated (19,984 Clean Shelves)",
+        "intuition": (
+            "Benchmarks ONNX YOLO and Gemini detectors on 356 clean Modern Trade supermarkets now that the old "
+            "burned-in red-rectangle mt/ images are replaced by mt_updated."
+        ),
+        "use_case": "market_share",
+        "task": "detection",
+        "dataset": "mt_json_golden",
+        "approaches": ["distilled_yolo_960_softnms", "promo_asset_stage0_clahe_detect"],
+        "models": ["yolo11n-distilled-onnx", "gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Clean raw supermarket pixels in mt_json_golden allow neural detection without OpenCV red-line leakage."
+        ),
+        "description": (
+            "Evaluates distilled_yolo_960_softnms and promo_asset_stage0_clahe_detect on mt_json_golden (val N=50, test N=200)."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Establish clean Modern Trade supermarket detection baseline >= 75.0% F2",
+        "model_family": "hul-yolo11n-distilled-detector-onnx",
+    },
+    {
+        "experiment_id": "P0-EXP-44",
+        "priority": "P0",
+        "task_id": "TASK-RET",
+        "title": "Clean Modern Trade Crop Retrieval & 5-Attribute Classification on mt_json_golden (EXP-44)",
+        "technical_title": "5-Attribute Crop Identification on Outlet-De-Leaked Modern Trade Supermarket Crops",
+        "intuition": (
+            "Tests our top retrieval and classification winners on clean Modern Trade supermarket shelf crops "
+            "where multi-pack cartons and wide modern-trade lighting dominate."
+        ),
+        "use_case": "market_share",
+        "task": "retrieval",
+        "dataset": "mt_json_golden",
+        "approaches": ["clef_contrastive_metadata", "hybrid_classify"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Contrastive Metadata CLEF and Hybrid Classify transfer to clean Modern Trade supermarket crops with "
+            ">= 80.0% 5-attribute exact accuracy."
+        ),
+        "description": (
+            "Evaluates clef_contrastive_metadata and hybrid_classify on N=1,000 test crops from mt_json_golden."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Achieve >= 80.0% 5-Attribute Exact Acc and >= 94.0% Brand Acc on MT supermarkets",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-45",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "End-to-End Share-of-Shelf on Clean Modern Trade Supermarkets (EXP-45)",
+        "technical_title": "Full-Shelf End-to-End Market Share & HUL SOS Error on mt_json_golden",
+        "intuition": (
+            "Measures full-shelf End-to-End F2 and HUL Share-of-Shelf error across 200 clean Modern Trade "
+            "supermarket shelves."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "mt_json_golden",
+        "approaches": ["shelf_hierarchical_clm_jev", "shelf_stage0_clahe_e2e"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Hierarchical CLM-JEV with Stage 0 Dual-Buffer CLAHE achieves <= 2.5 pp HUL Facing SOS absolute error "
+            "on Modern Trade supermarkets."
+        ),
+        "description": (
+            "Evaluates shelf_hierarchical_clm_jev and shelf_stage0_clahe_e2e on mt_json_golden (test N=200)."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Keep HUL Facing SOS Absolute Error <= 2.5 pp on Modern Trade supermarkets",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P1-EXP-46",
+        "priority": "P1",
+        "task_id": "TASK-PLN",
+        "title": "AWP Studio Template Planogram Spec Conditioning (EXP-46)",
+        "technical_title": "63-Template AWP_Code Studio Reference Index + Planogram Spec Compliance Audit",
+        "intuition": (
+            "Matches each store display bay against Unilever's 63 official AWP studio fixture templates to verify "
+            "exact tier count, required brand family, and bay purity."
+        ),
+        "use_case": "merchandising",
+        "task": "planogram_compliance",
+        "dataset": "gtmerch_golden",
+        "approaches": ["bay_planogram_verifier"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Conditioning check_planogram_spec on matched AWP_Code studio templates automates exact fixture-level "
+            "planogram rules."
+        ),
+        "description": (
+            "Indexes gs://sos-datasets/awp_vectors/awp_code (63 templates) and evaluates template-conditioned "
+            "planogram compliance on gtmerch_golden."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": ">= 90.0% Class 0 template match accuracy and exact AWP spec compliance audit",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-47",
+        "priority": "P1",
+        "task_id": "TASK-DET",
+        "title": "3-Class Shelf-Talker & Printed/Handwritten Price-Tag Detection (EXP-47)",
+        "technical_title": "Outlet-De-Leaked 3-Class Talker & Price-Tag Localization on hul_talkers_golden",
+        "intuition": (
+            "Detects printed promotional shelf-talker cards, printed store rail price tags, and handwritten "
+            "marker price tags across 532 outlets."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "hul_talkers_golden",
+        "approaches": ["talker_price_tag_detect"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Outlet-grouped 80/10/10 splits fix the raw test split leak and enable balanced 3-class talker/price-tag "
+            "detection."
+        ),
+        "description": (
+            "Evaluates 3-class detection (promo_talker, printed_price_tag, handwritten_price_tag) on hul_talkers_golden."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Achieve >= 82.0% F2 across all 3 talker and price-tag classes",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P1-EXP-48",
+        "priority": "P1",
+        "task_id": "TASK-PRM",
+        "title": "Two-Stage Talker & Price-Tag Discount OCR Extraction (EXP-48)",
+        "technical_title": "Stage 1 Talker/Tag Box Detection + Stage 2 Gemini Flash-Lite Discount & Price OCR",
+        "intuition": (
+            "Crops detected shelf-talkers and price tags so Gemini reads exact ₹ Off, % Off, and MRP vs Offer price "
+            "callouts."
+        ),
+        "use_case": "merchandising",
+        "task": "promo_detection",
+        "dataset": "hul_promos",
+        "approaches": ["promo_ocr_zoom_verifier"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "High-resolution zoom strips on promo bands and shelf-talkers lift discount-type and price-callout OCR "
+            "accuracy above 85%."
+        ),
+        "description": (
+            "Evaluates promo_ocr_zoom_verifier on hul_promos and hul_talkers_golden crops."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": ">= 85.0% discount-type and price-callout extraction accuracy",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-49",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Market Share Stage 0, Stage 1 & Stage 2 Swap Ablations on Current Winners (EXP-49)",
+        "technical_title": "Controlled Stage-Swap Ablations (Stage 0 CLAHE vs Stage 1 Gemini vs Stage 2 Contrastive CLEF) on Market Share E2E",
+        "intuition": (
+            "Isolates the exact effect of swapping Stage 0 photometry, Stage 1 box detector, and Stage 2 SKU "
+            "matcher on our current Market Share winner (shelf_hierarchical_clm_jev)."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "ms_json_golden",
+        "approaches": [
+            "shelf_hierarchical_clm_jev",
+            "shelf_stage0_clahe_e2e",
+            "shelf_gemini_detect_e2e",
+            "shelf_clef_metadata_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Stage 0 Dual-Buffer CLAHE lifts dark-shelf detection recall without hurting Stage 2 CIELAB color "
+            "matching, while Stage 1/2 swaps quantify the cost-accuracy frontier for Market Share SOS."
+        ),
+        "description": (
+            "Compares shelf_hierarchical_clm_jev (baseline) against shelf_stage0_clahe_e2e (EXP-49a), "
+            "shelf_gemini_detect_e2e (EXP-49b), and shelf_clef_metadata_e2e (EXP-49c) on ms_json_golden and mt_json_golden."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Quantify exact F2, 5-Attr Acc, and HUL SOS error impact of Stage 0, 1, and 2 swaps",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-50",
+        "priority": "P0",
+        "task_id": "TASK-RET",
+        "title": "Aspect-Preserving Cap/Rim Context Crop + Projective Container Scale Prior (EXP-50)",
+        "technical_title": "Stage 1.5 Aspect-Preserving Cap/Rim Context Pad (+12% Top) + Projective Scale Prior (h/w, crown_taper, h/h_plank)",
+        "intuition": (
+            "Preserves the top cap/nozzle/crimp silhouette (+12% top pad) and injects physical container aspect ratio (h/w) "
+            "and top-crown taper into System-1 re-ranking and Stage-2B CLEF rubrics to eliminate Pouch <-> Jar, Jar <-> Sachet, "
+            "and Spray <-> Bottle boundary errors without brand-specific rules."
+        ),
+        "use_case": "market_share",
+        "task": "retrieval",
+        "dataset": "hul_golden",
+        "approaches": ["clef_aspect_scale_prior"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Preserving physical container aspect ratio (h/w) and top-crown taper (w_top22 / w_mid) resolves >= 40% of "
+            "Bucket-2 cross-pack-form errors (Pouch <-> Jar, Bar <-> Carton, Spray <-> Bottle) on val and test."
+        ),
+        "description": (
+            "Evaluates clef_aspect_scale_prior against clef_contrastive_metadata on hul_golden val (N=1,000) and test_5k (N=5,000)."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Lift Packaging Type Acc >= +1.5 pp and 5-Attr Exact SKU Acc >= +1.0 pp on test_5k",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-51",
+        "priority": "P0",
+        "task_id": "TASK-RET",
+        "title": "Self-Supervised Reference-Difference Saliency Zoom Verifier (EXP-51)",
+        "technical_title": "Self-Supervised Reference Pixel-Variance Saliency Band V(x,y) = Var_k(R_k(x,y)) 2.5x Lanczos Zoom Strip",
+        "intuition": (
+            "Automatically locates the exact horizontal band [y1*, y2*] where top candidate studio reference packshots "
+            "differ most visually (via pixel variance V(x,y) = Var_k(R_k(x,y))) and renders a 2.5x Lanczos zoom strip of "
+            "that band alongside the bottom net-weight strip."
+        ),
+        "use_case": "market_share",
+        "task": "retrieval",
+        "dataset": "hul_golden",
+        "approaches": ["clef_saliency_diff_zoom"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Self-supervised reference-difference saliency zoom resolves fine-print sub-variant text on 180-240px Kirana "
+            "crops across all brands and unseen SKUs (LOVO-200) without any hardcoded crop coordinates."
+        ),
+        "description": (
+            "Evaluates clef_saliency_diff_zoom on hul_golden and hul_variants val (N=1,000) and test_5k (N=5,000)."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Lift Base Variant & Exact SKU Acc from 86.2% to >= 88.5% on test_5k (McNemar p < 0.01)",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-52",
+        "priority": "P0",
+        "task_id": "TASK-CLS",
+        "title": "Lidstone-Calibrated 3D Container Specialist Fusion + Top-22% Crown/Nozzle Strip (EXP-52)",
+        "technical_title": "Lidstone-Smoothed (eps=0.01) 16-Class Container Log-Prior (-lambda ln P_Lidstone(pack)) + Top-22% Crown/Nozzle Zoom Strip",
+        "intuition": (
+            "Combines a Lidstone-calibrated 16-class container-geometry prior with a dedicated Top-22% Crown/Nozzle/Lid/Crimp "
+            "zoom strip whenever top candidates disagree on packaging_type (Spray vs Bottle/Can, Roll_On vs Bottle/Tube, Pouch vs Jar)."
+        ),
+        "use_case": "market_share",
+        "task": "classification",
+        "dataset": "hul_golden",
+        "approaches": ["hybrid_pack_specialist_clef", "clef_pack_crown_fusion"],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Lidstone-smoothed container log-priors + Top-22% crown/actuator zoom strips lift Spray, Roll_On, and overall "
+            "16-class Packaging Type accuracy to >= 94.0% without hard-masking."
+        ),
+        "description": (
+            "Evaluates hybrid_pack_specialist_clef and clef_pack_crown_fusion on hul_golden and hul_packs val (N=1,000) and test_5k (N=5,000)."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": "Lift Packaging Type Acc to >= 94.0% and 5-Attr Exact SKU Acc to >= 89.0% on test_5k",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-53",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Physical Shelf-Plank Support Law + Density-Triggered 2x2 Quadrant Tiling (EXP-53)",
+        "technical_title": "Stage 1 Physical Plank-Support Law (y_max Alignment & Shoulder Filter) + Density-Triggered 2x2 Quadrant Tiling",
+        "intuition": (
+            "Enforces physical horizontal shelf-plank support inside WIN/CTU display bays to reject floating 2D header/wing "
+            "graphics and back-row depth shoulders, while triggering 2x2 overlapping quadrant tiling on dense 100-189 pack walls."
+        ),
+        "use_case": "merchandising",
+        "task": "detection",
+        "dataset": "gtmerch_golden",
+        "approaches": [
+            "promo_asset_plank_tiling_detect",
+            "shelf_plank_tiling_e2e",
+            "shelf_generalizable_spine_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Physical shelf-plank support eliminates >= 50% of in-bay 2D graphic/shoulder false positives while density-triggered "
+            "2x2 quadrant tiling recovers small sachets and dense wall facings."
+        ),
+        "description": (
+            "Evaluates promo_asset_plank_tiling_detect and shelf_generalizable_spine_e2e on gtmerch_golden and ms_json_golden val and test."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift GTMerch Bay Precision >= 93.0%, Bay F2 >= 89.5%, and MS-JSON E2E F2 >= 91.5%",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-54",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Unstarved Multi-Prototype Brand-Gate + 1D Shelf-Plank Row Consensus (EXP-54)",
+        "technical_title": "Multi-Prototype Brand-Gate (SKU Centroids + Global Top-2K Floor) + 1D Shelf-Plank Consensus + Backfilled HUL Parity",
+        "intuition": (
+            "Fixes Single-SKU Brand-Gate Starvation where 1-SKU brands starved 35-SKU HUL brands on 40.5% of full-shelf crops, "
+            "adds 1D horizontal shelf-plank category consensus, and resolves backfilled HUL catch-all parity on gtmerch_golden."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "ms_json_golden",
+        "approaches": [
+            "shelf_marketshare_generalizable_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Restoring SKU-level centroids into brand_subcentroids with a Top-8 brand gate (margin<=0.08) and a global_best[:2*K] "
+            "shortlist floor eliminates candidate starvation (0% crops < 10 candidates) and lifts Annotated-Row F2 from 69.2% to >=76.5%."
+        ),
+        "description": (
+            "Evaluates shelf_marketshare_generalizable_e2e and shelf_generalizable_spine_e2e on ms_json_golden and gtmerch_golden."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "0% candidate starvation (<10 candidates) and >= 76.5% Annotated-Row / Client-Clubbed F2 on ms_json_golden",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-55",
+        "priority": "P0",
+        "task_id": "TASK-DET",
+        "title": "Stage 0 CLAHE + 960px Gaussian Soft-NMS ONNX & Bay-Scoped Plank Detection (EXP-55)",
+        "technical_title": "Unified Scene-Adaptive Stage 1: 960px Soft-NMS ONNX + Stage 0 CLAHE (Open-Shelf) & AWP Bay-Scoped Plank Law (Promo-Bay)",
+        "intuition": (
+            "Combines Stage 0 Dual-Buffer CLAHE with 960px High-Res Gaussian Soft-NMS ONNX ($0 token cost) for open shelves "
+            "and AWP Bay-Scoped Plank-Support filtering for merchandising promo bays."
+        ),
+        "use_case": "market_share",
+        "task": "detection",
+        "dataset": "ms_json_golden",
+        "approaches": [
+            "distilled_yolo_960_stage0_clahe",
+            "promo_asset_bay_scoped_plank_detect",
+        ],
+        "models": ["yolo11n-distilled-onnx", "gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Running 960px Soft-NMS ONNX on Stage 0 CLAHE buffers recovers small hanging sachets and dark back-row packs at $0 VLM "
+            "token cost while pruning out-of-bay background shelves on gtmerch_golden."
+        ),
+        "description": (
+            "Evaluates distilled_yolo_960_stage0_clahe and promo_asset_bay_scoped_plank_detect across ms_json_golden and gtmerch_golden."
+        ),
+        "primary_metric": "f2",
+        "target_goal": ">= 84.0% Annotated-Zone Detection F2 on ms_json_golden at ₹0.003/img Stage-1 cost",
+        "model_family": "hul-yolo11n-distilled-detector-onnx",
+    },
+    {
+        "experiment_id": "P0-EXP-56",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Resolution-Adaptive Saliency-Diff Zoom + Lidstone Pack Spine on Kirana Shelves (EXP-56)",
+        "technical_title": "Resolution-Adaptive Stage 2B (Crop >=64px Saliency-Diff/Crown Sheet vs <64px Compact 4-Row Multi-Sheet)",
+        "intuition": (
+            "Applies EXP-51 Self-Supervised Reference-Diff Saliency Zoom + EXP-52 Crown Strip on >=64px Kirana crops while "
+            "keeping compact 4-row multi-sheets on tiny <64px full-shelf thumbnails."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "gt_hul_sessions",
+        "approaches": [
+            "shelf_marketshare_generalizable_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Gating Saliency-Diff + Crown Zoom strips by crop resolution (>=64px) resolves same-brand sister variants and "
+            "pack-type confusions on gt_hul_sessions without degrading tiny 35px full-shelf thumbnails."
+        ),
+        "description": (
+            "Evaluates shelf_generalizable_spine_e2e and shelf_marketshare_generalizable_e2e on gt_hul_sessions val and test."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Lift gt_hul_sessions Full-Shelf E2E F2 from 73.12% to >= 80.5% at <= ₹0.25/image",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-57",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Class-0 Bay-Scoped Pre-Embedding Gate & Production Unit-Cost Compression (EXP-57)",
+        "technical_title": "Pre-Embedding Class-0 Display-Bay Gate + 8-Crop Batched Contact Sheets for 5x-8x E2E Cost Compression",
+        "intuition": (
+            "Prunes out-of-bay background store shelf detections before Stage 2 crop embedding and VLM verification on "
+            "gtmerch_golden, cutting full-shelf E2E cost into the ₹0.22-₹0.45/image production band."
+        ),
+        "use_case": "merchandising",
+        "task": "end_to_end",
+        "dataset": "gtmerch_golden",
+        "approaches": [
+            "shelf_merchandising_bay_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Filtering out-of-bay background shelf detections prior to Stage 2 embedding eliminates ~61% of wasted crop "
+            "embeddings and VLM contact-sheet calls while improving in-bay precision and Client-Clubbed F2."
+        ),
+        "description": (
+            "Evaluates shelf_merchandising_bay_e2e and shelf_generalizable_spine_e2e on gtmerch_golden val and test."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "Cut gtmerch_golden E2E cost from ₹2.27/img to <= ₹0.45/img while lifting Client-Clubbed F2 >= 75.0%",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
+    {
+        "experiment_id": "P0-EXP-58",
+        "priority": "P0",
+        "task_id": "TASK-RET",
+        "title": "Layer-5 Deterministic Pack-Size Sister-SKU Verifier & Paired McNemar Audit (EXP-58)",
+        "technical_title": "Post-Generation Deterministic pack_size Sister-SKU Verifier + Paired McNemar 2x2 Discordant Significance Test",
+        "intuition": (
+            "Cross-checks Gemini's cognitive-ordered visible_pack_size_text against the chosen candidate's catalog pack_size "
+            "and deterministically overrides to the matching same-brand, same-variant sister SKU within the shortlist."
+        ),
+        "use_case": "market_share",
+        "task": "retrieval",
+        "dataset": "hul_golden",
+        "approaches": [
+            "clef_pack_crown_fusion",
+            "hybrid_pack_specialist_clef",
+            "l8_hul_ultimate",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Enforcing a Layer-5 deterministic pack_size sister-SKU post-verifier after cognitive-ordered VLM generation "
+            "resolves residual 50g/100g/200g/500g sister-SKU confusions with zero cross-brand regressions (b=0 in McNemar's 2x2 table) "
+            "and |val - test| <= 2.0% generalization gap."
+        ),
+        "description": (
+            "Evaluates clef_pack_crown_fusion, hybrid_pack_specialist_clef, and l8_hul_ultimate with Layer-5 pack_size "
+            "sister-SKU verification across hul_golden and hul_variants on both val and test splits."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": ">= 84.5% exact 5-attr SKU accuracy on hul_golden with McNemar b <= c and |val - test| <= 2.0%",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-59",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Level-4 Total Contracts, P2P Store Payout Gate & Rogan-Gladen Shelf Calibration (EXP-59)",
+        "technical_title": "Level-4 Total Contract Diagnostics + P2P Store Payout Policy Gate (>180s Quarantine) + Rogan-Gladen Prevalence Calibration",
+        "intuition": (
+            "Separates VLM contract/timeout faults from true recognition errors, blocks auto-zeroing of store P2P payouts on "
+            "infrastructure faults, and applies Rogan-Gladen prevalence calibration to 'AI Beyond Human GT' discovery rates."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "ms_json_golden",
+        "approaches": [
+            "shelf_marketshare_generalizable_e2e",
+            "shelf_merchandising_bay_e2e",
+            "shelf_generalizable_spine_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Combining Layer-5 pack_size sister-SKU verification with Level-4 Total Contracts, <untrusted_context> OCR isolation, "
+            "and Rogan-Gladen prevalence calibration maintains >= 99% valid_response_accuracy, 0 false zero-payouts, and |val - test| <= 2.5%."
+        ),
+        "description": (
+            "Evaluates shelf_marketshare_generalizable_e2e and shelf_merchandising_bay_e2e on ms_json_golden, mt_json_golden, "
+            "and gtmerch_golden across val and test splits on Cloud Run."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "100% valid_response_accuracy, 0 false P2P zero-payouts, and |val - test| <= 2.5% across val & test",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
 ]
 
 
@@ -1451,7 +2482,7 @@ POC_MODELS: list[dict[str, Any]] = [
             "auto-accepts high-margin CLM InfoNCE matches, and verifies sister variants via batched Gemini contact sheets."
         ),
         "artifact_uri": "gs://ul-fs-s-sandbx-16-prj-shelf-images/models/hul-hierarchical-brand-pack-gate",
-        "experiments": ["P0-EXP-02", "P0-EXP-03", "P1-EXP-06", "P2-EXP-10", "P1-EXP-17", "P1-EXP-18", "P0-EXP-19"],
+        "experiments": ["P0-EXP-02", "P0-EXP-03", "P1-EXP-06", "P2-EXP-10", "P1-EXP-17", "P1-EXP-18", "P0-EXP-19", "P0-EXP-58"],
     },
     {
         "model_key": "hul-gtmerch-bay-planogram-sos-verifier",
@@ -1468,7 +2499,7 @@ POC_MODELS: list[dict[str, Any]] = [
             "display bays, Class 1 SKU facings, promo callouts, brand-block purity, and Share of Shelf (SOS)."
         ),
         "artifact_uri": "gs://ul-fs-s-sandbx-16-prj-shelf-images/models/hul-gtmerch-bay-planogram-sos-verifier",
-        "experiments": ["P0-EXP-04", "P1-EXP-07", "P1-EXP-08", "MOON-EXP-14"],
+        "experiments": ["P0-EXP-04", "P1-EXP-07", "P1-EXP-08", "MOON-EXP-14", "P0-EXP-59"],
     },
     {
         "model_key": "hul-jev-laya-lora-sft-adapter",
@@ -1896,6 +2927,8 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
     run_to_experiments: dict[str, list[dict[str, Any]]] = {}
 
     golden_ds_set = {
+        "mt_json_golden",
+        "hul_talkers_golden",
         "hul_golden",
         "gtmerch_golden",
         "ms_json_golden",
@@ -1951,10 +2984,10 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                 ds == exp["dataset"]
                 or (exp["dataset"] in ("hul_sessions", "gt_hul_sessions") and ds in ("hul_sessions", "gt_hul_sessions"))
                 or (exp["dataset"] == "hul_golden" and ds in ("hul_golden", "hul_variants", "hul_packs", "hul_brands", "hul_sessions", "gt_hul_sessions"))
-                or (exp["dataset"] == "gtmerch_golden" and ds in ("gtmerch_golden", "ms_json_golden", "hul_sessions", "gt_hul_sessions", "hul_golden"))
-                or (exp["dataset"] == "ms_json_golden" and ds in ("ms_json_golden", "gtmerch_golden", "hul_sessions", "gt_hul_sessions", "hul_golden"))
-                or (exp["dataset"] in ("hul_promos", "hul_sessions", "gt_hul_sessions", "hul_brands") and ds in (exp["dataset"], "hul_sessions", "gt_hul_sessions", "hul_golden", "gtmerch_golden", "ms_json_golden"))
-            ) and (tk == exp["task"] or (exp["dataset"] in ("hul_golden", "gtmerch_golden", "ms_json_golden", "hul_sessions", "gt_hul_sessions") and ap in exp["approaches"])):
+                or (exp["dataset"] == "gtmerch_golden" and ds in ("gtmerch_golden", "ms_json_golden", "mt_json_golden", "hul_sessions", "gt_hul_sessions", "hul_golden"))
+                or (exp["dataset"] in ("ms_json_golden", "mt_json_golden") and ds in ("ms_json_golden", "mt_json_golden", "gtmerch_golden", "hul_sessions", "gt_hul_sessions", "hul_golden"))
+                or (exp["dataset"] in ("hul_promos", "hul_talkers_golden", "hul_sessions", "gt_hul_sessions", "hul_brands") and ds in (exp["dataset"], "hul_promos", "hul_talkers_golden", "hul_sessions", "gt_hul_sessions", "hul_golden", "gtmerch_golden", "ms_json_golden"))
+            ) and (tk == exp["task"] or (exp["dataset"] in ("hul_golden", "gtmerch_golden", "ms_json_golden", "mt_json_golden", "hul_talkers_golden", "hul_promos", "hul_sessions", "gt_hul_sessions") and ap in exp["approaches"])):
                 fa = s.get("field_accuracy") or {}
                 hier = s.get("hierarchical_accuracy") or {}
                 macro = s.get("macro_accuracy") or {}
@@ -1962,11 +2995,10 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                 plano = s.get("planogram_metrics") or {}
                 h_comp = s.get("hul_vs_competitor_breakdown") or {}
                 sm = dict(s.get("stage_metrics") or {})
-                primary_val = max(
-                    float(s.get(metric_key) or 0.0),
-                    float(s.get("f2") or 0.0),
-                    float(s.get("accuracy") or 0.0),
-                    float(fa.get("product") or 0.0),
+                primary_val = (
+                    float(s.get("f2") or s.get(metric_key) or 0.0)
+                    if tk in ("detection", "end_to_end")
+                    else float(s.get("accuracy") or s.get(metric_key) or 0.0)
                 )
 
                 det_fallback = (
@@ -2139,12 +3171,16 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                     "annotated_row_box_metrics": s.get("annotated_row_box_metrics"),
                     "annotated_row_detection_metrics": s.get("annotated_row_box_metrics") or s.get("annotated_row_detection_metrics"),
                     "enrichment_metrics": s.get("enrichment_metrics"),
+                    "human_and_beyond": s.get("human_and_beyond"),
+                    "contract_errors": s.get("contract_errors"),
+                    "bay_scoped_metrics": s.get("bay_scoped_metrics"),
                     "is_exact_dataset": ds == exp["dataset"] or (exp["dataset"] in ("hul_sessions", "gt_hul_sessions") and ds in ("hul_sessions", "gt_hul_sessions")),
                     "is_golden_dataset": ds in golden_ds_set,
                     "vertex_run_context": (
                         persisted_vertex_runs.get(s.get("run_id", ""), {}).get("run_context")
                         or f"projects/{project}/locations/{region}/metadataStores/default/contexts/{s.get('run_id', '')[:60]}"
                     ),
+                    "methodology": runner.synthesize_dynamic_methodology(s),
                 }
                 matched_runs.append(run_lite)
                 run_to_experiments.setdefault(str(s.get("run_id")), []).append({
@@ -2163,8 +3199,9 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
         seen_rids = {str(r.get("run_id")) for r in matched_runs if r.get("run_id")}
         for pr in persisted_exp_runs.get(exp_id, []):
             pr_id = str(pr.get("run_id") or "")
-            if pr_id and pr_id not in seen_rids:
+            if pr_id and pr_id not in seen_rids and pr.get("approach") in exp["approaches"]:
                 seen_rids.add(pr_id)
+                pr["methodology"] = runner.synthesize_dynamic_methodology(pr)
                 matched_runs.append(pr)
                 run_to_experiments.setdefault(pr_id, []).append({
                     "exp_id": exp_id,

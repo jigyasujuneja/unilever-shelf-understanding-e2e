@@ -468,6 +468,7 @@ canvas { display: block; max-width: 100%; border-radius: 6px; }
 .sw.fp { border-color: #ef4444; } .sw.tile { border-color: #facc15; }
 .sw.right { border-color: #22c55e; } .sw.wrong { border-color: #ef4444; }
 .sw.asset { border-color: #06b6d4; border-style: dashed; }
+.sw.oos { border-color: #f59e0b; border-style: dashed; }
 
 .labels { margin-bottom: 12px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .labels td { white-space: normal; }

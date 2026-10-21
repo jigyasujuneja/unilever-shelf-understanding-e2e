@@ -157,6 +157,25 @@ def _variant_tokens_match(p_var: str, g_var: str, brand: str = "") -> bool:
     return False
 
 
+def _pred_is_hul(pred: dict | None) -> bool:
+    """Resolve HUL ownership from pred['is_hul'], falling back to canonical brand lookup when omitted."""
+    if pred is None:
+        return False
+    raw_flag = pred.get("is_hul")
+    if isinstance(raw_flag, bool):
+        return raw_flag
+    if raw_flag is not None and str(raw_flag).strip() != "":
+        return str(raw_flag).strip().lower() in ("true", "1", "yes")
+    from utils.taxonomy.brands import HUL_BRANDS, canonicalize_brand_name
+
+    b_raw = str(pred.get("brand") or pred.get("legacy_brand_name") or "").strip()
+    if not b_raw and pred.get("product") and "__" in str(pred.get("product")):
+        b_raw = str(pred.get("product")).split("__", 1)[0].strip()
+    if not b_raw:
+        return False
+    return canonicalize_brand_name(b_raw).lower() in HUL_BRANDS
+
+
 def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
     """Granularity-aware, legacy-alias-aware, and multi-modal packaging-aware field matcher."""
     if pred is None:
@@ -166,15 +185,22 @@ def _field_matches(pred: dict | None, gt: dict, field: str) -> bool:
     if p_val == g_val and p_val is not None:
         return True
 
-    # Open-set competitor catch-all shelf boxes (`Others____Others____NA` in LabelMe annotations):
-    # strictly require the model to predict a Non-HUL competitor (`is_hul is False`).
-    if bool(gt.get("is_others_catchall")):
-        return pred.get("is_hul") is False
+    # Unbranded outside-bay product boxes in GT merchandising annotations (`product` with no brand/SKU):
+    # credit any recognized SKU/brand prediction.
+    if bool(gt.get("is_unbranded_outside_bay")):
+        return pred.get("sku_id") is not None or pred.get("brand") is not None
 
+    # Open-set competitor catch-all shelf boxes (`Others____Others____NA` in LabelMe annotations):
+    # strictly require the model to predict a Non-HUL competitor (`is_hul is False`) when GT is not a backfilled HUL item.
+    if bool(gt.get("is_others_catchall")) and not bool(gt.get("is_hul")):
+        return _pred_is_hul(pred) is False
+
+    if field == "is_hul":
+        return _pred_is_hul(pred) == bool(g_val)
 
     is_bay_sister_match = (
         bool(gt.get("is_bay_inferred"))
-        and bool(pred.get("is_hul")) == bool(gt.get("is_hul"))
+        and _pred_is_hul(pred) == bool(gt.get("is_hul"))
         and (
             (pred.get("category") is not None and pred.get("category") == gt.get("category"))
             or (pred.get("packaging_type") is not None and pred.get("packaging_type") == gt.get("packaging_type"))
@@ -312,12 +338,11 @@ def match_product(pred: dict | None, gt: dict, fields: Sequence[str]) -> dict:
     ``correct`` says per field (product, brand, category, ...) whether the prediction agrees with the
     ground truth (supporting ``legacy_brand_name``, ``legacy_pack_folder``, multi-modal
     ``allowed_packaging_types``, and brand-only competitor GT).
-    The exact product is the hit: TP if right; a wrong product is FP + FN; no
-    answer is FN. So precision = right / answered, recall = right / all photos.
+    Every evaluated field in ``fields`` must match for ``tp = 1``; a partial or wrong answer is
+    FP + FN, and no answer (``pred is None``) is FN.
     """
     correct = {f: _field_matches(pred, gt, f) for f in fields}
-    # "product" ranks when scored; a --fields subset without it needs every field right.
-    tp = int(correct[fields[0]]) if "product" in fields else int(bool(fields) and all(correct.values()))
+    tp = int(bool(fields) and all(correct.values()))
     return {"tp": tp, "fp": int(pred is not None) - tp, "fn": 1 - tp,
             "matched": [0] if tp else [], "correct": correct}
 
@@ -344,7 +369,7 @@ def hierarchical_field_scores(labels: Sequence[dict]) -> dict[str, float]:
         gt = item.get("gt") or {}
         if pred is None:
             continue
-        ok1 = (bool(pred.get("is_hul")) == bool(gt.get("is_hul"))) or bool(gt.get("is_others_catchall"))
+        ok1 = (_pred_is_hul(pred) == bool(gt.get("is_hul"))) or bool(gt.get("is_others_catchall"))
         ok2 = _field_matches(pred, gt, "category")
         ok3 = _field_matches(pred, gt, "brand")
         ok4 = _field_matches(pred, gt, "base_variant") if "base_variant" in gt else _field_matches(pred, gt, "product")
@@ -597,26 +622,26 @@ def compute_enrichment_buckets(
     extra_skus: set[int] = set()
     extra_brands: set[str] = set()
     extra_categories: set[str] = set()
-    if pred_ids is not None and catalog is not None:
+    if pred_ids is not None:
         for idx in extra_indices:
             pid = pred_ids[idx] if idx < len(pred_ids) else None
             if pid is None:
                 continue
-            meta = catalog.get(pid) or {}
+            meta = pid if isinstance(pid, dict) else ((catalog.get(pid) if catalog is not None else None) or {})
             if meta.get("sku_id") is not None:
                 extra_skus.add(int(meta["sku_id"]))
-            if meta.get("brand"):
+            if meta.get("brand") and str(meta.get("brand")) not in ("Others", "Unknown"):
                 extra_brands.add(str(meta["brand"]))
-            if meta.get("category"):
+            if meta.get("category") and str(meta.get("category")) not in ("Others", "Unknown"):
                 extra_categories.add(str(meta["category"]))
 
-    others_gt_total = sum(1 for g in (gt_labels or []) if bool(g.get("is_others_catchall")))
+    others_gt_total = sum(1 for g in (gt_labels or []) if isinstance(g, dict) and bool(g.get("is_others_catchall")))
     others_resolved = 0
-    if pairs and pred_ids is not None and catalog is not None and gt_labels is not None:
+    if pairs and pred_ids is not None and gt_labels is not None:
         for p_idx, g_idx in pairs.items():
-            if g_idx < len(gt_labels) and bool(gt_labels[g_idx].get("is_others_catchall")):
+            if g_idx < len(gt_labels) and isinstance(gt_labels[g_idx], dict) and bool(gt_labels[g_idx].get("is_others_catchall")):
                 pid = pred_ids[p_idx] if p_idx < len(pred_ids) else None
-                meta = catalog.get(pid) if pid is not None else None
+                meta = pid if isinstance(pid, dict) else (catalog.get(pid) if (catalog is not None and pid is not None) else None)
                 if meta and meta.get("brand") and str(meta.get("brand")) not in ("Others", "Unknown"):
                     others_resolved += 1
 
@@ -633,6 +658,513 @@ def compute_enrichment_buckets(
         "others_catchall_gt_count": others_gt_total,
         "others_catchall_resolved_count": others_resolved,
         "enrichment_multiplier": round(total_preds / max(gt_count, 1), 2),
+    }
+
+
+def compute_human_and_beyond_metrics(
+    preds: Sequence[Box],
+    pred_ids: Sequence | None,
+    gt_boxes: Sequence[Box],
+    gt_labels: Sequence[dict] | None = None,
+    catalog: dict[int, dict] | None = None,
+    pairs: dict[int, int] | None = None,
+    eval_fields: Sequence[str] = ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+) -> dict:
+    """Compute the 3-Tier 'Human Annotated & Beyond' evaluation structure for shelf benchmarks.
+
+    - ``tier1_named_target_sku``: Accuracy & F2 on explicitly named target SKUs (where the human
+      annotator provided a specific product/brand rather than ``'Others'``).
+    - ``tier2_client_clubbed_parity``: Apples-to-apples F2 in the client's label space inside
+      human-annotated shelf bands, where any valid non-target SKU prediction is clubbed into
+      ``'Others'`` just as the human annotator did.
+    - ``tier2_annotated_zone_detection``: 2D box detection F2 inside human-annotated shelf zones.
+    - ``tier3_beyond_gt_discovery``: Count of human ``'Others'`` boxes upgraded to exact Brand+SKU
+      plus extra valid facings discovered on unannotated shelf rows.
+    """
+    bands = group_annotated_shelf_bands(gt_boxes)
+    in_preds, in_ids, in_indices = filter_preds_to_annotated_bands(preds, pred_ids, bands)
+    in_box_m = match(in_preds, gt_boxes)
+    eff_pairs = pairs if pairs is not None else match(preds, gt_boxes)["pairs"]
+    enr = compute_enrichment_buckets(preds, pred_ids, gt_boxes, gt_labels, catalog, eff_pairs)
+
+    if pred_ids is None or gt_labels is None:
+        z_sc = {k: round(v, 4) for k, v in scores(in_box_m["tp"], in_box_m["fp"], in_box_m["fn"]).items()}
+        return {
+            "tier1_named_target_sku": {"tp": in_box_m["tp"], "fp": in_box_m["fp"], "fn": in_box_m["fn"], "found": in_box_m["tp"], "matched_box_acc": 1.0, **z_sc},
+            "tier2_client_clubbed_parity": {"tp": in_box_m["tp"], "fp": in_box_m["fp"], "fn": in_box_m["fn"], "found": in_box_m["tp"], **z_sc},
+            "tier2_annotated_zone_detection": {
+                "tp": in_box_m["tp"], "fp": in_box_m["fp"], "fn": in_box_m["fn"],
+                "out_of_band_preds": len(preds) - len(in_preds),
+                **z_sc,
+            },
+            "tier3_beyond_gt_discovery": {
+                "others_gt_count": enr["others_catchall_gt_count"],
+                "others_upgraded_to_exact_sku": enr["others_catchall_resolved_count"],
+                "others_upgraded_pct": 0.0,
+                "unannotated_row_facings_discovered": enr["extra_unannotated_row_preds"],
+                "extra_unique_skus": enr["extra_discovered_unique_skus"],
+                "extra_unique_brands": enr["extra_discovered_unique_brands"],
+                "total_coverage_multiplier": enr["enrichment_multiplier"],
+            },
+        }
+
+    named_gt_indices = [
+        j for j, g in enumerate(gt_labels)
+        if isinstance(g, dict) and not bool(g.get("is_others_catchall"))
+    ]
+    named_gt_keys = {
+        (str(gt_labels[j].get("brand") or "").lower(), str(gt_labels[j].get("base_variant") or gt_labels[j].get("product") or "").lower())
+        for j in named_gt_indices
+    }
+
+    named_matched = 0
+    named_tp = 0
+    club_tp = 0
+    matched_total = len(eff_pairs)
+
+    for p_idx, g_idx in eff_pairs.items():
+        if g_idx >= len(gt_labels) or not isinstance(gt_labels[g_idx], dict):
+            continue
+        gt = gt_labels[g_idx]
+        pid = pred_ids[p_idx] if p_idx < len(pred_ids) else None
+        pred_entry = pid if isinstance(pid, dict) else (catalog.get(pid) if (catalog is not None and pid is not None) else None)
+        eff_f = [f for f in eval_fields if gt.get(f) is not None] or list(eval_fields)
+        is_exact = bool(pred_entry is not None and match_product(pred_entry, gt, eff_f)["tp"] > 0)
+        if not bool(gt.get("is_others_catchall")):
+            named_matched += 1
+            if is_exact:
+                named_tp += 1
+                club_tp += 1
+            elif pred_entry is not None and (
+                _brand_matches(pred_entry, gt)
+                or (
+                    _pred_is_hul(pred_entry) == bool(gt.get("is_hul"))
+                    and _field_matches(pred_entry, gt, "category")
+                )
+            ):
+                club_tp += 1
+        else:
+            if is_exact or bool(gt.get("is_unbranded_outside_bay")):
+                if pred_entry is not None:
+                    club_tp += 1
+            elif pred_entry is not None:
+                if bool(gt.get("is_hul")) and _pred_is_hul(pred_entry):
+                    club_tp += 1
+                elif not _pred_is_hul(pred_entry):
+                    club_tp += 1
+                else:
+                    p_key = (
+                        str(pred_entry.get("brand") or "").lower(),
+                        str(pred_entry.get("base_variant") or pred_entry.get("product") or "").lower(),
+                    )
+                    if p_key not in named_gt_keys:
+                        club_tp += 1
+
+    named_wrong_on_matched = max(0, named_matched - named_tp)
+    named_fn = max(0, len(named_gt_indices) - named_matched) + named_wrong_on_matched
+    named_fp = named_wrong_on_matched
+    t1_sc = {k: round(v, 4) for k, v in scores(named_tp, named_fp, named_fn).items()}
+    t1_cond_acc = round(named_tp / max(1, named_matched), 4)
+
+    club_wrong_on_matched = max(0, matched_total - club_tp)
+    club_fp = in_box_m["fp"] + club_wrong_on_matched
+    club_fn = in_box_m["fn"] + club_wrong_on_matched
+    t2_sc = {k: round(v, 4) for k, v in scores(club_tp, club_fp, club_fn).items()}
+    z_sc = {k: round(v, 4) for k, v in scores(in_box_m["tp"], in_box_m["fp"], in_box_m["fn"]).items()}
+
+    oth_gt = enr["others_catchall_gt_count"]
+    oth_res = enr["others_catchall_resolved_count"]
+    oth_rate = round(oth_res / max(1, oth_gt), 4) if oth_gt > 0 else 0.0
+    return {
+        "tier1_named_target_sku": {
+            "tp": named_tp,
+            "fp": named_fp,
+            "fn": named_fn,
+            "found": named_matched,
+            "named_gt_count": len(named_gt_indices),
+            "gt_count": len(named_gt_indices),
+            "localized_gt_count": named_matched,
+            "matched_correct": named_tp,
+            "matched_box_acc": t1_cond_acc,
+            "conditional_accuracy": t1_cond_acc,
+            **t1_sc,
+        },
+        "tier2_client_clubbed_parity": {
+            "tp": club_tp,
+            "fp": club_fp,
+            "fn": club_fn,
+            "found": matched_total,
+            **t2_sc,
+        },
+        "tier2_annotated_zone_detection": {
+            "tp": in_box_m["tp"],
+            "fp": in_box_m["fp"],
+            "fn": in_box_m["fn"],
+            "out_of_band_preds": len(preds) - len(in_preds),
+            **z_sc,
+        },
+        "tier3_beyond_gt_discovery": {
+            "others_gt_count": oth_gt,
+            "others_upgraded_to_exact_sku": oth_res,
+            "others_upgraded_pct": oth_rate,
+            "others_upgrade_rate": oth_rate,
+            "unannotated_row_facings_discovered": enr["extra_unannotated_row_preds"],
+            "extra_unique_skus": enr["extra_discovered_unique_skus"],
+            "extra_unique_brands": enr["extra_discovered_unique_brands"],
+            "total_coverage_multiplier": enr["enrichment_multiplier"],
+        },
+    }
+
+
+def aggregate_human_and_beyond_metrics(rows: Sequence[dict]) -> dict | None:
+    """Aggregate per-image ``human_and_beyond`` dictionaries into a run-level summary dictionary."""
+    hb_rows = [
+        r["human_and_beyond"] if isinstance(r.get("human_and_beyond"), dict) else r
+        for r in rows
+        if isinstance(r, dict) and (isinstance(r.get("human_and_beyond"), dict) or isinstance(r.get("tier1_named_target_sku"), dict))
+    ]
+    if not hb_rows:
+        return None
+    t1_tp = sum(int(h.get("tier1_named_target_sku", {}).get("tp", 0)) for h in hb_rows)
+    t1_fp = sum(int(h.get("tier1_named_target_sku", {}).get("fp", 0)) for h in hb_rows)
+    t1_fn = sum(int(h.get("tier1_named_target_sku", {}).get("fn", 0)) for h in hb_rows)
+    t1_found = sum(int(h.get("tier1_named_target_sku", {}).get("found", 0)) for h in hb_rows)
+    t1_gt = sum(int(h.get("tier1_named_target_sku", {}).get("named_gt_count", 0)) for h in hb_rows)
+    t1_sc = {k: round(v, 4) for k, v in scores(t1_tp, t1_fp, t1_fn).items()}
+    t1_cond_acc = round(t1_tp / max(1, t1_found), 4)
+
+    t2_tp = sum(int(h.get("tier2_client_clubbed_parity", {}).get("tp", 0)) for h in hb_rows)
+    t2_fp = sum(int(h.get("tier2_client_clubbed_parity", {}).get("fp", 0)) for h in hb_rows)
+    t2_fn = sum(int(h.get("tier2_client_clubbed_parity", {}).get("fn", 0)) for h in hb_rows)
+    t2_found = sum(int(h.get("tier2_client_clubbed_parity", {}).get("found", 0)) for h in hb_rows)
+    t2_sc = {k: round(v, 4) for k, v in scores(t2_tp, t2_fp, t2_fn).items()}
+
+    z_tp = sum(int(h.get("tier2_annotated_zone_detection", {}).get("tp", 0)) for h in hb_rows)
+    z_fp = sum(int(h.get("tier2_annotated_zone_detection", {}).get("fp", 0)) for h in hb_rows)
+    z_fn = sum(int(h.get("tier2_annotated_zone_detection", {}).get("fn", 0)) for h in hb_rows)
+    z_oob = sum(int(h.get("tier2_annotated_zone_detection", {}).get("out_of_band_preds", 0)) for h in hb_rows)
+    z_sc = {k: round(v, 4) for k, v in scores(z_tp, z_fp, z_fn).items()}
+
+    oth_gt = sum(int(h.get("tier3_beyond_gt_discovery", {}).get("others_gt_count", 0)) for h in hb_rows)
+    oth_res = sum(int(h.get("tier3_beyond_gt_discovery", {}).get("others_upgraded_to_exact_sku", 0)) for h in hb_rows)
+    unann = sum(int(h.get("tier3_beyond_gt_discovery", {}).get("unannotated_row_facings_discovered", 0)) for h in hb_rows)
+    ex_skus = sum(int(h.get("tier3_beyond_gt_discovery", {}).get("extra_unique_skus", 0)) for h in hb_rows)
+    ex_brands = sum(int(h.get("tier3_beyond_gt_discovery", {}).get("extra_unique_brands", 0)) for h in hb_rows)
+    tot_gt = sum(int(r.get("gt_count", 0)) for r in rows)
+    tot_pred = sum(int(r.get("pred_count", 0)) for r in rows)
+    oth_rate = round(oth_res / max(1, oth_gt), 4) if oth_gt > 0 else 0.0
+
+    return {
+        "tier1_named_target_sku": {
+            "tp": t1_tp,
+            "fp": t1_fp,
+            "fn": t1_fn,
+            "found": t1_found,
+            "named_gt_count": t1_gt,
+            "gt_count": t1_gt,
+            "localized_gt_count": t1_found,
+            "matched_correct": t1_tp,
+            "matched_box_acc": t1_cond_acc,
+            "conditional_accuracy": t1_cond_acc,
+            **t1_sc,
+        },
+        "tier2_client_clubbed_parity": {
+            "tp": t2_tp,
+            "fp": t2_fp,
+            "fn": t2_fn,
+            "found": t2_found,
+            **t2_sc,
+        },
+        "tier2_annotated_zone_detection": {
+            "tp": z_tp,
+            "fp": z_fp,
+            "fn": z_fn,
+            "out_of_band_preds": z_oob,
+            **z_sc,
+        },
+        "tier3_beyond_gt_discovery": {
+            "others_gt_count": oth_gt,
+            "others_upgraded_to_exact_sku": oth_res,
+            "others_upgraded_pct": oth_rate,
+            "others_upgrade_rate": oth_rate,
+            "rogan_gladen_others_upgrade_rate": rogan_gladen_prevalence(oth_rate, n_samples=oth_gt)["corrected_rate"] if oth_gt > 0 else 0.0,
+            "unannotated_row_facings_discovered": unann,
+            "extra_unique_skus": ex_skus,
+            "extra_unique_brands": ex_brands,
+            "total_coverage_multiplier": round(tot_pred / max(1, tot_gt), 2),
+        },
+    }
+
+
+def rogan_gladen_prevalence(
+    observed_rate: float,
+    tpr: float = 0.96,
+    tnr: float = 0.94,
+    n_samples: int = 0,
+) -> dict:
+    """Rogan-Gladen (1978) prevalence bias correction for VLM Judge / Enrichment acceptance rates.
+
+    Adjusts raw judge acceptance ``p_obs`` using calibrated judge sensitivity (``tpr``) and
+    specificity (``tnr``):
+        p_hat = clip((p_obs + tnr - 1) / (tpr + tnr - 1), 0.0, 1.0)
+    """
+    p_obs = max(0.0, min(1.0, float(observed_rate)))
+    youden_j = float(tpr) + float(tnr) - 1.0
+    if youden_j <= 1e-6:
+        p_hat = p_obs
+    else:
+        p_hat = max(0.0, min(1.0, (p_obs + float(tnr) - 1.0) / youden_j))
+    ci_half = 0.0
+    if n_samples > 0 and youden_j > 1e-6:
+        se_obs = math.sqrt(max(0.0, p_obs * (1.0 - p_obs)) / n_samples)
+        ci_half = min(1.0, 1.96 * (se_obs / youden_j))
+    return {
+        "observed_rate": round(p_obs, 4),
+        "corrected_rate": round(p_hat, 4),
+        "ci95_low": round(max(0.0, p_hat - ci_half), 4),
+        "ci95_high": round(min(1.0, p_hat + ci_half), 4),
+        "judge_tpr": round(float(tpr), 4),
+        "judge_tnr": round(float(tnr), 4),
+        "youden_j": round(youden_j, 4),
+    }
+
+
+def _exact_binomial_two_sided_pvalue(b: int, c: int) -> float:
+    """Exact two-sided binomial p-value for McNemar discordant counts (b, c) under p=0.5."""
+    n = b + c
+    if n <= 0:
+        return 1.0
+    k = min(b, c)
+    # Use normal approximation with continuity correction when n > 200 to avoid overflow
+    if n > 200:
+        z = (abs(b - c) - 1.0) / math.sqrt(float(n))
+        return round(min(1.0, max(0.0, math.erfc(z / math.sqrt(2.0)))), 6)
+    tail = sum(math.comb(n, i) for i in range(0, k + 1)) / (2.0 ** n)
+    return round(min(1.0, 2.0 * tail), 6)
+
+
+def paired_mcnemar_test(
+    rows_a: Sequence[dict],
+    rows_b: Sequence[dict],
+    *,
+    alpha: float = 0.05,
+) -> dict:
+    """Paired McNemar significance test & discordant regression analysis across two runs on the same split.
+
+    Aligns items by ``(image_id, box_index)`` when per-box ``labels`` exist (with non-null ``gt``),
+    or by ``image_id`` (comparing ``tp > 0 and fp == 0 and fn == 0`` or ``f2 >= 0.80``) for shelf runs.
+    Returns the 2x2 contingency table ``(a_both_correct, b_regressions, c_fixes, d_both_wrong)``,
+    McNemar's chi-squared statistic, exact two-sided binomial p-value, paired accuracy lift with
+    paired 95% CI, and sample lists of fixed vs. regressed items.
+    """
+    def _extract_outcomes(rows: Sequence[dict]) -> dict[str, bool]:
+        outcomes: dict[str, bool] = {}
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            iid = str(r.get("image_id") or "")
+            if not iid:
+                continue
+            labels = r.get("labels")
+            if isinstance(labels, list) and labels and any(isinstance(l, dict) and l.get("gt") is not None for l in labels):
+                for idx, lab in enumerate(labels):
+                    if not isinstance(lab, dict) or lab.get("gt") is None:
+                        continue
+                    corr = lab.get("correct")
+                    if isinstance(corr, dict) and corr:
+                        ok = all(bool(v) for v in corr.values())
+                    else:
+                        ok = bool(lab.get("tp", 0))
+                    key = f"{iid}" if len(labels) == 1 else f"{iid}#box{idx}"
+                    outcomes[key] = ok
+            else:
+                gt_c = int(r.get("gt_count", 0))
+                tp_c = int(r.get("tp", 0))
+                f2_v = float(r.get("f2", 0.0))
+                ok = (tp_c == gt_c and int(r.get("fp", 0)) == 0) if gt_c <= 1 else (f2_v >= 0.75)
+                outcomes[iid] = ok
+        return outcomes
+
+    map_a = _extract_outcomes(rows_a)
+    map_b = _extract_outcomes(rows_b)
+    shared_keys = sorted(set(map_a).intersection(map_b))
+    n = len(shared_keys)
+    if n == 0:
+        return {
+            "paired_n": 0,
+            "a_both_correct": 0,
+            "b_regressions": 0,
+            "c_fixes": 0,
+            "d_both_wrong": 0,
+            "acc_a": 0.0,
+            "acc_b": 0.0,
+            "paired_lift": 0.0,
+            "paired_ci95_half": 0.0,
+            "mcnemar_chi2": 0.0,
+            "mcnemar_chi2_cc": 0.0,
+            "p_value": 1.0,
+            "significant": False,
+            "verdict": "no_shared_samples",
+            "fixed_ids": [],
+            "regressed_ids": [],
+        }
+
+    a_both = 0
+    b_reg = 0
+    c_fix = 0
+    d_wrong = 0
+    fixed_ids: list[str] = []
+    regressed_ids: list[str] = []
+
+    for k in shared_keys:
+        ok_a = map_a[k]
+        ok_b = map_b[k]
+        if ok_a and ok_b:
+            a_both += 1
+        elif ok_a and not ok_b:
+            b_reg += 1
+            regressed_ids.append(k)
+        elif not ok_a and ok_b:
+            c_fix += 1
+            fixed_ids.append(k)
+        else:
+            d_wrong += 1
+
+    discordant = b_reg + c_fix
+    chi2 = ((b_reg - c_fix) ** 2) / discordant if discordant > 0 else 0.0
+    chi2_cc = (max(0.0, abs(b_reg - c_fix) - 1.0) ** 2) / discordant if discordant > 0 else 0.0
+    p_val = _exact_binomial_two_sided_pvalue(b_reg, c_fix)
+    lift = (c_fix - b_reg) / n
+    var_lift = max(0.0, (discordant - ((c_fix - b_reg) ** 2) / n)) / (n * n)
+    ci_half = 1.96 * math.sqrt(var_lift)
+    sig = bool(p_val < alpha and discordant > 0)
+    if sig and c_fix > b_reg:
+        verdict = "significant_improvement"
+    elif sig and b_reg > c_fix:
+        verdict = "significant_regression"
+    else:
+        verdict = "statistically_indistinguishable"
+
+    return {
+        "paired_n": n,
+        "a_both_correct": a_both,
+        "b_regressions": b_reg,
+        "c_fixes": c_fix,
+        "d_both_wrong": d_wrong,
+        "acc_a": round((a_both + b_reg) / n, 4),
+        "acc_b": round((a_both + c_fix) / n, 4),
+        "paired_lift": round(lift, 4),
+        "paired_ci95_half": round(ci_half, 4),
+        "mcnemar_chi2": round(chi2, 4),
+        "mcnemar_chi2_cc": round(chi2_cc, 4),
+        "p_value": p_val,
+        "significant": sig,
+        "verdict": verdict,
+        "fixed_ids": fixed_ids[:50],
+        "regressed_ids": regressed_ids[:50],
+    }
+
+
+def _box_inside_any_asset_bay(
+    box: Box,
+    asset_boxes: Sequence[Box],
+    min_containment: float = 0.45,
+) -> bool:
+    """Return True if ``box`` center is inside any Class 0 bay, >= min_containment area overlaps,
+    or its base rests on a plank inside the bay with >= 25% vertical overlap (top-row header rule)."""
+    cx = 0.5 * (box[0] + box[2])
+    cy = 0.5 * (box[1] + box[3])
+    bh = max(1.0, box[3] - box[1])
+    area = max(1.0, (box[2] - box[0]) * bh)
+    for ab in asset_boxes:
+        if ab[0] <= cx <= ab[2] and ab[1] <= cy <= ab[3]:
+            return True
+        ix1 = max(box[0], ab[0])
+        iy1 = max(box[1], ab[1])
+        ix2 = min(box[2], ab[2])
+        iy2 = min(box[3], ab[3])
+        if ix2 > ix1 and iy2 > iy1:
+            if ((ix2 - ix1) * (iy2 - iy1)) / area >= min_containment:
+                return True
+            if ab[0] <= cx <= ab[2] and ab[1] <= box[3] <= ab[3] and (iy2 - iy1) / bh >= 0.25:
+                return True
+    return False
+
+
+def filter_preds_to_asset_bays(
+    preds: Sequence[Box],
+    pred_ids: Sequence | None = None,
+    asset_boxes: Sequence[Box] | None = None,
+    min_containment: float = 0.45,
+) -> tuple[list[Box], list, list[int], str]:
+    """Scope Class 1 SKU boxes to Class 0 promo bays when bays exist; else keep full-image SKUs (hanger fallback)."""
+    if not asset_boxes:
+        return (
+            list(preds),
+            list(pred_ids) if pred_ids is not None else [],
+            list(range(len(preds))),
+            "full_image_hanger_fallback",
+        )
+    kept_preds: list[Box] = []
+    kept_ids: list = []
+    kept_indices: list[int] = []
+    for idx, b in enumerate(preds):
+        if _box_inside_any_asset_bay(b, asset_boxes, min_containment=min_containment):
+            kept_preds.append(b)
+            if pred_ids is not None and idx < len(pred_ids):
+                kept_ids.append(pred_ids[idx])
+            kept_indices.append(idx)
+    return kept_preds, kept_ids, kept_indices, "class0_bay_scoped"
+
+
+def score_merchandising_bay_or_hanger(
+    preds: Sequence[Box],
+    pred_ids: Sequence | None,
+    gt_boxes: Sequence[Box],
+    gt_labels: Sequence[dict] | None = None,
+    asset_boxes: Sequence[Box] | None = None,
+    catalog: dict[int, dict] | None = None,
+    fields: Sequence[str] | None = None,
+    iou_thr: float = 0.5,
+) -> dict:
+    """Score detection or E2E predictions under Unilever's Class 0 bay vs. full-image hanger rule.
+
+    When Class 0 display bays (``asset_boxes``) exist, only SKUs inside the asset boundaries are
+    scored (ignoring background store shelves outside the promo bay). When no Class 0 bay exists
+    (such as hanging strips / hangers), full-image SKU detection and classification are scored.
+    """
+    sc_preds, sc_ids, _, scope_mode = filter_preds_to_asset_bays(
+        preds, pred_ids=pred_ids, asset_boxes=asset_boxes
+    )
+    sc_gt_boxes, sc_gt_labels, _, _ = filter_preds_to_asset_bays(
+        gt_boxes, pred_ids=gt_labels, asset_boxes=asset_boxes
+    )
+    if pred_ids is None:
+        m = match(sc_preds, sc_gt_boxes, thr=iou_thr)
+        found = m["tp"]
+    else:
+        sc_gt_ids = [g.get("sku_id") for g in sc_gt_labels]
+        m = match_identified(
+            sc_preds,
+            sc_ids,
+            sc_gt_boxes,
+            sc_gt_ids,
+            catalog=catalog,
+            gt_labels=sc_gt_labels,
+            fields=tuple(fields) if fields is not None else None,
+        )
+        found = m["found"]
+    sc = scores(m["tp"], m["fp"], m["fn"])
+    return {
+        "scope_mode": scope_mode,
+        "asset_bay_count": len(asset_boxes or []),
+        "scoped_pred_count": len(sc_preds),
+        "scoped_gt_count": len(sc_gt_boxes),
+        "found": found,
+        "tp": m["tp"],
+        "fp": m["fp"],
+        "fn": m["fn"],
+        **{k: round(v, 4) for k, v in sc.items()},
     }
 
 

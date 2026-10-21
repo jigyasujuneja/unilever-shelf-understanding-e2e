@@ -199,6 +199,8 @@ RPC_FORMAT_SETS = (
     "hul_golden",
     "gtmerch_golden",
     "ms_json_golden",
+    "mt_json_golden",
+    "hul_talkers_golden",
     "hul_variants",
     "hul_brands",
     "hul_packs",
@@ -210,6 +212,8 @@ HUL_FIELDS: dict[str, tuple[str, ...]] = {
     "hul_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
     "gtmerch_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
     "ms_json_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "mt_json_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
+    "hul_talkers_golden": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul", "promo_type"),
     "hul_variants": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
     "hul_brands": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
     "hul_packs": ("product", "brand", "base_variant", "category", "packaging_type", "is_hul"),
@@ -366,7 +370,7 @@ def data_root(name: str) -> str:
     local = (
         SHELVES_LOCAL
         if name == "shelves"
-        else (f"data/{name}" if name.startswith(("hul_", "gt_hul", "gtmerch", "ms_json")) else RPC_LOCAL)
+        else (f"data/{name}" if name.startswith(("hul_", "gt_hul", "gtmerch", "ms_json", "mt_json")) else RPC_LOCAL)
     )
     return local
 
@@ -384,7 +388,7 @@ def _rpc_json(root: str) -> dict:
             return json.loads(direct_path.read_bytes())
         if local_mirror.exists():
             return json.loads(local_mirror.read_bytes())
-    elif local_mirror.exists() and os.environ.get("SHELF_BENCH_FORCE_GCS_MANIFEST") != "1":
+    elif local_mirror.exists() and os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get("SHELF_BENCH_FORCE_GCS_MANIFEST") != "1":
         return json.loads(local_mirror.read_bytes())
     try:
         raw = read_bytes(join(root, RPC_JSON))
@@ -513,6 +517,10 @@ def load_split_jsonl(
 
 @lru_cache(maxsize=64)
 def load_rpc(split: str, root: str) -> dict[str, Sample]:
+    if split == "all":
+        cat = rpc_catalog(root)
+        rows = _rpc_split_rows("test", root) + _rpc_split_rows("val", root) + _rpc_split_rows("train", root)
+        return _rows_to_samples(rows, cat=cat, root=root)
     if split not in SPLITS:
         raise ValueError(f"the rpc dataset has splits {SPLITS}, got {split!r}")
     cat = rpc_catalog(root)

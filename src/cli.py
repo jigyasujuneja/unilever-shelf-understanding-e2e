@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "gen_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
         s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
                        help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
-    s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
+    s.add_argument("--split", default=d.get("split", "test"), choices=(*dataset.SPLITS, "all"))
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
     s.add_argument("--workers", type=int, default=d.get("workers", 4))
@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "gen_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
         s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
                        help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
-    s.add_argument("--split", default=d.get("split", "test"), choices=dataset.SPLITS)
+    s.add_argument("--split", default=d.get("split", "test"), choices=(*dataset.SPLITS, "all"))
     s.add_argument("--limit", type=int, default=d.get("limit", 50), help="0 = whole split")
     s.add_argument("--seed", type=int, default=d.get("seed", 0))
     s.add_argument("--workers", type=int, default=d.get("workers", 4))
@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("tune", help="build zero-leakage SFT JSONL data and launch/list Vertex AI LoRA tuning jobs")
     s.add_argument("--dataset", default="shelves",
-                   choices=("shelves", "rpc", "pack", "brand", "variant", "hul_golden", "gtmerch_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos"))
+                   choices=("shelves", "rpc", "pack", "brand", "unified_brand", "variant", "hul_golden", "gtmerch_golden", "hul_variants", "hul_brands", "hul_packs", "hul_promos"))
     s.add_argument("--task", default="all3", choices=("all3", "category", "brand", "variant", "clef_contrastive"),
                    help="target task when --dataset=variant or 'clef_contrastive' for contact-sheet SFT")
     s.add_argument("--fields", type=int, default=5, choices=(3, 5),
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         help="export standalone legacy_mapping_table.jsonl or score joined legacy Brand (ABrand) + Pack (Category__PackType) + Variant predictions",
     )
     s.add_argument("-d", "--dataset", default="hul_golden", help="Golden dataset name (default: hul_golden)")
-    s.add_argument("--split", default="test", choices=dataset.SPLITS)
+    s.add_argument("--split", default="test", choices=(*dataset.SPLITS, "all"))
     s.add_argument("--root", default=None, help="Override dataset root directory or GCS URI")
     s.add_argument(
         "--export-mapping",
@@ -232,6 +232,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--job", default="shelf-bench-loadtest", help="override Cloud Run job name (default: shelf-bench-loadtest)")
     s.add_argument("--cpu", type=int, default=4, help="Cloud Run container vCPU count (default: 4)")
     s.add_argument("--memory-gib", type=int, default=16, help="Cloud Run container RAM GiB (default: 16)")
+
+    s = sub.add_parser(
+        "compare",
+        help="run paired McNemar significance test & discordant regression breakdown across two runs",
+    )
+    s.add_argument("run_a", help="Baseline run ID or directory in results/")
+    s.add_argument("run_b", help="Candidate run ID or directory in results/")
+    s.add_argument("--results", type=Path, default=runner.RESULTS_DIR)
+    s.add_argument("--alpha", type=float, default=0.05)
 
     a = p.parse_args(argv)
     if a.cmd in ("run", "cloud-run"):
@@ -602,6 +611,24 @@ def main(argv: list[str] | None = None) -> int:
                 container_ram_gib=a.memory_gib,
             )
             run_load_test(cfg)
+    elif a.cmd == "compare":
+        import json
+
+        from utils import metrics
+
+        def _load_run_rows(rdir: Path, rname: str) -> list[dict]:
+            cand = Path(rname)
+            p_img = cand / "images.jsonl" if cand.is_dir() else rdir / rname / "images.jsonl"
+            if not p_img.exists():
+                raise FileNotFoundError(f"Missing images.jsonl for run: {rname} ({p_img})")
+            return [json.loads(line) for line in p_img.read_text().splitlines() if line.strip()]
+
+        rows_a = _load_run_rows(a.results, a.run_a)
+        rows_b = _load_run_rows(a.results, a.run_b)
+        res = metrics.paired_mcnemar_test(rows_a, rows_b, alpha=a.alpha)
+        res["run_a"] = a.run_a
+        res["run_b"] = a.run_b
+        print(json.dumps(res, indent=2))
     return 0
 
 

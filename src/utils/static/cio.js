@@ -2314,64 +2314,21 @@ function bindHowItWorksEvents() {
 }
 
 function buildCioRunMethodologyBullets(r) {
+  const dyn = r.methodology;
+  if (dyn && typeof dyn === 'object' && Array.isArray(dyn.bullets) && dyn.bullets.length > 0) {
+    return dyn.bullets;
+  }
   const ap = String(r.approach || '');
   const mod = String(r.model || '');
   const ds = String(r.dataset || 'hul_golden');
-  const tk = String(r.task || '');
   const sc = r.primary_score != null ? (r.primary_score * 100).toFixed(1) + '%' : '—';
   const lat = r.p50_latency_s != null ? Number(r.p50_latency_s).toFixed(2) + 's' : '—';
-  const gateVal = r.stage2a_zero_vlm_gate_pct != null ? Number(r.stage2a_zero_vlm_gate_pct).toFixed(1) + '%' : '68.0%';
-
-  if (ap === 'cv_classify') {
-    const isOracle = mod.includes('oracle_brand') || String(r.run_id || '').includes('oracle_brand');
-    return [
-      `<strong>Stage 1 (${isOracle ? '100% Oracle GT Brand Override' : 'marketshare_brand.h5 941-Way Softmax'}):</strong> ${isOracle ? 'Injects 100% ground-truth Brand &amp; Category into the legacy chain so downstream endpoints receive error-free one-hot conditioning vectors.' : 'Runs 299x299 InceptionV3 argmax over 941 brand_data folders on Vertex AI Endpoint and maps to a 10-d category one-hot vector via gt-mapping.yml.'}`,
-      `<strong>Stage 2 (marketshare_packtype.h5 46-Way Softmax):</strong> Predicts <code>Category__PackType</code> conditioned on the 10-d category one-hot vector from Stage 1 (47.8%–60.2% pack accuracy).`,
-      `<strong>Stage 3 (Category-Routed Variant .h5 Endpoints):</strong> ${mod.includes('variant.h5') ? `Routes to 1 of 7 variant .h5 endpoints with a brand one-hot vector, achieving <strong>${sc}</strong> at <strong>${lat}</strong>.` : `Evaluates 3-attribute scope (Brand + Category + Pack) without variant .h5 heads, achieving <strong>${sc}</strong> at <strong>${lat}</strong>.`}`,
-    ];
-  }
-  if (ap === 'dinov3_classify') {
-    return [
-      `<strong>Frozen Meta DINOv3 Backbone (<code>${esc(mod)}</code>):</strong> Applies Shades-of-Gray photometric de-glare, resizes crops to <code>224x224</code>, and extracts 384-D Gram-anchored dense patch features in 0 VLM calls.`,
-      `<strong>Supervised Fine-Tuned (SFT) Residual Bottleneck + CosFace Head:</strong> Trains an angular-margin CosFace classifier head with AdamW cosine annealing on the deduplicated <code>${esc(ds)}</code> train split.`,
-      `<strong>Run Outcome on <code>${esc(ds)}</code>:</strong> Achieves <strong>${sc}</strong> at <strong>${lat}</strong> with zero Gemini token cost (95.2% Category, 92.4% Pack, 77.5% Variant/5-Attr).`,
-    ];
-  }
-  if (tk === 'detection' || ap.includes('yolo') || ap === 'single_pass_dedup' || ap === 'tiled_dedup') {
-    const isOnnx = ap.includes('onnx') || ap.includes('yolo') || mod.includes('onnx');
-    const isSoft = ap.includes('softnms') || ap.includes('960');
-    return [
-      `<strong>Stage 1 Localization Engine (<code>${esc(ap)}</code> on <code>${esc(mod)}</code>):</strong> ${isOnnx ? `Executes ${isSoft ? 'full-frame + 960px dense sachet sub-window' : 'single-pass 640px'} CPU ONNX inference ($0 token cost) to localize Class 0 Display Bays and Class 1 Product Packs.` : `Runs ${ap === 'tiled_dedup' ? '2-tile half-height seam-stitched' : 'single-pass 2048px'} VLM bounding-box detection.`}`,
-      `<strong>Geometric Filtering &amp; NMS:</strong> ${isSoft ? 'Applies Aspect-Aware Gaussian Soft-NMS (sigma=0.55) to preserve overlapping hanging Kirana sachet strips.' : 'Suppresses outer display-bay containers (>65% area containment), applies IoU=0.58 NMS, and drops recessed depth ghosts.'}`,
-      `<strong>Run Localization Result on <code>${esc(ds)}</code>:</strong> Achieves <strong>${sc} Detection F2</strong> at <strong>${lat} p50 latency</strong>.`,
-    ];
-  }
-  if (ap === 'clm_standalone' || ap === 'shelf_clm_standalone' || ap === 'clm_promo_matcher') {
-    return [
-      `<strong>JEV (Bypassed — 100% Zero-VLM Mode):</strong> Disables Stage-2B VLM calls so <strong>100% of crops</strong> are resolved in System 1 via <code>${esc(mod)}</code> ($0 VLM cost).`,
-      `<strong>CLM (InfoNCE Multi-View + Centroid + Inner-80% CIELAB Energy):</strong> Ranks all 2,659 SKUs by <code>E(x, y_k) = 0.78 * max_cos + 0.22 * centroid_cos + 0.035 * (s_lab - 0.5)</code> at <code>1/tau = 28.0</code> after Shades-of-Gray (<code>p=6</code>) normalization.`,
-      `<strong>CLEF (Not Invoked — Pure Vector Argmax):</strong> Returns the top-1 CLM InfoNCE SKU directly in 0 VLM calls, achieving <strong>${sc}</strong> on <code>${esc(ds)}</code> at <strong>${lat}</strong>.`,
-    ];
-  }
-  if (ap.startsWith('clef_') || ap === 'detect_clef_flash') {
-    return [
-      `<strong>JEV (Candidate Shortlisting via <code>gemini-embedding-2</code>):</strong> Uses <code>3,072-D</code> visual+text embeddings to shortlist the Top-5 to Top-10 closest gallery candidates (+ same-brand sisters).`,
-      `<strong>CLM (${ap.startsWith('clef_standalone') ? 'Fast-Gate Disabled — 100% Escalation' : 'Coarse Family Triage'}):</strong> Routes lookalike crops to Stage-2B visual verification (${gateVal} 0-VLM gate).`,
-      `<strong>CLEF (Multi-Zone Zoom Contact Sheet on <code>${esc(mod)}</code>):</strong> Pairs Full Pack + Variant Banner + Bottom-30% Size Zoom Strip against candidate packshots with constrained token logprob readout, achieving <strong>${sc}</strong> at <strong>${lat}</strong>.`,
-    ];
-  }
-  if (ap === 'gemini_classify' || ap === 'hybrid_classify_sft' || ap === 'hybrid_classify_max') {
-    const isDirect = ap === 'gemini_classify';
-    return [
-      `<strong>JEV (${isDirect ? 'Direct VLM Call on 100% of Crops' : 'System-1 CLM kNN Gate + System-2 SFT Cascade'}):</strong> ${isDirect ? `Calls the fine-tuned LoRA SFT endpoint (<code>${esc(mod)}</code>) directly on every crop without embedding retrieval.` : `Couples <code>gemini-embedding-2</code> top-5 kNN voting with <code>${esc(mod)}</code> only when neighbors disagree.`}`,
-      `<strong>CLM (${isDirect ? 'Not Used — 0% Fast Gate' : 'Top-5 kNN Agreement &amp; Energy Gate'}):</strong> ${isDirect ? 'No embedding gate or kNN candidate hints are provided.' : 'Auto-accepts crops where top-5 CLM neighbors agree with high top-1 energy in 0 VLM calls, passing kNN hints on escalated crops.'}`,
-      `<strong>CLEF / SFT Decision Outcome on <code>${esc(ds)}</code>:</strong> Achieves <strong>${sc}</strong> at <strong>${lat}</strong>.`,
-    ];
-  }
+  const steps = Array.isArray(r.steps) && r.steps.length
+    ? r.steps.map((st, idx) => `<strong>Step ${idx + 1}:</strong> ${esc(String(st))}`)
+    : [`<strong>Declared Architecture (<code>${esc(ap)}</code> on <code>${esc(mod || 'CPU/ONNX')}</code>):</strong> ${esc(r.architecture || r.approach_intuition || ap)}`];
   return [
-    `<strong>JEV (Joint Embedding + VLM Cascade in <code>${esc(ap)}</code>):</strong> Embeds each Shades-of-Gray normalized crop once via <code>gemini-embedding-2</code> (<code>3,072-D</code>), resolving <strong>${gateVal}</strong> of crops in System 1 at $0 VLM cost and escalating only uncertain lookalikes to <code>${esc(mod)}</code>.`,
-    `<strong>CLM (Contrastive-LM InfoNCE &amp; Z-Score/LID Margin Gate):</strong> Computes <code>E(x, y_k) = 0.78 * max_cos + 0.22 * centroid_cos + 0.035 * (s_lab - 0.5)</code> and local Z-score margin <code>(s_1 - s_2) / sigma_topK</code> with medoid deduplication across adjacent identical facings.`,
-    `<strong>CLEF (Contrastive Lookalike Escalation Funnel on <code>${esc(mod)}</code>):</strong> Builds a <code>2x2</code> contact sheet with Top-25% header, Middle-30% variant banner, and Bottom-30% weight zoom strips alongside Top-5 gallery packshots, achieving <strong>${sc}</strong> on <code>${esc(ds)}</code> at <strong>${lat}</strong>.`,
+    ...steps,
+    `<strong>Evaluated Result on <code>${esc(ds)}</code>:</strong> Achieves <strong>${sc}</strong> at <strong>${lat} p50 latency</strong>.`,
   ];
 }
 
@@ -2385,18 +2342,28 @@ function buildExperimentModalMethodologyHtml(exp, runs) {
   const apList = (exp.approaches || [bestRun.approach]).filter(Boolean).join(', ');
   const modList = (exp.models || [bestRun.model]).filter(Boolean).join(', ');
   const ds = exp.dataset || bestRun.dataset || 'hul_golden';
+  const dyn = bestRun.methodology || {};
   const bullets = buildCioRunMethodologyBullets(bestRun);
+  const originBadgeHtml = dyn.origin_badge
+    ? `<div style="margin-top:6px;"><span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#dbeafe;color:#1e3a8a;border:1px solid #93c5fd;">${esc(dyn.origin_badge)}</span></div>`
+    : '';
+  const termNoteHtml = dyn.terminology_note
+    ? `<div style="margin-top:8px;padding:6px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:11px;color:#92400e;">${dyn.terminology_note}</div>`
+    : '';
   return `
     <details open style="margin-bottom:12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;font-size:12px;color:#1e293b;line-height:1.5;">
       <summary style="cursor:pointer;font-weight:700;color:#0057b8;">
-        ${esc(exp.experiment_id)} Methodology &amp; Component Architecture (<code>${esc(apList)}</code> on <code>${esc(ds)}</code> &middot; Models: <code>${esc(modList)}</code>) &blacktriangledown;
+        ${esc(exp.experiment_id)} Dynamic Methodology &amp; Component Architecture (<code>${esc(apList)}</code> on <code>${esc(ds)}</code> &middot; Models: <code>${esc(modList)}</code>) &blacktriangledown;
       </summary>
+      ${originBadgeHtml}
       <div style="margin-top:6px;color:#334155;">
         <strong>Experiment Hypothesis &amp; Design:</strong> ${esc(exp.hypothesis || exp.intuition || exp.description || '')}
       </div>
+      ${dyn.flow_html ? `<div style="margin-top:6px;color:#334155;">${dyn.flow_html}</div>` : ''}
       <ul style="margin:6px 0 0 18px;padding:0;display:grid;gap:6px;">
         ${bullets.map((b) => `<li>${b}</li>`).join('')}
       </ul>
+      ${termNoteHtml}
     </details>`;
 }
 

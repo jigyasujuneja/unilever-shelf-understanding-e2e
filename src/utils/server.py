@@ -237,6 +237,8 @@ def _build_qc_payload(eff_dir: Path, force_refresh: bool = False) -> dict[str, A
     if qc_path.exists() and not force_refresh:
         try:
             rep = json.loads(qc_path.read_text())
+            if int(rep.get("total_gates") or 0) < 14:
+                rep = None
         except Exception:
             rep = None
     if rep is None:
@@ -266,28 +268,32 @@ def _build_qc_payload(eff_dir: Path, force_refresh: bool = False) -> dict[str, A
     if rpc_path.exists():
         try:
             raw_cls = dataset._rpc_json("data/hul_golden").get("classes", {})
-            cls_list = list(raw_cls.values()) if isinstance(raw_cls, dict) else list(raw_cls)
-            total_mapped = len(cls_list) or 2659
-            for c_row in cls_list:
+            cls_items = list(raw_cls.items()) if isinstance(raw_cls, dict) else [(str(i + 1), r) for i, r in enumerate(raw_cls)]
+            total_mapped = len(cls_items) or 2659
+            for cid_k, c_row in cls_items:
                 cat_c = str(c_row.get("category") or "")
                 brd_c = str(c_row.get("brand") or "")
                 pk_c = str(c_row.get("packaging_type") or "")
                 leg_b = c_row.get("legacy_brand_folder") or legacy_brand_map.get(brd_c, brd_c)
                 leg_p = c_row.get("legacy_pack_folder") or legacy_pack_map.get((cat_c, pk_c), f"{cat_c}__{pk_c}")
                 allowed_p = c_row.get("allowed_packaging_types") or [pk_c]
+                base_var = c_row.get("base_variant") or c_row.get("variant") or c_row.get("product") or c_row.get("name") or ""
                 if len(preview_rows) < 16 and (
                     len(allowed_p) > 1
                     or (leg_b != brd_c)
                     or (leg_p != f"{cat_c}__{pk_c}")
                 ):
                     preview_rows.append({
+                        "sku_id": cid_k,
                         "category": cat_c,
                         "brand": brd_c,
-                        "name": c_row.get("variant") or c_row.get("product") or c_row.get("name"),
+                        "base_variant": base_var,
+                        "name": base_var,
                         "packaging_type": pk_c,
                         "allowed_packaging_types": allowed_p,
                         "legacy_brand_folder": leg_b,
                         "legacy_pack_folder": leg_p,
+                        "legacy_pack_folders": c_row.get("legacy_pack_folders") or [leg_p],
                     })
         except Exception:
             pass

@@ -360,13 +360,13 @@ class HybridClassify(ClmStandaloneRetrieval):
     sheet_candidates = "clm"
 
     architecture = (
-        "2-Stage Confidence-Gated Hybrid Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & CLM InfoNCE Gate "
-        f"({MODEL}, 1408-d, 67.9% zero-VLM fast-path at 91.2% accuracy) -> Stage 2 Top-8 Visual Contact-Sheet Verifier "
+        "2-Stage Confidence-Gated Hybrid Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & Calibrated InfoNCE Gate "
+        f"({MODEL}, 3,072-D, 67.9% zero-VLM fast-path at 91.2% accuracy) -> Stage 2 Top-8 Visual Contact-Sheet Verifier "
         "(gemini-3.5-flash-lite on 32.1% ambiguous crops) -> Stage 3 5-Attribute Catalog Taxonomy Reconciliation"
     )
     steps = [
-        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 1408-d): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) while excluding all held-out val/test URIs and store-visit sessions (0 data leakage)",
-        "Stage 2 · 5-Attribute CLM InfoNCE kNN Voting (inv_temp = 160, K = 5): Computes similarity-weighted vote share and margin across all 5 attributes (product, brand, base_variant, packaging_type, category) from the Top-5 nearest catalog neighbors",
+        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 3,072-D): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) while excluding all held-out val/test URIs and store-visit sessions (0 data leakage)",
+        "Stage 2 · 5-Attribute Calibrated InfoNCE kNN Voting (inv_temp = 160, K = 5): Computes similarity-weighted vote share and margin across all 5 attributes (product, brand, base_variant, packaging_type, category) from the Top-5 nearest catalog neighbors",
         "Stage 3 · Per-Attribute Confidence Gate (67.9% Fast-Path at ₹0 VLM Cost): Auto-accepts Stage-1 predictions when all 5 fields exceed confidence thresholds (τ_brand=0.90, τ_cat=0.90, τ_var=0.85, τ_prod=0.85, τ_pack=0.80, energy ≥ 0.85), achieving 91.2% 5-attribute accuracy with 0 LLM calls",
         "Stage 4 · Top-8 Visual Contact-Sheet Escalation (gemini-3.5-flash-lite, 32.1% of Crops): Builds a numbered 8-panel reference contact sheet alongside the query crop for uncertain attributes and merges Stage-2 VLM predictions with high-confidence Stage-1 fields",
         "Stage 5 · 5-Attribute Catalog Taxonomy Reconciliation (project_taxonomy): Snaps base_variant to canonical brand vocabulary, aligns product = Brand__Variant, and projects (category, packaging_type) onto the 46 valid pack_data pairs (96.3% Cat, 95.3% Brand, 90.8% Pack, 78.2% Variant/SKU)",
@@ -707,13 +707,13 @@ class HybridClassifySft(HybridClassify):
     tau_category = 0.6
     min_energy = 0.0
     architecture = (
-        "2-Stage Confidence-Gated Hybrid SFT Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & CLM InfoNCE Gate "
-        f"({MODEL}, 1408-d, 0-LLM fast-path) -> Stage 2 LoRA Fine-Tuned Gemini 3.5 Flash-Lite Conditioned on Top-5 kNN Hints "
+        "2-Stage Confidence-Gated Hybrid SFT Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & Calibrated InfoNCE Gate "
+        f"({MODEL}, 3,072-D, 0-LLM fast-path) -> Stage 2 LoRA Fine-Tuned Gemini 3.5 Flash-Lite Conditioned on Top-5 kNN Hints "
         "-> Stage 3 5-Attribute Catalog Taxonomy Reconciliation"
     )
     steps = [
-        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 1408-d): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) with strict val/test URI and session exclusion",
-        "Stage 2 · 5-Attribute CLM InfoNCE kNN Voting (inv_temp = 160, K = 5): Computes similarity-weighted vote share across product, brand, base_variant, packaging_type, and category",
+        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 3,072-D): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) with strict val/test URI and session exclusion",
+        "Stage 2 · 5-Attribute Calibrated InfoNCE kNN Voting (inv_temp = 160, K = 5): Computes similarity-weighted vote share across product, brand, base_variant, packaging_type, and category",
         "Stage 3 · Per-Attribute Confidence Gate (Fast-Path at ₹0 VLM Cost): Auto-accepts crops where all 5 fields exceed confidence thresholds with 0 LLM calls",
         "Stage 4 · K-Hinted LoRA SFT Escalation (sft_hints): Sends the query crop + Top-5 kNN candidate shortlist (brand, base_variant, product, packaging_type, category) to the 5-attribute LoRA fine-tuned Gemini 3.5 Flash-Lite endpoint and merges uncertain fields",
         "Stage 5 · 5-Attribute Catalog Taxonomy Reconciliation (project_taxonomy): Canonicalizes base_variant against gt-mapping.yml, aligns product = Brand__Variant, and enforces valid 46-class (category, packaging_type) pairs",
@@ -732,13 +732,127 @@ class HybridClassifyMax(HybridClassify):
     tau_category = 0.99
     architecture = (
         "2-Stage High-Precision Hybrid Cascade on Vertex AI: Stage 1 Unanimous Top-5 Gallery kNN Gate "
-        f"({MODEL}, 1408-d, τ=0.99) -> Stage 2 Top-8 Visual Contact-Sheet Verifier "
+        f"({MODEL}, 3,072-D, τ=0.99) -> Stage 2 Top-8 Visual Contact-Sheet Verifier "
         "-> Stage 3 5-Attribute Catalog Taxonomy Reconciliation"
     )
     steps = [
-        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 1408-d): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) with strict val/test URI and session exclusion",
+        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 3,072-D): Embeds the hul_golden training reference gallery (15,937 crops across 2,659 SKUs) with strict val/test URI and session exclusion",
         "Stage 2 · High-Precision 5-Attribute kNN Voting (inv_temp = 160, K = 5): Ranks Top-5 candidate SKUs and computes vote shares across product, brand, base_variant, packaging_type, and category",
         "Stage 3 · Strict Unanimous Confidence Gate (τ = 0.99, energy ≥ 0.85): Fast-paths only unanimous Top-5 kNN matches at ₹0 VLM cost and escalates all borderline cases",
-        "Stage 4 · Top-8 Visual Contact-Sheet Verification: Renders a numbered 8-candidate reference sheet from the CLM shortlist so Gemini can inspect fine-print variant sub-banners and pack geometry",
+        "Stage 4 · Top-8 Visual Contact-Sheet Verification: Renders a numbered 8-candidate reference sheet from the Stage-2A shortlist so Gemini can inspect fine-print variant sub-banners and pack geometry",
         "Stage 5 · 5-Attribute Catalog Taxonomy Reconciliation (project_taxonomy): Canonicalizes base_variant, aligns product = Brand__Variant, and projects (category, packaging_type) onto the 46 valid pack_data pairs",
     ]
+
+
+@register
+class HybridPackSpecialistClef(HybridClassify):
+    """EXP-52: 5-Attribute Hybrid Cascade with Lidstone-Calibrated 3D Container Specialist + Saliency-Diff & Crown Zoom Contact Sheet."""
+
+    name = "hybrid_pack_specialist_clef"
+    merge = "all"
+    use_saliency_diff_zoom = True
+    use_lidstone_pack_crown = True
+    tau_packaging_type = 0.86
+    architecture = (
+        "EXP-52 5-Attribute Hybrid Cascade: Stage 1 Disjoint Gallery kNN + Projective Scale & Lidstone 3D Container Prior "
+        f"({MODEL}, eps=0.01) -> Stage 2 Top-22% Crown/Nozzle + Self-Supervised Saliency-Diff Contact-Sheet Verifier "
+        "-> Stage 3 5-Attribute Catalog Taxonomy Reconciliation"
+    )
+    steps = [
+        "Stage 1 · Disjoint Reference Gallery Indexing (gemini-embedding-2, 3,072-D) with strict val/test URI and session exclusion",
+        "Stage 2A · Projective Scale (EXP-50) + Lidstone-Calibrated 16-Class Container Specialist Fusion (EXP-52, -lambda ln P_Lidstone(pack))",
+        "Stage 2B · Per-Attribute Confidence Gate (escalates any crop with packaging_type conflict or vote share < 0.86)",
+        "Stage 2C · Multi-Band Contact-Sheet Verifier (Top-22% Crown/Nozzle/Lid/Crimp Strip + Self-Supervised Reference-Diff Band + Bottom-30% Weight Strip)",
+        "Stage 3 · 5-Attribute Catalog Taxonomy Reconciliation (project_taxonomy)",
+    ]
+
+    def stage_a(self, image: Image.Image, ctx: Context) -> dict[str, Any]:
+        from utils.clm import (
+            apply_lidstone_pack_fusion,
+            apply_projective_scale_prior,
+            compute_container_geometry_features,
+        )
+
+        active = self._active_fields()
+        base_ranked = self.ranked(image, ctx)
+        geom = compute_container_geometry_features(image)
+        cat_map = getattr(self, "catalog", None)
+        scaled = apply_projective_scale_prior(base_ranked, geom, cat_map, weight=0.008, k=self.top_k)
+        ranked, pack_probs = apply_lidstone_pack_fusion(scaled, geom, cat_map, lam=0.006, eps=0.01, k=self.top_k)
+        top = ranked[: self.top_k]
+        cands = [(s, self._labels(pid)) for s, pid, _ in top]
+        votes = field_votes(cands, inv_temp=self.inv_temp, k=self.top_k, fields=active)
+        e1 = top[0][0] if top else -1.0
+        e2 = top[1][0] if len(top) > 1 else -1.0
+        thresholds = {
+            "product": self.tau_product,
+            "brand": self.tau_brand,
+            "base_variant": self.tau_base_variant,
+            "packaging_type": self.tau_packaging_type,
+            "category": self.tau_category,
+        }
+        unsure, reason = (
+            gate(votes, e1, thresholds, self.min_energy, fields=active)
+            if top
+            else (list(active), "no neighbours")
+        )
+        return {
+            "ranked": top,
+            "cands": cands,
+            "labels": {f: votes[f]["label"] for f in dict.fromkeys([*active, *FIELDS])},
+            "sku_id": top[0][1] if top else None,
+            "votes": votes,
+            "energy": round(e1, 4),
+            "margin": round(e1 - e2, 4),
+            "unsure": unsure,
+            "reason": reason,
+            "geometry": geom,
+            "pack_probs": pack_probs,
+        }
+
+    def stage_b_call(self, image: Image.Image, a: dict[str, Any], ctx: Context) -> tuple[dict, dict]:
+        from approaches.market_share.retrieval.clef_standalone import ClefAspectScalePrior
+        from utils.clm import apply_lidstone_pack_fusion, apply_projective_scale_prior
+
+        if self.stage_b == "contact_sheet":
+            geom = a.get("geometry") or {}
+            cat_map = getattr(self, "catalog", None)
+            if self.sheet_candidates == "cosine":
+                cos_ranked = EmbeddingRetrieval.ranked(self, image, ctx)
+                scaled = apply_projective_scale_prior(cos_ranked, geom, cat_map, weight=0.008, k=self.top_k)
+                fused, pack_probs = apply_lidstone_pack_fusion(scaled, geom, cat_map, lam=0.006, eps=0.01, k=self.top_k)
+                top = fused[: self.top_k]
+            else:
+                top = a["ranked"]
+                pack_probs = a.get("pack_probs")
+            if not top:
+                return {}, {"error": "no candidates"}
+            sku, meta = ClefAspectScalePrior._clef_single_geom(
+                self,  # type: ignore[arg-type]
+                image,
+                top,
+                ctx,
+                geom=geom,
+                pack_probs=pack_probs,
+            )
+            return self._labels(sku), {**meta, "sku_id": sku, "candidates": [pid for _, pid, _ in top]}
+        return super().stage_b_call(image, a, ctx)
+
+    def _build_rubric_with_geom(
+        self,
+        top: list[tuple[float, int, str]],
+        geom: dict[str, float] | None = None,
+        pack_probs: dict[str, float] | None = None,
+        diff_band: tuple[float, float, float] | None = None,
+        row_idx: int | None = None,
+    ) -> str:
+        from approaches.market_share.retrieval.clef_standalone import ClefAspectScalePrior
+
+        return ClefAspectScalePrior._build_rubric_with_geom(
+            self,  # type: ignore[arg-type]
+            top,
+            geom=geom,
+            pack_probs=pack_probs,
+            diff_band=diff_band,
+            row_idx=row_idx,
+        )

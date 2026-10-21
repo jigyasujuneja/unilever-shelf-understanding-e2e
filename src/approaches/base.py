@@ -140,6 +140,11 @@ class Context:
     otel_parent: Any = None
     price: Callable[[Usage], dict] | None = None
     detected_asset_boxes: list[Box] = field(default_factory=list)
+    detector_image: Image.Image | None = None
+    color_image: Image.Image | None = None
+    detected_fixture_type: str | None = None
+    image_id: str | None = None
+    sheet: dict | None = None
 
     def ask(self, image: Image.Image, prompt: str, **kw) -> LLMResult:
         """Call the run's Gemini model. kw: schema=<JSON schema>, max_side=<px downscale>.
@@ -207,6 +212,8 @@ class Context:
                 "retry_errors": m.get("retry_errors") or None,
                 "finish_reason": m.get("finish_reason"),
                 "truncated": m.get("truncated"),
+                "contract_status": m.get("contract_status"),
+                "contract_error": m.get("contract_error"),
                 "thinking_level": m.get("thinking_level"),
                 "image": [image.width, image.height],
                 "max_side": kw.get("max_side"),
@@ -318,7 +325,8 @@ class Approach:
         classification (e.g. a fine-tuned Gemini model or Agent Platform endpoint). By default,
         it runs ``self.detect(image, ctx)`` followed by ``self.identify_boxes(image, boxes, ctx)``."""
         boxes = self.detect(image, ctx)
-        ids = self.identify_boxes(image, boxes, ctx)
+        color_im = ctx.color_image if ctx.color_image is not None else image
+        ids = self.identify_boxes(color_im, boxes, ctx)
         ctx.trace.step("Identify each box", f"{sum(i is not None for i in ids)} of {len(boxes)} "
                        "boxes matched to a catalog product", boxes=boxes)
         return boxes, ids
