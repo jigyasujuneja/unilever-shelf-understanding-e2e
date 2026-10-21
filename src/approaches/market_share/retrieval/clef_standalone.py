@@ -53,14 +53,14 @@ CLEF_ZOOM_BATCH_SCHEMA = {
 CLEF_ZOOM_SINGLE_PROMPT = (
     "Panel Q is a product cut out of a retail photo. Panels 1-{k} are candidate catalog reference photos "
     "(each panel includes a bottom zoom strip of the net-weight/pack-size label). First read the visible "
-    "net weight/pack size on Q (or '' if unreadable), then pick the numbered panel (1-{k}) that shows the "
+    "net weight/pack size or distinctive variant/pack keyword on Q (or '' if unreadable), then pick the numbered panel (1-{k}) that shows the "
     "exact same product (same brand, variant, packaging form, and pack size), or 0 if none match. "
     'Return ONLY JSON {{"pack_size": "...", "choice": <int 0..{k}>}}.'
 )
 CLEF_ZOOM_BATCH_PROMPT = (
     "The image shows {m} rows (Q1 to Q{m}). In each row, the red-labelled left panel Qi is a product crop, "
     "followed by candidate reference photos 1-{k} (each cell includes a bottom zoom strip of the net-weight "
-    "label). For each row Qi (in order 1..{m}), read the visible net weight/pack size on Qi and pick the "
+    "label). For each row Qi (in order 1..{m}), read the visible net weight/pack size or distinctive variant/pack keyword on Qi and pick the "
     "numbered panel (1-{k}) showing the exact same product, or 0 if none match. "
     'Return ONLY JSON {{"pack_sizes": ["...", ...], "choices": [<int>, ...]}} with {m} items.'
 )
@@ -182,56 +182,97 @@ def normalize_pack_size_token(raw: str | None) -> str:
     return f"{num_str}{unit}"
 
 
+def _catalog_sister_tokens(meta: dict[str, Any]) -> set[str]:
+    import re
+
+    raw = "_".join(
+        str(meta.get(k) or "")
+        for k in ("product", "base_variant", "variant", "packaging_type", "pack_size", "size")
+    )
+    return {t.lower() for t in re.split(r"[^a-zA-Z0-9]+", raw) if len(t) >= 4}
+
+
 def verify_pack_size_sister_sku(
     chosen_id: int | None,
     extracted_pack_size: str | None,
-    ranked_candidates: list[tuple[float, int]],
+    ranked_candidates: list[tuple[float, int]] | list[tuple[float, int, str]],
     catalog: dict[int, dict[str, Any]] | None,
     *,
     max_cos_drop: float = 0.08,
 ) -> tuple[int | None, bool]:
-    """Layer-5 deterministic post-generation verifier for sister-SKU pack-size disambiguation.
+    """Layer-5 deterministic post-generation verifier for sister-SKU pack-size & variant disambiguation.
 
     When the VLM extracts a visible ``pack_size`` token (e.g. ``'100g'``) that conflicts with the
     chosen candidate's catalog size (e.g. ``'50g'``), checks the shortlist for a same-brand,
     same-variant sister SKU whose catalog size matches ``extracted_pack_size`` within ``max_cos_drop``.
+    When no numeric size is present in the catalog, checks whether ``extracted_pack_size`` contains a
+    unique discriminative sister-SKU variant/packaging keyword among same-brand shortlist candidates.
     """
+    import re
+
     if chosen_id is None or not extracted_pack_size or not catalog or not ranked_candidates:
         return chosen_id, False
-    target_sz = normalize_pack_size_token(extracted_pack_size)
-    if not target_sz:
-        return chosen_id, False
     chosen_meta = catalog.get(chosen_id) or {}
-    chosen_sz = normalize_pack_size_token(
-        str(chosen_meta.get("pack_size") or chosen_meta.get("size") or chosen_meta.get("product") or "")
-    )
-    if chosen_sz == target_sz:
-        return chosen_id, False
     chosen_brand = str(chosen_meta.get("brand") or "").strip().lower()
     if not chosen_brand:
         return chosen_id, False
-    chosen_var = str(
-        chosen_meta.get("base_variant") or chosen_meta.get("variant") or ""
-    ).strip().lower()
-    cos_by_id = {cid: float(cos) for cos, cid in ranked_candidates}
-    chosen_cos = cos_by_id.get(chosen_id, float(ranked_candidates[0][0]))
-    for cos, cid in ranked_candidates:
-        if cid == chosen_id:
-            continue
-        if (chosen_cos - float(cos)) > max_cos_drop:
+    pairs = [(float(item[0]), int(item[1])) for item in ranked_candidates]
+    cos_by_id = {cid: cos for cos, cid in pairs}
+    chosen_cos = cos_by_id.get(chosen_id, pairs[0][0])
+
+    target_sz = normalize_pack_size_token(extracted_pack_size)
+    if target_sz:
+        chosen_sz = normalize_pack_size_token(
+            str(chosen_meta.get("pack_size") or chosen_meta.get("size") or chosen_meta.get("product") or "")
+        )
+        if chosen_sz == target_sz:
+            return chosen_id, False
+        chosen_var = str(
+            chosen_meta.get("base_variant") or chosen_meta.get("variant") or ""
+        ).strip().lower()
+        for cos, cid in pairs:
+            if cid == chosen_id:
+                continue
+            if (chosen_cos - cos) > max_cos_drop:
+                continue
+            c_meta = catalog.get(cid) or {}
+            c_brand = str(c_meta.get("brand") or "").strip().lower()
+            if c_brand != chosen_brand:
+                continue
+            c_var = str(c_meta.get("base_variant") or c_meta.get("variant") or "").strip().lower()
+            if chosen_var and c_var and c_var != chosen_var:
+                continue
+            c_sz = normalize_pack_size_token(
+                str(c_meta.get("pack_size") or c_meta.get("size") or c_meta.get("product") or "")
+            )
+            if c_sz == target_sz:
+                return cid, True
+
+    # Fallback for catalogs where sister SKUs differ by discriminative variant/packaging token
+    stopwords = {"pack", "size", "none", "null", "unknown", "unreadable", "same", "brand", "product", chosen_brand}
+    ext_toks = {
+        t.lower()
+        for t in re.split(r"[^a-zA-Z0-9]+", str(extracted_pack_size))
+        if len(t) >= 4 and t.lower() not in stopwords
+    }
+    if not ext_toks:
+        return chosen_id, False
+    chosen_toks = _catalog_sister_tokens(chosen_meta)
+    missing_toks = ext_toks - chosen_toks
+    if not missing_toks:
+        return chosen_id, False
+    matching_sisters: list[int] = []
+    for cos, cid in pairs:
+        if cid == chosen_id or (chosen_cos - cos) > min(max_cos_drop, 0.035):
             continue
         c_meta = catalog.get(cid) or {}
-        c_brand = str(c_meta.get("brand") or "").strip().lower()
-        if c_brand != chosen_brand:
+        if str(c_meta.get("brand") or "").strip().lower() != chosen_brand:
             continue
-        c_var = str(c_meta.get("base_variant") or c_meta.get("variant") or "").strip().lower()
-        if chosen_var and c_var and c_var != chosen_var:
-            continue
-        c_sz = normalize_pack_size_token(
-            str(c_meta.get("pack_size") or c_meta.get("size") or c_meta.get("product") or "")
-        )
-        if c_sz == target_sz:
-            return cid, True
+        c_toks = _catalog_sister_tokens(c_meta)
+        if c_toks & missing_toks:
+            matching_sisters.append(cid)
+    if len(matching_sisters) == 1:
+        return matching_sisters[0], True
     return chosen_id, False
 
 
@@ -674,10 +715,10 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
         base_ranked = super().ranked(image, ctx, allowed_ids)
         geom = compute_container_geometry_features(image, box=box, plank_height=plank_height)
         cat_map = getattr(self, "catalog", None)
-        reranked = apply_projective_scale_prior(base_ranked, geom, cat_map, weight=0.008, k=CLEF_K)
+        reranked = apply_projective_scale_prior(base_ranked, geom, cat_map, weight=0.003, k=CLEF_K)
         pack_probs: dict[str, float] = {}
         if self.use_lidstone_pack_crown:
-            reranked, pack_probs = apply_lidstone_pack_fusion(reranked, geom, cat_map, lam=0.006, eps=0.01, k=CLEF_K)
+            reranked, pack_probs = apply_lidstone_pack_fusion(reranked, geom, cat_map, lam=0.002, eps=0.01, k=CLEF_K)
         return reranked, geom, pack_probs
 
     def _build_rubric_with_geom(
@@ -707,12 +748,54 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
                 f"Self-Supervised Reference-Diff Zoom Strip covers vertical band y={int(diff_band[0]*100)}%..{int(diff_band[1]*100)}% (variance peak {diff_band[2]:.2f}x)"
             )
         if pack_probs:
-            top_packs = sorted(pack_probs.items(), key=lambda kv: -kv[1])[:3]
-            p_str = ", ".join(f"{k}={v:.2f}" for k, v in top_packs)
-            extras.append(f"Calibrated 3D Container Prior: {p_str} (check top crown/nozzle/lid/crimp strip)")
+            extras.append(
+                "Top-22% Crown/Nozzle/Lid/Crimp Zoom Strip included: verify physical closure & container form directly on Q"
+            )
         if not extras:
             return base
         return f"{base}\n" + " | ".join(extras) if base else " | ".join(extras)
+
+    def _stage_a_accept(
+        self,
+        top: list[tuple[float, int, str]],
+        p_clm: float,
+        zlid: dict[str, float],
+    ) -> bool:
+        if not top:
+            return False
+        cat_map = getattr(self, "catalog", {}) or {}
+        s1, id1, _ = top[0]
+        s2, id2, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
+        c1 = cat_map.get(id1) or {}
+        c2 = cat_map.get(id2) or {}
+        b1 = str(c1.get("brand") or "")
+        b2 = str(c2.get("brand") or "")
+        p1 = str(c1.get("packaging_type") or "")
+        prod1 = str(c1.get("product") or "")
+        brand_only = bool(b1 and prod1 == b1)
+        same_brand = bool(b1 and b1 == b2)
+        same_variant = bool(
+            same_brand
+            and c1.get("base_variant") == c2.get("base_variant")
+            and c1.get("pack_size") != c2.get("pack_size")
+        )
+        same_brand_pack_conflict = any(
+            str((cat_map.get(cid) or {}).get("brand") or "") == b1
+            and str((cat_map.get(cid) or {}).get("packaging_type") or "") not in ("", p1)
+            for sc, cid, _ in top[1:3]
+            if (s1 - sc) < 0.06
+        )
+        if brand_only or same_brand_pack_conflict:
+            return False
+        req_margin = 0.030 if (same_brand or same_variant) else 0.009
+        req_p = 0.42 if same_brand else 0.30
+        return bool(
+            s1 >= 0.75
+            and (s1 - s2) >= req_margin
+            and p_clm >= req_p
+            and zlid["z_margin"] >= 0.80
+            and zlid["lid"] <= 11.5
+        )
 
     def _clef_single_geom(
         self,
@@ -731,8 +814,12 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
         refs = [Image.open(io.BytesIO(self.jpeg[path])).convert("RGB") for _, _, path in top]
         cat_map = getattr(self, "catalog", {}) or {}
         p1 = str((cat_map.get(top[0][1]) or {}).get("packaging_type") or "") if top else ""
-        p2 = str((cat_map.get(top[1][1]) or {}).get("packaging_type") or "") if len(top) > 1 else ""
-        pack_conflict = bool(p1 and p2 and p1 != p2)
+        other_packs = {
+            str((cat_map.get(cid) or {}).get("packaging_type") or "")
+            for _, cid, _ in top[1:3]
+            if (cat_map.get(cid) or {}).get("packaging_type")
+        }
+        pack_conflict = bool(p1 and any(op != p1 for op in other_packs))
         include_crown = bool(self.use_lidstone_pack_crown and pack_conflict)
         diff_band: tuple[float, float, float] | None = None
 
@@ -781,6 +868,7 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
             "diff_band": list(diff_band) if diff_band else None,
             "include_crown": include_crown,
             "lidstone_pack_probs": pack_probs or None,
+            "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in top],
         }
 
     def identify(
@@ -792,32 +880,11 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
         if not ranked:
             return None
         top = ranked[:CLEF_K]
-        cat_map = getattr(self, "catalog", {}) or {}
         s1, id1, _ = top[0]
-        s2, id2, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
-        c1 = cat_map.get(id1) or {}
-        c2 = cat_map.get(id2) or {}
-        same_variant = bool(
-            c1.get("brand")
-            and c1.get("brand") == c2.get("brand")
-            and c1.get("base_variant") == c2.get("base_variant")
-            and c1.get("pack_size") != c2.get("pack_size")
-        )
-        pack_conflict = bool(
-            c1.get("packaging_type")
-            and c2.get("packaging_type")
-            and c1.get("packaging_type") != c2.get("packaging_type")
-        )
-        req_margin = 0.025 if (same_variant or (self.use_lidstone_pack_crown and pack_conflict)) else 0.009
+        s2, _, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
         zlid = compute_zscore_and_lid([s for s, _, _ in top])
         p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
-        if (
-            s1 >= 0.75
-            and (s1 - s2) >= req_margin
-            and p_clm >= 0.30
-            and zlid["z_margin"] >= 0.80
-            and zlid["lid"] <= 11.5
-        ):
+        if self._stage_a_accept(top, p_clm, zlid):
             ctx.trace.step(
                 "Stage A CLM + Projective Scale Fast-Gate (0 VLM calls)",
                 f"#{id1} accepted (cos={s1:.3f}, margin={s1 - s2:.3f}, P_CLM={p_clm:.2f}, h/w={geom['aspect_ratio']:.2f})",
@@ -892,36 +959,15 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
 
         ids: list[int | None] = [None] * len(boxes)
         valid_indices: list[int] = []
-        cat_map = getattr(self, "catalog", {}) or {}
         for i, r in enumerate(all_ranked):
             if not r:
                 continue
             top = r[:CLEF_K]
             s1, id1, _ = top[0]
-            s2, id2, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
-            c1 = cat_map.get(id1) or {}
-            c2 = cat_map.get(id2) or {}
-            same_variant = bool(
-                c1.get("brand")
-                and c1.get("brand") == c2.get("brand")
-                and c1.get("base_variant") == c2.get("base_variant")
-                and c1.get("pack_size") != c2.get("pack_size")
-            )
-            pack_conflict = bool(
-                c1.get("packaging_type")
-                and c2.get("packaging_type")
-                and c1.get("packaging_type") != c2.get("packaging_type")
-            )
-            req_margin = 0.025 if (same_variant or (self.use_lidstone_pack_crown and pack_conflict)) else 0.009
+            s2, _, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
             zlid = compute_zscore_and_lid([s for s, _, _ in top])
             p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
-            if (
-                s1 >= 0.75
-                and (s1 - s2) >= req_margin
-                and p_clm >= 0.30
-                and zlid["z_margin"] >= 0.80
-                and zlid["lid"] <= 11.5
-            ):
+            if self._stage_a_accept(top, p_clm, zlid):
                 ids[i] = id1
                 ctx.trace.step(
                     "Stage A CLM + Projective Scale Fast-Gate",

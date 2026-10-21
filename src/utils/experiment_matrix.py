@@ -2347,6 +2347,71 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "target_goal": "Cut gtmerch_golden E2E cost from ₹2.27/img to <= ₹0.45/img while lifting Client-Clubbed F2 >= 75.0%",
         "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
     },
+    {
+        "experiment_id": "P0-EXP-58",
+        "priority": "P0",
+        "task_id": "TASK-RET",
+        "title": "Layer-5 Deterministic Pack-Size Sister-SKU Verifier & Paired McNemar Audit (EXP-58)",
+        "technical_title": "Post-Generation Deterministic pack_size Sister-SKU Verifier + Paired McNemar 2x2 Discordant Significance Test",
+        "intuition": (
+            "Cross-checks Gemini's cognitive-ordered visible_pack_size_text against the chosen candidate's catalog pack_size "
+            "and deterministically overrides to the matching same-brand, same-variant sister SKU within the shortlist."
+        ),
+        "use_case": "market_share",
+        "task": "retrieval",
+        "dataset": "hul_golden",
+        "approaches": [
+            "clef_pack_crown_fusion",
+            "hybrid_pack_specialist_clef",
+            "l8_hul_ultimate",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Enforcing a Layer-5 deterministic pack_size sister-SKU post-verifier after cognitive-ordered VLM generation "
+            "resolves residual 50g/100g/200g/500g sister-SKU confusions with zero cross-brand regressions (b=0 in McNemar's 2x2 table) "
+            "and |val - test| <= 2.0% generalization gap."
+        ),
+        "description": (
+            "Evaluates clef_pack_crown_fusion, hybrid_pack_specialist_clef, and l8_hul_ultimate with Layer-5 pack_size "
+            "sister-SKU verification across hul_golden and hul_variants on both val and test splits."
+        ),
+        "primary_metric": "accuracy",
+        "target_goal": ">= 84.5% exact 5-attr SKU accuracy on hul_golden with McNemar b <= c and |val - test| <= 2.0%",
+        "model_family": "hul-hierarchical-brand-pack-gate",
+    },
+    {
+        "experiment_id": "P0-EXP-59",
+        "priority": "P0",
+        "task_id": "TASK-E2E",
+        "title": "Level-4 Total Contracts, P2P Store Payout Gate & Rogan-Gladen Shelf Calibration (EXP-59)",
+        "technical_title": "Level-4 Total Contract Diagnostics + P2P Store Payout Policy Gate (>180s Quarantine) + Rogan-Gladen Prevalence Calibration",
+        "intuition": (
+            "Separates VLM contract/timeout faults from true recognition errors, blocks auto-zeroing of store P2P payouts on "
+            "infrastructure faults, and applies Rogan-Gladen prevalence calibration to 'AI Beyond Human GT' discovery rates."
+        ),
+        "use_case": "market_share",
+        "task": "end_to_end",
+        "dataset": "ms_json_golden",
+        "approaches": [
+            "shelf_marketshare_generalizable_e2e",
+            "shelf_merchandising_bay_e2e",
+            "shelf_generalizable_spine_e2e",
+        ],
+        "models": ["gemini-3.5-flash-lite"],
+        "splits": ["val", "test"],
+        "hypothesis": (
+            "Combining Layer-5 pack_size sister-SKU verification with Level-4 Total Contracts, <untrusted_context> OCR isolation, "
+            "and Rogan-Gladen prevalence calibration maintains >= 99% valid_response_accuracy, 0 false zero-payouts, and |val - test| <= 2.5%."
+        ),
+        "description": (
+            "Evaluates shelf_marketshare_generalizable_e2e and shelf_merchandising_bay_e2e on ms_json_golden, mt_json_golden, "
+            "and gtmerch_golden across val and test splits on Cloud Run."
+        ),
+        "primary_metric": "f2",
+        "target_goal": "100% valid_response_accuracy, 0 false P2P zero-payouts, and |val - test| <= 2.5% across val & test",
+        "model_family": "hul-gtmerch-bay-planogram-sos-verifier",
+    },
 ]
 
 
@@ -2417,7 +2482,7 @@ POC_MODELS: list[dict[str, Any]] = [
             "auto-accepts high-margin CLM InfoNCE matches, and verifies sister variants via batched Gemini contact sheets."
         ),
         "artifact_uri": "gs://ul-fs-s-sandbx-16-prj-shelf-images/models/hul-hierarchical-brand-pack-gate",
-        "experiments": ["P0-EXP-02", "P0-EXP-03", "P1-EXP-06", "P2-EXP-10", "P1-EXP-17", "P1-EXP-18", "P0-EXP-19"],
+        "experiments": ["P0-EXP-02", "P0-EXP-03", "P1-EXP-06", "P2-EXP-10", "P1-EXP-17", "P1-EXP-18", "P0-EXP-19", "P0-EXP-58"],
     },
     {
         "model_key": "hul-gtmerch-bay-planogram-sos-verifier",
@@ -2434,7 +2499,7 @@ POC_MODELS: list[dict[str, Any]] = [
             "display bays, Class 1 SKU facings, promo callouts, brand-block purity, and Share of Shelf (SOS)."
         ),
         "artifact_uri": "gs://ul-fs-s-sandbx-16-prj-shelf-images/models/hul-gtmerch-bay-planogram-sos-verifier",
-        "experiments": ["P0-EXP-04", "P1-EXP-07", "P1-EXP-08", "MOON-EXP-14"],
+        "experiments": ["P0-EXP-04", "P1-EXP-07", "P1-EXP-08", "MOON-EXP-14", "P0-EXP-59"],
     },
     {
         "model_key": "hul-jev-laya-lora-sft-adapter",
@@ -3107,6 +3172,8 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
                     "annotated_row_detection_metrics": s.get("annotated_row_box_metrics") or s.get("annotated_row_detection_metrics"),
                     "enrichment_metrics": s.get("enrichment_metrics"),
                     "human_and_beyond": s.get("human_and_beyond"),
+                    "contract_errors": s.get("contract_errors"),
+                    "bay_scoped_metrics": s.get("bay_scoped_metrics"),
                     "is_exact_dataset": ds == exp["dataset"] or (exp["dataset"] in ("hul_sessions", "gt_hul_sessions") and ds in ("hul_sessions", "gt_hul_sessions")),
                     "is_golden_dataset": ds in golden_ds_set,
                     "vertex_run_context": (

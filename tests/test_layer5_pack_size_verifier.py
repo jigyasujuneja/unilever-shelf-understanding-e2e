@@ -90,3 +90,27 @@ def test_resolve_clef_choice_integrates_layer5_pack_size_verifier():
     )
     assert ans == 102
     assert mode == "panel_1+layer5_pack_size_verified"
+
+
+def test_verify_pack_size_sister_sku_discriminative_token_fallback():
+    catalog = {
+        365: {
+            "sku_id": 365,
+            "brand": "Dove",
+            "base_variant": "Glycolic_Hydration",
+            "packaging_type": "Bottle",
+            "product": "ADove__Glycolic_Hydration",
+        },
+        366: {
+            "sku_id": 366,
+            "brand": "Dove",
+            "base_variant": "Glycolic_Hydration_Conditioner",
+            "packaging_type": "Bottle",
+            "product": "ADove__Glycolic_Hydration_Conditioner",
+        },
+    }
+    ranked = [(0.876, 365, "p1"), (0.855, 366, "p2")]
+    ans, overridden = verify_pack_size_sister_sku(365, "Conditioner", ranked, catalog)
+    assert overridden is True
+    assert ans == 366
+
