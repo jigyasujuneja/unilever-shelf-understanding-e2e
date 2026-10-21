@@ -52,15 +52,15 @@ from approaches.market_share.retrieval.clm_info_nce import SftClmClefCascade
 from utils import dataset, pricing
 from utils.llm import Gemini, load_config
 
-# Baseline run parameters for EXP-29 / EXP-33 (Run ID: 1015-162629-sft_clm_clef_cascade-gemini-3.5-flash-lite-priority-hul_variants-val)
-BASELINE_RUN_ID = "1015-162629-sft_clm_clef_cascade-gemini-3.5-flash-lite-priority-hul_variants-val"
+# Baseline run parameters for Option 2: EXP-28 Contrastive Metadata CLEF (Run ID: 1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k)
+BASELINE_RUN_ID = "1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k"
 BASELINE_USD_TO_INR = 95.98874999870618
-BASELINE_GEMINI_COST_PER_CROP = 0.0003796128  # ₹0.0364
-BASELINE_SERVICES_COST_PER_CROP = 0.0001161000  # ₹0.0111
-BASELINE_COMPUTE_COST_PER_CROP = 0.0000540800  # ₹0.00519
-BASELINE_STORAGE_COST_PER_CROP = 0.0000004520  # ₹0.0000433
-BASELINE_TOTAL_COST_PER_CROP = 0.0005502448  # ₹0.0528
-BASELINE_GATE_BYPASS_PCT = 0.555  # 55.5% resolved in Stage A with 0 Gemini calls
+BASELINE_GEMINI_COST_PER_CROP = 0.0003271  # $0.0003271 / ₹0.0314
+BASELINE_SERVICES_COST_PER_CROP = 0.0001161  # ₹0.0111
+BASELINE_COMPUTE_COST_PER_CROP = 0.0000131  # ₹0.00126
+BASELINE_STORAGE_COST_PER_CROP = 0.0000004  # ₹0.000038
+BASELINE_TOTAL_COST_PER_CROP = 0.0004568  # ₹0.0438 / 4.38 paise
+BASELINE_GATE_BYPASS_PCT = 0.6164  # 61.64% resolved in Stage A with 0 Gemini calls
 
 # Cloud Run 4 vCPU / 16 GiB billing rates
 CLOUD_RUN_VCPU_S = 1.8e-05
@@ -212,16 +212,22 @@ class PipelineLoadTester:
     def __init__(
         self,
         config: dict,
-        tier: str = "priority",
+        approach: str = "clef_contrastive_metadata",
+        tier: str = "standard",
         model: str = "gemini-3.5-flash-lite",
         dry_run_vlm: bool = False,
     ):
         self.config = config
+        self.approach = approach
         self.tier = tier
         self.model = model
         self.dry_run_vlm = dry_run_vlm
         self.detector = DistilledYolo960SoftNms()
-        self.retriever = SftClmClefCascade()
+        if approach == "clef_contrastive_metadata":
+            from approaches.market_share.retrieval.clef_standalone import ClefContrastiveMetadata
+            self.retriever = ClefContrastiveMetadata()
+        else:
+            self.retriever = SftClmClefCascade()
         self.llm = None if dry_run_vlm else Gemini(model, config, tier=tier)
         self._is_setup = False
         self._setup_lock = concurrent.futures.thread.threading.Lock()
@@ -245,6 +251,48 @@ class PipelineLoadTester:
                 "setup_ms": duration_ms,
                 "gallery_entries": len(self.retriever.index),
             }
+
+    def _evaluate_crop_retrieval(self, crop_im: Image.Image, ctx: Context) -> tuple[list, bool, float, float]:
+        """Rank candidates and evaluate fast gate, returning (top_k, confident, t_rank_ms, t_gate_ms)."""
+        t1 = time.perf_counter_ns()
+        if hasattr(self.retriever, "_rank_crop"):
+            ranked, q_vec, restored = self.retriever._rank_crop(crop_im, ctx)
+            top_k = ranked[:5]
+            t_rank_ms = (time.perf_counter_ns() - t1) / 1e6
+            t2 = time.perf_counter_ns()
+            confident, _ = self.retriever._stage_a_gate(ranked)
+            t_gate_ms = (time.perf_counter_ns() - t2) / 1e6
+        else:
+            ranked = self.retriever.ranked(crop_im, ctx)
+            top_k = ranked[:5] if ranked else []
+            t_rank_ms = (time.perf_counter_ns() - t1) / 1e6
+            t2 = time.perf_counter_ns()
+            confident = False
+            if top_k:
+                cat_map = getattr(self.retriever, "catalog", {})
+                s1, id1, _ = top_k[0]
+                s2, id2, _ = top_k[1] if len(top_k) > 1 else (-1.0, -1, "")
+                c1 = cat_map.get(id1) or {}
+                c2 = cat_map.get(id2) or {}
+                same_variant = bool(
+                    c1.get("brand")
+                    and c1.get("brand") == c2.get("brand")
+                    and c1.get("base_variant") == c2.get("base_variant")
+                    and c1.get("pack_size") != c2.get("pack_size")
+                )
+                req_margin = 0.025 if same_variant else 0.009
+                from utils.clm import compute_zscore_and_lid, infonce_posterior
+                zlid = compute_zscore_and_lid([s for s, _, _ in top_k])
+                p_clm, _ = infonce_posterior(top_k, inv_temp=28.0, k=len(top_k))
+                confident = bool(
+                    s1 >= 0.75
+                    and (s1 - s2) >= req_margin
+                    and p_clm >= 0.30
+                    and zlid["z_margin"] >= 0.80
+                    and zlid["lid"] <= 11.5
+                )
+            t_gate_ms = (time.perf_counter_ns() - t2) / 1e6
+        return top_k, confident, t_rank_ms, t_gate_ms
 
     def process_single_crop(
         self,
@@ -271,41 +319,40 @@ class PipelineLoadTester:
 
             # 2. Embedding + CLM Gate
             ctx = Context(model=self.model, llm=self.llm)
-            t1 = time.perf_counter_ns()
-            ranked, q_vec, restored = self.retriever._rank_crop(crop_im, ctx)
-            timing.embedding_gen_ms = (time.perf_counter_ns() - t1) / 1e6
+            top_k, confident, t_rank_ms, t_gate_ms = self._evaluate_crop_retrieval(crop_im, ctx)
+            timing.embedding_gen_ms = t_rank_ms
+            timing.clm_gate_ms = t_gate_ms
 
-            t2 = time.perf_counter_ns()
-            confident, gate_meta = self.retriever._stage_a_gate(ranked)
-            timing.clm_gate_ms = (time.perf_counter_ns() - t2) / 1e6
-
-            if confident and ranked:
+            if confident and top_k:
                 zero_vlm = 1
-                pred_id = ranked[0][1]
+                pred_id = top_k[0][1]
             else:
                 vlm_escalated = 1
                 t3 = time.perf_counter_ns()
                 # Stage B: Contact sheet rendering
-                top_k = ranked[:5]
                 refs = [
                     Image.open(dataset.io.BytesIO(self.retriever.jpeg[path])).convert("RGB")
                     for _, _, path in top_k
                 ]
                 from utils.clm import zoom_sheet as clef_sheet
-                contact_sheet = clef_sheet(restored, refs)
+                contact_sheet = clef_sheet(crop_im, refs)
                 timing.contact_sheet_ms = (time.perf_counter_ns() - t3) / 1e6
 
                 # Stage B: LVM inference
                 t4 = time.perf_counter_ns()
                 if self.dry_run_vlm:
-                    # Calibrated simulation based on baseline P50 latency & token consumption
-                    time.sleep(np.random.normal(0.42, 0.05))
-                    pred_id = ranked[0][1] if ranked else None
-                    in_tokens = 1440
-                    out_tokens = 16
+                    # Calibrated simulation based on Option 2 baseline (Run ID 1016-092456)
+                    # Latency P50: ~818ms, Input tokens: 1,441, Output tokens: 17
+                    time.sleep(np.random.normal(0.818, 0.08))
+                    pred_id = top_k[0][1] if top_k else None
+                    in_tokens = 1441
+                    out_tokens = 17
                     gemini_calls = 1
                 else:
-                    pred_id, conf, info = self.retriever.pick_with_confidence(crop_im, top_k, ctx)
+                    if hasattr(self.retriever, "pick_with_confidence"):
+                        pred_id, conf, info = self.retriever.pick_with_confidence(crop_im, top_k, ctx)
+                    else:
+                        pred_id, info = self.retriever._clef_single(crop_im, top_k, ctx)
                     in_tokens = ctx.trace.usage.input_tokens
                     out_tokens = ctx.trace.usage.output_tokens
                     gemini_calls = sum(len(c) for c in ctx.trace._calls.values()) if ctx.trace._calls else (1 if in_tokens > 0 else 0)
@@ -424,15 +471,9 @@ class PipelineLoadTester:
 
             def process_crop(crop_im):
                 ctx_crop = Context(model=self.model, llm=self.llm)
-                t_sub = time.perf_counter_ns()
-                ranked, q_vec, restored = self.retriever._rank_crop(crop_im, ctx_crop)
-                t_rank_dur = (time.perf_counter_ns() - t_sub) / 1e6
+                top_k, confident, t_rank_dur, t_gate_dur = self._evaluate_crop_retrieval(crop_im, ctx_crop)
 
-                t_clm_sub = time.perf_counter_ns()
-                confident, meta = self.retriever._stage_a_gate(ranked)
-                t_gate_dur = (time.perf_counter_ns() - t_clm_sub) / 1e6
-
-                if confident and ranked:
+                if confident and top_k:
                     return {
                         "zero_vlm": 1,
                         "vlm_escalated": 0,
@@ -446,24 +487,26 @@ class PipelineLoadTester:
                     }
 
                 # Ambiguous crop escalated to Stage B
-                top_k = ranked[:5]
                 t_cs_sub = time.perf_counter_ns()
                 refs = [
                     Image.open(dataset.io.BytesIO(self.retriever.jpeg[path])).convert("RGB")
                     for _, _, path in top_k
                 ]
                 from utils.clm import zoom_sheet as clef_sheet
-                contact_sheet = clef_sheet(restored, refs)
+                contact_sheet = clef_sheet(crop_im, refs)
                 t_cs_dur = (time.perf_counter_ns() - t_cs_sub) / 1e6
 
                 t_lvm_sub = time.perf_counter_ns()
                 if self.dry_run_vlm:
-                    time.sleep(max(0.05, float(np.random.normal(0.42, 0.05))))
-                    in_t = 1440
-                    out_t = 16
+                    time.sleep(max(0.05, float(np.random.normal(0.818, 0.08))))
+                    in_t = 1441
+                    out_t = 17
                     n_calls = 1
                 else:
-                    self.retriever.pick_with_confidence(crop_im, top_k, ctx_crop)
+                    if hasattr(self.retriever, "pick_with_confidence"):
+                        self.retriever.pick_with_confidence(crop_im, top_k, ctx_crop)
+                    else:
+                        self.retriever._clef_single(crop_im, top_k, ctx_crop)
                     in_t = ctx_crop.trace.usage.input_tokens
                     out_t = ctx_crop.trace.usage.output_tokens
                     n_calls = sum(len(c) for c in ctx_crop.trace._calls.values()) if ctx_crop.trace._calls else (1 if in_t > 0 else 0)
@@ -685,19 +728,20 @@ def aggregate_benchmark(
 
 def run_load_test(
     concurrency_levels: list[int],
+    approach: str = "clef_contrastive_metadata",
     mode: str = "both",  # "e2e", "classification", "both"
     num_samples: int = 15,
     num_e2e_samples: int | None = None,
     num_cls_samples: int | None = None,
     dry_run_vlm: bool = False,
-    tier: str = "priority",
+    tier: str = "standard",
     out_dir: str = "results/load_tests",
     prod_profile: bool = False,
     duration_minutes: float | None = None,
 ) -> dict[str, Any]:
     """Execute full load test across concurrency levels, datasets, duration, or production burst profiles."""
     cfg = load_config()
-    tester = PipelineLoadTester(cfg, tier=tier, dry_run_vlm=dry_run_vlm)
+    tester = PipelineLoadTester(cfg, approach=approach, tier=tier, dry_run_vlm=dry_run_vlm)
 
     if duration_minutes is not None and duration_minutes > 0:
         n_cls = num_cls_samples if num_cls_samples is not None else 25
@@ -708,9 +752,9 @@ def run_load_test(
 
     print(f"\n================================================================================")
     print(f"🚀 INITIALIZING LOAD TEST: EMBEDDING + DECISION MODEL + LVM PIPELINES")
-    print(f"Target: EXP-29 / EXP-33 Gemini 3.5 Flash-Lite LoRA SFT + Calibrated Gate + Contact Sheet")
+    print(f"Target: Option 2 ★ Production Winner ({approach})")
     print(f"Baseline Run: {BASELINE_RUN_ID}")
-    print(f"Environment: Cloud Run 4 vCPU / 16 GiB (us-central1) | Priority Tier: {tier}")
+    print(f"Environment: Cloud Run 4 vCPU / 16 GiB (us-central1) | Pricing Tier: {tier}")
     print(f"Production Reality Profile: {prod_profile} (500k shelves/day over 16h = 8.68 sh/s, 781.3 crops/s)")
     print(f"Mode: {mode.upper()} | Samples: Cls={n_cls}, E2E={n_e2e} | Dry-Run VLM: {dry_run_vlm}")
     print(f"================================================================================\n")
@@ -995,19 +1039,19 @@ def run_load_test(
     return results
 
 
-def format_markdown_report(results: dict[str, list[ConcurrencyBenchmarkResult]]) -> str:
+def format_markdown_report(results: dict[str, list[ConcurrencyBenchmarkResult]], approach: str = "clef_contrastive_metadata") -> str:
     """Format full load test telemetry into an extensive markdown report."""
     md = []
     md.append("# 📈 Load Test Report: Embedding + Decision Model + LVM Pipelines\n")
-    md.append(f"**Target Approach**: Approach 9: Gemini 3.5 Flash-Lite LoRA SFT + Calibrated Embedding Gate + Contact Sheet (EXP-29 / EXP-33)\n")
-    md.append(f"**Baseline Benchmark Run**: `{BASELINE_RUN_ID}`\n")
-    md.append(f"**Target Architecture**: Cloud Run (`us-central1`, 4 vCPU / 16 GiB), `gemini-3.5-flash-lite` (Priority Tier)\n")
+    md.append(f"**Target Approach**: Option 2 ★ Production Winner: Contrastive Metadata CLEF (`{approach}`)\n")
+    md.append(f"**Baseline Benchmark Run**: `{BASELINE_RUN_ID}` (82.28% test accuracy, 0.818s P50 latency)\n")
+    md.append(f"**Target Architecture**: Cloud Run (`us-central1`, 4 vCPU / 16 GiB), `gemini-3.5-flash-lite` (Standard PayGo)\n")
     md.append(f"**Exchange Rate**: $1.00 USD = ₹{BASELINE_USD_TO_INR:.4f} INR\n")
     md.append(f"**Execution Timestamp**: `{datetime.now(timezone.utc).isoformat()}`\n\n")
 
     # 1. Executive Summary
     md.append("## 1. Executive Summary & Comparison vs Baseline\n")
-    md.append("| Metric | Baseline (EXP-29 / EXP-33) | Load Test (hul_variants) | End-to-End Pipeline (ms_json_golden) |\n")
+    md.append("| Metric | Baseline (Option 2 Winner) | Load Test (hul_variants) | End-to-End Pipeline (ms_json_golden) |\n")
     md.append("| :--- | :--- | :--- | :--- |\n")
 
     cls_bench = results["classification"][-1] if results.get("classification") else None
@@ -1025,11 +1069,11 @@ def format_markdown_report(results: dict[str, list[ConcurrencyBenchmarkResult]])
     e2e_gate = f"{e2e_bench.zero_vlm_gate_pct:.1f}%" if e2e_bench else "N/A"
     e2e_err = f"{e2e_bench.error_rate_pct:.1f}% ({e2e_bench.failed_requests}/{e2e_bench.total_requests})" if e2e_bench else "N/A"
 
-    md.append(f"| **Error Rate** | 0.0% (0/200) | {cls_err} | {e2e_err} |\n")
-    md.append(f"| **P50 Latency** | 4.08s | {cls_p50} | {e2e_p50} |\n")
-    md.append(f"| **P95 Latency** | 8.79s | {cls_p95} | {e2e_p95} |\n")
-    md.append(f"| **Zero-VLM Gate Rate** | 55.5% | {cls_gate} | {e2e_gate} |\n")
-    md.append(f"| **Cost / Unit** | ₹0.0528 ($0.000550) | {cls_cost} | {e2e_cost} / shelf |\n")
+    md.append(f"| **Error Rate** | 0.0% (0/5000) | {cls_err} | {e2e_err} |\n")
+    md.append(f"| **P50 Latency** | 0.82s | {cls_p50} | {e2e_p50} |\n")
+    md.append(f"| **P95 Latency** | 4.08s | {cls_p95} | {e2e_p95} |\n")
+    md.append(f"| **Zero-VLM Gate Rate** | 61.6% | {cls_gate} | {e2e_gate} |\n")
+    md.append(f"| **Cost / Unit** | ₹0.0438 ($0.000457) | {cls_cost} | {e2e_cost} / shelf |\n")
     md.append(f"| **Detection Stage** | N/A (Pre-cropped) | N/A (Pre-cropped) | YOLO 960px Soft-NMS (~85 boxes/shelf) |\n\n")
 
     # 2. Concurrency Scaling & Throughput
@@ -1224,15 +1268,17 @@ def main():
     parser.add_argument("--e2e-samples", type=int, default=None, help="Number of shelf samples per level (ms_json_golden)")
     parser.add_argument("--cls-samples", type=int, default=None, help="Number of crop samples per level (hul_variants)")
     parser.add_argument("--prod-profile", action="store_true", help="Execute 5-phase production reality burst & trough load test for 500k shelves/day")
+    parser.add_argument("--approach", type=str, default="clef_contrastive_metadata", help="Pipeline approach (default: clef_contrastive_metadata)")
     parser.add_argument("--duration-minutes", type=float, default=None, help="Run sustained soak test for N minutes at peak concurrency")
     parser.add_argument("--dry-run-vlm", action="store_true", help="Simulate VLM latency without incurring live API billing")
-    parser.add_argument("--tier", type=str, default="priority", choices=["priority", "standard", "flex"])
+    parser.add_argument("--tier", type=str, default="standard", choices=["priority", "standard", "flex"])
     parser.add_argument("--out-dir", type=str, default="results/load_tests", help="Output directory for reports")
     args = parser.parse_args()
 
     concurrency_list = [int(c.strip()) for c in args.concurrency.split(",") if c.strip()]
     results = run_load_test(
         concurrency_levels=concurrency_list,
+        approach=args.approach,
         mode=args.mode,
         num_samples=args.samples,
         num_e2e_samples=args.e2e_samples,
@@ -1244,7 +1290,7 @@ def main():
         duration_minutes=args.duration_minutes,
     )
 
-    report_md = format_markdown_report(results)
+    report_md = format_markdown_report(results, approach=args.approach)
 
     out_path = (PROJECT_ROOT / args.out_dir).resolve()
     out_path.mkdir(parents=True, exist_ok=True)

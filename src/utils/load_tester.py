@@ -30,16 +30,20 @@ class LoadTestConfig:
     duration_minutes: float = 3.0
     shelves_per_min: float = 2500.0
     products_per_shelf: float = 50.0
-    approach: str = "sft_clm_clef_cascade"
+    approach: str = "clef_contrastive_metadata"
     model: str = "gemini-3.5-flash-lite"
-    tier: str = "priority"
+    tier: str = "standard"
     dry_run_vlm: bool = True
     stress_gcs_io: bool = True
     shelf_dataset: str = "rpc_json"
     crop_dataset: str = "hul_golden"
-    gate_bypass_rate: float = 0.117  # 11.7% for dense shelves, up to 48.8% for variants
-    p50_latency_ms: float = 420.0
-    p95_latency_ms: float = 1150.0
+    gate_bypass_rate: float = 0.616  # 61.6% empirical Stage 2A zero-VLM fast gate from 1016-092456
+    p50_latency_ms: float = 818.0   # 818ms P50 empirical baseline from 1016-092456
+    p95_latency_ms: float = 4075.0  # 4075ms P95 empirical baseline from 1016-092456
+    prompt_tokens_per_call: float = 1441.0
+    candidate_tokens_per_call: float = 16.6
+    empirical_accuracy: float = 0.8228  # 82.28% on 5,000 blind test crops
+    baseline_run_id: str = "1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k"
     report_interval_s: float = 20.0
     gcs_bucket: str = "ul-fs-s-sandbx-16-prj-shelf-images"
     gcs_prefix: str = "results/load_tests"
@@ -139,9 +143,13 @@ def run_load_test(cfg: LoadTestConfig) -> dict[str, Any]:
     t_start = time.perf_counter()
     next_report_time = t_start + cfg.report_interval_s
 
-    # Capacity baselines (4 vCPU / 16 GiB)
-    cls_worker_capacity_per_container = 28.5  # crops/s per container
-    det_worker_capacity_per_container = 1.0 / 5.41  # 0.185 shelves/s per container
+    # Capacity baselines (4 vCPU / 16 GiB container, 16 worker threads)
+    # Option 2 (clef_contrastive_metadata):
+    # - Fast-path Stage 2A: ~80ms (zero-VLM fast-gate)
+    # - Escalated Stage 2B: ~p50_latency_ms (CLEF Contact Sheet + Gemini inference)
+    weighted_latency_s = (cfg.gate_bypass_rate * 0.080) + ((1.0 - cfg.gate_bypass_rate) * (cfg.p50_latency_ms / 1000.0))
+    cls_worker_capacity_per_container = max(1.0, 16.0 / max(0.05, weighted_latency_s))
+    det_worker_capacity_per_container = 1.0 / 5.41  # 0.185 shelves/s per container (CPU ONNX YOLO)
 
     for sec in range(1, duration_s + 1):
         t_sec_start = time.perf_counter()
@@ -155,7 +163,7 @@ def run_load_test(cfg: LoadTestConfig) -> dict[str, Any]:
         total_crops_arrived += crops_in
         queue_crops += crops_in
 
-        # Gate bypass (11.7% to 48.8%)
+        # Gate bypass (calibrated to Option 2 Stage 2A empirical rate: 61.6%)
         bypassed = int(round(crops_in * cfg.gate_bypass_rate))
         total_crops_bypassed += bypassed
 
@@ -206,8 +214,7 @@ def run_load_test(cfg: LoadTestConfig) -> dict[str, Any]:
                     gcs_errors += 1
 
             # 2. Concurrently stream sample product crops for classification
-            # Stream up to 8 real crops per second to maintain balanced I/O & CPU pipeline
-            crops_to_stream = min(crops_in, max(4, shelves_in * 2))
+            crops_to_stream = min(crops_in, max(8, int(round(crops_in * 0.20))))
             crop_indices = [(sec * 97 + j) for j in range(crops_to_stream)]
             futs_cr = [gcs_executor.submit(_fetch_crop, ci) for ci in crop_indices]
             for f in futs_cr:
@@ -218,10 +225,17 @@ def run_load_test(cfg: LoadTestConfig) -> dict[str, Any]:
                 if c_code != 200:
                     gcs_errors += 1
 
-        # Simulate calibrated latencies
-        sec_latencies = np.random.lognormal(mean=math.log(cfg.p50_latency_ms), sigma=0.45, size=min(100, max(1, processed_this_sec)))
+        # Simulate calibrated two-stage cascade latencies (fast-gate vs escalated CLEF)
+        sec_latencies = []
+        n_bypassed = bypassed
+        n_escalated = max(0, processed_this_sec - bypassed)
+        if n_bypassed > 0:
+            sec_latencies.extend(np.random.lognormal(mean=math.log(80.0), sigma=0.35, size=min(40, n_bypassed)).tolist())
+        if n_escalated > 0:
+            sec_latencies.extend(np.random.lognormal(mean=math.log(cfg.p50_latency_ms), sigma=0.98, size=min(60, n_escalated)).tolist())
+
         if len(sec_latencies) > 0:
-            latencies_sample.extend(sec_latencies.tolist())
+            latencies_sample.extend(sec_latencies)
             if len(latencies_sample) > 5000:
                 latencies_sample = latencies_sample[-5000:]
             p50 = float(np.percentile(latencies_sample, 50))
@@ -317,12 +331,28 @@ def run_load_test(cfg: LoadTestConfig) -> dict[str, Any]:
         print(f"Crop Latency (P50/P95):  {gcs_stats['crop_latency_p50_ms']} ms / {gcs_stats['crop_latency_p95_ms']} ms ({gcs_errors} errors)")
     print("=" * 80)
 
-    # Cost calculations
-    in_tok = total_gemini_calls * 1440
-    out_tok = total_gemini_calls * 16
-    cost_vlm_usd = (in_tok / 1e6 * 0.54) + (out_tok / 1e6 * 4.50)
-    bypassed_tok_saved = total_crops_bypassed * 1440
-    savings_usd = (bypassed_tok_saved / 1e6 * 0.54) + ((total_crops_bypassed * 16) / 1e6 * 4.50)
+    # Cost calculations (Option 2 CLEF Contrastive Metadata tokens + GCP pricing tiers)
+    pricing_tiers = {
+        "standard": {"in": 0.30, "out": 2.50},
+        "priority": {"in": 0.54, "out": 4.50},
+        "flex": {"in": 0.15, "out": 1.25},
+    }
+    tier_rates = pricing_tiers.get(cfg.tier, pricing_tiers["standard"])
+    std_rates = pricing_tiers["standard"]
+    prio_rates = pricing_tiers["priority"]
+
+    in_tok = total_gemini_calls * cfg.prompt_tokens_per_call
+    out_tok = total_gemini_calls * cfg.candidate_tokens_per_call
+
+    # Selected tier cost
+    cost_vlm_usd = (in_tok / 1e6 * tier_rates["in"]) + (out_tok / 1e6 * tier_rates["out"])
+    cost_std_usd = (in_tok / 1e6 * std_rates["in"]) + (out_tok / 1e6 * std_rates["out"])
+    cost_prio_usd = (in_tok / 1e6 * prio_rates["in"]) + (out_tok / 1e6 * prio_rates["out"])
+
+    # Fast gate savings (tokens saved from zero-VLM bypass)
+    bypassed_in_saved = total_crops_bypassed * cfg.prompt_tokens_per_call
+    bypassed_out_saved = total_crops_bypassed * cfg.candidate_tokens_per_call
+    savings_usd = (bypassed_in_saved / 1e6 * tier_rates["in"]) + (bypassed_out_saved / 1e6 * tier_rates["out"])
     usd_to_inr = 95.98875
 
     peak_cls_containers = max(t.active_cls_containers for t in ticks) if ticks else 0
@@ -334,6 +364,11 @@ def run_load_test(cfg: LoadTestConfig) -> dict[str, Any]:
         "task_count": task_count,
         "duration_seconds": round(wall_time, 2),
         "duration_minutes": cfg.duration_minutes,
+        "approach": cfg.approach,
+        "model": cfg.model,
+        "tier": cfg.tier,
+        "baseline_run_id": cfg.baseline_run_id,
+        "empirical_accuracy": cfg.empirical_accuracy,
         "shelf_dataset": "rpc_json",
         "crop_dataset": "hul_golden",
         "shelves_arrived": total_shelves_arrived,
@@ -347,7 +382,7 @@ def run_load_test(cfg: LoadTestConfig) -> dict[str, Any]:
             "p50_ms": round(float(np.percentile(latencies_sample, 50)), 1) if latencies_sample else cfg.p50_latency_ms,
             "p90_ms": round(float(np.percentile(latencies_sample, 90)), 1) if latencies_sample else 850.0,
             "p95_ms": round(float(np.percentile(latencies_sample, 95)), 1) if latencies_sample else cfg.p95_latency_ms,
-            "p99_ms": round(float(np.percentile(latencies_sample, 99)), 1) if latencies_sample else 1500.0,
+            "p99_ms": round(float(np.percentile(latencies_sample, 99)), 1) if latencies_sample else 5500.0,
         },
         "gcs_io_stats": gcs_stats,
         "fleet_sizing": {
@@ -357,12 +392,18 @@ def run_load_test(cfg: LoadTestConfig) -> dict[str, Any]:
             "savings_pct": round((peak_cls_containers - buffered_cls_containers) / peak_cls_containers * 100.0, 1) if peak_cls_containers > 0 else 0.0,
         },
         "financial_ledger": {
+            "pricing_tier": cfg.tier,
             "actual_billed_api_cost_usd": 0.0,
             "actual_billed_api_cost_inr": 0.0,
-            "theoretical_live_vlm_cost_usd": round(cost_vlm_usd, 2),
+            "theoretical_live_vlm_cost_usd": round(cost_vlm_usd, 4),
             "theoretical_live_vlm_cost_inr": round(cost_vlm_usd * usd_to_inr, 2),
-            "gate_savings_usd": round(savings_usd, 2),
+            "cost_standard_paygo_usd": round(cost_std_usd, 4),
+            "cost_priority_paygo_usd": round(cost_prio_usd, 4),
+            "standard_vs_priority_savings_usd": round(cost_prio_usd - cost_std_usd, 4),
+            "gate_savings_usd": round(savings_usd, 4),
             "gate_savings_inr": round(savings_usd * usd_to_inr, 2),
+            "cost_per_crop_usd": round(cost_vlm_usd / max(1, total_crops_processed), 7),
+            "cost_per_crop_inr": round((cost_vlm_usd / max(1, total_crops_processed)) * usd_to_inr, 4),
         },
         "ticks": [asdict(t) for t in ticks],
     }
@@ -438,11 +479,14 @@ def aggregate_distributed_fleet(bucket_name: str, prefix: str, expected_tasks: i
 
         all_lat_p50 = [t["latencies"]["p50_ms"] for t in task_summaries]
         all_lat_p95 = [t["latencies"]["p95_ms"] for t in task_summaries]
-        median_p50 = float(np.median(all_lat_p50)) if all_lat_p50 else 420.0
-        median_p95 = float(np.median(all_lat_p95)) if all_lat_p95 else 1150.0
+        median_p50 = float(np.median(all_lat_p50)) if all_lat_p50 else 818.0
+        median_p95 = float(np.median(all_lat_p95)) if all_lat_p95 else 4075.0
+        fleet_bypass_pct = (total_bypassed / max(1, total_crops) * 100.0)
 
         ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         report_content = f"""# 🌐 Google Cloud Run Distributed Multi-Container Load Test Report
+**Architecture**: `clef_contrastive_metadata` (Option 2 ★ Production Winner - EXP-28)
+**Empirical Baseline**: `1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k`
 **Fleet Scale**: {len(task_summaries)} Concurrent Physical Cloud Run Containers (4 vCPU / 16 GiB each)
 **Aggregated Target Throughput**: 2,500 Store Shelves / Min (125,000 Products / Min)
 **Duration**: 3.0 Minutes Sustained Peak
@@ -466,7 +510,7 @@ def aggregate_distributed_fleet(bucket_name: str, prefix: str, expected_tasks: i
 | **Product Crops Classifications** | **{total_crops:,} crops** (`hul_golden`) | {total_crops/len(task_summaries):,.0f} crops | **100.0%** |
 | **Aggregated Shelf Ingress** | **{fleet_shelf_qps:.2f} shelves/sec** | {fleet_shelf_qps/len(task_summaries):.2f} sh/s | **100.0%** |
 | **Aggregated Crop Throughput** | **{fleet_crop_qps:,.1f} crops/sec** | {fleet_crop_qps/len(task_summaries):,.1f} crops/s | **100.0%** |
-| **Calibrated Gate Bypasses** | **{total_bypassed:,} crops** | {total_bypassed/len(task_summaries):,.0f} crops | 11.7% |
+| **Calibrated Gate Bypasses** | **{total_bypassed:,} crops** | {total_bypassed/len(task_summaries):,.0f} crops | **{fleet_bypass_pct:.1f}%** |
 
 ---
 
@@ -528,13 +572,18 @@ def _format_report_markdown(cfg: LoadTestConfig, summary: dict[str, Any]) -> str
 | **GCS HTTP 503 / 429 Errors** | **{gcs.get('errors', 0)} errors** | Both Buckets | **0 Errors** |
 """
 
+    tier_label = cfg.tier.capitalize()
     return f"""# 🌐 Google Cloud Run Production Peak Load Test Report
+**Architecture**: `{cfg.approach}` (Option 2 ★ Production Winner - EXP-28)
+**Empirical Baseline**: `{cfg.baseline_run_id}`
+**Empirical Accuracy**: **82.28%** on 5,000 blind test crops (`test_5k`) | **90.00%** 3-Attribute (Brand+Category+Pack) | **97.44%** Recall@5
 **Scale Specification**: {cfg.shelves_per_min:,.0f} Store Shelves / Min ({cfg.shelves_per_min * cfg.products_per_shelf:,.0f} Products / Min)
 **Simulated Window**: {cfg.duration_minutes:.1f} Minutes Sustained Peak
 **Shelf Dataset (Boxes)**: `rpc_json` (`gs://{cfg.gcs_bucket}/RPC/rpc.json`)
 **Crop Dataset (SKU/Class)**: `hul_golden` (`gs://marketshare-datasets/derived_manifests/hul_golden/test_5k.jsonl`)
-**Pipeline Approach**: `{cfg.approach}` (Option A: Stage 2 Variant Classification)
-**Mock Mode**: 100% Simulated Gemini Calls ($0.00 Token Charges, 0 GCP Quota Used)
+**Pipeline Approach**: `{cfg.approach}`
+**Pricing Tier**: {tier_label} PayGo (Standard PayGo recommended: $0.30/M text/img input, $2.50/M output)
+**Mock Mode**: 100% Calibrated Simulated Gemini Calls ($0.00 Token Charges, 0 GCP Quota Used)
 **Actual Google Cloud API Cost**: **$0.00 USD (₹0.00 INR)** | **Actual Quota Consumed**: **0 RPM**
 
 ---
@@ -546,7 +595,7 @@ def _format_report_markdown(cfg: LoadTestConfig, summary: dict[str, Any]) -> str
 | **Product Crop Classifications** | {int(cfg.shelves_per_min * cfg.products_per_shelf * cfg.duration_minutes):,} crops | **{summary['crops_processed']:,} crops** (`hul_golden`) | **100.0%** |
 | **Sustained Shelf Throughput** | {cfg.shelves_per_min/60.0:.2f} sh/s | **{summary['overall_shelf_throughput_qps']:.2f} sh/s** | **100.0%** |
 | **Sustained Crop Throughput** | {cfg.shelves_per_min*cfg.products_per_shelf/60.0:.1f} crops/s | **{summary['overall_crop_throughput_qps']:.1f} crops/s** | **100.0%** |
-| **Calibrated Gate Bypass Rate** | {cfg.gate_bypass_rate*100:.1f}% | **{summary['crops_bypassed']:,} crops** ({summary['gate_bypass_rate_pct']}%) | Bypassed Stage B |
+| **Stage 2A Fast Gate Bypass** | {cfg.gate_bypass_rate*100:.1f}% | **{summary['crops_bypassed']:,} crops** ({summary['gate_bypass_rate_pct']}%) | **Zero-VLM Fast Path (80ms)** |
 
 ---
 
@@ -568,9 +617,13 @@ def _format_report_markdown(cfg: LoadTestConfig, summary: dict[str, Any]) -> str
 ## 4. Virtual Production Ledger: What This Traffic Would Cost
 | Billing Component | Unit Volume | Theoretical Spend (USD) | Theoretical Spend (INR) |
 | :--- | :---: | :---: | :---: |
-| **Gemini 3.5 Flash-Lite (Priority)** | {summary['crops_processed'] - summary['crops_bypassed']:,} calls | ${fl['theoretical_live_vlm_cost_usd']:,.2f} | ₹{fl['theoretical_live_vlm_cost_inr']:,.2f} |
+| **Gemini 3.5 Flash-Lite ({tier_label} PayGo)** | {summary['crops_processed'] - summary['crops_bypassed']:,} escalated calls | ${fl['theoretical_live_vlm_cost_usd']:,.4f} | ₹{fl['theoretical_live_vlm_cost_inr']:,.2f} |
+| **Standard PayGo Equivalent** | {summary['crops_processed'] - summary['crops_bypassed']:,} escalated calls | ${fl['cost_standard_paygo_usd']:,.4f} | ₹{fl['cost_standard_paygo_usd']*95.98875:,.2f} |
+| **Priority PayGo Equivalent** | {summary['crops_processed'] - summary['crops_bypassed']:,} escalated calls | ${fl['cost_priority_paygo_usd']:,.4f} | ₹{fl['cost_priority_paygo_usd']*95.98875:,.2f} |
+| **Standard PayGo Savings vs Priority** | {summary['crops_processed'] - summary['crops_bypassed']:,} escalated calls | **${fl['standard_vs_priority_savings_usd']:,.4f}** | **₹{fl['standard_vs_priority_savings_usd']*95.98875:,.2f}** |
+| **Stage 2A Gate Bypass Savings** | **{summary['crops_bypassed']:,} calls bypassed** | **${fl['gate_savings_usd']:,.4f}** | **₹{fl['gate_savings_inr']:,.2f}** |
 | **Actual Billed API Cost** | **0 live calls** | **$0.00** | **₹0.00** |
-| **Calibrated Gate Savings** | **{summary['crops_bypassed']:,} calls bypassed** | **${fl['gate_savings_usd']:,.2f}** | **₹{fl['gate_savings_inr']:,.2f}** |
+| **Blended Cost per Product Crop** | 1 product crop | **${fl['cost_per_crop_usd']:.6f}** | **₹{fl['cost_per_crop_inr']:.4f}** |
 {gcs_section}
 """
 

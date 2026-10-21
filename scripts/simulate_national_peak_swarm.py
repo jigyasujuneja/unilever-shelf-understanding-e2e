@@ -97,7 +97,7 @@ def run_national_peak_swarm(
     duration_minutes: float = 10.0,
     traffic_factor: float = 2.50,
     crops_per_shelf_mean: float = 90.0,
-    gate_bypass_rate: float = 0.117,
+    gate_bypass_rate: float = 0.616,
     buffer_mode: str = "both",  # 'unbuffered', 'leaky_bucket', or 'both'
     report_interval_s: float = 60.0,
     output_dir: str = "results/load_tests",
@@ -119,7 +119,7 @@ def run_national_peak_swarm(
     print(f"10-Minute Expected Ingress: {int(peak_shelf_rate * duration_s):,} shelves | "
           f"{int(peak_crop_rate * duration_s):,} product crops")
     print(f"Mock Engine: Zero Live API Calls ($0.00 Cost, 0 GCP Quota Used)")
-    print(f"Calibrated Distributions: P50=420ms, P95=1250ms, Bypass={gate_bypass_rate*100:.1f}%")
+    print(f"Calibrated Option 2 Distributions: P50=818ms, P95=4075ms, Fast Gate=80ms, Bypass={gate_bypass_rate*100:.1f}%")
     print("=" * 80 + "\n")
 
     # Tracking accumulators
@@ -199,13 +199,13 @@ def run_national_peak_swarm(
         total_vlm_escalated += escalated
 
         # Sample realistic end-to-end latencies for crops
-        # Stage A: 120ms P50; Stage B: 420ms P50, 1250ms P95
+        # Stage 2A Fast Gate: 80ms P50; Stage 2B CLEF Contact Sheet: 818ms P50, 4075ms P95
         if crops_served > 0:
             sample_size = min(200, crops_served)
             lat_samples = np.where(
                 np.random.rand(sample_size) < gate_bypass_rate,
-                np.random.lognormal(mean=np.log(120), sigma=0.25, size=sample_size),
-                np.random.lognormal(mean=np.log(420), sigma=0.55, size=sample_size)
+                np.random.lognormal(mean=np.log(80), sigma=0.20, size=sample_size),
+                np.random.lognormal(mean=np.log(818), sigma=0.45, size=sample_size)
             )
             # Add queue wait time if leaky bucket
             if queue_crops > 0:
@@ -408,7 +408,7 @@ def main():
     parser.add_argument("--duration-minutes", type=float, default=10.0, help="Simulation duration in minutes.")
     parser.add_argument("--traffic-factor", type=float, default=2.50, help="Surge factor (2.50 = Evening Peak).")
     parser.add_argument("--crops-per-shelf", type=float, default=90.0, help="Mean products detected per shelf.")
-    parser.add_argument("--gate-bypass", type=float, default=0.117, help="Calibrated gate bypass rate (0.117 or 0.50).")
+    parser.add_argument("--gate-bypass", type=float, default=0.616, help="Calibrated gate bypass rate (Option 2 baseline: 0.616).")
     parser.add_argument("--buffer-mode", type=str, default="both", choices=["unbuffered", "leaky_bucket", "both"])
     parser.add_argument("--report-interval", type=float, default=60.0, help="Report logging interval in seconds.")
     parser.add_argument("--output-dir", type=str, default="results/load_tests")

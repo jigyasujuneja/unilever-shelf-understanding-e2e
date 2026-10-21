@@ -221,7 +221,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--duration-minutes", type=float, default=5.0, help="duration in minutes (default: 5.0)")
     s.add_argument("--shelves-per-min", type=float, default=2500.0, help="ingress shelves per minute (default: 2500.0)")
     s.add_argument("--products-per-shelf", type=float, default=50.0, help="products per shelf (default: 50.0)")
-    s.add_argument("--approach", default="sft_clm_clef_cascade", help="pipeline approach (Option A default: sft_clm_clef_cascade)")
+    s.add_argument("--approach", default="clef_contrastive_metadata", help="pipeline approach (Option 2 winner default: clef_contrastive_metadata)")
+    s.add_argument("--tier", default="standard", choices=["standard", "priority", "flex"], help="pricing tier (default: standard - recommended pay-as-you-go)")
     s.add_argument("--dry-run-vlm", action="store_true", default=True, help="simulate Gemini calls with calibrated latency/tokens")
     s.add_argument("--cloud-run", action="store_true", help="execute 100%% on GCP Cloud Run Job instead of locally")
     s.add_argument("--tasks", type=int, default=1, help="number of parallel Cloud Run tasks (default: 1)")
@@ -571,6 +572,7 @@ def main(argv: list[str] | None = None) -> int:
                 "--shelves-per-min", str(a.shelves_per_min),
                 "--products-per-shelf", str(a.products_per_shelf),
                 "--approach", a.approach,
+                "--tier", a.tier,
             ]
             if a.dry_run_vlm:
                 cli_args.append("--dry-run-vlm")
@@ -593,6 +595,7 @@ def main(argv: list[str] | None = None) -> int:
                 shelves_per_min=a.shelves_per_min,
                 products_per_shelf=a.products_per_shelf,
                 approach=a.approach,
+                tier=a.tier,
                 dry_run_vlm=a.dry_run_vlm,
                 stress_gcs_io=a.stress_gcs_io,
                 container_cpu=a.cpu,
