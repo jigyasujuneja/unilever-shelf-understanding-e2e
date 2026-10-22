@@ -42,6 +42,7 @@ SOURCE_FILES = [
     "data/mt_json_golden",
     "data/gtmerch_golden",
     "data/hul_golden",
+    "results/locust_load_test_report.json",
 ]
 
 
@@ -225,9 +226,13 @@ def run_on_cloud(
         "--seed", str(seed), "--workers", str(workers), "--owner", owner,
         "--root", gcp["data"], "--results", gcp["results"],
     ]
-    cfg.setdefault("cloud_run", {}).setdefault("parallelism", len(models))
+    cr_cfg = cfg.setdefault("cloud_run", {})
+    cr_cfg.setdefault("parallelism", len(models))
+    if needs_cv:
+        cr_cfg["cpu"] = max(int(cr_cfg.get("cpu", 2)), 4)
+        cr_cfg["memory_gib"] = max(int(cr_cfg.get("memory_gib", 4)), 16)
     if job_name:
-        cfg["cloud_run"]["job"] = job_name
+        cr_cfg["job"] = job_name
     job_url = deploy_job(s, project, region, image, args, tasks, cfg)
     log(f"Executing {tasks} tasks on Cloud Run job {job_url.rsplit('/', 1)[-1]} ({region}) ...")
     op = _ok(s.post(f"{job_url}:run", json={}))
