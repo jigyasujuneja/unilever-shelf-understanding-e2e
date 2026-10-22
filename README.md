@@ -1,26 +1,28 @@
-# Unilever Retail Shelf Understanding and Merchandising Benchmark (`shelf-bench` v2.2)
+# Unilever Retail Shelf Understanding and Merchandising Benchmark (`shelf-bench` v2.3 / SPEC v0.2)
 
-End-to-end computer vision and multimodal benchmark for **Unilever Market Share (Share of Shelf)** and **In-Store Merchandising Compliance** across Indian General Trade (Kirana) and Modern Trade supermarkets. All datasets, embedding caches, model registries, and experiment results run **100% on Google Cloud Platform (Google Cloud Storage, Vertex AI, BigQuery, Cloud SQL, and Cloud Run)** without storing datasets or results on local machines.
+End-to-end computer vision and multimodal benchmark for **Unilever Market Share (Share of Shelf)** and **In-Store Merchandising & Pay-for-Performance (`P2P`) Compliance** across Indian General Trade (Kirana) and Modern Trade supermarkets. All datasets, embedding caches, model registries, and experiment results run **100% on Google Cloud Platform (Google Cloud Storage, Vertex AI, BigQuery, Cloud SQL, and Cloud Run)** without storing datasets or results on local machines.
 
-## 1. Executive Summary: What We Built (4 Bullets)
+## 1. Executive Summary: What We Built
 
-1. **8 Leakage-Free Unilever Golden Datasets in GCS (`2,745` Products, `12/12` Quality Checks Passed):** Consolidated raw store shelf photos, 2-class display bay and product annotations (`gtmerch`), and clean client full-shelf images (`gs://ms-json-dataset`, after filtering out images with pre-drawn red or green debug boxes) into 8 standardized GCS manifests (`gs://marketshare-datasets/derived_manifests/<dataset>/rpc.json`) with **0 `Unknown` categories or packaging types**, **0 `Others` placeholder labels**, and **100% catalog-to-box parity**.
-2. **Two-Stage Shelf Pipeline (`₹0.095 / shelf` when Grouping Identical Side-by-Side Packs, `96.2%` Golden Accuracy):**
-   - **Stage 1 (`distilled_yolo_onnx`):** CPU ONNX shelf detector (`<100 ms`, `₹0` LLM token cost) that separates branded display bays (`Class 0`) from individual product facings (`Class 1`).
-   - **Stage 2A (`clm_standalone` / Embedding Brand Filter):** `gemini-embedding-2` (`₹0.0111/crop`) with white-balance store lighting correction and an embedding confidence filter that resolves **68% of shelf facings without calling an LLM**.
-   - **Stage 2B (`hierarchical_clm_jev`):** 4-crop contact-sheet verification (`gemini-3.5-flash-lite` at `₹0.0674/call`) restricted to the matched brand's ~15 sister variants using neighboring shelf products as context.
-3. **19-Experiment Benchmark Catalog, Sequential Phase-2 Roadmap (`EXP-20..25`), and 6 Vertex AI Registered Models:** Evaluated all 19 POC experiments (`P0` Core, `P1` Scale, `P2` Fast-Follow, and `Moonshot`) across validation and test splits with audited GCP Cloud Billing SKU rates (`330D-7FB0-87C5`, `8271-FF1A-6295`, and `D47E-C6CE-1E1A`), documented in [`docs/experiments_decision_log.md`](docs/experiments_decision_log.md), and synced all runs and models to Vertex AI Experiments and Model Registry (`us-central1`).
-4. **Cloud Run Dashboards (`/engineering` and `/exec`) Backed 100% by GCS:** Deployed an interactive Engineering Leaderboard (`https://perfect-store-control-plane-jbn2qgbina-uc.a.run.app/engineering`, showing Task IDs, plain-English model descriptions, run durations, unit-labeled `₹/crop` vs `₹/shelf` costs, and 12-check data quality status) alongside an Executive Summary & Partner Readout Portal (`https://perfect-store-control-plane-jbn2qgbina-uc.a.run.app/exec`, with a live rollout ROI simulator, 5-level accuracy breakdown, bounding-box shelf inspector, and next week's Decision Maker vs. Partner readout playbook in [`docs/next_week_readout_playbook.md`](docs/next_week_readout_playbook.md)).
+1. **11 Leakage-Free Unilever Golden Datasets in GCS (`2,659-2,745` Products, `15/15` Hard Quality Gates Passed):** Consolidated raw store shelf photos, 2-class display bay and product annotations (`gtmerch_golden`), outlet-de-leaked Modern Trade supermarkets (`mt_json_golden`, `19,984` clean shelves), 3-class shelf talkers and price tags (`hul_talkers_golden`), and clean client full-shelf images (`ms_json_golden`, `gt_hul_sessions`) into standardized GCS manifests (`gs://marketshare-datasets/derived_manifests/<dataset>/rpc.json`) with **0 `Unknown` categories or packaging types**, **0 `Others` placeholder labels**, **0 outlet-code or MD5 split overlaps**, and **100% catalog-to-box parity**.
+2. **Two Unified Non-Overfitting Production Spines (`EXP-50..59`, `83.2%` Blind Test Accuracy, `94.4%` Unseen Launches):**
+   - **Stage 0 (`Dual-Buffer Photometry`, `EXP-40`):** Minkowski $p=6$ Shades-of-Gray white balance splitting linear RGB (`color_image` for Stage 2 CIELAB color fidelity, avoiding the `-6.0 pp` CLAHE drop) from `L* CLAHE` (`detector_image` for Stage 1 edges and Stage 2B micro-text OCR).
+   - **Stage 1 & 1.5 (`Scene-Adaptive CPU ONNX + Physical Plank Law + Bay Gate`, `EXP-24`, `EXP-53`, `EXP-55`, `EXP-57`):** Dual-class `960px` Soft-NMS CPU ONNX detector (`<100 ms`, `₹0` LLM token cost) separating `Class 0` display bays from `Class 1` product facings, enforcing physical horizontal shelf-plank support ($y_{\max}$ alignment), pruning **61% of out-of-bay background shelf crops** before embedding on merchandising audits (`shelf_merchandising_bay_e2e`), and applying `+12%` top cap/rim padding + projective scale priors (`EXP-50`).
+   - **Stage 2A (`Unstarved Multi-Prototype CLM InfoNCE + Residual Adapter`, `EXP-32`, `EXP-54`):** `gemini-embedding-2` + residual adapter + Lidstone-smoothed 16-class container prior (`EXP-52`) that resolves **60%-68% of shelf facings without calling a VLM**.
+   - **Stage 2B (`Resolution-Adaptive CLEF Contact Sheet + Layer-5 Verifier`, `EXP-51`, `EXP-52`, `EXP-56`, `EXP-58`):** Composite contact sheets with Bottom-30% Weight Strip, Self-Supervised Reference-Difference Saliency Strip $V(x,y)=\text{Var}_k(R_k)$, Top-22% Crown/Nozzle Strip, Pre-Choice Evidence Decoding (`PROP-08`), Bayesian PoE (`PROP-09`), and deterministic `pack_size` sister-SKU post-verification (`PR-14`).
+3. **57-Experiment Benchmark Catalog (`P0-EXP-01` to `P0-EXP-59`), Level-4 Total Contracts (`PR-16`), and Statistical Calibration (`PR-15`):** Evaluated 57 experiments across Market Share and Merchandising with Paired McNemar discordant significance testing, Rogan-Gladen prevalence calibration, content-addressed SHA-256 VLM response caching (`PR-17`), and a **Level-4 Total Contract Payout Quarantine Gate (`PT180S` SLA)** so transient cloud errors emit `RETRY_PENDING` to `PR19_pubsub_dlq` and never trigger false `Earning = '0'` retailer payout denials.
+4. **Cloud Run Dashboards (`/engineering` and `/exec`) Backed 100% by GCS:** Deployed an interactive Engineering Leaderboard (`https://perfect-store-control-plane-jbn2qgbina-uc.a.run.app/engineering`) alongside an Executive Summary & P2P ROI Portal (`https://perfect-store-control-plane-jbn2qgbina-uc.a.run.app/exec`).
 
 ## 2. System Architecture and 100% GCS Data Flow
 
-### A. Two-Stage Shelf Inference Pipeline
+### A. Unified 4-Stage Shelf Inference Spine (`SPEC v0.2`)
 ```mermaid
 flowchart LR
-    IMG["Store Shelf Photo\n(Kirana / Modern Trade)"] --> S1["Stage 1: CPU ONNX Detector\n• Class 0: Branded Display Bays\n• Class 1: Product Facings\n(₹0 Token Cost · <100 ms)"]
-    S1 --> S2A{"Stage 2A: Embedding Filter\ngemini-embedding-2 + Confidence Gate\n(₹0.0111 / crop)"}
-    S2A -->|"High Confidence (~68%)"| OUT["5-Level Product & Share of Shelf\nL1 Unilever vs Rival -> L2 Cat/Pack\n-> L3 Brand -> L4 Variant -> L5 SKU"]
-    S2A -->|"Ambiguous Sister Variant (~32%)"| S2B["Stage 2B: 4-Crop Contact Sheet\ngemini-3.5-flash-lite Verifier\n(₹0.0674 / sheet + Neighbor Context)"]
+    IMG["Store Shelf Photo\n(Kirana / Modern Trade / Promo Bay)"] --> S0["Stage 0: Dual-Buffer Photometry\n• Buffer A: Linear RGB (Color)\n• Buffer B: L* CLAHE (Edges/OCR)"]
+    S0 --> S1["Stage 1 & 1.5: CPU ONNX + Plank Law\n• Class 0 Bays vs Class 1 Packs\n• -61% Out-of-Bay Crop Pruning\n• 3.5x Neighbor Medoid Grouping"]
+    S1 --> S2A{"Stage 2A: CLM Brand-Gate\ngemini-embedding-2 + Residual Adapter\n+ Lidstone 3D Container Prior"}
+    S2A -->|"High Margin (~68%, ₹0 VLM)"| OUT["5-Level SKU, SOS & P2P Payout\nL1 Owner -> L2 Cat/Pack -> L3 Brand\n-> L4 Variant -> L5 SKU + PT180S Gate"]
+    S2A -->|"Ambiguous Sister (~32%)"| S2B["Stage 2B: CLEF Contact Sheet\nWeight + Saliency Var_k(R_k) + Crown\n+ Layer-5 Pack-Size Verifier (PR-14)"]
     S2B --> OUT
 ```
 
@@ -28,8 +30,8 @@ flowchart LR
 ```mermaid
 flowchart TD
     subgraph GCS["Google Cloud Storage (Single Source of Truth)"]
-        M["gs://marketshare-datasets/derived_manifests/\n• 8 Golden Datasets (rpc.json)\n• brand_sku_live_registry.json\n• tuning/ SFT JSONL"]
-        R["gs://ul-fs-s-sandbx-16-prj-shelf-images/results/\n• <run_id>/summary.json & images.jsonl\n• experiments_registry.json\n• qc_audit_report.json"]
+        M["gs://marketshare-datasets/derived_manifests/\n• 11 Golden Datasets (rpc.json)\n• brand_sku_live_registry.json\n• 63 AWP_Code Fixture Templates"]
+        R["gs://ul-fs-s-sandbx-16-prj-shelf-images/results/\n• <run_id>/summary.json & images.jsonl\n• experiments_registry.json\n• qc_audit_report.json & vlm_cache/"]
     end
 
     subgraph Compute["Developer CLI or Cloud Run Job"]
@@ -37,8 +39,8 @@ flowchart TD
     end
 
     subgraph Dash["Cloud Run Control Plane (Auto-Syncs Every 30s)"]
-        ENG["/engineering Portal\n• Task Leaderboards (TASK-E2E..TASK-PRM)\n• Scannable 19-Experiment Table\n• 12-Gate QC & Vertex Model Registry"]
-        EXEC["/exec Executive Summary\n• Audited GCP SKU Cost & ROI Simulator\n• Next Week Readout (Execs vs Partners)\n• 5-Level Taxonomy & Shelf Proof Modal"]
+        ENG["/engineering Portal\n• Task Leaderboards (TASK-E2E..TASK-PRM)\n• 57-Experiment Matrix (EXP-01..59)\n• 15/15 QC Gates & Paired McNemar"]
+        EXEC["/exec Executive Summary\n• Audited GCP SKU Cost & P2P Simulator\n• 4-Scenario W1 Payout Lift (34.8% -> 73.7%)\n• 5-Level Taxonomy & Shelf Proof Modal"]
     end
 
     M -->|"Streamed in-memory"| CLI
@@ -47,132 +49,67 @@ flowchart TD
     R -->|"Polled every 30s (PULL_TTL_S)"| EXEC
 ```
 
-## 3. Team Guide: Which Dataset to Use and How to Load It
+## 3. Team Guide: Canonical Golden Datasets (`11` Datasets in GCS)
 
-Use the **8 Unilever Golden Datasets** listed below. All 8 stream directly from `gs://marketshare-datasets/derived_manifests/<dataset>/rpc.json` into memory with `SHA-256` split hashes (`stats.split_hashes`), **0 `Unknown` categories or packaging types**, **0 `Others` placeholder labels**, and **100% catalog-to-label parity**. Legacy public sets (`sku110k`, `rpc`, `products`, and `shelves`) are hidden behind an opt-in toggle in the UI and should not be used for Unilever accuracy or cost reporting.
+All canonical datasets stream directly from `gs://marketshare-datasets/derived_manifests/<dataset>/rpc.json` into memory with `SHA-256` split hashes (`stats.split_hashes`), **0 `Unknown` categories or packaging types**, **0 `Others` placeholder labels**, **0 outlet-code split leaks**, and **100% catalog-to-label parity**.
 
 | What You Are Building or Testing | Dataset Key (`-d`) | Task ID & Name | Standard Splits (`train / val / test`) | Classes | Canonical GCS Manifest Location |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Full-Shelf Share of Shelf (SOS) on Kirana / Modern Trade** | **`gtmerch_golden`** | `TASK-E2E` (`end_to_end`) | `186` / `72` / `100` | `2,745` | `gs://marketshare-datasets/derived_manifests/gtmerch_golden/rpc.json` |
-| **Full-Shelf SOS on Clean Client LabelMe Shelves** | **`ms_json_golden`** | `TASK-E2E` (`end_to_end`) | `38` / `25` / `27` | `2,745` | `gs://marketshare-datasets/derived_manifests/ms_json_golden/rpc.json` |
-| **Multi-Photo Store Session Stitching & SOS** | **`hul_sessions`** | `TASK-E2E` / `TASK-PLN` | `30` / `20` / `25` | `2,745` | `gs://marketshare-datasets/derived_manifests/hul_sessions/rpc.json` |
-| **Crop-Level 2,745-Product Retrieval or Classification** | **`hul_golden`** | `TASK-RET` / `TASK-CLS` | `16,000` / `1,900` / `1,907` | `2,745` (`1,108` HUL, `1,637` Competitor) | `gs://marketshare-datasets/derived_manifests/hul_golden/rpc.json` |
+| **Full-Shelf Merchandising Bay & SOS (`GTMerch`)** | **`gtmerch_golden`** | `TASK-E2E` / `TASK-PLN` / `TASK-DET` | `186` / `72` / `100` | `2,659-2,745` | `gs://marketshare-datasets/derived_manifests/gtmerch_golden/rpc.json` |
+| **Full-Shelf SOS on Clean Client LabelMe Shelves** | **`ms_json_golden`** | `TASK-E2E` / `TASK-DET` | `38` / `25` / `27` (`100` full) | `2,659-2,745` | `gs://marketshare-datasets/derived_manifests/ms_json_golden/rpc.json` |
+| **Outlet-De-Leaked Modern Trade Supermarkets (`19.9k`)** | **`mt_json_golden`** | `TASK-E2E` / `TASK-DET` / `TASK-RET` | Outlet-disjoint splits | `2,659` | `gs://marketshare-datasets/derived_manifests/mt_json_golden/rpc.json` |
+| **Multi-Photo Store Session Stitching & SOS** | **`hul_sessions`** / **`gt_hul_sessions`** | `TASK-E2E` / `TASK-PLN` | `30` / `20` / `25` (`97` GT sessions) | `2,659-2,745` | `gs://marketshare-datasets/derived_manifests/hul_sessions/rpc.json` |
+| **3-Class Shelf Talkers, Price Tags & Promo Callouts** | **`hul_talkers_golden`** | `TASK-DET` / `TASK-PRM` | Outlet-disjoint splits | `3` + OCR | `gs://marketshare-datasets/derived_manifests/hul_talkers_golden/rpc.json` |
+| **Crop-Level Product Retrieval or Classification** | **`hul_golden`** | `TASK-RET` / `TASK-CLS` | `16,000` / `1,900` / `1,907` | `2,659-2,745` | `gs://marketshare-datasets/derived_manifests/hul_golden/rpc.json` |
 | **Fine-Grained Sister-Variant Disambiguation** | **`hul_variants`** | `TASK-RET` / `TASK-CLS` | `15,208` / `1,900` / `1,907` | `1,962` | `gs://marketshare-datasets/derived_manifests/hul_variants/rpc.json` |
-| **Unilever vs Competitor Brand & M&A Ownership** | **`hul_brands`** | `TASK-CLS` (`classification`) | `8,000` / `1,000` / `1,000` | `953` | `gs://marketshare-datasets/derived_manifests/hul_brands/rpc.json` |
-| **Packaging Form Factor × Category** | **`hul_packs`** | `TASK-CLS` (`classification`) | `6,000` / `1,000` / `1,000` | `18` | `gs://marketshare-datasets/derived_manifests/hul_packs/rpc.json` |
+| **Unilever vs Competitor Brand & M&A Ownership** | **`hul_brands`** | `TASK-CLS` (`classification`) | `8,000` / `1,000` / `1,000` | `934-953` | `gs://marketshare-datasets/derived_manifests/hul_brands/rpc.json` |
+| **Packaging Form Factor x Category** | **`hul_packs`** | `TASK-CLS` (`classification`) | `6,000` / `1,000` / `1,000` | `16-18` | `gs://marketshare-datasets/derived_manifests/hul_packs/rpc.json` |
 | **Promo Banner, Multipack & Price-Off Detection** | **`hul_promos`** | `TASK-PRM` (`promo_detection`) | `4,000` / `1,000` / `982` | `240` | `gs://marketshare-datasets/derived_manifests/hul_promos/rpc.json` |
 
-### Loading Any Golden Dataset in Python (Streams Directly from GCS)
-```python
-from utils import dataset
+## 4. Production Approaches by Task (`src/approaches/`)
 
-# Streams rpc.json directly from gs://marketshare-datasets/derived_manifests/gtmerch_golden/rpc.json
-samples = dataset.sample_images(
-    split="test",
-    limit=15,
-    seed=0,
-    root=dataset.data_root("gtmerch_golden"),
-    name="gtmerch_golden",
-)
-
-# Inspect 5-level product ground truth on the first sample
-print(samples[0].image_id, len(samples[0].boxes), samples[0].labels[0])
-```
-
-## 4. Team Guide: How to Set Up Experiments, Write to GCS, and Update the Dashboard
-
-### Step 1: Choose or Build an Approach (`src/approaches/`)
-| Task ID & Name | Embedding-Only Approach (`₹0` LLM Spend) | Highest-Accuracy Hybrid Approach | Plain-English Summary |
+| Task ID & Name | Embedding-Only Approach (`₹0` VLM Spend) | Primary Production Hybrid Spine | Plain-English Summary |
 | :--- | :--- | :--- | :--- |
-| **`TASK-E2E` (`end_to_end`)** | `shelf_clm_standalone` (`gemini-embedding-2`) | `shelf_hierarchical_clm_jev` (`gemini-3.5-flash-lite`) | CPU ONNX shelf detector (`Class 0` bays vs `Class 1` products) + Embedding Brand Filter (`68%` early exit) + 4-crop Gemini contact sheet. |
-| **`TASK-RET` (`retrieval`)** | `clm_standalone` (`gemini-embedding-2`) | `hierarchical_clm_jev` / `l8_hul_ultimate` (`gemini-3.5-flash-lite`) | Matches each crop against the `2,745`-product gallery using embeddings and confidence filtering before optional contact-sheet verification. |
-| **`TASK-CLS` (`classification`)** | `clm_standalone_classify` (`gemini-embedding-2`) | `djev_classify` (`gemini-3.5-flash-lite`) | Predicts all 5 catalog levels (`L1` Unilever/Rival -> `L2` Cat/Pack -> `L3` Brand -> `L4` Variant -> `L5` Product) with token probability calibration. |
-| **`TASK-DET` (`detection`)** | `distilled_yolo_onnx` (`yolo11n-distilled-onnx`) | `distilled_yolo_onnx` (`yolo11n-distilled-onnx`) | Dual-head CPU ONNX detector (`<100 ms`, `₹0` token cost) trained on `gtmerch_golden` and `ms_json_golden`. |
-| **`TASK-PLN` (`planogram_compliance`)** | None (requires bay & gap reasoning) | `bay_planogram_verifier` (`gemini-3.5-flash-lite`) | Checks `Class 0` branded bay purity, brand-block cohesion, horizontal out-of-stock shelf gaps, and Share of Shelf (`SOS`). |
-| **`TASK-PRM` (`promo_detection`)** | `clm_promo_matcher` (`gemini-embedding-2`) | `jev_promo_verifier` (`gemini-3.5-flash-lite`) | Uses color-band cues and structured Gemini verification to read price-off bands, multipacks, and freebie callouts. |
+| **`TASK-E2E` (`market_share`)** | `shelf_clm_standalone` (`gemini-embedding-2`) | `shelf_marketshare_generalizable_e2e` (`EXP-54..59`) | Stage 0 Dual-Buffer CLAHE + `960px` Soft-NMS CPU ONNX + Unstarved Brand-Gate + Saliency/Crown Contact Sheet + Layer-5 Pack-Size Verifier + `PT180S` P2P Gate. |
+| **`TASK-E2E` (`merchandising`)** | `shelf_clm_standalone` | `shelf_merchandising_bay_e2e` (`EXP-55 + EXP-57`) | Scopes full-shelf detection to `Class 0` display bays (`WIN/CTU/MB2/MB3`), pruning **61% of background shelf crops** before Stage 2 embedding + Stage 6 Planogram/OOS. |
+| **`TASK-RET` (`retrieval`)** | `clm_standalone` / `residual_infonce_clm` | `clef_saliency_diff_zoom` / `clef_pack_crown_fusion` | Multi-prototype `CLM` InfoNCE + Lidstone 3D container prior + Top-6 contact sheet with Saliency-Diff ($V(x,y)=\text{Var}_k(R_k)$), Crown strip, and `PR-14` pack-size verifier. |
+| **`TASK-CLS` (`classification`)** | `clm_standalone_classify` | `hybrid_pack_specialist_clef` / `djev_classify` | Predicts all 5 catalog levels (`L1..L5`) with pre-choice evidence decoding (`PROP-08`) and Bayesian PoE logprob calibration (`PROP-09`). |
+| **`TASK-DET` (`detection`)** | `distilled_yolo_960_stage0_clahe` | `promo_asset_bay_scoped_plank_detect` (`EXP-55 + EXP-57`) | Dual-class CPU ONNX (`<100 ms`, `₹0` token cost) with physical shelf-plank support law ($y_{\max}$ alignment) and density-triggered $2\times 2$ quadrant tiling (`EXP-53`). |
+| **`TASK-PLN` (`planogram_compliance`)** | Deterministic geometry | `bay_planogram_verifier` (`EXP-04`, `EXP-46`) | Audits `63` `AWP_Code` fixture templates, Brand-Block Purity ($W_5$), Assortment ($W_4$), and horizontal Out-of-Stock (`OOS`) shelf gaps. |
+| **`TASK-PRM` (`promo_detection`)** | `clm_promo_matcher` | `talker_price_tag_detect` + `jev_promo_verifier` (`EXP-47`, `EXP-48`) | Localizes 3-class shelf talkers, price rail tags, and promo bands (`hul_talkers_golden`, `hul_promos`) and extracts discount/price callouts. |
 
-To create a new approach:
-1. Add `src/approaches/<use_case>/<task>/<your_approach>.py` subclassing `Approach` (from `src/approaches/base.py`) and register it with `@register` in `src/approaches/__init__.py`.
-2. Add its plain-English title and 1-line summary to `APPROACH_INTUITIONS` (and optionally register an Experiment ID in `EXPERIMENT_DEFINITIONS`) inside [`src/utils/experiment_matrix.py`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/utils/experiment_matrix.py).
+## 5. 15-Gate Automated Data and Production Quality Contract (`cli qc --verify-all`)
 
-### Step 2: Run the Experiment Directly into GCS (Zero Local Files Left Behind)
-Pass `--results gs://ul-fs-s-sandbx-16-prj-shelf-images/results` (or use `cloud-run`). `runner.py` writes `images.jsonl` and `summary.json` in a temporary directory, uploads them directly to GCS, logs the run to **Vertex AI Experiments**, and deletes the temporary directory:
-
-```bash
-# Option A: Run from terminal directly into GCS (zero local files kept)
-PYTHONPATH=src .venv/bin/python -m cli run \
-  -a shelf_hierarchical_clm_jev \
-  -m gemini-3.5-flash-lite \
-  -d gtmerch_golden \
-  --split test --limit 15 \
-  --results gs://ul-fs-s-sandbx-16-prj-shelf-images/results
-
-# Option B: Run in parallel as a Cloud Run Job (reads & writes 100% in GCS)
-PYTHONPATH=src .venv/bin/python -m cli cloud-run \
-  -a shelf_hierarchical_clm_jev \
-  -m gemini-3.5-flash-lite \
-  -t priority \
-  --split test --limit 50
-```
-
-If you run locally into `results/` during debugging, push everything to GCS and clean your local disk in one command:
-```bash
-PYTHONPATH=src .venv/bin/python -m cli qc --verify-all
-PYTHONPATH=src .venv/bin/python -m cli experiments --sync-gcp
-PYTHONPATH=src .venv/bin/python -m cli push --overwrite --prune --clean-local
-```
-
-### Step 3: How New Results Automatically Reflect in the Dashboards (`/engineering` and `/exec`)
-1. **Automatic 30-Second GCS Polling (`PULL_TTL_S = 30.0`):** The live Cloud Run service (`https://perfect-store-control-plane-jbn2qgbina-uc.a.run.app`) runs `shelf-bench serve --pull`, which polls `gs://ul-fs-s-sandbx-16-prj-shelf-images/results` every 30 seconds.
-2. **Where Your Run Appears Automatically:**
-   - **Engineering Leaderboard (`/engineering#/board/market_share` or `#/board/merchandising`):** Appears under its Task tab (`TASK-E2E`, `TASK-RET`, etc.) and Golden Dataset chip with its Task ID badge, plain-English model summary, UTC timestamp, run duration (`wall_time_s` + `setup_seconds`), and unit-labeled cost (`₹/crop` and `₹/shelf`).
-   - **Experiments Matrix (`/engineering#/experiments`):** Binds to its matching Experiment ID (`P0-EXP-01` through `P0-EXP-19`), updates the 5-level accuracy breakdown (`L1` through `L5`), and links the Vertex AI Experiment context.
-   - **Executive Summary (`/exec`):** Updates executive KPI cards, the Audited GCP Cloud Billing SKU cost simulator, 5-level accuracy bars, and the interactive Shelf Proof modal.
-3. **Redeploying After UI or Code Changes:**
-   ```bash
-   PYTHONPATH=src .venv/bin/python -m cli serve-cloud
-   ```
-
-## 5. 12-Check Automated Data and Pipeline Quality Gate (`cli qc --verify-all`)
-
-Before publishing manifests or promoting runs, verify all 12 quality checks (`src/utils/qc.py`):
+All runs and manifests are verified against the 15 hard gates in [`src/utils/qc.py`](src/utils/qc.py) and [`docs/SPEC_v0.2_Production_Contract.md`](docs/SPEC_v0.2_Production_Contract.md):
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m cli qc --verify-all
 ```
 
-1. **`G1 catalog_label_parity`**: Every box's `sample.labels[k]` matches `classes[str(sku_id)]` (`0` drift).
-2. **`G2 canonical_taxonomy_domain`**: `0` `"Unknown"` categories, `0` `"Unknown"` packaging types, `0` `"Others"` placeholders, `0` brand typos (`tetely`, `twinnings`, `ppvwash`).
-3. **`G3 zero_class_collision`**: Unique `(brand, base_variant)` pairs across all `2,745` classes; `0` brand-only classes in `hul_variants`.
-4. **`G4 multi_box_shelf_diversity`**: `100%` of multi-box shelves in `gtmerch_golden`, `ms_json_golden`, and `hul_sessions` have `>1` distinct SKU (`0` single-product fallback stamping).
-5. **`G5 pixel_overlay_deleakage`**: `100%` quarantine of burned-in OpenCV red rectangles and green variant text in `gs://ms-json-dataset`.
-6. **`G6 non_product_box_quarantine`**: Rejects ceiling fans, printed model faces on display borders, and tiny `<3px` artifacts.
-7. **`G7 bbox_geometry_and_dedup`**: Valid `[x1, y1, x2, y2]` bounds and nested-box deduplication.
-8. **`G8 split_and_session_deleakage`**: `0` image URI overlap across `train`, `val`, and `test`.
-9. **`G9 visual_embedding_concordance`**: Every catalog class has verified reference gallery images.
-10. **`G10 detector_deoracle_integrity`**: `0` ground-truth bay proposal shortcuts or hardcoded `220px` grid division in detectors.
-11. **`G11 stage2_per_box_completeness`**: Complete 5-level `field_accuracy` across all evaluated runs.
-12. **`G12 ci_confidence_and_rival_parity`**: Cryptographic `SHA-256` split hashes and Unilever vs Competitor parity.
+1. **`G1 catalog_label_parity`**: 100% of split labels match canonical catalog metadata.
+2. **`G2 zero_burned_in_overlays`**: 0 green/cyan/red OpenCV debug rectangles in evaluation images.
+3. **`G3 split_hash_disjointness`**: 0 URI overlap across `train` (`gallery`), `val`, and `test`.
+4. **`G4 stratified_50_50_balance`**: 50/50 HUL vs. Non-HUL balance on `hul_golden`.
+5. **`G5 zero_unknown_taxonomy`**: 0 `"Unknown"` categories or packaging types and 0 `"Others"` catch-all strings.
+6. **`G6 shortlist_oracle_deleakage`**: 0 ground-truth oracle injection into candidate shortlists.
+7. **`G7 gtmerch_brand_and_bay_integrity`**: Validated display bay (`asset_boxes`) and brand labels on `gtmerch_golden`.
+8. **`G8 results_taxonomy_parity`**: All `results/*/summary.json` and `images.jsonl` match canonical taxonomy.
+9. **`G9 five_attribute_crop_coverage`**: All 5 attributes evaluated on every crop run.
+10. **`G10 closed_set_non_abstention`**: Closed-set tasks never abstain (`choice=0` resolved via Tier-1/Tier-2 guardrails).
+11. **`G11 e2e_dual_lens_eval_parity`**: End-to-End runs report both Full-Catalog (`2,659` SKUs) and Annotated-Row Box Metrics.
+12. **`G12 detector_dedup_iou_audit`**: Stage 1 NMS suppresses duplicate overlapping boxes (`IoU > 0.55`).
+13. **`G13 outlet_and_md5_split_deleakage`**: Zero store `outlet_code` or image MD5 overlap across `train`/`val`/`test`.
+14. **`G14 dual_buffer_photometry_integrity`**: Stage 0 preserves linear RGB (`color_image`) for Stage 2 CIELAB while routing `L* CLAHE` (`detector_image`) to Stage 1 detection.
+15. **`G15 zero_synthetic_fallbacks_and_zero_official_errors`**: Zero synthetic/dummy fallbacks in [`src/utils/server.py`](src/utils/server.py) or [`src/utils/hul_builder.py`](src/utils/hul_builder.py), and strictly `errors == 0` required for official leaderboard ranking in [`src/runner.py`](src/runner.py).
 
-## 6. Modular Codebase Structure
+## 6. Repeatable Platform Assets & Reusable Agent Skills (`skills/`)
 
-```text
-src/
-├── approaches/
-│   ├── market_share/
-│   │   ├── detection/       # CPU ONNX YOLO detectors (onnx_yolo_detector.py) & Gemini dedup detectors
-│   │   ├── retrieval/       # Embedding search, Brand Filter + Contact Sheet, and Cold-Start discovery
-│   │   ├── classification/  # 5-level catalog classifiers (embedding-only & Gemini contact-sheet)
-│   │   └── end_to_end/      # Composed Stage 1 ONNX/Gemini + Stage 2 Shelf Attribution pipelines
-│   └── merchandising/       # Display Bay Planogram & Out-of-Stock Verifier, Promo Verifiers
-├── utils/
-│   ├── taxonomy/            # Modular catalog package (brands.py, categories.py, packaging.py, filenames.py)
-│   ├── manifests/           # Modular manifest builders (ms_json_loader.py, crop_verifier.py, golden_builder.py)
-│   ├── qc.py                # 12-Check Automated Data & Pipeline Quality Engine
-│   ├── dataset.py           # Unified GCS-first streaming loader for all 8 Golden & 4 Public datasets
-│   ├── experiment_matrix.py # 19-Experiment Catalog & Audited GCP Billing SKU Cost Estimator
-│   ├── server.py            # Dual-mode HTTP server (:8080 /engineering, :8090 / /exec Executive Summary)
-│   └── static/              # Frontend UI assets (index.html, app.js, styles.css, cio.html, cio.js, cio.css)
-├── cli.py                   # CLI entrypoints (run, cloud-run, push, pull, qc, experiments, serve, serve-cloud)
-└── runner.py                # Parallel evaluation harness, 5-level scorer & GCS/Vertex telemetry
-```
+Solving Unilever's end-to-end Market Share and Merchandising compliance problem yielded **6 repeatable Google Cloud engineering assets** and **5 reusable Agent Skills** stored directly in [`skills/`](skills/):
+
+| Repeatable Asset / Skill Directory | Core Modules | Reusable Capability |
+| :--- | :--- | :--- |
+| **[`skills/calibrated-multimodal-funnel/`](skills/calibrated-multimodal-funnel/SKILL.md)**<br/>*(Multimodal JEV / `go/multimodal-jev`)* | `clef_standalone.py`, `clm_info_nce.py`, `residual_infonce.py` | 3-stage large-catalog (`2,745+` classes) visual decision funnel: Dual-Buffer Photometry (`EXP-40`), Unstarved Brand-Gate (`EXP-54`), Saliency-Diff ($V(x,y)=\text{Var}_k(R_k)$, `EXP-51`) & Crown Contact Sheets (`EXP-52`), `PROP-08` pre-choice evidence, `PROP-09` PoE, and `PR-14` pack-size verifier. |
+| **[`skills/spatial-detection-and-planogram-physics/`](skills/spatial-detection-and-planogram-physics/SKILL.md)** | `onnx_yolo_detector.py`, `promo_asset_sku_detect.py`, `planogram_engine.py`, `awp_template_index.py` | Dual-Class (`Class 0` Bay vs `Class 1` Pack) `960px` Soft-NMS CPU ONNX, Physical Shelf-Plank Support Law (`EXP-53`), Pre-Embedding Class-0 Bay Gate (`-61%` background crop pruning, `EXP-57`), `63`-template `AWP_Code` planogram/OOS engine, and 3-class Talker/Price-Tag detector (`EXP-47`, `EXP-48`). |
+| **[`skills/total-contracts-and-payout-guardrails/`](skills/total-contracts-and-payout-guardrails/SKILL.md)** | `llm.py`, `p2p_simulation.py`, `SPEC_v0.2_Production_Contract.md` | Level-4 Total Contracts (`PR-16`, `EXP-59`), `PT180S` SLA timeout quarantine (`RETRY_PENDING` to `PR19_pubsub_dlq` vs false `Earning='0'` denials), `<untrusted_pack_text>` prompt-injection isolation, and SHA-256 content-addressed VLM response caching (`PR-17`). |
+| **[`skills/ml-data-forensics-and-eval-integrity/`](skills/ml-data-forensics-and-eval-integrity/SKILL.md)** | `qc.py`, `metrics.py`, `taxonomy/`, `brand_registry_crawler.py` | 15-Gate Zero-Leakage dataset & leaderboard audit (`G1..G15`), outlet-code split disjointness, Paired McNemar $2\times 2$ discordant significance testing (`PR-15`, `EXP-58`), and Rogan-Gladen prevalence calibration (`EXP-59`). |
+| **[`skills/gcp-eval-workbench-and-finops/`](skills/gcp-eval-workbench-and-finops/SKILL.md)** | `runner.py`, `pricing.py`, `server.py`, `tests/load/locustfile.py` | 100% GCS-streamed evaluation harness, Vertex AI Experiments sync, audited GCP Cloud Billing SKU unit-cost & diurnal burst FinOps model (`EXP-26`), Locust load-test suite (`PR-19`), and Dual-Persona (`/engineering` + `/exec`) Cloud Run control plane. |
