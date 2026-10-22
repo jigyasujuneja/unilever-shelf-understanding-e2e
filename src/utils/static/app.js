@@ -222,6 +222,13 @@ const SHORT_APPROACH_NAMES = {
   hf_clef_27b_gpu: "Open-Source HuggingFace Cloudflare/clef-27b (GPU)",
   hf_clm_clef_cascade_gpu: "Open-Source HuggingFace CLM-8B -> clef-flash Cascade (GPU)",
   cv_classify: "Legacy 3-Stage InceptionV3 Cascade (Brand → Pack → 7 Routed Variant Models)",
+  cv_promo_classify: "Legacy 9-Model InceptionV3 Cascade on Promotional SKUs (Brand → 7 Variant → Pack)",
+  legacy_gtmerch_yolo: "Legacy GT Merchandising 2-Class YOLOv8n Detector (gtmerch_asset_sku_intermediary_17092026.pt)",
+  legacy_mt_yolo: "Legacy Modern Trade 1-Class YOLOv8n Detector (marketshare_yolo.pt)",
+  legacy_gtmerch_planogram: "Legacy GT Merchandising 209-Class InceptionV3 (.h5) + Stage 6 Planogram Engine",
+  legacy_gtmerch_e2e: "Legacy GT Merchandising E2E Cascade (2-Class YOLOv8n .pt + 209-Class InceptionV3 .h5)",
+  legacy_mt_planogram: "Legacy Modern Trade 9-Model InceptionV3 Cascade (.h5) + Stage 6 Planogram Engine",
+  legacy_mt_e2e: "Legacy Modern Trade E2E Cascade (marketshare_yolo.pt + 9-Model InceptionV3 .h5)",
   hierarchy_classify: "Single-Pass Hierarchical VLM Taxonomy Baseline",
   hybrid_classify: "2-Stage Hybrid Embedding Gate + Gemini 3.5 Flash-Lite Contact-Sheet Verifier",
   hybrid_classify_sft: "2-Stage Hybrid Embedding Gate + LoRA SFT Gemini 3.5 Flash-Lite",
@@ -342,10 +349,17 @@ function getEvalScopeMeta(r) {
   const ap = String(r.approach || "");
   const has3 = fa.brand != null && fa.category != null && fa.packaging_type != null;
   const mean3 = has3 ? (Number(fa.brand) + Number(fa.category) + Number(fa.packaging_type)) / 3.0 : null;
+  const isLegacyModel =
+    ap.startsWith("cv_") ||
+    ap.startsWith("legacy_") ||
+    /\.h5|legacy-pt/i.test(String(r.model || ""));
+  const legChip = isLegacyModel
+    ? `<span style="display:inline-block;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:800;margin-left:4px;" title="Phase-1 Legacy Customer Model (.h5 InceptionV3 / .pt YOLOv8n) evaluated on the identical Golden split">🏛️ Legacy Baseline (.h5 / .pt)</span>`
+    : "";
   const valChip =
-    r.split === "val"
+    (r.split === "val"
       ? `<span style="display:inline-block;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Validation split run used for threshold/rubric calibration; production winners are crowned strictly on blind Test / Test 5K splits.">Val Calibration Split</span>`
-      : "";
+      : "") + legChip;
   const isOracleBrand = String(r.model || "").includes("oracle_brand") || String(r.run_id || "").includes("oracle_brand");
   if (isOracleBrand) {
     return {
@@ -487,6 +501,11 @@ function isValidatedGoldenRun(r) {
   const ds = r.dataset || "sku110k";
   if (DATASETS[ds]?.isGolden !== true) return false;
   if ((r.errors || 0) > Math.floor(Number(r.images || 0) / 1000)) return false;
+  const ap = String(r.approach || "");
+  const mod = String(r.model || "");
+  if (ap.startsWith("cv_") || ap.startsWith("legacy_") || /\.h5|legacy-pt/i.test(mod)) {
+    return Number(r.images || 0) > 0;
+  }
   const primary = Number(r.primary_score ?? r.f2 ?? r.accuracy ?? 0);
   return primary >= 0.10;
 }
@@ -508,7 +527,22 @@ function fmtShortModel(r) {
   if (r.short_model) return r.short_model;
   const m = String(r.model || "");
   const ap = String(r.approach || "");
-  if (/\.h5/i.test(m)) {
+  if (ap.startsWith("legacy_gtmerch_e2e")) {
+    return "Legacy GT YOLOv8n (.pt) + 209-Class InceptionV3 (.h5)";
+  }
+  if (ap.startsWith("legacy_gtmerch_planogram") || /17Sep26-moc10-model-gtmerch/i.test(m)) {
+    return "Legacy GT 209-Class InceptionV3 (.h5)";
+  }
+  if (ap === "legacy_gtmerch_yolo" || /gtmerch-yolo-legacy-pt/i.test(m)) {
+    return "Legacy GT 2-Class YOLOv8n (gtmerch_asset_sku_intermediary.pt)";
+  }
+  if (ap === "legacy_mt_yolo" || /marketshare-yolo-legacy-pt/i.test(m)) {
+    return "Legacy MT 1-Class YOLOv8n (marketshare_yolo.pt)";
+  }
+  if (ap === "legacy_mt_e2e") {
+    return "Legacy MT YOLOv8n (.pt) + 9-Model InceptionV3 (.h5)";
+  }
+  if (/\.h5/i.test(m) || ap.startsWith("cv_") || ap === "legacy_mt_planogram") {
     return /oracle_brand/i.test(m)
       ? "InceptionV3 7-Variant + Pack (.h5, Oracle Brand)"
       : "InceptionV3 9-Model Ensemble (.h5)";
@@ -996,6 +1030,13 @@ async function showUseCaseBoard(useCase = "market_share") {
   // (excludes Phase-1 legacy .h5 baselines, partial 1-attr/2-attr runs, Oracle diagnostics, closed-set GPU research runs, and val calibration runs)
   const NAIVE_BASELINES = new Set([
     "cv_classify",
+    "cv_promo_classify",
+    "legacy_gtmerch_yolo",
+    "legacy_mt_yolo",
+    "legacy_gtmerch_planogram",
+    "legacy_gtmerch_e2e",
+    "legacy_mt_planogram",
+    "legacy_mt_e2e",
     "hierarchy_classify",
     "embedding_retrieval",
     "embedding_text_match",
