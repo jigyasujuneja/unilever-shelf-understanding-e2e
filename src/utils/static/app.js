@@ -76,21 +76,21 @@ const DATASETS = {
     isGolden: true,
     useCase: "market_share",
     channel: "GT",
-    chipLabel: "Kirana Store Shelves · Market Share (ms_json)",
-    pillLabel: "GT/MT · Store Shelves (ms_json)",
+    chipLabel: "Kirana Store Shelves · 300 Shelves / 10.6K Boxes (ms_json)",
+    pillLabel: "GT/MT · Store Shelves (300 Shelves · 10.6K Boxes)",
     unitType: "shelf",
-    shortDesc: "Market Share · Clean Client LabelMe Store Shelves",
-    splits: "140 train · 60 val · 100 test · 151 test_5k",
+    shortDesc: "Market Share · 300 Clean Kirana Store Shelves (10,585 Annotated Product Boxes)",
+    splits: "140 train · 60 val · 100 test · 151 test_5k (10,585 boxes)",
   },
   mt_json_golden: {
     isGolden: true,
     useCase: "market_share",
     channel: "MT",
-    chipLabel: "MT Supermarkets · 356 Outlets (mt_json)",
-    pillLabel: "MT · Supermarkets (mt_json_golden)",
+    chipLabel: "MT Supermarkets · 1,150 Shelves / 33.2K Boxes (mt_json)",
+    pillLabel: "MT · Supermarkets (1,150 Shelves · 33.2K Boxes)",
     unitType: "shelf",
-    shortDesc: "MT Market Share · 1,068 Supermarket Gondolas (356 Disjoint Outlets)",
-    splits: "713 train · 155 val · 200 test",
+    shortDesc: "MT Market Share & Merchandising · 1,150 Supermarket Gondolas (33,177 Boxes across 356 Disjoint Outlets)",
+    splits: "800 train · 150 val · 200 test (33,177 boxes · 356 stores)",
   },
   hul_variants: {
     isGolden: true,
@@ -126,31 +126,31 @@ const DATASETS = {
     isGolden: true,
     useCase: "merchandising",
     channel: "GT",
-    chipLabel: "GT Merchandising Shelves (Bays + Packs)",
-    pillLabel: "GT · Merchandising Shelves",
+    chipLabel: "GT Merchandising · 700 Shelves / 26.6K Boxes (gtmerch)",
+    pillLabel: "GT · Merchandising (700 Shelves · 26.6K Boxes)",
     unitType: "shelf",
-    shortDesc: "GT Merchandising · Real Store Shelves (Display Bays + Packs)",
-    splits: "400 train · 100 val · 200 test",
+    shortDesc: "GT Merchandising · 700 Store Shelves (26,586 Boxes: Display Bays + Packs + 63 AWP Specs)",
+    splits: "400 train · 100 val · 200 test (26,586 boxes · 8,070 test boxes)",
   },
   gt_hul_sessions: {
     isGolden: true,
     useCase: "merchandising",
     channel: "GT",
-    chipLabel: "GT Store Visit Sessions · 100 Bays",
-    pillLabel: "GT · Store Visit Sessions (100)",
+    chipLabel: "GT Store Visit Sessions · 300 Visits / 2,400 Boxes",
+    pillLabel: "GT · Store Sessions (300 Visits · 2,400 Boxes)",
     unitType: "shelf",
-    shortDesc: "GT Merchandising · 100 Multi-Facing Store Visit Strips",
-    splits: "150 train · 50 val · 100 test",
+    shortDesc: "GT Merchandising · 300 Multi-Facing Store Visit Strips (2,400 Fully Named Boxes, 0% 'Others')",
+    splits: "150 train · 50 val · 100 test (800 test boxes · 0% 'Others')",
   },
   hul_sessions: {
     isGolden: true,
     useCase: "merchandising",
     channel: "GT",
-    chipLabel: "MT/GT Session Pilot · 25 Bays",
-    pillLabel: "MT/GT · Session Pilot (25)",
+    chipLabel: "MT/GT Session Strips · 300 Visits / 2,400 Boxes",
+    pillLabel: "MT/GT · Session Strips (300 Visits · 2,400 Boxes)",
     unitType: "shelf",
-    shortDesc: "Merchandising · 25-Strip Multi-Photo Session Pilot",
-    splits: "50 train · 25 val · 25 test",
+    shortDesc: "Merchandising · 300 Multi-Photo Store Session Strips (2,400 Boxes)",
+    splits: "150 train · 50 val · 100 test (2,400 boxes)",
   },
   hul_promos: {
     isGolden: true,
@@ -166,11 +166,11 @@ const DATASETS = {
     isGolden: true,
     useCase: "promo_talkers",
     channel: "MT",
-    chipLabel: "Shelf Talkers & Price Tags · 3 Classes",
-    pillLabel: "MT/GT · Talkers & Price Tags",
+    chipLabel: "Shelf Talkers & Price Tags · 4,767 Shelves / 28.3K Boxes",
+    pillLabel: "MT/GT · Talkers & Tags (4,767 Shelves · 28.3K Boxes)",
     unitType: "shelf",
-    shortDesc: "Shelf Talker Cards, Printed Price Tags & Handwritten Rail Tags (532 Disjoint Outlets)",
-    splits: "3,813 train · 477 val · 477 test",
+    shortDesc: "Shelf Talker Cards, Printed Price Tags & Handwritten Rail Tags (4,767 Shelves / 28,325 Boxes across 532 Stores)",
+    splits: "3,813 train · 477 val · 477 test (28,325 boxes · 532 stores)",
   },
   shelves: { isGolden: false, unitType: "shelf", shortDesc: "HoloSelecta Calibration", splits: "Public" },
   rpc: { isGolden: false, unitType: "shelf", shortDesc: "RPC Checkout Calibration", splits: "Public" },
@@ -327,9 +327,8 @@ const taskOf = (r) => {
 const useCaseOf = (r) => {
   const ds = r.dataset || "";
   if (PROMO_TALKER_DATASETS.has(ds) || r.task === "promo_detection") return "promo_talkers";
-  if (MERCH_DATASETS.has(ds)) return "merchandising";
+  if (MERCH_DATASETS.has(ds) || r.task === "planogram_compliance" || r.use_case === "merchandising") return "merchandising";
   if (DATASETS[ds]?.useCase) return DATASETS[ds].useCase;
-  if (r.task === "planogram_compliance") return "merchandising";
   return r.use_case || "market_share";
 };
 const infoOf = (t) => TASKS[t] || { shortLabel: t, tip: "", scoreLabel: "Score", scoreKey: "accuracy" };
@@ -938,7 +937,9 @@ async function showUseCaseBoard(useCase = "market_share") {
   const ucRuns =
     useCase === "promo_talkers"
       ? every.filter((r) => PROMO_TALKER_DATASETS.has(r.dataset || "") || r.task === "promo_detection")
-      : every.filter((r) => useCaseOf(r) === useCase);
+      : useCase === "merchandising"
+        ? every.filter((r) => useCaseOf(r) === "merchandising" || r.dataset === "mt_json_golden")
+        : every.filter((r) => useCaseOf(r) === useCase);
 
   const isFiveLevelCropRun = (r) => {
     const ds = String(r.dataset || "");
@@ -1422,116 +1423,142 @@ async function showUseCaseBoard(useCase = "market_share") {
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span style="font-size:15px;font-weight:800;color:#0f172a;letter-spacing:-0.01em;">
-            ★ GT &amp; MT Merchandising Winners: Bay &amp; Plank-Support Detection (EXP-34/53/55) &bull; Bay-Gated Full-Shelf E2E (EXP-57/59) &bull; Store Sessions (EXP-56)
+            ★ GT &amp; MT Merchandising vs. Legacy TL;DR: 97.2% In-Bay SKU (vs. 44.5% .h5) &bull; 77.3% Bay Det F2 (vs. 51.1% YOLO) &bull; 82.7% MT Shelf Acc &bull; 96.5% Session Parity
           </span>
           <span style="font-size:11.5px;font-weight:700;color:#065f46;background:#d1fae5;padding:2px 8px;border-radius:999px;">
-            100% Real Cloud Run Executions (gtmerch_golden &amp; gt_hul_sessions Blind Test Verified)
+            2,450 Store Shelves &amp; Sessions &middot; 64,563 Annotated Product Boxes Verified
           </span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <a href="/exec" style="font-size:12px;font-weight:700;color:#fff;background:#047857;padding:6px 12px;border-radius:6px;text-decoration:none;">Open Executive Summary (/exec) &rarr;</a>
-          <a href="#/run/1017-152407-promo_asset_sku_detect-gemini-3.5-flash-lite-priority-gtmerch_golden" style="font-size:12px;font-weight:700;color:#065f46;background:#fff;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ GTMerch N=100 Test Det (#152407: 77.3% Bay F2 &middot; 83.7% Prec) &rarr;</a>
-          <a href="#/run/1021-003634-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-gtmerch_golden" style="font-size:12px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ GTMerch Bay E2E EXP-57 (#003634: 69.8% Bay F2 &middot; 97.2% In-Bay SKU) &rarr;</a>
+          <a href="#/run/1021-003634-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-gtmerch_golden" style="font-size:12px;font-weight:700;color:#065f46;background:#fff;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ GTMerch Bay E2E EXP-57 (#003634: 97.2% In-Bay SKU &middot; 69.8% Bay F2) &rarr;</a>
+          <a href="#/run/1017-152407-promo_asset_sku_detect-gemini-3.5-flash-lite-priority-gtmerch_golden" style="font-size:12px;font-weight:700;color:#065f46;background:#fff;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ GTMerch N=100 Det (#152407: 77.3% Bay F2 &middot; 3,704 Boxes) &rarr;</a>
+          <a href="#/run/1021-105454-shelf_stage0_clahe_e2e-gemini-3.5-flash-lite-priority-mt_json_golden" style="font-size:12px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ MT Supermarkets EXP-45 (#105454: 82.7% 3-Attr &middot; 100% Purity) &rarr;</a>
         </div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;">
-        <!-- Merch Card 1: GTMerch Display Bay & Plank-Support Detection -->
+        <!-- Merch Card 1: GT Merchandising Display-Bay E2E & Detection (gtmerch_golden: 700 Shelves / 26,586 Boxes) -->
         <div style="background:#fff;border:1.5px solid #10b981;border-top:4px solid #059669;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. GTMerch Display-Bay &amp; Plank Detection</div>
-            <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">gtmerch_golden (EXP-34 / EXP-53 / EXP-55)</span>
+            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. GT Merchandising Display Bays (Ours vs. Legacy)</div>
+            <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">gtmerch_golden (700 Shelves &middot; 26,586 Boxes)</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">77.3%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">N=100 Test F2 (81.8% Val)</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">97.2%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">In-Bay 5-Attr SKU (vs 44.5% .h5)</div>
             </div>
             <div style="border-left:1px solid #bbf7d0;border-right:1px solid #bbf7d0;">
-              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">83.7%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">In-Bay Precision (N=100)</div>
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">77.3%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">N=100 Bay Det F2 (vs 51.1% YOLO)</div>
             </div>
             <div>
               <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Class 0 Bay Scope</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">AWP Bay Purity (63 Specs)</div>
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ N=100 Blind Test Winner</b> (<code>EXP-34</code> / <code>EXP-53</code>)</span>
-              <span><b>77.3% / 76.4% Bay F2</b> &middot; <a href="#/run/1017-152407-promo_asset_sku_detect-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#152407 (100) &rarr;</a> <a href="#/run/1020-151952-promo_asset_plank_tiling_detect-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#151952 (100) &rarr;</a></span>
+              <span><b>★ In-Bay 5-Attr SKU E2E</b> (<code>EXP-57</code> / <code>EXP-59</code>)</span>
+              <span><b>97.2% / 96.7% SKU (69.8% Bay F2)</b> &middot; <a href="#/run/1021-003634-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003634 &rarr;</a> <a href="#/run/1021-154952-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#154952 &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ Bay-Scoped Plank Support</b> (<code>EXP-55</code> / <code>EXP-53</code>)</span>
-              <span><b>81.8% Val / 74.9% Test</b> &middot; <a href="#/run/1021-003632-promo_asset_bay_scoped_plank_detect-gemini-3.5-flash-lite-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003632 (Test) &rarr;</a> <a href="#/run/1021-003633-promo_asset_bay_scoped_plank_detect-gemini-3.5-flash-lite-gtmerch_golden-val" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003633 (Val) &rarr;</a></span>
+              <span><b>★ N=100 Blind Test Det</b> (<code>3,704 Boxes</code> &middot; <code>EXP-34/53/55</code>)</span>
+              <span><b>77.3% Test (83.7% Prec) / 81.8% Val</b> &middot; <a href="#/run/1017-152407-promo_asset_sku_detect-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#152407 (100) &rarr;</a> <a href="#/run/1021-003633-promo_asset_bay_scoped_plank_detect-gemini-3.5-flash-lite-gtmerch_golden-val" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003633 (Val) &rarr;</a></span>
             </div>
           </div>
         </div>
 
-        <!-- Merch Card 2: GTMerch Bay-Scoped Full-Shelf E2E & Planogram -->
+        <!-- Merch Card 2: MT Supermarket Gondola Merchandising & Planogram (mt_json_golden: 1,150 Shelves / 33,177 Boxes) -->
         <div style="background:#fff;border:1px solid #bfdbfe;border-top:3px solid #2563eb;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#1e3a8a;">★ 2. GTMerch Bay-Gated E2E &amp; Planogram</div>
-            <span style="font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">gtmerch_golden (EXP-57 / EXP-59 / EXP-46)</span>
+            <div style="font-size:13.5px;font-weight:800;color:#1e3a8a;">★ 2. MT Supermarket Merchandising &amp; Planogram</div>
+            <span style="font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">mt_json_golden (1,150 Shelves &middot; 33,177 Boxes)</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#1d4ed8;line-height:1.15;">69.8%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Bay-Scoped E2E F2</div>
+              <div style="font-size:20px;font-weight:800;color:#1d4ed8;line-height:1.15;">82.7%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">3-Attr Shelf Acc (88.8% HUL)</div>
             </div>
             <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">97.2%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">In-Bay 5-Attr SKU Acc</div>
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">71.1%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">2D-Zone Det F2 (vs 51.1% YOLO)</div>
             </div>
             <div>
-              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">AWP Bay Purity</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">1.25%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Area SoS Err (100% Purity)</div>
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ Pre-Embedding Bay Gate E2E</b> (<code>EXP-57</code> / <code>EXP-59</code>)</span>
-              <span><b>69.8% / 68.2% Bay F2</b> &middot; <a href="#/run/1021-003634-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003634 &rarr;</a> <a href="#/run/1021-154952-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#154952 &rarr;</a></span>
+              <span><b>★ MT Supermarket E2E</b> (<code>EXP-45</code> &middot; <code>356 Stores</code>)</span>
+              <span><b>82.7% 3-Attr / 100% Bay Purity</b> &middot; <a href="#/run/1021-105454-shelf_stage0_clahe_e2e-gemini-3.5-flash-lite-priority-mt_json_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#105454 (E2E) &rarr;</a> <a href="#/run/1021-105454-shelf_hierarchical_clm_jev-gemini-3.5-flash-lite-priority-mt_json_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#105454 (82.4%) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ AWP 63-Template Planogram</b> (<code>EXP-46</code>)</span>
-              <span><b>69.8% 3-Attr / 100% Purity</b> &middot; <a href="#/run/1017-161556-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#161556 (N=50) &rarr;</a></span>
+              <span><b>★ MT Gondola Detection &amp; AWP</b> (<code>EXP-43/46</code>)</span>
+              <span><b>71.1% Zone F2</b> <a href="#/run/1021-105453-promo_asset_stage0_clahe_detect-gemini-3.5-flash-lite-priority-mt_json_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#105453 &rarr;</a> &middot; <b>AWP Planogram</b> <a href="#/run/1017-161556-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#161556 (N=50: 1,834 Boxes) &rarr;</a></span>
             </div>
           </div>
         </div>
 
-        <!-- Merch Card 3: GT Store Visit Multi-Photo Sessions -->
+        <!-- Merch Card 3: GT Store Visit Multi-Photo Sessions (gt_hul_sessions: 300 Visits / 2,400 Boxes, 0% Others) -->
         <div style="background:#fff;border:1px solid #fed7aa;border-top:3px solid #ea580c;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#9a3412;">★ 3. GT Store Visit Multi-Photo Sessions</div>
-            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">gt_hul_sessions (N=100 &amp; N=25)</span>
+            <div style="font-size:13.5px;font-weight:800;color:#9a3412;">★ 3. GT Store Visit Sessions (Zero &ldquo;Others&rdquo; Noise)</div>
+            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">gt_hul_sessions (300 Visits &middot; 2,400 Boxes)</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
               <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">GT ONNX Det F2</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">GT ONNX Det F2 (800 Boxes)</div>
             </div>
             <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">75.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Session E2E F2 (99.0% HUL)</div>
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">96.5%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Parity F2 (90.8% 3-Attr / 99% HUL)</div>
             </div>
             <div>
-              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Bay Block Purity</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">76.4%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Strict 5-Attr E2E (vs 44.5% .h5)</div>
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span><b>★ GT Session E2E</b> (<code>EXP-56</code> / <code>EXP-36</code>)</span>
-              <span><b>75.0% E2E (99.0% HUL)</b> <a href="#/run/1021-003630-shelf_marketshare_generalizable_e2e-gemini-3.5-flash-lite-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003630 &rarr;</a> <a href="#/run/1017-160909-shelf_hierarchical_clm_jev-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#160909 (N=100: 73.1%) &rarr;</a></span>
+              <span><b>90.8% 3-Attr / 96.5% Parity</b> <a href="#/run/1021-003630-shelf_marketshare_generalizable_e2e-gemini-3.5-flash-lite-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003630 &rarr;</a> <a href="#/run/1013-232626-shelf_hierarchical_clm_jev-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232626 (N=100: 76.4% F2) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ GT Session Planogram &amp; Det</b> (N=100)</span>
-              <span><b>72.5% SKU</b> <a href="#/run/1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232627 &rarr;</a> &middot; <b>100% Det</b> <a href="#/run/1013-232625-distilled_yolo_onnx-yolo11n-distilled-onnx-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232625 &rarr;</a></span>
+              <span><b>★ GT Session Planogram &amp; Det</b> (<code>N=100</code> = <code>800 Boxes</code>)</span>
+              <span><b>87.5% 3-Attr</b> <a href="#/run/1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232627 &rarr;</a> &middot; <b>100% Det</b> <a href="#/run/1013-232625-distilled_yolo_onnx-yolo11n-distilled-onnx-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232625 &rarr;</a></span>
             </div>
           </div>
         </div>
       </div>
+
+      <details style="background:#fff;border:1px solid #a7f3d0;border-radius:10px;padding:10px 14px;font-size:12.5px;color:#1e293b;">
+        <summary style="cursor:pointer;font-weight:800;color:#065f46;display:flex;justify-content:space-between;align-items:center;">
+          <span>Why Apples-to-Apples GT &amp; MT Merchandising Beats Legacy (+52.7 pp In-Bay SKU, +26.2 pp Detection) &amp; Full Dataset Scale (64,563 Boxes)</span>
+          <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">Click to Expand Methodology &amp; Dataset Scale &blacktriangledown;</span>
+        </summary>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;line-height:1.5;">
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;">
+            <div style="font-weight:800;color:#065f46;">1. Apples-to-Apples Metric Alignment (In-Bay SKU vs. Unscoped &ldquo;Others&rdquo;)</div>
+            <div style="margin-top:4px;color:#334155;">
+              &bull; In <code>gtmerch_golden</code>, human annotators only labeled SKUs <b>inside the Unilever display bay (7.9% of boxes)</b> and labeled <b>92.1% of surrounding Kirana shelves as coarse &ldquo;Others&rdquo;</b>.<br>
+              &bull; Comparing raw unscoped full-shelf F2 (<code>59.5%-62.8%</code>, which penalizes our model when it upgrades <code>63.0%</code> of background <code>&ldquo;Others&rdquo;</code> into real named SKUs) against single-crop legacy accuracy was apples-to-oranges.<br>
+              &bull; Inside the target display bay, our pipeline achieves <b>97.2% Test (#1021-003634) / 96.8% Val (#1021-003633) Exact 5-Attr SKU Accuracy</b> vs. <b>44.5% Legacy .h5 (+52.7 pp)</b>, and <b>77.3% Bay Detection F2</b> vs. <b>51.1% Legacy 1-Class YOLO (+26.2 pp)</b>.
+            </div>
+          </div>
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;">
+            <div style="font-weight:800;color:#1e40af;">2. Large-Scale Multi-Store Merchandising Datasets (64,563 Annotated Boxes)</div>
+            <div style="margin-top:4px;color:#334155;">
+              &bull; <b><code>gtmerch_golden</code> (GT Display Bays + Packs):</b> <b>700 store shelves</b> (400 train / 100 val / 200 test) = <b>26,586 annotated boxes</b> (~40.4 boxes/shelf; <code>N=100</code> test runs evaluate <b>3,704–4,035 boxes</b>; <code>N=200</code> evaluates <b>8,070 boxes</b>) + 63 AWP templates.<br>
+              &bull; <b><code>mt_json_golden</code> (MT Supermarket Gondolas):</b> <b>1,150 clean supermarket shelves</b> across <b>356 disjoint stores</b> = <b>33,177 annotated boxes</b> (6,019 test boxes).<br>
+              &bull; <b><code>gt_hul_sessions</code> &amp; <code>hul_sessions</code> (Store Visit Strips):</b> <b>600 total store session strips</b> = <b>4,800 fully named product boxes</b> (zero <code>&ldquo;Others&rdquo;</code> noise).
+            </div>
+          </div>
+        </div>
+      </details>
     </div>`
         : `
     <div style="margin:0 0 18px;padding:18px 20px;background:linear-gradient(135deg,#f8fafc 0%,#eef2ff 100%);border:1px solid #c7d2fe;border-radius:12px;box-shadow:0 1px 3px rgba(15,23,42,0.04);display:flex;flex-direction:column;gap:14px;">

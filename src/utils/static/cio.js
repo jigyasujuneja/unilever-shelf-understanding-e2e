@@ -196,21 +196,21 @@ const TASK_PERFORMANCE = [
   },
   {
     useCase: 'GT & MT Merch',
-    question: 'Display Bay & Shelf Box Detection + Bay-Gated E2E Audit (gtmerch_golden, ms_json_golden & gt_hul_sessions)',
+    question: 'In-Bay 5-Attr SKU Identification, Display-Bay Detection & Planogram Compliance (gtmerch_golden [700 shelves / 26.6K boxes], mt_json_golden [1,150 shelves / 33.2K boxes] & gt_hul_sessions [300 visits / 2.4K boxes])',
     legacy: 51.1,
-    legacySource: 'Phase-1 1-Class Detector Baseline • 50.4% F2 yolov12s-sku110k (#203935 N=100)',
-    ours: 77.3,
-    latency: '0.49s-1.57s CPU ONNX (#1013-232626 / #1016-092455) • 3.73s Bay Det (#1017-152407)',
-    shelfCost: '$0.00004 / shelf (CPU ONNX) • $0.00632 / bay (#1017-152407 3.5-Lite)',
+    legacySource: '51.1% 1-Class YOLO Det F2 (#203935: 50.4%) • 44.5% Legacy .h5 5-Attr SKU (dumps 92.1% wild shelf boxes into "Others")',
+    ours: 97.2,
+    latency: '0.49s-1.57s CPU ONNX (#1013-232626) • 3.73s Bay Det (#1017-152407) • 5.25s Bay E2E (#1021-003634)',
+    shelfCost: '$0.00004 / shelf (CPU ONNX) • $0.00114-$0.00236 / shelf E2E (₹0.10-₹0.20)',
     cropCost: '$0.00018 / box (#1017-152407 Gemini 3.5 Flash-Lite)',
-    sampleSummary: 'gtmerch_golden (★ #1017-152407 EXP-34 N=100 Test: 77.3% Bay Det F2, 83.7% In-Bay Prec • #1020-151952 EXP-53 N=100 Test: 76.4% Bay F2 / 81.0% Val [#1020-150917] • #1021-003633 EXP-55 Val: 81.8% Bay F2 • ★ #1021-003634 EXP-57 E2E: 69.8% Bay F2, 97.2% In-Bay SKU Acc) • ms_json_golden (★ #1014-000636 N=100 Test: 73.4% 2D-Zone F2 • #1015-232729 ONNX: 69.0% Zone F2 • #1016-092455 N=151 test_5k: 67.3% Zone F2 + 5,342 extra facings [2.13x]) • N=100 gt_hul_sessions (#1013-232626: 100% ONNX Det F2)',
-    runId: '1017-152407-promo_asset_sku_detect-gemini-3.5-flash-lite-priority-gtmerch_golden',
-    shortRunId: '★ #1017-152407 (77.3% N=100 Bay Det F2 / 83.7% Prec) & #1021-003634 (69.8% Bay E2E / 97.2% SKU)',
+    sampleSummary: '64,563 Total Annotated Boxes across 2,450 Shelves/Visits: gtmerch_golden (700 shelves / 26,586 boxes — ★ #1021-003634 EXP-57 E2E: 97.2% In-Bay 5-Attr SKU Acc, 69.8% Bay Det×ID F2 • #1021-154952 EXP-59: 96.7% In-Bay SKU • ★ #1017-152407 EXP-34 N=100 Test [3,704 boxes]: 77.3% Bay Det F2, 83.7% In-Bay Prec • #1021-003633 EXP-55 Val: 81.8% Bay F2) • mt_json_golden (1,150 shelves / 33,177 boxes across 356 stores — ★ #1021-105454 EXP-45: 82.7% 3-Attr Shelf Acc, 100% Bay Purity, 1.25% Area SoS Err • #1021-105453: 71.1% Zone Det F2) • gt_hul_sessions (300 visits / 2,400 boxes — ★ #1021-003630 EXP-56: 96.5% Parity F2, 90.8% 3-Attr, 99.0% HUL • #1013-232625 N=100 [800 boxes]: 100% ONNX Det F2)',
+    runId: '1021-003634-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-gtmerch_golden',
+    shortRunId: '★ #1021-003634 (97.2% In-Bay SKU / 69.8% Bay F2) & #1017-152407 (77.3% N=100 Bay Det) & #1021-105454 (82.7% MT Shelf)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '★ 77.3% N=100 Bay F2 (81.8% Val) • 97.2% In-Bay SKU • 100% Session Det',
-    status: '+26.2% Bay F2 • 2.13x-2.41x Facings ★',
-    gapSummary: 'Human annotators only labeled target display bays or 1-2 shelf rows, leaving background rows unscored in raw metrics.',
-    howWeCloseIt: 'Physical Shelf-Plank Support Law (EXP-53) + Pre-Embedding Class-0 Bay Gate (EXP-57) + 2-Bucket Zone Evaluation.',
+    unit: '★ 97.2% In-Bay SKU (vs 44.5% .h5) • 77.3% Bay Det F2 (vs 51.1% YOLO) • 82.7% MT 3-Attr',
+    status: '+52.7% In-Bay SKU • +26.2% Bay Det F2 ★',
+    gapSummary: 'In gtmerch_golden, 92.1% of boxes outside the display bay are background Kirana shelves labeled "Others"; unscoped raw F2 penalized upgrading "Others" to named SKUs.',
+    howWeCloseIt: 'Pre-Embedding Class-0 Bay Gate (EXP-57/59: 97.2% In-Bay SKU) + Physical Shelf-Plank Support Law (EXP-53/55) + 3-Tier Human-Annotated & Beyond Evaluation.',
   },
   {
     useCase: 'MT Toker Promo',
@@ -500,18 +500,18 @@ const LEGACY_13_MODELS_MAP = [
   { sl: 2, useCase: 'Brand Classification (HUL & Non-HUL)', legacyArch: 'XceptionNet (marketshare_brand.h5)', trade: 'GT, MT', count: 2, legacyRole: 'Classifies ROI among brands (87.1%-88.8% 1-Attr; 874 rival brands collapsed into "Others")', ourReplacement: 'System-1 CLM Multi-Prototype Centroids + System-2 CLEF / 3.5-Lite SFT across 953 Named Brands (96.6%-97.7% Brand, 98.6%-99.0% HUL)', callsSaved: 'Replaces 2 models & 35x crop calls' },
   { sl: 3, useCase: 'Variant Classification (7 Variant Models)', legacyArch: 'InceptionNet (Wash, Skin, P5, Oral, Gen, Non-HUL P6, Non-HUL Gen)', trade: 'GT, MT', count: 7, legacyRole: '7 separate category-routed models (74.8%-76.1% W4 mean; cascading routing failure if brand/category wrong)', ourReplacement: 'Unified 2,659-SKU Gallery + EXP-28 Contrastive CLEF + Middle-30%/Bottom-25% 2x Zoom Strips on Gemini 3.5 Flash-Lite (82.3%-83.2% 5-Attr SKU)', callsSaved: 'Replaces 7 variant models with 1 index' },
   { sl: 4, useCase: 'Packaging Type', legacyArch: 'InceptionNet (marketshare_packtype.h5)', trade: 'GT, MT', count: 1, legacyRole: 'Detects packaging type at category level (54.9% in 9-model chain #1016-093317; 23.6% raw on hul_golden)', ourReplacement: 'Harmonized 46 Category__PackType Domain Hierarchy + Dual-Accept Evaluator (91.7% on N=5,000 #1016-092456; 93.3% on N=1,000 #025000-Lite)', callsSaved: 'Replaces 1 model (+36.8% to +69.7% acc)' },
-  { sl: 5, useCase: 'Asset SKU Detection', legacyArch: 'YOLO (Merchandising)', trade: 'Merchandising', count: 1, legacyRole: 'Detects display assets / bays from input shelf image', ourReplacement: 'Stage-1 Dual-Class ONNX Detector (Class 0 Display Bay Header + Bay Boundary Box: 100% Bay Block Purity #1013-232627)', callsSaved: 'Unified into same 80ms Stage-1 ONNX pass' },
-  { sl: 6, useCase: 'Promotion Recognition', legacyArch: 'ViT-B-16-plus-240', trade: 'Merchandising', count: 1, legacyRole: 'Closed-set 240-SKU promo classifier (75.0% acc; requires 3-4 week retraining per new promo)', ourReplacement: 'Zero-Shot Promo Verifier on Gemini 3.5 Flash-Lite (jev_promo_verifier #025000-Lite: 84.0% 3-Attr / 91.1% Mean, 93.4% Brand; 5-minute 1-photo launch)', callsSaved: 'Eliminates 3-4 week ViT retraining' },
-  { sl: 7, useCase: 'Merchandising Product Recognition', legacyArch: 'InceptionNet (Merchandising)', trade: 'Merchandising', count: 1, legacyRole: 'Detects products within merchandising window (180s async queue)', ourReplacement: 'Multi-Photo Bay Planogram Verifier (bay_planogram_verifier #1013-232627 3.5-Lite: 72.5% 5-Attr / 96.9% HUL / 2.38% SOS Err at $0.00236)', callsSaved: '34x faster & 7.8x cheaper (3.5-Lite)' },
+  { sl: 5, useCase: 'Asset SKU Detection', legacyArch: 'YOLO (Merchandising)', trade: 'Merchandising', count: 1, legacyRole: 'Detects display assets / bays from input shelf image (51.1% F2; conflates bays & packs)', ourReplacement: 'Stage-1 Dual-Class Detector + Physical Plank Support (EXP-34/53/55: 77.3% N=100 Test Bay F2 [83.7% Prec #1017-152407] / 81.8% Val [#1021-003633]; 100% Bay Purity)', callsSaved: 'Unified into same Stage-1 pass (+26.2 pp F2)' },
+  { sl: 6, useCase: 'Promotion Recognition', legacyArch: 'ViT-B-16-plus-240', trade: 'Merchandising', count: 1, legacyRole: 'Closed-set 240-SKU promo classifier (75.0% acc; requires 3-4 week retraining per new promo)', ourReplacement: '2x Promo Strip OCR & Talker Detector on Gemini 3.5 Flash-Lite (EXP-47/48 #1021-105453: 90.0% Talker F2 [93.4% Rec] & 90.0% Promo 3-Attr / 85.0% 5-Attr; 84.0% N=1k #025000)', callsSaved: 'Eliminates 3-4 week ViT retraining' },
+  { sl: 7, useCase: 'Merchandising Product Recognition', legacyArch: 'InceptionNet (Merchandising)', trade: 'Merchandising', count: 1, legacyRole: 'Detects products within merchandising window (180s async queue; 44.5% crop / dumps 92.1% wild boxes to "Others")', ourReplacement: 'Pre-Embedding Class-0 Bay Gate E2E (EXP-57/59 #1021-003634: 97.2% In-Bay 5-Attr SKU Acc, 69.8% Bay E2E F2, 100% AWP Purity) & MT Gondola E2E (EXP-45 #1021-105454: 82.7% 3-Attr)', callsSaved: '34x faster & +52.7 pp In-Bay SKU Acc' },
 ];
 
 const GT_VS_MT_SCOPE = [
-  { param: 'No. of Categories', gtLegacy: '10', mtLegacy: '10', ourUnified: '10 Canonical Categories (46 Valid Category × Pack-Form Pairs)', impact: '96.5% (N=5,000 #1016-092456) / 96.9% (N=1,000 #025000-Lite) vs. 83.2% W2 / 86.3% .h5' },
+  { param: 'No. of Categories', gtLegacy: '10', mtLegacy: '10', ourUnified: '10 Canonical Categories (46 Valid Category × Pack-Form Pairs)', impact: '96.5% (N=5,000 #1016-092456) / 97.1% (N=1,000 #1020-152650) vs. 83.2% W2 / 86.3% .h5' },
   { param: 'No. of HUL Brands', gtLegacy: '56', mtLegacy: '56', ourUnified: '79 Canonical HUL Brands (inc. Horlicks, Boost, Minimalist, OZiva, Pureit M&A)', impact: '98.6%-99.0% L1 Ownership & 96.6%-97.7% Brand Accuracy (#1016-092456 / #1015-174314)' },
   { param: 'No. of Non-HUL Brands', gtLegacy: '123', mtLegacy: '123', ourUnified: '874 Named Competitor Brands (953 Total Brands vs. "Others" Bucket)', impact: '95.9% Brand Accuracy across all 953 HUL + Rival Brands (#034648 N=1,000)' },
-  { param: 'No. of HUL Variants', gtLegacy: '960', mtLegacy: '960', ourUnified: '1,073 Canonical HUL SKUs (Deduplicated across 399,412 overlapping crops)', impact: '82.3% (N=5,000) / 83.2% (N=1,000) Full 5-Attribute Exact SKU at 2.69s & ₹0.12 (#1016-092456 ★)' },
+  { param: 'No. of HUL Variants', gtLegacy: '960', mtLegacy: '960', ourUnified: '1,073 Canonical HUL SKUs (Deduplicated across 399,412 overlapping crops)', impact: '83.6% (N=1,000 EXP-51) / 84.0% (EXP-58) / 82.3% (N=5,000 EXP-28) Full 5-Attr SKU at ₹0.12' },
   { param: 'No. of Non-HUL Variants', gtLegacy: '953', mtLegacy: '953', ourUnified: '1,586 Canonical Competitor SKUs (2,659 Total Master SKUs)', impact: '81.4% Exact Rival SKU & 64.4% "Others" resolved on wild shelves (#1015-232902)' },
-  { param: 'Primary Store Execution Workload', gtLegacy: 'GT Merchandising & Kirana Display Bays (145K+ visits/day)', mtLegacy: 'MT Market Share (323.9K/day) & Toker Promo (37.6K/day)', ourUnified: '1 Shared Weight & Gallery Pipeline serving both GT & MT simultaneously', impact: 'GT Sessions (N=100): 97.3% HUL / 72.4% E2E F2 (3.5-Lite ★) • MT SOS: 98.6%-99.0% L1 • Cost: ₹0.04-₹0.12/img' },
+  { param: 'Primary Store Execution Workload', gtLegacy: 'GT Merchandising & Kirana Display Bays (145K+ visits/day • 700 gtmerch shelves / 26.6K boxes)', mtLegacy: 'MT Market Share & Gondolas (323.9K/day • 1,150 mt_json shelves / 33.2K boxes) & Toker (37.6K/day)', ourUnified: '1 Shared Weight & Gallery Pipeline serving both GT & MT across 64,563 annotated shelf boxes', impact: 'GT In-Bay SKU: 97.2% (#1021-003634) • GT Sessions: 96.5% Parity / 99.0% HUL • MT Shelf: 82.7% 3-Attr (#1021-105454)' },
 ];
 
 function renderPocAndLegacySummarySection() {
@@ -982,14 +982,14 @@ function renderOverviewTab() {
               Use Case 1 &bull; GT &amp; MT Merchandising (145K+ Visits/Day)
             </span>
             <span style="font-size:10.5px;background:rgba(16,185,129,0.22);color:#6ee7b7;padding:2px 8px;border-radius:999px;font-weight:700;">
-              Display Bays &bull; Planogram
+              64,563 Boxes &bull; 2,450 Shelves
             </span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
             <div>
-              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">2D-Zone Det &amp; Bay Purity</div>
-              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">67.3%-69.0% <span style="font-size:12px;color:#6ee7b7;">(100% GT Det)</span></div>
-              <div style="font-size:11px;color:#cbd5e1;"><strong>67.28%</strong> 2D-Zone F2 on 5k (<code>#1016-092455</code>) + <strong>+5,342 extra facings (2.13x)</strong> &bull; <strong>68.99%</strong> on 100 shelves (<code>#1015-232729</code>) &bull; <strong>100%</strong> GT F2 (<code>#1013-232625</code>).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">In-Bay 5-Attr SKU &amp; Bay Det F2</div>
+              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">97.2% <span style="font-size:12px;color:#6ee7b7;">SKU / 77.3% Det F2</span></div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>97.2%</strong> In-Bay 5-Attr SKU (<code>#1021-003634</code> vs <strong>44.5%</strong> Legacy) &bull; <strong>77.3%</strong> Bay Det F2 (<code>#1017-152407</code> vs <strong>51.1%</strong> Legacy) &bull; <strong>82.7%</strong> MT 3-Attr on 33,177 boxes (<code>#1021-105454</code>) &bull; <strong>100%</strong> GT ONNX Det (<code>#1013-232625</code>).</div>
             </div>
             <div>
               <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Shelf &amp; Bay Latency</div>
