@@ -180,9 +180,10 @@ def load_awp_template_index(path_or_uri: str | Path | None = None) -> dict[str, 
         target = str(path_or_uri)
         if not target.endswith(".json"):
             target = f"{target.rstrip('/')}/index.json"
-        from utils.dataset import read_bytes
+        if target.startswith("gs://") or Path(target).exists():
+            from utils.dataset import read_bytes
 
-        return json.loads(read_bytes(target))
+            return json.loads(read_bytes(target))
 
     local_path = Path("data/awp_code_templates/index.json")
     if local_path.exists():

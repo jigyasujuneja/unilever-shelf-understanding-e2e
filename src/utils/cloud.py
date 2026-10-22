@@ -26,7 +26,23 @@ from utils import dataset
 from utils.llm import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_FILES = ["Dockerfile", "pyproject.toml", "README.md", "config.yaml", "gt-mapping.yml", "src", "experiments", "scripts"]
+SOURCE_FILES = [
+    "Dockerfile",
+    "pyproject.toml",
+    "README.md",
+    "config.yaml",
+    "gt-mapping.yml",
+    "src",
+    "experiments",
+    "scripts",
+    "docs",
+    "tests",
+    "data/awp_code_templates",
+    "data/hul_talkers_golden",
+    "data/mt_json_golden",
+    "data/gtmerch_golden",
+    "data/hul_golden",
+]
 
 
 def _session() -> AuthorizedSession:
@@ -305,7 +321,7 @@ def deploy_ui(image: str | None = None, log=print) -> str:
     primary_name = cr.get("service", "shelf-ui")
     services = list(dict.fromkeys([primary_name, "perfect-store-control-plane"]))
     if gcp.get("results") and Path(runner.RESULTS_DIR).is_dir() and any(Path(runner.RESULTS_DIR).glob("*/summary.json")):
-        pushed = runner.push(gcp["results"], overwrite=True, prune_remote=False)
+        pushed = runner.push(gcp["results"], overwrite=True, prune_remote=True)
         log(f"Pushed {pushed} local run(s) + experiments_registry.json + qc_audit_report.json to {gcp['results']}")
     s = _session()
     image = image or build_image(s, project, region, log)
@@ -320,6 +336,19 @@ def deploy_ui(image: str | None = None, log=print) -> str:
                 "args": ["serve", "--pull", "--host", "0.0.0.0", "--port", "8080"],
                 "ports": [{"containerPort": 8080}],
                 "resources": {"limits": {"cpu": "2", "memory": "4Gi"}},
+                "startupProbe": {
+                    "httpGet": {"path": "/api/v2/health", "port": 8080},
+                    "initialDelaySeconds": 1,
+                    "timeoutSeconds": 5,
+                    "periodSeconds": 5,
+                    "failureThreshold": 24,
+                },
+                "livenessProbe": {
+                    "httpGet": {"path": "/api/v2/health", "port": 8080},
+                    "timeoutSeconds": 5,
+                    "periodSeconds": 30,
+                    "failureThreshold": 3,
+                },
             }],
         },
     }

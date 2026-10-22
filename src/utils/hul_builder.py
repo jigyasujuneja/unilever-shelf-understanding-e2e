@@ -1182,9 +1182,10 @@ def export_golden_rpc_manifest(
         classes[cid] = {"sku_id": idx, **class_meta[cls_key]}
         gal_pool = sorted(by_cls_split[cls_key]["gallery"], key=lambda x: str(x["canonical_uri"]))
         if not gal_pool:
-            fallback = by_cls_split[cls_key]["val"] + by_cls_split[cls_key]["test"]
-            if fallback:
-                gal_pool = [fallback[0]]
+            raise RuntimeError(
+                f"Zero-leakage invariant violated: class {cls_key!r} (sku_id={idx}) has 0 train/gallery references; "
+                "refusing to populate gallery from val or test splits."
+            )
         step = max(1, len(gal_pool) // max(1, refs_per_class))
         gallery[cid] = [
             str(gal_pool[i]["canonical_uri"])

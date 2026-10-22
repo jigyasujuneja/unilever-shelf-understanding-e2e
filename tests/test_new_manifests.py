@@ -62,9 +62,10 @@ def test_awp_code_templates_index() -> None:
 
 
 def test_hul_talkers_golden_zero_outlet_overlap_and_valid_boxes() -> None:
-    root = Path("data/hul_talkers_golden")
-    assert (root / "rpc.json").exists()
-    mf = json.loads((root / "rpc.json").read_text(encoding="utf-8"))
+    from utils.dataset import data_root, read_bytes
+
+    root_str = str(Path("data/hul_talkers_golden")) if Path("data/hul_talkers_golden/rpc.json").exists() else data_root("hul_talkers_golden")
+    mf = json.loads(read_bytes(f"{root_str}/rpc.json").decode("utf-8"))
 
     assert set(mf["classes"].keys()) == {"1", "2", "3"}
     for cid, expected in TALKER_CLASSES.items():
@@ -76,9 +77,7 @@ def test_hul_talkers_golden_zero_outlet_overlap_and_valid_boxes() -> None:
     classes_by_split: dict[str, set[int]] = {}
 
     for sp in ("train", "val", "test"):
-        jsonl_path = root / f"{sp}.jsonl"
-        assert jsonl_path.exists()
-        rows = parse_split_jsonl(jsonl_path.read_text(encoding="utf-8"))
+        rows = parse_split_jsonl(read_bytes(f"{root_str}/{sp}.jsonl").decode("utf-8"))
         assert len(rows) == len(mf["splits"][sp])
         assert len(rows) > 0
 
@@ -106,7 +105,7 @@ def test_hul_talkers_golden_zero_outlet_overlap_and_valid_boxes() -> None:
         outlets_by_split[sp] = outlets
         md5s_by_split[sp] = md5s
         classes_by_split[sp] = cls_seen
-        loaded = load_rpc(sp, str(root))
+        loaded = load_rpc(sp, root_str)
         assert len(loaded) == len(rows)
 
     assert not (outlets_by_split["train"] & outlets_by_split["val"])
@@ -123,9 +122,10 @@ def test_hul_talkers_golden_zero_outlet_overlap_and_valid_boxes() -> None:
 
 
 def test_mt_json_golden_zero_outlet_overlap_and_valid_boxes() -> None:
-    root = Path("data/mt_json_golden")
-    assert (root / "rpc.json").exists()
-    mf = json.loads((root / "rpc.json").read_text(encoding="utf-8"))
+    from utils.dataset import data_root, read_bytes
+
+    root_str = str(Path("data/mt_json_golden")) if Path("data/mt_json_golden/rpc.json").exists() else data_root("mt_json_golden")
+    mf = json.loads(read_bytes(f"{root_str}/rpc.json").decode("utf-8"))
     classes = mf["classes"]
     assert len(classes) > 100
 
@@ -134,9 +134,7 @@ def test_mt_json_golden_zero_outlet_overlap_and_valid_boxes() -> None:
     total_rows = 0
 
     for sp in ("train", "val", "test"):
-        jsonl_path = root / f"{sp}.jsonl"
-        assert jsonl_path.exists()
-        rows = parse_split_jsonl(jsonl_path.read_text(encoding="utf-8"))
+        rows = parse_split_jsonl(read_bytes(f"{root_str}/{sp}.jsonl").decode("utf-8"))
         assert len(rows) == len(mf["splits"][sp])
         assert len(rows) > 0
         total_rows += len(rows)
@@ -160,7 +158,7 @@ def test_mt_json_golden_zero_outlet_overlap_and_valid_boxes() -> None:
 
         outlets_by_split[sp] = outlets
         md5s_by_split[sp] = md5s
-        loaded = load_rpc(sp, str(root))
+        loaded = load_rpc(sp, root_str)
         assert len(loaded) == len(rows)
 
     assert not (outlets_by_split["train"] & outlets_by_split["val"])

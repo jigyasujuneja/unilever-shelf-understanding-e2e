@@ -322,27 +322,9 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "leaderboard":
         print_leaderboard(runner.leaderboard(a.results))
     elif a.cmd == "serve":
-        import threading
-
         from utils.server import serve
 
-        eff_results = runner.resolve_results_dir(a.results)
-        if a.pull:
-            def _bg_initial_pull() -> None:
-                try:
-                    n = runner.pull(
-                        cfg["gcp"]["results"],
-                        eff_results,
-                        include_images=True,
-                        finalize_compute=False,
-                    )
-                    if n:
-                        print(f"Pulled {n} updated/pruned run(s) into {eff_results}/")
-                except Exception:
-                    pass
-
-            threading.Thread(target=_bg_initial_pull, daemon=True).start()
-        serve(a.host, a.port, eff_results, a.root, pull_src=cfg["gcp"]["results"] if a.pull else None, mode=a.mode)
+        serve(a.host, a.port, Path(a.results), a.root, pull_src=cfg["gcp"]["results"] if a.pull else None, mode=a.mode)
     elif a.cmd == "serve-cloud":
         from utils import cloud
 

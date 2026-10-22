@@ -728,12 +728,45 @@ APPROACH_INTUITIONS: dict[str, dict[str, Any]] = {
         "task_id": "TASK-E2E",
     },
     "shelf_merchandising_bay_e2e": {
-        "display_name": "Promo-Bay Merchandising Full-Shelf Spine with Pre-Embedding Bay Gate (EXP-54 + EXP-55 + EXP-57)",
+        "display_name": "Promo-Bay Merchandising Full-Shelf Spine with Pre-Embedding Bay Gate",
         "intuition": (
             "Scopes full-shelf detection to Class 0 promo display bays (WIN/CTU/MB2/MB3) before Stage 2 embedding, "
             "eliminating 61% of background shelf embeddings while running Unstarved Brand-Gate + Stage 6 Planogram/OOS."
         ),
         "task_id": "TASK-E2E",
+    },
+    "maxvit_classify": {
+        "display_name": "MaxViT-Tiny (timm maxvit_tiny_tf_224) Closed-Set Multi-Task Supervised Classifier",
+        "intuition": (
+            "Closed-set GPU supervised benchmark: fine-tunes a 31M-parameter MaxViT-Tiny multi-axis vision transformer across "
+            "5 classification heads (0 VLM calls). High in-distribution accuracy, but 99.9% train memorization (+14.9 pp train-test gap) "
+            "and 0% accuracy on unseen Day-0 SKUs without full retraining."
+        ),
+        "task_id": "TASK-CLS",
+    },
+    "promo_robotics_detect": {
+        "display_name": "Gemini Robotics-ER 2.0 Embodied Spatial Bay & Sachet Detector",
+        "intuition": (
+            "Uses embodied 2D/3D spatial pointing (gemini-robotics-er-2.0-preview) to trace tilted Class 0 display bays "
+            "and separate touching sachets by 3D pack seams."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "promo_asset_stage1_crop_detect": {
+        "display_name": "Bay-First Native-Res Crop + Dual-Class SKU Detector",
+        "intuition": (
+            "Detects Class 0 Unilever display bays on the full photo, then crops each bay at native camera resolution "
+            "to localize small sachets and back-row packs."
+        ),
+        "task_id": "TASK-DET",
+    },
+    "hf_clm_clef_cascade_gpu": {
+        "display_name": "Open-Source HuggingFace CLM-v0.1-8B -> Cloudflare/clef-flash Cascade",
+        "intuition": (
+            "External open-weight GPU cascade: routes crops through Contrastive-LM/CLM-v0.1-8B and escalates low-margin crops "
+            "to Cloudflare/clef-flash on Vertex AI L4 GPUs."
+        ),
+        "task_id": "TASK-RET",
     },
 }
 

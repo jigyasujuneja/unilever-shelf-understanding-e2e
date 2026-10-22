@@ -56,6 +56,7 @@ def test_vlm_response_cache_save_and_load_roundtrip(tmp_path: Path):
 
 def test_runner_checkpoint_resume_skips_completed_rows(fake_root, tmp_path: Path, monkeypatch):
     from conftest import OracleLLM
+
     import runner
 
     ckpt_file = tmp_path / "ckpt.jsonl"

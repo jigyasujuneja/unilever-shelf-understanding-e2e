@@ -966,7 +966,7 @@ def paired_mcnemar_test(
             if not iid:
                 continue
             labels = r.get("labels")
-            if isinstance(labels, list) and labels and any(isinstance(l, dict) and l.get("gt") is not None for l in labels):
+            if isinstance(labels, list) and labels and any(isinstance(lbl, dict) and lbl.get("gt") is not None for lbl in labels):
                 for idx, lab in enumerate(labels):
                     if not isinstance(lab, dict) or lab.get("gt") is None:
                         continue

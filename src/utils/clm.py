@@ -767,4 +767,35 @@ def zoom_multi_sheet_saliency_diff(
     return out
 
 
+def compute_catalog_sha256(catalog: dict[int, dict] | None, gallery_paths: list[str] | None = None) -> str:
+    """Compute a 16-char deterministic SHA-256 fingerprint of the active SKU catalog & gallery paths for MLOps index parity."""
+    import hashlib
+    import json
 
+    h = hashlib.sha256()
+    if catalog:
+        for cid in sorted(catalog):
+            meta = catalog[cid] or {}
+            h.update(
+                json.dumps(
+                    {
+                        "sku_id": cid,
+                        "basepack_id": meta.get("basepack_id"),
+                        "brand": meta.get("brand"),
+                        "packaging_type": meta.get("packaging_type"),
+                    },
+                    sort_keys=True,
+                ).encode("utf-8")
+            )
+    if gallery_paths:
+        for p in sorted(gallery_paths):
+            h.update(str(p).encode("utf-8"))
+    return h.hexdigest()[:16]
+
+
+def compute_ood_low_cosine_rate(top1_cosines: list[float], threshold: float = 0.65) -> float:
+    """Compute fraction of query facings with top-1 catalog cosine below ``threshold`` (0.65) for OOD packaging drift alerts."""
+    if not top1_cosines:
+        return 0.0
+    low = sum(1 for c in top1_cosines if float(c) < threshold)
+    return round(low / float(len(top1_cosines)), 4)

@@ -140,6 +140,7 @@ def get_completed_keys() -> set[tuple[str, str, str, str, int]]:
     """Return (dataset, split, approach, model, limit) tuples already completed in GCS results."""
     import json
     from pathlib import Path
+
     import runner
 
     cfg = load_config()
@@ -224,7 +225,9 @@ def run_batch_resilient(
 def sync_expanded_manifests_and_cache_to_gcs() -> None:
     """Upload expanded data/* manifests (.json + .jsonl) and gallery_path_vec_cache.pkl to GCS."""
     from pathlib import Path
+
     from google.cloud import storage  # type: ignore[attr-defined]
+
     from utils.llm import ensure_gcloud_auth_fallback
 
     ensure_gcloud_auth_fallback()

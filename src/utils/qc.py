@@ -577,6 +577,39 @@ def run_12_gate_qc(
         "sample_violations": g14_violations[:5],
     })
 
+    # --- Gate 15: zero_synthetic_fallbacks_and_zero_official_errors ---
+    g15_violations: list[str] = []
+    server_src = Path("src/utils/server.py").read_text()
+    hul_builder_src = Path("src/utils/hul_builder.py").read_text()
+    if "_v2_dummy_gallery" in server_src:
+        g15_violations.append("server.py still contains synthetic _v2_dummy_gallery")
+    if "_fallback_schematic_jpeg" in server_src:
+        g15_violations.append("server.py still contains synthetic _fallback_schematic_jpeg")
+    if 'by_cls_split[cls_key]["val"] + by_cls_split[cls_key]["test"]' in hul_builder_src:
+        g15_violations.append("hul_builder.py still contains val/test gallery fallback")
+    try:
+        import runner as _runner_mod
+
+        lb_runs = _runner_mod.leaderboard(results_dir) if results_dir.exists() else []
+        for r_item in lb_runs:
+            if isinstance(r_item.get("rank"), int) and int(r_item.get("errors", 0)) > 0:
+                g15_violations.append(
+                    f"Official ranked run {r_item.get('run_id')} has errors={r_item.get('errors')} (rank={r_item.get('rank')})"
+                )
+            if int(r_item.get("errors", 0)) > 0 and int(r_item.get("errors", 0)) == int(r_item.get("images", 0)):
+                g15_violations.append(
+                    f"100%-errored dead run {r_item.get('run_id')} remains in {results_dir}"
+                )
+    except Exception as exc:
+        g15_violations.append(f"leaderboard zero-error check failed: {exc}")
+    gates.append({
+        "gate_id": 15,
+        "name": "zero_synthetic_fallbacks_and_zero_official_errors",
+        "passed": len(g15_violations) == 0,
+        "violations_count": len(g15_violations),
+        "sample_violations": g15_violations[:5],
+    })
+
     passed_count = sum(1 for g in gates if g["passed"])
     return {
         "all_passed": passed_count == len(gates),

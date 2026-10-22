@@ -26,11 +26,7 @@ from approaches.market_share.detection.single_pass_dedup import SinglePassDedup
 from approaches.market_share.end_to_end.detect_identify import GeminiBoxDetector
 from approaches.market_share.retrieval.clef_standalone import (
     ClefContrastiveMetadata,
-    ClefPackCrownFusion,
     ClefStandaloneRetrieval,
-)
-from approaches.merchandising.promo_detection.promo_asset_sku_detect import (
-    PromoAssetPlankTilingDetect,
 )
 from approaches.market_share.retrieval.clm_info_nce import (
     HierarchicalClmJev,
@@ -43,6 +39,9 @@ from approaches.market_share.retrieval.clm_info_nce import (
 )
 from approaches.market_share.retrieval.clm_standalone import ClmStandaloneRetrieval
 from approaches.market_share.retrieval.embedding_retrieval import MODEL
+from approaches.merchandising.promo_detection.promo_asset_sku_detect import (
+    PromoAssetPlankTilingDetect,
+)
 from utils.embeddings import MODELS
 from utils.photometry import dual_buffer_shelf_photometry
 
@@ -470,6 +469,7 @@ class _GeneralizableHierarchicalSpineJev(HierarchicalClmJev):
 
     def setup(self, config: dict, ctx: Context) -> None:
         from collections import defaultdict
+
         from approaches.market_share.classification.embedding_text_match import unit
         from utils import dataset as ds_mod
 
@@ -540,6 +540,7 @@ class _GeneralizableHierarchicalSpineJev(HierarchicalClmJev):
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None
     ) -> tuple[list[tuple[float, int, str]], list[float], Image.Image]:
         import numpy as np
+
         from approaches.market_share.classification.embedding_text_match import unit
         from approaches.market_share.retrieval.jev_laya_hybrid import LAB_WEIGHT, K, _dot
         from utils.clm import (

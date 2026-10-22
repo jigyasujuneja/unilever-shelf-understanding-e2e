@@ -136,25 +136,25 @@ const DATASETS = {
     isGolden: true,
     useCase: "merchandising",
     channel: "GT",
-    chipLabel: "GT Store Visit Sessions (Multi-Photo)",
-    pillLabel: "GT · Store Visit Sessions (gt_hul_sessions)",
+    chipLabel: "GT Store Visit Sessions · 100 Bays",
+    pillLabel: "GT · Store Visit Sessions (100)",
     unitType: "shelf",
-    shortDesc: "GT Merchandising · Multi-Facing Store Visit Strips",
+    shortDesc: "GT Merchandising · 100 Multi-Facing Store Visit Strips",
     splits: "150 train · 50 val · 100 test",
   },
   hul_sessions: {
     isGolden: true,
     useCase: "merchandising",
     channel: "GT",
-    chipLabel: "GT Store Visit Sessions (Multi-Photo)",
-    pillLabel: "GT · Store Visit Sessions",
+    chipLabel: "MT/GT Session Pilot · 25 Bays",
+    pillLabel: "MT/GT · Session Pilot (25)",
     unitType: "shelf",
-    shortDesc: "GT Merchandising · Multi-Facing Store Visit Strips",
-    splits: "150 train · 50 val · 100 test",
+    shortDesc: "Merchandising · 25-Strip Multi-Photo Session Pilot",
+    splits: "50 train · 25 val · 25 test",
   },
   hul_promos: {
     isGolden: true,
-    useCase: "merchandising",
+    useCase: "promo_talkers",
     channel: "MT",
     chipLabel: "MT Toker Promo Packs · 240 SKUs",
     pillLabel: "MT · Toker Promo (240)",
@@ -164,7 +164,7 @@ const DATASETS = {
   },
   hul_talkers_golden: {
     isGolden: true,
-    useCase: "merchandising",
+    useCase: "promo_talkers",
     channel: "MT",
     chipLabel: "Shelf Talkers & Price Tags · 3 Classes",
     pillLabel: "MT/GT · Talkers & Price Tags",
@@ -181,37 +181,51 @@ const DATASETS = {
 const SHORT_APPROACH_NAMES = {
   distilled_yolo_onnx: "Dual-ONNX CPU Shelf & Bay Detector",
   distilled_yolo_960_softnms: "960px Aspect-Aware Soft-NMS CPU Detector",
-  distilled_yolo_stage0_clahe: "Stage 0 Luminance CLAHE + 960px Soft-NMS CPU Detector (EXP-43 / EXP-49)",
+  distilled_yolo_stage0_clahe: "Stage 0 Luminance CLAHE + Distilled ONNX CPU Detector",
+  distilled_yolo_960_stage0_clahe: "Stage 0 Luminance CLAHE + 960px Soft-NMS CPU Detector",
   yolo_sku110k_onnx: "Single-Pass ONNX CPU Shelf Detector",
   single_pass_dedup: "Single-Pass Gemini Full-Shelf Detector",
   tiled_dedup: "Tiled Multi-Pass Gemini Detector",
-  clm_standalone: "Base CLM Retrieval: Zero-VLM gemini-embedding-2 + CIELAB Color Scorer",
+  clm_standalone: "Fast Photo Match: Zero-VLM gemini-embedding-2 + CIELAB Color Scorer",
+  clm_contrastive: "Contrastive Multi-View gemini-embedding-2 + Margin Gate",
   embedding_retrieval: "Nearest-Neighbor Embedding Baseline",
-  hierarchical_clm_jev: "Base JEV Cascade: 2-Stage Brand-Gated Embedding + Contact Sheet",
-  outlet_scoped_clm_jev: "Store-Segment Scoped Hybrid Matcher (EXP-20)",
-  tube_midband_jev: "Cylindrical Tube Unwarp + Variant Strip (EXP-21)",
-  row_neighbor_prior_jev: "1D Shelf-Row Neighbor Category Prior (EXP-22)",
-  shelf_height_size_prior_jev: "Shelf-Plank Relative Height Size Prior (EXP-23)",
-  session_overlap_dedup_jev: "Store-Visit Session Overlap Deduplicator (EXP-25)",
-  l8_hul_ultimate: "Lighting-Corrected + Taper + Contact Sheet",
-  clef_standalone: "Base CLEF Prompt: Bottom-Band Weight Zoom + Contact Sheet",
-  clef_contrastive_metadata: "Base CLEF Prompt: Multi-Crop Contact Sheet + Catalog Diff Headers (EXP-28)",
-  sft_clm_clef_cascade: "Gemini 3.5-Lite LoRA SFT + Embedding Gate + Contact Sheet (EXP-29 / EXP-33)",
-  residual_infonce_clm_jev: "Residual InfoNCE Adapter + Calibrated Embedding Cascade (EXP-32)",
-  dinov3_classify: "Meta DINOv3 + CosFace SFT Classifier",
-  dinov3_hierarchical_sft: "Meta DINOv3 ViT-S/16 + 5-Level Taxonomic CosFace SFT (EXP-25)",
+  embedding_text_match: "Catalog Text-to-Image Embedding Baseline",
+  hierarchical_clm_jev: "2-Stage Brand-Gated Embedding + Contact-Sheet Verifier",
+  coarse_jev_laya: "Coarse Brand Router + Lighting-Corrected Contact Sheet",
+  jev_laya_global_wb: "Shades-of-Gray Illuminant Balance + Contact Sheet",
+  jev_laya_hybrid: "Shades-of-Gray + Container Taper + Contact Sheet",
+  jev_laya_zoom_strip: "Bottom-30% Weight Zoom Strip + Contact Sheet",
+  outlet_scoped_clm_jev: "Store-Segment Scoped Hybrid Matcher",
+  tube_midband_jev: "Cylindrical Tube Unwarp + Variant Strip",
+  row_neighbor_prior_jev: "1D Shelf-Row Neighbor Category Prior",
+  shelf_height_size_prior_jev: "Shelf-Plank Relative Height Size Prior",
+  session_overlap_dedup_jev: "Store-Visit Session Overlap Deduplicator",
+  l8_hul_ultimate: "Shades-of-Gray + Container Taper + Layer-5 Size Contact Sheet",
+  clef_standalone: "Bottom-Band Weight Zoom + Logprob Contact Sheet",
+  clef_contrastive_metadata: "Multi-Crop Contact Sheet + Catalog Diff Headers",
+  clef_aspect_scale_prior: "Aspect-Preserving Cap/Rim Crop + Projective Container Scale Prior",
+  clef_saliency_diff_zoom: "Self-Supervised Reference-Difference Saliency 2.5x Zoom Verifier",
+  clef_pack_crown_fusion: "Lidstone 3D Container Prior + Top-22% Crown & Layer-5 Size Verifier",
+  hybrid_pack_specialist_clef: "5-Attr Hybrid Cascade + Lidstone Container Prior + Crown/Saliency Zoom",
+  sft_clm_clef_cascade: "Gemini 3.5-Lite LoRA SFT + Embedding Gate + Contact Sheet",
+  residual_infonce_clm_jev: "Residual InfoNCE Adapter + Calibrated Embedding Cascade",
+  maxvit_classify: "MaxViT-Tiny (31M) Closed-Set Multi-Task GPU Classifier",
+  dinov3_classify: "Meta DINOv3 ViT-S/16 + CosFace SFT Classifier",
+  dinov3_hierarchical_sft: "Meta DINOv3 ViT-S/16 + 5-Level Taxonomic CosFace SFT",
   dinov3_triage: "Meta DINOv3 Confidence Triage + Selective Gemini 3.5 Flash-Lite",
   dinov3_vitb_hierarchical: "Meta DINOv3 ViT-B/16 (1,536-D) + 5-Level Taxonomic CosFace SFT",
   dinov3_vitb_detr_hierarchical: "E2E ONNX RT-DETR + Meta DINOv3 ViT-B/16 Hierarchical SFT",
   ijepa_hierarchical: "Meta I-JEPA ViT-H/14 (2,560-D) + 5-Level Taxonomic CosFace SFT",
-  vjepa2_hierarchical: "Meta V-JEPA 2 Self-Supervised Vision Backbone + SFT Hierarchical Head",
-  hf_clm_v01_8b_gpu: "Open-Source HuggingFace Contrastive-LM/CLM-v0.1-8B (EXP-26)",
-  hf_clef_flash_gpu: "Open-Source HuggingFace Cloudflare/clef-flash (EXP-26)",
-  hf_clm_clef_cascade_gpu: "Open-Source HuggingFace CLM-8B -> clef-flash Cascade (EXP-26)",
+  vjepa2_hierarchical: "Meta V-JEPA 2 ViT-L/16 + 5-Level Taxonomic CosFace SFT",
+  hf_clm_v01_8b_gpu: "Open-Source HuggingFace Contrastive-LM/CLM-v0.1-8B (GPU)",
+  hf_clef_flash_gpu: "Open-Source HuggingFace Cloudflare/clef-flash (GPU)",
+  hf_clef_27b_gpu: "Open-Source HuggingFace Cloudflare/clef-27b (GPU)",
+  hf_clm_clef_cascade_gpu: "Open-Source HuggingFace CLM-8B -> clef-flash Cascade (GPU)",
   cv_classify: "Legacy 3-Stage InceptionV3 Cascade (Brand → Pack → 7 Routed Variant Models)",
-  hybrid_classify: "2-Stage Hybrid Embedding Gate + Gemini 3.5 Flash-Lite Contact-Sheet Verifier (5-Attribute Cascade)",
-  hybrid_classify_sft: "2-Stage Hybrid Embedding Gate + LoRA SFT Gemini 3.5 Flash-Lite with Top-5 kNN Hints (5-Attribute Cascade)",
-  hybrid_classify_max: "2-Stage High-Precision Unanimous kNN Gate + Gemini Contact-Sheet Verifier (5-Attribute Cascade)",
+  hierarchy_classify: "Single-Pass Hierarchical VLM Taxonomy Baseline",
+  hybrid_classify: "2-Stage Hybrid Embedding Gate + Gemini 3.5 Flash-Lite Contact-Sheet Verifier",
+  hybrid_classify_sft: "2-Stage Hybrid Embedding Gate + LoRA SFT Gemini 3.5 Flash-Lite",
+  hybrid_classify_max: "2-Stage Unanimous kNN Gate + Gemini Contact-Sheet Verifier",
   clef_flash_decision: "CLEF Decision Model: Single-Token Logprob Decision Head on Shortlist",
   jev_laya_zscore_lid: "JEV Decision Model: Statistical Z-Score & LID Routing Gate + Contact Sheet",
   cold_start_lid_discovery: "Zero-Shot New-Launch SKU Discovery",
@@ -221,49 +235,58 @@ const SHORT_APPROACH_NAMES = {
   clef_flash_classify: "CLEF Decision Model: Weight-Zoom Single-Token 5-Level Classifier",
   clef_standalone_classify: "CLEF Decision Model: Logprob-Calibrated 5-Level Taxonomy Classifier",
   coarse_jev_gemini: "JEV Decision Model: Coarse-to-Fine Brand Router + Gemini Classifier",
-  gemini_classify: "Single-Pass Gemini 3.5 Flash-Lite 5-Attribute Classifier (Catalog-Grounded SFT / Base)",
+  gemini_classify: "Single-Pass Gemini 3.5 Flash-Lite 5-Attribute Classifier",
   stitched_classify: "Stitched Multi-Crop Gemini Classifier",
   stitched_e2e: "Stitched Multi-Crop End-to-End Pipeline",
-  shelf_hierarchical_clm_jev: "E2E CPU Detector + Brand-Gated Hybrid (EXP-45 MT Winner)",
+  gemini_e2e: "Single-Pass Gemini Full-Shelf End-to-End Baseline",
+  shelf_hierarchical_clm_jev: "E2E CPU Detector + Brand-Gated Hybrid Cascade",
   shelf_outlet_scoped_clm_jev: "E2E CPU Detector + Store-Scoped Hybrid",
   shelf_tube_midband_jev: "E2E CPU Detector + Tube Unwarp Verifier",
   shelf_row_neighbor_prior: "E2E CPU Detector + Row Neighbor Prior",
   shelf_height_size_prior: "E2E CPU Detector + Plank-Height Prior",
   shelf_960_softnms_e2e: "E2E 960px Soft-NMS + Brand-Gated Hybrid",
-  shelf_stage0_clahe_e2e: "E2E Dual-Buffer Stage 0 CLAHE + CPU Detector + Hybrid (EXP-49)",
-  shelf_gemini_detect_e2e: "E2E Stage 1 VLM Detector + Stage 2 Hybrid (EXP-49 Ablation)",
-  shelf_clef_metadata_e2e: "E2E Dual-Buffer CLAHE + CPU Detector + Contrastive CLEF Metadata (EXP-49 Winner)",
+  shelf_stage0_clahe_e2e: "E2E Dual-Buffer Stage 0 CLAHE + CPU Detector + Hybrid",
+  shelf_gemini_detect_e2e: "E2E Stage 1 VLM Detector + Stage 2 Hybrid",
+  shelf_clef_metadata_e2e: "E2E Dual-Buffer CLAHE + CPU Detector + Contrastive CLEF Metadata",
+  shelf_plank_tiling_e2e: "E2E Plank-Support & 2x2 Quadrant-Tiled Shelf Pipeline",
+  shelf_generalizable_spine_e2e: "Unified Non-Overfitting Full-Shelf Production Spine",
+  shelf_marketshare_generalizable_e2e: "Open-Shelf Market Share Full-Shelf Spine (Unstarved Brand-Gate + Row Consensus)",
+  shelf_merchandising_bay_e2e: "Promo-Bay Merchandising Full-Shelf Spine (Pre-Embedding Class-0 Bay Gate)",
   session_overlap_dedup_e2e: "E2E 960px Soft-NMS + Session Overlap Dedup",
   shelf_l8_ultimate: "E2E CPU Detector + Lighting + Row Prior",
   detect_l8_ultimate: "E2E Gemini Detector + Lighting Verifier",
   shelf_onnx_jev_laya: "E2E CPU Detector + Contrastive Contact Sheet",
   detect_onnx_jev_laya: "Single-Model ONNX + Contact Sheet",
   shelf_clm_standalone: "Zero-VLM E2E Shelf Pipeline (ONNX + Calibrated gemini-embedding-2)",
-  bay_planogram_verifier: "AWP Display Bay & Row Planogram Auditor (EXP-46)",
-  promo_asset_sku_detect: "Dual-Class Promo Bay + SKU Detector (EXP-34)",
-  promo_asset_stage1_crop_detect: "Bay-First Full-Res Crop + SKU Detector (EXP-39)",
-  promo_asset_stage0_clahe_detect: "Stage 0 Luminance CLAHE + Bay-First Detector (EXP-40 / EXP-43)",
-  promo_asset_stage15_clutter_detect: "Bay-First + Stage 0 CLAHE + Stage 1.5 Clutter Filter (EXP-41 Winner)",
-  promo_asset_awp_router_detect: "AWP Template Router + Bay-First Detector (EXP-42)",
-  promo_robotics_detect: "Gemini Robotics-ER 2.0 Dense Spatial Detector (EXP-38)",
-  talker_price_tag_detect: "3-Class Shelf Talker & Rail Price-Tag Detector (EXP-47 Winner)",
+  bay_planogram_verifier: "AWP Display Bay & Row Planogram Auditor",
+  promo_asset_sku_detect: "Dual-Class Promo Bay + SKU Detector",
+  promo_asset_bay_first_detect: "Bay-First Native-Res Crop + Plank Support Detector",
+  promo_asset_stage1_crop_detect: "Bay-First Native-Res Crop + Dual-Class SKU Detector",
+  promo_asset_stage0_clahe_detect: "Stage 0 Luminance CLAHE + Bay-First Detector",
+  promo_asset_stage15_clutter_detect: "Bay-First + Stage 0 CLAHE + Stage 1.5 3D-vs-2D Clutter Gate",
+  promo_asset_awp_router_detect: "AWP Fixture Archetype Router + Bay-First Detector",
+  promo_asset_plank_tiling_detect: "Physical Shelf-Plank Support Law + 2x2 Quadrant Tiling Detector",
+  promo_asset_bay_scoped_plank_detect: "AWP Bay Router + Physical Plank-Support Law + Pre-Embedding Bay Gate",
+  promo_robotics_detect: "Gemini Robotics-ER 2.0 Dense Spatial Detector",
+  promo_robotics_spatial_detect: "Gemini Robotics-ER 2.0 Embodied Spatial Bay & Sachet Detector",
+  talker_price_tag_detect: "3-Class Shelf Talker & Rail Price-Tag Detector",
   jev_promo_verifier: "Promo Banner Zoom + Gemini Verifier",
-  promo_ocr_zoom_verifier: "2x Top/Bottom Promo Strip Zoom + OCR Verifier (EXP-37 / EXP-48)",
+  promo_ocr_zoom_verifier: "2x Top/Bottom Promo Strip Zoom + OCR Verifier",
   clm_promo_matcher: "Zero-VLM Promo Embedding Matcher",
 };
 
 const USE_CASES = {
   market_share: {
     label: "1. Market Share (MT Supermarkets, Kirana Walls & Full Catalog)",
-    subtitle: "MT Supermarket gondolas (mt_json_golden · EXP-43/44/45), Kirana store walls (ms_json_golden · EXP-49), and 5-level SKU/Brand/Variant/Pack silos (hul_golden, hul_brands · EXP-35, hul_variants, hul_packs).",
+    subtitle: "MT Supermarket gondolas (mt_json_golden · EXP-43/44/45), Kirana store walls (ms_json_golden · EXP-49/54/55), and 5-level SKU/Brand/Variant/Pack silos (hul_golden · EXP-28/51/52/58, hul_variants, hul_packs, hul_brands · EXP-35).",
   },
   merchandising: {
     label: "2. GT & MT Merchandising, Planogram & Display Bays",
-    subtitle: "GT display bays & Stage 1.5 clutter filtering (gtmerch_golden · EXP-41), AWP planogram & OOS void audit (EXP-46), multi-photo store visit sessions (gt_hul_sessions), talkers (hul_talkers_golden · EXP-47), and promos (hul_promos).",
+    subtitle: "GT branded display bays & plank-support detection (gtmerch_golden · EXP-41/53/55), Bay-Gated full-shelf E2E (EXP-57/59), AWP planogram & OOS void audit (EXP-46), and multi-photo store visit sessions (gt_hul_sessions · EXP-56 & hul_sessions).",
   },
   promo_talkers: {
     label: "3. Shelf Talkers, Rail Price Tags & Promotional Packs",
-    subtitle: "Dedicated audit workspace for 3-class shelf talkers & rail price tags (hul_talkers_golden · EXP-47: 85.0% F2, 89.9% Recall) and 240 MT Toker promotional & multipack SKUs (hul_promos · EXP-37/48).",
+    subtitle: "Dedicated audit workspace for 3-class shelf talkers & rail price tags (hul_talkers_golden · EXP-47: 90.0% F2, 93.4% Recall) and 240 MT Toker promotional & multipack SKUs (hul_promos · EXP-37/48: 90.0% 3-Attr, 85.0% 5-Attr).",
   },
 };
 
@@ -280,11 +303,15 @@ const DS_ORDER = [
   "hul_talkers_golden",
   "hul_promos",
 ];
-const MERCH_DATASETS = new Set(["gtmerch_golden", "gt_hul_sessions", "hul_sessions", "hul_promos", "hul_talkers_golden"]);
+const MERCH_DATASETS = new Set(["gtmerch_golden", "gt_hul_sessions", "hul_sessions"]);
 const PROMO_TALKER_DATASETS = new Set(["hul_talkers_golden", "hul_promos"]);
 const byDsOrder = (a, b) => (DS_ORDER.indexOf(a) + 1 || 99) - (DS_ORDER.indexOf(b) + 1 || 99);
 const taskOf = (r) => {
   const raw = r.task || "detection";
+  const ds = r.dataset || "";
+  if (DATASETS[ds]?.unitType === "shelf" && (raw === "retrieval" || raw === "classification")) {
+    return "end_to_end";
+  }
   if (raw === "retrieval" || raw === "classification") {
     return "classification";
   }
@@ -292,9 +319,10 @@ const taskOf = (r) => {
 };
 const useCaseOf = (r) => {
   const ds = r.dataset || "";
-  if (r.task === "planogram_compliance" || r.task === "promo_detection") return "merchandising";
+  if (PROMO_TALKER_DATASETS.has(ds) || r.task === "promo_detection") return "promo_talkers";
   if (MERCH_DATASETS.has(ds)) return "merchandising";
   if (DATASETS[ds]?.useCase) return DATASETS[ds].useCase;
+  if (r.task === "planogram_compliance") return "merchandising";
   return r.use_case || "market_share";
 };
 const infoOf = (t) => TASKS[t] || { shortLabel: t, tip: "", scoreLabel: "Score", scoreKey: "accuracy" };
@@ -311,88 +339,146 @@ function getEvalScopeMeta(r) {
   const ef = Array.isArray(r.evaluated_fields) ? r.evaluated_fields : [];
   const fa = r.field_accuracy || {};
   const ds = String(r.dataset || "");
+  const ap = String(r.approach || "");
   const has3 = fa.brand != null && fa.category != null && fa.packaging_type != null;
   const mean3 = has3 ? (Number(fa.brand) + Number(fa.category) + Number(fa.packaging_type)) / 3.0 : null;
+  const valChip =
+    r.split === "val"
+      ? `<span style="display:inline-block;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Validation split run used for threshold/rubric calibration; production winners are crowned strictly on blind Test / Test 5K splits.">Val Calibration Split</span>`
+      : "";
   const isOracleBrand = String(r.model || "").includes("oracle_brand") || String(r.run_id || "").includes("oracle_brand");
   if (isOracleBrand) {
     return {
       isPartial: true,
       isOracleDiagnostic: true,
+      isClosedSetResearch: false,
       nAttrs: 4,
       scoreLabel: "Oracle GT Brand (Variant Only)",
-      badgeHtml: `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Unchained Oracle-Brand Diagnostic: feeds 100% Ground-Truth Brand into legacy variant/pack models (Pack Type = 60.2%, compound 5-Attr = 51.0%). Not an end-to-end model.">Oracle GT Brand Diagnostic</span>`,
+      badgeHtml: `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Unchained Oracle-Brand Diagnostic: feeds 100% Ground-Truth Brand into legacy variant/pack models (Pack Type = 60.2%, compound 5-Attr = 51.0%). Not an end-to-end model.">⚠️ Oracle GT Brand Diagnostic</span>${valChip}`,
+      mean3,
+    };
+  }
+  const isOracleBox = Boolean(
+    r.is_oracle_box_diagnostic ||
+      (DATASETS[ds]?.unitType === "shelf" && (r.raw_task === "retrieval" || r.task === "retrieval"))
+  );
+  if (isOracleBox) {
+    return {
+      isPartial: false,
+      isOracleDiagnostic: true,
+      isClosedSetResearch: false,
+      nAttrs: 5,
+      scoreLabel: r.primary_score_label || "Oracle GT-Box 3-Attr",
+      rawScoreNote: r.raw_primary_score_label || null,
+      badgeHtml: `<span style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Stage-2-only diagnostic evaluated on pre-cropped ground-truth bounding boxes without Stage-1 shelf detection or Stage-1.5 Class-0 Bay Gating. Excluded from End-to-End Production Winner ranking.">⚠️ Oracle GT-Box Stage-2 Diagnostic (No Stage-1 Detector)</span>${valChip}`,
+      mean3,
+    };
+  }
+  const isClosedGpu = Boolean(
+    r.is_closed_set_gpu ||
+      ap === "maxvit_classify" ||
+      ap === "vjepa2_hierarchical" ||
+      ap === "ijepa_hierarchical" ||
+      ap.startsWith("dinov3_") ||
+      ap.startsWith("hf_")
+  );
+  if (isClosedGpu) {
+    return {
+      isPartial: false,
+      isOracleDiagnostic: false,
+      isClosedSetResearch: true,
+      nAttrs: 5,
+      scoreLabel: r.primary_score_label || "5-Attr Closed-Set",
+      rawScoreNote: r.raw_primary_score_label || null,
+      badgeHtml: `<span style="display:inline-block;background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Closed-Set Supervised / Open-Weight GPU Research Benchmark: 99.9% train memorization and 0% accuracy on unseen Day-0 SKU launches without full retraining.">🔬 Closed-Set GPU Benchmark (0% Unseen SKUs · Retrain Req.)</span>${valChip}`,
       mean3,
     };
   }
   if (r.primary_score_label) {
     return {
       isPartial: false,
+      isOracleDiagnostic: false,
+      isClosedSetResearch: false,
       nAttrs: 5,
       scoreLabel: r.primary_score_label,
       rawScoreNote: r.raw_primary_score_label || null,
-      badgeHtml: `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluated inside human-annotated shelf zones / target bays while preserving Beyond-GT discovery">${esc(r.primary_score_label)}</span>`,
+      badgeHtml: `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluated inside human-annotated shelf zones / target bays while preserving Beyond-GT discovery">${esc(r.primary_score_label)}</span>${valChip}`,
       mean3,
     };
   }
   if (ds === "hul_brands" && ef.includes("brand") && ef.includes("is_hul")) {
     return {
       isPartial: false,
+      isOracleDiagnostic: false,
+      isClosedSetResearch: false,
       nAttrs: 2,
       scoreLabel: "Brand + HUL Exact",
-      badgeHtml: `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates exact Brand (953 classes) + L1 HUL/Rival ownership">953-Brand + HUL</span>`,
+      badgeHtml: `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates exact Brand (953 classes) + L1 HUL/Rival ownership">953-Brand + HUL</span>${valChip}`,
       mean3,
     };
   }
   if (ds === "hul_packs" && ef.includes("packaging_type")) {
     return {
       isPartial: false,
+      isOracleDiagnostic: false,
+      isClosedSetResearch: false,
       nAttrs: 2,
       scoreLabel: "46-Class Cat+Pack",
-      badgeHtml: `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates 46 Category × Packaging Type pairs">46-Class Pack Domain</span>`,
+      badgeHtml: `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates 46 Category × Packaging Type pairs">46-Class Pack Domain</span>${valChip}`,
       mean3,
     };
   }
   if (ef.length === 1 && ef[0] === "brand") {
     return {
       isPartial: true,
+      isOracleDiagnostic: false,
+      isClosedSetResearch: false,
       nAttrs: 1,
       scoreLabel: "1-Attr (Brand Only)",
-      badgeHtml: `<span style="display:inline-block;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates ONLY Brand (1 attribute); does not predict Pack Type, Category, Variant, or SKU">1-Attr Only: Brand</span>`,
+      badgeHtml: `<span style="display:inline-block;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates ONLY Brand (1 attribute); does not predict Pack Type, Category, Variant, or SKU">1-Attr Only: Brand</span>${valChip}`,
       mean3: null,
     };
   }
   if (ef.length === 2) {
     return {
       isPartial: true,
+      isOracleDiagnostic: false,
+      isClosedSetResearch: false,
       nAttrs: 2,
       scoreLabel: "2-Attr (Cat+Pack)",
-      badgeHtml: `<span style="display:inline-block;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates ONLY Category + Pack Type (2 attributes); does not predict Brand, Variant, or SKU">2-Attr Only: Cat+Pack</span>`,
+      badgeHtml: `<span style="display:inline-block;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates ONLY Category + Pack Type (2 attributes); does not predict Brand, Variant, or SKU">2-Attr Only: Cat+Pack</span>${valChip}`,
       mean3: null,
     };
   }
   if (ef.length === 3) {
     return {
       isPartial: true,
+      isOracleDiagnostic: false,
+      isClosedSetResearch: false,
       nAttrs: 3,
       scoreLabel: "3-Attr (B/C/P Only)",
-      badgeHtml: `<span style="display:inline-block;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates ONLY 3 attributes (Brand, Category, Pack Type); does not predict L4 Variant or L5 Exact SKU">3-Attr Only (No Variant/SKU)</span>`,
+      badgeHtml: `<span style="display:inline-block;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates ONLY 3 attributes (Brand, Category, Pack Type); does not predict L4 Variant or L5 Exact SKU">3-Attr Only (No Variant/SKU)</span>${valChip}`,
       mean3,
     };
   }
   if (taskOf(r) === "classification" || r.task === "retrieval" || r.task === "classification") {
     return {
       isPartial: false,
+      isOracleDiagnostic: false,
+      isClosedSetResearch: false,
       nAttrs: 5,
       scoreLabel: "5-Attr Exact (All 5)",
-      badgeHtml: `<span style="display:inline-block;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates all 5 Unilever hierarchy levels: L1 HUL/Rival, L2 Category, L2 Pack Type, L3 Brand, L4 Variant & L5 Exact SKU">Full 5-Attr Exact</span>`,
+      badgeHtml: `<span style="display:inline-block;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;" title="Evaluates all 5 Unilever hierarchy levels: L1 HUL/Rival, L2 Category, L2 Pack Type, L3 Brand, L4 Variant & L5 Exact SKU">Full 5-Attr Exact</span>${valChip}`,
       mean3,
     };
   }
   return {
     isPartial: false,
+    isOracleDiagnostic: false,
+    isClosedSetResearch: false,
     nAttrs: 5,
     scoreLabel: infoOf(taskOf(r)).scoreLabel,
-    badgeHtml: "",
+    badgeHtml: valChip,
     mean3,
   };
 }
@@ -846,6 +932,18 @@ async function showUseCaseBoard(useCase = "market_share") {
     useCase === "merchandising" &&
     (boardSubView === "planogram_oos" || boardTaskFilter === "planogram_compliance");
 
+  const matchesSampleSize = (r, szF) => {
+    if (!szF || szF === "all") return true;
+    const ds = r.dataset || "hul_golden";
+    const isShelfDs = DATASETS[ds]?.unitType === "shelf";
+    const nSamples = getRunSampleCount(r);
+    const nImgs = Number(r.images || 0);
+    if (szF === "5000") return isShelfDs ? nImgs >= 100 || nSamples >= 3000 : nSamples >= 5000;
+    if (szF === "1000") return isShelfDs ? nImgs >= 25 || nSamples >= 600 : nSamples >= 1000;
+    if (szF === "500") return isShelfDs ? nImgs >= 15 || nSamples >= 300 : nSamples >= 500;
+    return true;
+  };
+
   const runFilterPass = (tkF, dsF, spF, szF) =>
     ucRuns.filter((r) => {
       if (isPlanoView && tkF === "all") {
@@ -863,10 +961,7 @@ async function showUseCaseBoard(useCase = "market_share") {
       }
       if (dsF !== "all" && (r.dataset || "hul_golden") !== dsF) return false;
       if (spF !== "all" && (r.split || "test") !== spF) return false;
-      const nSamples = getRunSampleCount(r);
-      if (szF === "5000" && nSamples < 5000) return false;
-      if (szF === "1000" && nSamples < 1000) return false;
-      if (szF === "500" && nSamples < 500) return false;
+      if (!matchesSampleSize(r, szF)) return false;
       return true;
     });
 
@@ -897,8 +992,8 @@ async function showUseCaseBoard(useCase = "market_share") {
     filtered = runFilterPass(boardTaskFilter, boardDsFilter, boardSplitFilter, boardSampleSizeFilter);
   }
 
-  // Helper: only our modern hybrid/CLEF/CLM/JEV/ONNX/SFT architectures on full task taxonomy qualify as Use-Case Task Winners
-  // (excludes Phase-1 legacy .h5 baselines, partial 1-attr/2-attr diagnostic runs, and naive zero-shot VLM baselines)
+  // Helper: only our open-catalog blind test/test_5k production architectures on full task taxonomy qualify as Use-Case Task Winners
+  // (excludes Phase-1 legacy .h5 baselines, partial 1-attr/2-attr runs, Oracle diagnostics, closed-set GPU research runs, and val calibration runs)
   const NAIVE_BASELINES = new Set([
     "cv_classify",
     "hierarchy_classify",
@@ -910,29 +1005,25 @@ async function showUseCaseBoard(useCase = "market_share") {
     const ap = String(r.approach || "");
     const mod = String(r.model || "");
     const tk = taskOf(r);
+    const sp = String(r.split || "test");
+    if (sp !== "test" && sp !== "test_5k") return false;
+    const scope = getEvalScopeMeta(r);
+    if (scope.isOracleDiagnostic || scope.isClosedSetResearch || scope.isPartial) return false;
     if (NAIVE_BASELINES.has(ap) || mod.includes(".h5") || mod.includes("keras")) return false;
     if ((ap === "single_pass_dedup" || ap === "tiled_dedup") && tk !== "detection") return false;
     if (Array.isArray(r.evaluated_fields) && r.evaluated_fields.length > 0 && r.evaluated_fields.length < 5) {
-      return false;
+      const ds = String(r.dataset || "");
+      if (ds !== "hul_brands" && ds !== "hul_packs") return false;
     }
+    const isShelfDs = DATASETS[r.dataset || "hul_golden"]?.unitType === "shelf";
+    if (!isShelfDs && Number(r.p50_latency_s || 0) > 30.0) return false;
+    if (isShelfDs && Number(r.images || 0) < 15) return false;
+    if (r.dataset === "hul_promos" && Number(r.images || 0) < 50) return false;
     return true;
   };
 
-  const USE_CASE_TASK_WINNER_LABELS = {
-    market_share__detection: "🏆 MT Shelf Localization Winner",
-    market_share__classification: "🏆 MT 5-Attr SKU Classification Winner",
-    market_share__retrieval: "🏆 MT Catalog Retrieval Winner",
-    market_share__end_to_end: "🏆 MT Full-Shelf E2E Winner",
-    merchandising__detection: "🏆 Merch Bay Detection Winner",
-    merchandising__retrieval: "🏆 Merch Session Retrieval Winner",
-    merchandising__end_to_end: "🏆 Merch Session Dedup E2E Winner",
-    merchandising__planogram_compliance: "🏆 Planogram Compliance Winner",
-    merchandising__promo_detection: "🏆 Promo Pack Verification Winner",
-    promo_talkers__detection: "🏆 Shelf Talker & Price-Tag Winner",
-    promo_talkers__promo_detection: "🏆 Promo Pack Verification Winner",
-  };
-
-  // Identify #1 Production Task Winner focused on Gemini 3.5 Flash-Lite / CPU ONNX / Zero-VLM Embeddings
+  // Identify #1 Production Task Winner across the FULL use-case benchmark (ucRuns, never filtered!)
+  // focusing on Gemini 3.5 Flash-Lite / CPU ONNX / Zero-VLM Embeddings on blind test / test_5k splits
   const taskWinnerRunIds = new Set();
   const prodCostWinnerRunIds = new Set();
   const dsTaskWinnerRunIds = new Set();
@@ -940,41 +1031,50 @@ async function showUseCaseBoard(useCase = "market_share") {
   const bestProdByTask = new Map();
   const bestByDsTask = new Map();
 
-  for (const r of filtered) {
+  for (const r of ucRuns) {
     if (!isModernClientWinnerCandidate(r)) continue;
-    const tk = boardTaskFilter === "classification" ? "classification" : taskOf(r);
+    const tk = taskOf(r);
     const ds = r.dataset || "hul_golden";
+    const sp = r.split || "test";
     const isShelfDs = DATASETS[ds]?.unitType === "shelf";
     const isGolden = Boolean(r.is_golden_dataset || ds.startsWith("hul_") || ds.startsWith("gtmerch") || ds.startsWith("gt_hul") || ds.startsWith("ms_json") || ds.startsWith("mt_json"));
-    const is1000 = isShelfDs ? Number(r.images || 0) >= 15 : getRunSampleCount(r) >= 1000;
+    const isLargeScale = isShelfDs ? Number(r.images || 0) >= 15 : getRunSampleCount(r) >= 1000;
     const sc = Number(r.primary_score ?? 0);
     const cost = Number(r.cost_per_image_usd ?? 999);
     const modStr = String(r.model || "").toLowerCase();
     const isLiteOrFast = modStr.includes("3.5-flash-lite") || modStr.includes("3-5-flash-lite") || modStr.includes("onnx") || modStr.includes("embedding-2");
+    if (!isLiteOrFast) continue;
 
-    // Crown Production Winner per task (prioritizing Gemini 3.5 Flash-Lite / ONNX / Embedding-2 on N>=1,000 Golden runs)
-    if (isLiteOrFast) {
-      const curProdBest = bestProdByTask.get(tk);
+    // Crown overall Production Winner per task AND per split tier (test_5k vs test, and N>=1000 vs latest EXP-58 test)
+    for (const tkKey of [tk, `${tk}__${sp}`, `${tk}__${isLargeScale ? "1k" : "std"}`]) {
+      const curProdBest = bestProdByTask.get(tkKey);
       if (
         !curProdBest ||
         (isGolden && !curProdBest.isGolden && sc >= 0.5) ||
-        (isGolden === curProdBest.isGolden && is1000 && !curProdBest.is1000 && sc >= 0.5) ||
-        (isGolden === curProdBest.isGolden && is1000 === curProdBest.is1000 && (sc > curProdBest.sc || (sc === curProdBest.sc && cost < curProdBest.cost)))
+        (isGolden === curProdBest.isGolden && isLargeScale && !curProdBest.isLargeScale && tkKey === tk && sc >= 0.5) ||
+        (isGolden === curProdBest.isGolden && (tkKey !== tk || isLargeScale === curProdBest.isLargeScale) && (sc > curProdBest.sc || (sc === curProdBest.sc && cost < curProdBest.cost)))
       ) {
-        bestProdByTask.set(tk, { run_id: r.run_id, isGolden, is1000, sc, cost });
-        bestByTask.set(tk, { run_id: r.run_id, isGolden, is1000, sc, cost });
+        bestProdByTask.set(tkKey, { run_id: r.run_id, isGolden, isLargeScale, sc, cost });
+        bestByTask.set(tkKey, { run_id: r.run_id, isGolden, isLargeScale, sc, cost });
       }
     }
 
     const dsTkKey = `${ds}__${tk}`;
-    if (isLiteOrFast) {
-      const curDsBest = bestByDsTask.get(dsTkKey);
+    const curDsBest = bestByDsTask.get(dsTkKey);
+    if (
+      !curDsBest ||
+      (sc > curDsBest.sc || (sc === curDsBest.sc && cost < curDsBest.cost))
+    ) {
+      bestByDsTask.set(dsTkKey, { run_id: r.run_id, isLargeScale, sc, cost });
+    }
+    const dsTk1kKey = `${ds}__${tk}__1k`;
+    if (isLargeScale) {
+      const curDs1kBest = bestByDsTask.get(dsTk1kKey);
       if (
-        !curDsBest ||
-        (is1000 && !curDsBest.is1000 && sc >= 0.5) ||
-        (is1000 === curDsBest.is1000 && (sc > curDsBest.sc || (sc === curDsBest.sc && cost < curDsBest.cost)))
+        !curDs1kBest ||
+        (sc > curDs1kBest.sc || (sc === curDs1kBest.sc && cost < curDs1kBest.cost))
       ) {
-        bestByDsTask.set(dsTkKey, { run_id: r.run_id, is1000, sc, cost });
+        bestByDsTask.set(dsTk1kKey, { run_id: r.run_id, isLargeScale, sc, cost });
       }
     }
   }
@@ -982,14 +1082,27 @@ async function showUseCaseBoard(useCase = "market_share") {
   for (const v of bestProdByTask.values()) prodCostWinnerRunIds.add(v.run_id);
   for (const v of bestByDsTask.values()) dsTaskWinnerRunIds.add(v.run_id);
 
-  // Order leaderboard: full 5-attribute runs before Oracle-Brand diagnostic runs, then by primary KPI score descending
-  // (when filtering by a single task, boost its #1 Production Winner to the top).
+  // Order leaderboard:
+  //   1. Non-Oracle runs before Oracle GT-Brand / GT-Box diagnostics
+  //   2. Open-Catalog Production architectures before Closed-Set GPU Research benchmarks (0% on unseen SKUs)
+  //   3. Blind Test / Test 5K runs before Val calibration runs when viewing "All Splits"
+  //   4. When filtering by a single task, boost its #1 Production Winner to the top, then sort by Primary Score descending
   filtered.sort((a, b) => {
     const scopeA = getEvalScopeMeta(a);
     const scopeB = getEvalScopeMeta(b);
     const isOracleA = scopeA.isOracleDiagnostic ? 1 : 0;
     const isOracleB = scopeB.isOracleDiagnostic ? 1 : 0;
     if (isOracleA !== isOracleB) return isOracleA - isOracleB;
+
+    const isClosedA = scopeA.isClosedSetResearch ? 1 : 0;
+    const isClosedB = scopeB.isClosedSetResearch ? 1 : 0;
+    if (isClosedA !== isClosedB) return isClosedA - isClosedB;
+
+    if (boardSplitFilter === "all") {
+      const isValA = (a.split || "test") === "val" ? 1 : 0;
+      const isValB = (b.split || "test") === "val" ? 1 : 0;
+      if (isValA !== isValB) return isValA - isValB;
+    }
 
     if (boardTaskFilter !== "all") {
       const isWinA = prodCostWinnerRunIds.has(a.run_id) ? 1 : 0;
@@ -1021,7 +1134,12 @@ async function showUseCaseBoard(useCase = "market_share") {
     )
     .join("");
 
-  const dsAllLabel = useCase === "merchandising" ? `All GT & MT Merch Datasets (${availDatasets.length})` : `All MT Datasets (${availDatasets.length})`;
+  const dsAllLabel =
+    useCase === "merchandising"
+      ? `All GT & MT Merch Datasets (${availDatasets.length})`
+      : useCase === "promo_talkers"
+        ? `All Promo & Talker Datasets (${availDatasets.length})`
+        : `All MT & GT Market Share Datasets (${availDatasets.length})`;
   const dsChips = [
     ["all", dsAllLabel],
     ...availDatasets.map((d) => [d, `${DATASETS[d]?.chipLabel || d} (${ucRuns.filter((r) => (r.dataset || "hul_golden") === d).length})`]),
@@ -1044,14 +1162,14 @@ async function showUseCaseBoard(useCase = "market_share") {
     )
     .join("");
 
-  const count5000 = ucRuns.filter((r) => getRunSampleCount(r) >= 5000).length;
-  const count1000 = ucRuns.filter((r) => getRunSampleCount(r) >= 1000).length;
-  const count500 = ucRuns.filter((r) => getRunSampleCount(r) >= 500).length;
+  const count5000 = ucRuns.filter((r) => matchesSampleSize(r, "5000")).length;
+  const count1000 = ucRuns.filter((r) => matchesSampleSize(r, "1000")).length;
+  const count500 = ucRuns.filter((r) => matchesSampleSize(r, "500")).length;
   const sampleChips = [
     ["all", `All Sample Sizes (${ucRuns.length})`],
-    ["5000", `5,000+ Samples (${count5000})`],
-    ["1000", `1,000+ Samples (${count1000})`],
-    ["500", `500+ Samples (${count500})`],
+    ["5000", `Large Scale: 5K+ Crops / 100+ Shelves (${count5000})`],
+    ["1000", `Standard Prod: 1K+ Crops / 25+ Shelves (${count1000})`],
+    ["500", `Pilot: 500+ Crops / 15+ Shelves (${count500})`],
   ]
     .map(
       ([sz, lbl]) =>
@@ -1065,45 +1183,47 @@ async function showUseCaseBoard(useCase = "market_share") {
   const simpleFunnelStripHtml = `
       <div style="display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;background:#ffffff;border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;">
         <div style="flex:1;min-width:170px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 10px;">
-          <div style="font-size:11px;font-weight:800;color:#1d4ed8;text-transform:uppercase;">1. Box Detector (CPU)</div>
-          <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">Bays &amp; Packs &bull; 2-Bucket Zone (2.13x-2.22x)</div>
-          <div style="font-size:11px;color:#475569;margin-top:2px;"><b>67.3%-69.0% 2D Zone F2</b> &bull; <b>$0 VLM Cost</b></div>
+          <div style="font-size:11px;font-weight:800;color:#1d4ed8;text-transform:uppercase;">1. Box Detector + Stage 0 CLAHE</div>
+          <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">960px Soft-NMS &bull; 2-Bucket Zone (2.41x)</div>
+          <div style="font-size:11px;color:#475569;margin-top:2px;"><b>73.4% Tiled / 69.0% ONNX Zone F2</b> &bull; <b>$0 VLM Cost</b></div>
         </div>
         <div style="display:flex;align-items:center;font-size:16px;font-weight:900;color:#64748b;">&rarr;</div>
         <div style="flex:1.15;min-width:190px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:8px 10px;">
-          <div style="font-size:11px;font-weight:800;color:#047857;text-transform:uppercase;">2. Embedding (gemini-embedding-2)</div>
-          <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">2,659-SKU Match + Margin Gate</div>
+          <div style="font-size:11px;font-weight:800;color:#047857;text-transform:uppercase;">2. Embedding + Lidstone 3D Prior</div>
+          <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">2,659-SKU Match + Unstarved Brand Gate</div>
           <div style="font-size:11px;color:#065f46;margin-top:2px;"><b>Resolves 50%-68% at $0 VLM</b> &bull; <b>92.6% R@5 (EXP-32 5k)</b></div>
         </div>
         <div style="display:flex;align-items:center;font-size:16px;font-weight:900;color:#64748b;">&rarr;</div>
         <div style="flex:1.15;min-width:190px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 10px;">
-          <div style="font-size:11px;font-weight:800;color:#4338ca;text-transform:uppercase;">3. Contact-Sheet Zoom Verifier (EXP-28)</div>
-          <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">Top-6 Sheet + Catalog Diff Headers</div>
+          <div style="font-size:11px;font-weight:800;color:#4338ca;text-transform:uppercase;">3. Saliency-Diff &amp; Crown Zoom (EXP-51/52/58)</div>
+          <div style="font-size:12px;color:#1e293b;font-weight:600;margin-top:2px;">Top-22% Crown + 2.5x Ref-Diff + Layer-5 Size</div>
           <div style="font-size:11px;color:#3730a3;margin-top:2px;"><b>Gemini 3.5 Flash-Lite ★</b> &bull; <b>₹0.12/shelf (97.4% R@5)</b></div>
         </div>
         <div style="display:flex;align-items:center;font-size:16px;font-weight:900;color:#64748b;">&rarr;</div>
         <div style="flex:1.1;min-width:180px;background:#f8fafc;border:1px solid #94a3b8;border-radius:8px;padding:8px 10px;">
           <div style="font-size:11px;font-weight:800;color:#0f172a;text-transform:uppercase;">4. Output (5-Level SKU &amp; P2P)</div>
-          <div style="font-size:12px;color:#0f172a;font-weight:700;margin-top:2px;">82.3% (5k) / 83.2% (1k) &bull; 91.6% 3-Attr</div>
+          <div style="font-size:12px;color:#0f172a;font-weight:700;margin-top:2px;">84.0% (EXP-58) / 83.6% (1k) / 82.3% (5k)</div>
           <div style="font-size:11px;color:#475569;margin-top:2px;"><b>P2P W1: 34.8% &rarr; 73.7%</b> &bull; <b>94.4% New Launches</b></div>
         </div>
       </div>`;
-  const winningTriangulationBannerHtml = useCase === "market_share"
-    ? `
+  const winningTriangulationBannerHtml =
+    useCase === "market_share"
+      ? `
     <div style="margin:0 0 18px;padding:18px 20px;background:linear-gradient(135deg,#f8fafc 0%,#eff6ff 100%);border:1px solid #bfdbfe;border-radius:12px;box-shadow:0 1px 3px rgba(15,23,42,0.04);display:flex;flex-direction:column;gap:14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span style="font-size:15px;font-weight:800;color:#0f172a;letter-spacing:-0.01em;">
-            ★ Best Variant vs. Legacy TL;DR: Multi-Crop Contact-Sheet Verifier (EXP-28) &bull; Custom SFT (EXP-32 / EXP-33) &bull; 2-Bucket Discovery
+            ★ Best Variant vs. Legacy TL;DR: Crown/Saliency-Diff + Layer-5 Size Verifier (EXP-51/52/58) &bull; Contact Sheet (EXP-28) &bull; InfoNCE SFT (EXP-32)
           </span>
           <span style="font-size:11.5px;font-weight:700;color:#065f46;background:#d1fae5;padding:2px 8px;border-radius:999px;">
-            100% Real Cloud Run &amp; GCP Executions (N=5,000 test_5k &amp; N=1,000 test Verified)
+            100% Real Cloud Run Executions (Blind Test N=5,000, N=1,000 &amp; Paired Val/Test Verified)
           </span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <a href="/exec" style="font-size:12px;font-weight:700;color:#fff;background:#1d4ed8;padding:6px 12px;border-radius:6px;text-decoration:none;box-shadow:0 1px 2px rgba(29,78,216,0.2);">Open Executive Summary (/exec) &rarr;</a>
-          <a href="#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="font-size:12px;font-weight:700;color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ #1 Best Model EXP-28 (N=5,000 #092456: 82.3% Golden / 81.9% Variants) &rarr;</a>
-          <a href="#/run/1016-092457-residual_infonce_clm_jev-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="font-size:12px;font-weight:700;color:#1e40af;background:#fff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ EXP-32 InfoNCE SFT (N=5,000 #092457: 81.2% 5-Attr &middot; 92.6% R@5) &rarr;</a>
+          <a href="#/run/1020-152650-clef_saliency_diff_zoom-gemini-3.5-flash-lite-priority-hul_golden" style="font-size:12px;font-weight:700;color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ EXP-51 N=1,000 Winner (#152650: 83.6% Test &middot; 98.7% HUL) &rarr;</a>
+          <a href="#/run/1021-154455-clef_pack_crown_fusion-gemini-3.5-flash-lite-priority-hul_golden" style="font-size:12px;font-weight:700;color:#065f46;background:#fff;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ EXP-58 Crown Zoom (#154455: 84.0% Test) &rarr;</a>
+          <a href="#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="font-size:12px;font-weight:700;color:#1e40af;background:#fff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ EXP-28 N=5,000 (#092456: 82.3% Golden / 81.8% Variants) &rarr;</a>
         </div>
       </div>
 
@@ -1113,14 +1233,14 @@ async function showUseCaseBoard(useCase = "market_share") {
         <!-- Card 1: Best Model / Recommended Production Winner (Option 2: Hybrid Photo + AI Zoom) -->
         <div style="background:#fff;border:1.5px solid #10b981;border-top:4px solid #059669;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. Best Model: Hybrid Photo + AI Zoom</div>
-            <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">Option 2 ★ &middot; ₹0.12/Shelf</span>
+            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. Recommended Production Winner (Option 2 ★)</div>
+            <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">EXP-51 / EXP-58 / EXP-28 &middot; ₹0.12/Shelf</span>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">82.3%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">5-Attr N=5k (83.2% N=1k)</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">83.6%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">N=1k Test (84.0% EXP-58 / 82.3% 5k)</div>
             </div>
             <div style="border-left:1px solid #bbf7d0;border-right:1px solid #bbf7d0;">
               <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">97.4%</div>
@@ -1128,22 +1248,22 @@ async function showUseCaseBoard(useCase = "market_share") {
             </div>
             <div>
               <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">₹0.12</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">/Shelf (2.69s &middot; -62% Cost)</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">/Shelf (0.82s-2.0s &middot; -62% Cost)</div>
             </div>
           </div>
 
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;border-bottom:1px dashed #e2e8f0;">
-              <span style="color:#64748b;font-weight:600;">N=5,000 Per-Level</span>
-              <span style="font-weight:700;color:#0f172a;">98.6% HUL &middot; 96.6% Brand &middot; 96.5% Cat &middot; 91.7% Pack</span>
+              <span><b>Crown + Layer-5 Size</b> (<code>EXP-58</code> / <code>EXP-52</code>)</span>
+              <span><b>84.0% (100) / 83.0% (200)</b> <a href="#/run/1021-154455-clef_pack_crown_fusion-gemini-3.5-flash-lite-priority-hul_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#154455 &rarr;</a> <a href="#/run/1020-152901-clef_pack_crown_fusion-gemini-3.5-flash-lite-priority-hul_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#152901 (1k: 82.9%) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>Golden N=5,000 &amp; N=1,000</b> (<code>EXP-28</code>)</span>
-              <span><b>82.3% (5k) / 82.7% (1k)</b> &middot; <a href="#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092456 (5k) &rarr;</a> <a href="#/run/1015-165814-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#165814 (1k) &rarr;</a></span>
+              <span><b>Saliency-Diff &amp; Metadata</b> (<code>EXP-51</code> / <code>EXP-28</code>)</span>
+              <span><b>83.6% (1k) / 82.3% (5k)</b> <a href="#/run/1020-152650-clef_saliency_diff_zoom-gemini-3.5-flash-lite-priority-hul_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#152650 (1k) &rarr;</a> <a href="#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092456 (5k) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>Variants N=5,000 &amp; N=1,000</b> (<code>EXP-28</code>)</span>
-              <span><b>81.9% (5k) / 83.2% (1k)</b> &middot; <a href="#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092456 (5k) &rarr;</a> <a href="#/run/1015-163309-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#163309 (1k) &rarr;</a></span>
+              <span><b>Sister Variants</b> (<code>hul_variants</code> <code>EXP-28</code>)</span>
+              <span><b>83.5% (1k) / 81.8% (5k)</b> <a href="#/run/1015-163309-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#163309 (1k) &rarr;</a> <a href="#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092456 (5k) &rarr;</a></span>
             </div>
           </div>
         </div>
@@ -1151,8 +1271,8 @@ async function showUseCaseBoard(useCase = "market_share") {
         <!-- Card 2: Custom Fine-Tuned AI (Option 3) -->
         <div style="background:#fff;border:1px solid #bfdbfe;border-top:3px solid #2563eb;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#1e3a8a;">★ 2. Custom Fine-Tuned AI</div>
-            <span style="font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">Option 3 &middot; ₹0.12-0.14/Shelf</span>
+            <div style="font-size:13.5px;font-weight:800;color:#1e3a8a;">★ 2. Custom Fine-Tuned AI (Option 3 Challenger)</div>
+            <span style="font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">EXP-32 / EXP-29 &middot; ₹0.12-0.14/Shelf</span>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
@@ -1181,16 +1301,16 @@ async function showUseCaseBoard(useCase = "market_share") {
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span><b>Fine-Tuned 3.5-Flash-Lite</b> (<code>EXP-29/33</code>)</span>
-              <span><b>79.6% (5k) / 81.9% (1k)</b> &middot; <a href="#/run/1016-092456-sft_clm_clef_cascade-gemini-3.5-flash-lite-sft-priority-hul_variants-test_5k" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#092456 (5k) &rarr;</a> <a href="#/run/1015-174314-sft_clm_clef_cascade-gemini-3.5-flash-lite-sft-priority-hul_variants" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#174314 (1k) &rarr;</a></span>
+              <span><b>79.6% (5k) / 82.0% (1k)</b> &middot; <a href="#/run/1016-092456-sft_clm_clef_cascade-gemini-3.5-flash-lite-sft-priority-hul_variants-test_5k" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#092456 (5k) &rarr;</a> <a href="#/run/1015-174950-sft_clm_clef_cascade-gemini-3.5-flash-lite-sft-priority-hul_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#174950 (1k) &rarr;</a></span>
             </div>
           </div>
         </div>
 
-        <!-- Card 3: Legacy 9-Model .h5 Chain, P2P Scoring & 2-Bucket Discovery -->
+        <!-- Card 3: Legacy 9-Model .h5 Chain, Full-Shelf SOS & 2D Zone Discovery -->
         <div style="background:#fff;border:1px solid #fed7aa;border-top:3px solid #ea580c;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#9a3412;">3. Legacy 9-Model <code>.h5</code>, P2P &amp; 2D Zone</div>
-            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">Apples-to-Apples N=5,000 &amp; N=1,000</span>
+            <div style="font-size:13.5px;font-weight:800;color:#9a3412;">3. Legacy 9-Model <code>.h5</code>, Full-Shelf E2E &amp; 2D Zone</div>
+            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">mt_json_golden &amp; ms_json_golden</span>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
@@ -1199,12 +1319,12 @@ async function showUseCaseBoard(useCase = "market_share") {
               <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">9-Model .h5 5k (44.5% 1k)</div>
             </div>
             <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">73.7%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">P2P W1 (vs 34.8% Legacy)</div>
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">82.7%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">MT 3-Attr Shelf Acc (EXP-45)</div>
             </div>
             <div>
-              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">69.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">2D Zone F2 (67.3% on 5k)</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">73.4%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">2D-Zone Det F2 (69.0% ONNX)</div>
             </div>
           </div>
 
@@ -1214,12 +1334,12 @@ async function showUseCaseBoard(useCase = "market_share") {
               <span><b>42.3% (5k) / 44.5% (1k)</b> &middot; <a href="#/run/1016-093317-cv_classify-marketshare_brand.h5+marketshare_packtype.h5+wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5-hul_golden-test_5k-5attr" style="${runPillStyle}color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;">#093317 (5k) &rarr;</a> <a href="#/run/1015-092627-cv_classify-marketshare_brand.h5+marketshare_packtype.h5+wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5-hul_golden-5attr" style="${runPillStyle}color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;">#092627 (1k) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>Oracle GT Brand <code>.h5</code></b> (Cheating Diagnostic)</span>
-              <span><b>52.0% 5-Attr / 84.7% Var</b> &middot; <a href="#/run/1015-115810-cv_classify-marketshare_brand.h5+marketshare_packtype.h5+wash_variant.h5+skin_variant.h5+p5_variant.h5+oral_variant.h5+gen_variant.h5+nonhul_p6_variant.h5+nonhul_gen_variant.h5+oracle_brand-hul_golden-5attr" style="${runPillStyle}color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;">#115810 &rarr;</a></span>
+              <span><b>MT Supermarkets E2E</b> (<code>mt_json_golden</code>)</span>
+              <span><b>82.7% 3-Attr / 71.1% Zone Det</b> &middot; <a href="#/run/1021-105454-shelf_stage0_clahe_e2e-gemini-3.5-flash-lite-priority-mt_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#105454 (E2E) &rarr;</a> <a href="#/run/1021-105453-promo_asset_stage0_clahe_detect-gemini-3.5-flash-lite-priority-mt_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#105453 (Det) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>MT Shelves 2D Zone</b> (<code>ms_json_golden</code>)</span>
-              <span><b>67.3% (5k) / 69.0% (1k)</b> &middot; <a href="#/run/1016-092455-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092455 (151) &rarr;</a> <a href="#/run/1015-232729-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232729 (100) &rarr;</a> <a href="#/run/1015-232902-shelf_960_softnms_e2e-gemini-3.5-flash-lite-priority-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232902 &rarr;</a></span>
+              <span><b>Kirana 2D Zone &amp; E2E</b> (<code>ms_json_golden</code>)</span>
+              <span><b>73.4% Tiled / 69.0% ONNX</b> &middot; <a href="#/run/1014-000636-tiled_dedup-gemini-3.5-flash-lite-priority-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#000636 (100) &rarr;</a> <a href="#/run/1015-232729-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232729 (ONNX) &rarr;</a> <a href="#/run/1021-003631-shelf_marketshare_generalizable_e2e-gemini-3.5-flash-lite-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003631 (E2E) &rarr;</a></span>
             </div>
           </div>
         </div>
@@ -1241,131 +1361,248 @@ async function showUseCaseBoard(useCase = "market_share") {
           <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px 12px;">
             <div style="font-weight:800;color:#065f46;">Option 2 (★ Recommended Default): Hybrid Photo + AI Zoom (<code>₹0.12/shelf</code>)</div>
             <div style="margin-top:4px;color:#334155;line-height:1.45;">
-              &bull; <b>Performance &amp; Cost:</b> <b>82.3% (N=5,000) / 83.2% (N=1,000)</b> (<b>97.4% Recall@5</b>, <b>94.4% on unseen new launches</b>) at <b>₹0.12/shelf (2.69s)</b>.<br>
+              &bull; <b>Performance &amp; Cost:</b> <b>83.6% (EXP-51 N=1k) / 84.0% (EXP-58) / 82.3% (EXP-28 N=5k)</b> (<b>97.4% Recall@5</b>, <b>94.4% on unseen new launches</b>) at <b>₹0.12/shelf (0.82s-2.69s)</b>.<br>
               &bull; <b>P2P Business Impact:</b> Lifts basepack weight <b>W1 = W4&times;W5/100 from 34.82% to 73.68% (2.12x)</b> and usable P2P facings from <b>2,223 to 6,012 (+170.4%)</b> across 4 scenarios.
             </div>
           </div>
           <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px 12px;">
             <div style="font-weight:800;color:#1e40af;">Option 3 (Challenger): Custom Fine-Tuned AI (<code>₹0.12-0.14/shelf</code>)</div>
             <div style="margin-top:4px;color:#334155;line-height:1.45;">
-              &bull; <b>Performance &amp; Cost:</b> Custom photo-matching adapter hits <b>92.6% Top-5 Recall &amp; 81.2% 5-Attr on N=5,000</b> (82.0% on N=1,000, ₹0 endpoint fee); fine-tuned 3.5-Flash-Lite hits <b>79.6% (N=5,000) / 81.9% (N=1,000) / 85.0% Val</b>.<br>
+              &bull; <b>Performance &amp; Cost:</b> Custom photo-matching adapter hits <b>92.6% Top-5 Recall &amp; 81.2% 5-Attr on N=5,000</b> (82.0% on N=1,000, ₹0 endpoint fee); fine-tuned 3.5-Flash-Lite hits <b>79.6% (N=5,000) / 82.0% (N=1,000) / 85.0% Val</b>.<br>
               &bull; <b>Role:</b> Field A/B test challenger arm on dense Modern Trade Skin Care and Oral Care shelves.
             </div>
           </div>
         </div>
       </details>
     </div>`
-    : `
+      : useCase === "merchandising"
+        ? `
     <div style="margin:0 0 18px;padding:18px 20px;background:linear-gradient(135deg,#f8fafc 0%,#ecfdf5 100%);border:1px solid #a7f3d0;border-radius:12px;box-shadow:0 1px 3px rgba(15,23,42,0.04);display:flex;flex-direction:column;gap:14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span style="font-size:15px;font-weight:800;color:#0f172a;letter-spacing:-0.01em;">
-            ★ GT &amp; MT Merchandising Winners: 2-Bucket Shelf Discovery (ms_json_golden) &bull; Store Sessions (gt_hul_sessions)
+            ★ GT &amp; MT Merchandising Winners: Bay &amp; Plank-Support Detection (EXP-34/53/55) &bull; Bay-Gated Full-Shelf E2E (EXP-57/59) &bull; Store Sessions (EXP-56)
           </span>
           <span style="font-size:11.5px;font-weight:700;color:#065f46;background:#d1fae5;padding:2px 8px;border-radius:999px;">
-            100% Real Cloud Run Executions (N=151 test_5k &amp; N=100 test Verified)
+            100% Real Cloud Run Executions (gtmerch_golden &amp; gt_hul_sessions Blind Test Verified)
           </span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <a href="/exec" style="font-size:12px;font-weight:700;color:#fff;background:#047857;padding:6px 12px;border-radius:6px;text-decoration:none;">Open Executive Summary (/exec) &rarr;</a>
-          <a href="#/run/1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="font-size:12px;font-weight:700;color:#065f46;background:#fff;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ GT Planogram 3.5-Lite (#232627: 72.5% SKU &middot; 96.9% HUL) &rarr;</a>
-          <a href="#/run/1013-025000-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos" style="font-size:12px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ Promo N=1,000 Winner (#025000-Lite: 84.0% 3-Attr &middot; 93.4% Brand) &rarr;</a>
+          <a href="#/run/1017-152407-promo_asset_sku_detect-gemini-3.5-flash-lite-priority-gtmerch_golden" style="font-size:12px;font-weight:700;color:#065f46;background:#fff;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ GTMerch N=100 Test Det (#152407: 77.3% Bay F2 &middot; 83.7% Prec) &rarr;</a>
+          <a href="#/run/1021-003634-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-gtmerch_golden" style="font-size:12px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ GTMerch Bay E2E EXP-57 (#003634: 69.8% Bay F2 &middot; 97.2% In-Bay SKU) &rarr;</a>
         </div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;">
-        <!-- Merch Card 1: Planogram & GT Sessions -->
+        <!-- Merch Card 1: GTMerch Display Bay & Plank-Support Detection -->
         <div style="background:#fff;border:1.5px solid #10b981;border-top:4px solid #059669;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. GT Store Sessions &amp; Planogram SOS</div>
-            <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">gt_hul_sessions (N=100) &amp; hul_sessions</span>
+            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. GTMerch Display-Bay &amp; Plank Detection</div>
+            <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">gtmerch_golden (EXP-34 / EXP-53 / EXP-55)</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 8px;text-align:center;">
+            <div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">77.3%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">N=100 Test F2 (81.8% Val)</div>
+            </div>
+            <div style="border-left:1px solid #bbf7d0;border-right:1px solid #bbf7d0;">
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">83.7%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">In-Bay Precision (N=100)</div>
+            </div>
+            <div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Class 0 Bay Scope</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span><b>★ N=100 Blind Test Winner</b> (<code>EXP-34</code> / <code>EXP-53</code>)</span>
+              <span><b>77.3% / 76.4% Bay F2</b> &middot; <a href="#/run/1017-152407-promo_asset_sku_detect-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#152407 (100) &rarr;</a> <a href="#/run/1020-151952-promo_asset_plank_tiling_detect-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#151952 (100) &rarr;</a></span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span><b>★ Bay-Scoped Plank Support</b> (<code>EXP-55</code> / <code>EXP-53</code>)</span>
+              <span><b>81.8% Val / 74.9% Test</b> &middot; <a href="#/run/1021-003632-promo_asset_bay_scoped_plank_detect-gemini-3.5-flash-lite-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003632 (Test) &rarr;</a> <a href="#/run/1021-003633-promo_asset_bay_scoped_plank_detect-gemini-3.5-flash-lite-gtmerch_golden-val" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003633 (Val) &rarr;</a></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Merch Card 2: GTMerch Bay-Scoped Full-Shelf E2E & Planogram -->
+        <div style="background:#fff;border:1px solid #bfdbfe;border-top:3px solid #2563eb;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div style="font-size:13.5px;font-weight:800;color:#1e3a8a;">★ 2. GTMerch Bay-Gated E2E &amp; Planogram</div>
+            <span style="font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">gtmerch_golden (EXP-57 / EXP-59 / EXP-46)</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
+            <div>
+              <div style="font-size:20px;font-weight:800;color:#1d4ed8;line-height:1.15;">69.8%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Bay-Scoped E2E F2</div>
+            </div>
+            <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">97.2%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">In-Bay 5-Attr SKU Acc</div>
+            </div>
+            <div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">AWP Bay Purity</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span><b>★ Pre-Embedding Bay Gate E2E</b> (<code>EXP-57</code> / <code>EXP-59</code>)</span>
+              <span><b>69.8% / 68.2% Bay F2</b> &middot; <a href="#/run/1021-003634-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-gtmerch_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003634 &rarr;</a> <a href="#/run/1021-154952-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#154952 &rarr;</a></span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span><b>★ AWP 63-Template Planogram</b> (<code>EXP-46</code>)</span>
+              <span><b>69.8% 3-Attr / 100% Purity</b> &middot; <a href="#/run/1017-161556-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gtmerch_golden" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#161556 (N=50) &rarr;</a></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Merch Card 3: GT Store Visit Multi-Photo Sessions -->
+        <div style="background:#fff;border:1px solid #fed7aa;border-top:3px solid #ea580c;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div style="font-size:13.5px;font-weight:800;color:#9a3412;">★ 3. GT Store Visit Multi-Photo Sessions</div>
+            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">gt_hul_sessions (N=100 &amp; N=25)</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
+            <div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">GT ONNX Det F2</div>
+            </div>
+            <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">75.0%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Session E2E F2 (99.0% HUL)</div>
+            </div>
             <div>
               <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
               <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Bay Block Purity</div>
             </div>
-            <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">96.9%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">HUL Ownership (2.38% SOS Err)</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span><b>★ GT Session E2E</b> (<code>EXP-56</code> / <code>EXP-36</code>)</span>
+              <span><b>75.0% E2E (99.0% HUL)</b> <a href="#/run/1021-003630-shelf_marketshare_generalizable_e2e-gemini-3.5-flash-lite-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#003630 &rarr;</a> <a href="#/run/1017-160909-shelf_hierarchical_clm_jev-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#160909 (N=100: 73.1%) &rarr;</a></span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span><b>★ GT Session Planogram &amp; Det</b> (N=100)</span>
+              <span><b>72.5% SKU</b> <a href="#/run/1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232627 &rarr;</a> &middot; <b>100% Det</b> <a href="#/run/1013-232625-distilled_yolo_onnx-yolo11n-distilled-onnx-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232625 &rarr;</a></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`
+        : `
+    <div style="margin:0 0 18px;padding:18px 20px;background:linear-gradient(135deg,#f8fafc 0%,#eef2ff 100%);border:1px solid #c7d2fe;border-radius:12px;box-shadow:0 1px 3px rgba(15,23,42,0.04);display:flex;flex-direction:column;gap:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:15px;font-weight:800;color:#0f172a;letter-spacing:-0.01em;">
+            ★ Shelf Talkers, Rail Price Tags &amp; Toker Promo Winners: 3-Class Talker Det (EXP-47) &bull; 2x Promo Strip OCR (EXP-48) &bull; Zero-VLM Fast Matcher
+          </span>
+          <span style="font-size:11.5px;font-weight:700;color:#065f46;background:#d1fae5;padding:2px 8px;border-radius:999px;">
+            100% Real Cloud Run Executions (532 Disjoint Outlets &amp; N=1,000 Blind Test Verified)
+          </span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <a href="/exec" style="font-size:12px;font-weight:700;color:#fff;background:#4338ca;padding:6px 12px;border-radius:6px;text-decoration:none;">Open Executive Summary (/exec) &rarr;</a>
+          <a href="#/run/1021-105453-talker_price_tag_detect-gemini-3.5-flash-lite-priority-hul_talkers_golden" style="font-size:12px;font-weight:700;color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;padding:6px 11px;border-radius:6px;text-decoration:none;">★ Talker Det EXP-47 (#105453: 90.0% F2 &middot; 93.4% Recall) &rarr;</a>
+          <a href="#/run/1021-105453-promo_ocr_zoom_verifier-gemini-3.5-flash-lite-priority-hul_promos" style="font-size:12px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;padding:6px 11px;border-radius:6px;text-decoration:none;">★ Promo OCR EXP-48 (#105453: 90.0% 3-Attr &middot; 85.0% 5-Attr) &rarr;</a>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;">
+        <!-- Promo Card 1: 3-Class Shelf Talker & Rail Price-Tag Detection -->
+        <div style="background:#fff;border:1.5px solid #10b981;border-top:4px solid #059669;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div style="font-size:13.5px;font-weight:800;color:#065f46;">★ 1. 3-Class Shelf Talker &amp; Price-Tag Detection</div>
+            <span style="font-size:11px;font-weight:700;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;padding:2px 8px;border-radius:999px;">hul_talkers_golden (EXP-47)</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 8px;text-align:center;">
+            <div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">90.0%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">2D-Zone F2 (84.9% Full)</div>
+            </div>
+            <div style="border-left:1px solid #bbf7d0;border-right:1px solid #bbf7d0;">
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">93.4%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Talker &amp; Tag Recall</div>
             </div>
             <div>
-              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">$0.0024</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">/Strip (3.5-Flash-Lite)</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">532</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Disjoint Store Outlets</div>
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ GT Sessions Test</b> (<code>3.5-Flash-Lite</code> N=100)</span>
-              <span><b>72.5% SKU / 96.9% HUL</b> &middot; <a href="#/run/1013-232627-bay_planogram_verifier-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232627 &rarr;</a></span>
+              <span><b>★ EXP-47 Blind Test Winner</b> (<code>3.5-Flash-Lite</code>)</span>
+              <span><b>90.0% Zone / 84.9% Full F2</b> &middot; <a href="#/run/1021-105453-talker_price_tag_detect-gemini-3.5-flash-lite-priority-hul_talkers_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#105453 (N=50) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ MT Sessions Bay Audit</b> (<code>3.5-Flash-Lite</code> N=25)</span>
-              <span><b>100% Bay Block Purity</b> &middot; <a href="#/run/1013-022245-bay_planogram_verifier-gemini-3.5-flash-lite-priority" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#022245-Lite &rarr;</a></span>
+              <span><b>★ Recall &amp; Speed</b> (<code>EXP-47</code>)</span>
+              <span><b>93.4% Recall &middot; 3.05s P50 ($0.0022/shelf)</b></span>
             </div>
           </div>
         </div>
 
-        <!-- Merch Card 2: Promo Verification -->
+        <!-- Promo Card 2: 2x Top/Bottom Promo Strip Zoom & OCR Verifier -->
         <div style="background:#fff;border:1px solid #bfdbfe;border-top:3px solid #2563eb;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#1e3a8a;">★ 2. Toker Promo Verification</div>
-            <span style="font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">hul_promos (N=1,000)</span>
+            <div style="font-size:13.5px;font-weight:800;color:#1e3a8a;">★ 2. Promo Callout &amp; Multipack OCR Verifier</div>
+            <span style="font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:999px;">hul_promos (EXP-48 / EXP-37 / EXP-07)</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#1d4ed8;line-height:1.15;">93.4%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">Promo Brand Acc</div>
+              <div style="font-size:20px;font-weight:800;color:#1d4ed8;line-height:1.15;">90.0%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">3-Attr Promo (EXP-48)</div>
             </div>
             <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">97.4%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">HUL Detection</div>
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">85.0%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">5-Attr SKU (100% HUL)</div>
             </div>
             <div>
               <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">84.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">3-Attr Exact ($0.00069)</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">N=1,000 3-Attr (#025000)</div>
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ Production Winner</b> (<code>3.5-Flash-Lite</code>)</span>
-              <span><b>84.0% 3-Attr / 93.4% Brand</b> &middot; <a href="#/run/1013-025000-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#025000-Lite &rarr;</a></span>
+              <span><b>★ 2x Top/Bottom Strip OCR</b> (<code>EXP-48</code>)</span>
+              <span><b>90.0% 3-Attr / 85.0% 5-Attr</b> &middot; <a href="#/run/1021-105453-promo_ocr_zoom_verifier-gemini-3.5-flash-lite-priority-hul_promos" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#105453 &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ Zero-VLM Fast Path</b> (<code>gemini-embedding-2</code>)</span>
-              <span><b>79.2% 3-Attr</b> ($0.00020/crop) &middot; <a href="#/run/1013-024958-clm_promo_matcher-gemini-embedding-2-hul_promos" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#024958 &rarr;</a></span>
+              <span><b>★ N=1,000 Scale Benchmark</b> (<code>EXP-07</code>)</span>
+              <span><b>84.0% 3-Attr / 93.4% Brand</b> &middot; <a href="#/run/1013-025000-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#025000 (1k) &rarr;</a></span>
             </div>
           </div>
         </div>
 
-        <!-- Merch Card 3: Session Dedup, E2E & 2-Bucket Detection -->
+        <!-- Promo Card 3: Zero-VLM Fast Promo Matcher vs Legacy ViT-240 -->
         <div style="background:#fff;border:1px solid #fed7aa;border-top:3px solid #ea580c;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="font-size:13.5px;font-weight:800;color:#9a3412;">3. 2-Bucket Shelf Discovery &amp; E2E (MT &amp; GT)</div>
-            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">ms_json_golden &amp; gt_hul_sessions</span>
+            <div style="font-size:13.5px;font-weight:800;color:#9a3412;">3. Zero-VLM Fast Path vs. Legacy ViT-240</div>
+            <span style="font-size:11px;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:2px 8px;border-radius:999px;">60s Onboarding vs. 4-Wk Retrain</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 8px;text-align:center;">
             <div>
-              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">100.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">GT ONNX Det F2 (99.1% VLM)</div>
+              <div style="font-size:20px;font-weight:800;color:#047857;line-height:1.15;">79.2%</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">0-VLM 3-Attr (N=1,000)</div>
             </div>
             <div style="border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">72.4%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">GT E2E F2 (2.25% SOS Err)</div>
+              <div style="font-size:20px;font-weight:800;color:#0f172a;line-height:1.15;">$0.0002</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">/Crop (₹0.017 &middot; 0 VLM)</div>
             </div>
             <div>
-              <div style="font-size:20px;font-weight:800;color:#c2410c;line-height:1.15;">69.0%</div>
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">MT 2D Zone F2 (+5,342 5k)</div>
+              <div style="font-size:20px;font-weight:800;color:#c2410c;line-height:1.15;">60 sec</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-top:2px;">1-Photo Promo Onboarding</div>
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:#334155;line-height:1.45;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>★ GT E2E &amp; Det</b> (<code>gt_hul_sessions</code> N=100)</span>
-              <span><b>72.4% E2E</b> <a href="#/run/1013-232626-shelf_960_softnms_e2e-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232626 &rarr;</a> &middot; <b>100% Det</b> <a href="#/run/1013-232625-distilled_yolo_onnx-yolo11n-distilled-onnx-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232625 &rarr;</a> <a href="#/run/1013-234933-shelf_l8_ultimate-gemini-3.5-flash-lite-priority-gt_hul_sessions-val" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#234933 &rarr;</a></span>
+              <span><b>★ Zero-VLM Promo Matcher</b> (<code>gemini-embedding-2</code>)</span>
+              <span><b>79.2% 3-Attr / 96.9% HUL</b> &middot; <a href="#/run/1013-024958-clm_promo_matcher-gemini-embedding-2-hul_promos" style="${runPillStyle}color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;">#024958 (1k) &rarr;</a></span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span><b>MT 2D Zone &amp; 2.13x-2.22x</b> (<code>ms_json_golden</code>)</span>
-              <span><b>67.3% (151) / 69.0% (100)</b> <a href="#/run/1016-092455-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden-test_5k" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#092455 &rarr;</a> <a href="#/run/1015-232729-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232729 &rarr;</a> <a href="#/run/1013-232626-single_pass_dedup-gemini-3.5-flash-lite-priority-gt_hul_sessions" style="${runPillStyle}color:#065f46;background:#ecfdf5;border:1px solid #6ee7b7;">#232626-Det &rarr;</a></span>
+              <span><b>Legacy Closed-Set ViT-240</b> (Baseline)</span>
+              <span><b>75.0% Known / 0% New Campaign</b> (3-4 wk retrain)</span>
             </div>
           </div>
         </div>
@@ -1712,8 +1949,8 @@ const DATASET_ENRICHMENT_ROWS = [
     beforeRaw: "Legacy mt/ folder had 100% of photos ruined by burned-in red OpenCV boxes; raw mt_updated/ (19,984 JSONs) had 6.7% red-edge artifacts and 32.9% catch-all labels.",
     afterEnriched: "Filtered for clean raw store pixels (Gate 5), mapped 4-part LabelMe labels onto the 2,659-SKU catalog, and split 1,068 shelves across 356 disjoint supermarkets (0 shared stores, Gate 13).",
     splits: "713 train · 155 val · 200 test (356 stores)",
-    impact: "1.25% Area / 2.95% Facing Share-of-Shelf error (EXP-45)",
-    inspectRunId: "1017-220408-shelf_hierarchical_clm_jev-gemini-3.5-flash-lite-priority-mt_json_golden",
+    impact: "82.7% 3-Attr Shelf Acc · 71.1% 2D-Zone Det F2 · 1.25% Area / 2.95% Facing Share-of-Shelf error (EXP-45)",
+    inspectRunId: "1021-105454-shelf_stage0_clahe_e2e-gemini-3.5-flash-lite-priority-mt_json_golden",
   },
   {
     ds: "ms_json_golden",
@@ -1723,8 +1960,8 @@ const DATASET_ENRICHMENT_ROWS = [
     beforeRaw: "Raw gt/ bucket had 33.3% burned-in QA review overlays, 26.7% of boxes labeled only as 'Others____Others____NA', and human annotators only boxed 1–2 shelf rows out of 4–5 physical rows.",
     afterEnriched: "Quarantined all burned-in overlay photos (300 clean shelves, 5,013 boxes), mapped named labels to 2,659 SKUs, and added 3-Tier 'Human Annotated & Beyond' scoring for unannotated shelf rows.",
     splits: "140 train · 60 val · 100 test · 151 test_5k",
-    impact: "3.52% Area SoS error (EXP-49) · 69.4% Annotated-Zone F2 · +939 unannotated-row packs found (2.41x coverage, EXP-54/55)",
-    inspectRunId: "1021-003631-shelf_marketshare_generalizable_e2e-gemini-3.5-flash-lite-ms_json_golden-val",
+    impact: "3.52% Area SoS error (EXP-49) · 73.4% Tiled / 69.0% ONNX 2D-Zone F2 · +5,342 unannotated-row packs found (2.13x–2.41x coverage)",
+    inspectRunId: "1021-003631-shelf_marketshare_generalizable_e2e-gemini-3.5-flash-lite-ms_json_golden",
   },
   {
     ds: "hul_golden",
@@ -1734,8 +1971,8 @@ const DATASET_ENRICHMENT_ROWS = [
     beforeRaw: "1,002,209 crops scattered across disconnected brand, variant, and pack folders; 73.5% lacked container suffixes (645 classes defaulted to wrong pack forms); 874 rival brands collapsed into 'Others'.",
     afterEnriched: "Linked 399,769 crops by exact MD5 hash, de-collided 2,659 canonical SKUs (1,073 Unilever / 1,586 Competitor), fixed all 645 pack defaults (0 out-of-domain pairs), and built session-disjoint splits.",
     splits: "16,000 train · 1,900 val · 1,907 test · 5,000 test_5k",
-    impact: "82.3%–84.8% Exact 5-Attr SKU (88.8% on Unilever SKUs, N=5,000) vs. 50.5% Phase-1 W1 baseline (+33.1 pp lift)",
-    inspectRunId: "1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k",
+    impact: "83.6% (N=1k EXP-51) / 84.0% (EXP-58) / 82.3% (N=5k EXP-28) Exact 5-Attr SKU vs. 42.3%–44.5% 9-Model .h5 (+40.0 pp lift)",
+    inspectRunId: "1020-152650-clef_saliency_diff_zoom-gemini-3.5-flash-lite-priority-hul_golden",
   },
   {
     ds: "hul_variants",
@@ -1745,8 +1982,8 @@ const DATASET_ENRICHMENT_ROWS = [
     beforeRaw: "Raw variant_* silos contained 737 brand-only catch-all folders (<Brand>__Others), 497 duplicate twin folders, and synthetic .jpg0BA.png / copy*.jpg training copies mixed into evaluation pools.",
     afterEnriched: "Removed all brand-only catch-all folders (Gate 3), merged twin folders, stripped synthetic copies, and curated 1,922 pure Brand__Variant classes (1,048 Unilever / 874 Competitor) with 7,442 gallery views.",
     splits: "15,687 train · 1,900 val · 1,907 test · 5,000 test_5k",
-    impact: "82.3%–84.8% Exact Sister Variant accuracy across 1,922 classes vs. 76.1% Phase-1 W4 baseline (+8.7 pp lift)",
-    inspectRunId: "1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants-test_5k",
+    impact: "83.5% (N=1k) / 81.8% (N=5k) Exact Sister Variant accuracy across 1,922 classes & 94.4% (17/18) on unseen launches",
+    inspectRunId: "1015-163309-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants",
   },
   {
     ds: "hul_packs",
@@ -1756,8 +1993,8 @@ const DATASET_ENRICHMENT_ROWS = [
     beforeRaw: "pack_data contained 8,398 synthetic copies (copy*.jpg, DA_TBC_*), 57 dual-folder MD5 collisions (Bottle vs. Jar), and only 42.8% agreement with master-brand pack defaults.",
     afterEnriched: "Stripped all 8,398 synthetic copies, prioritized explicit physical-form tokens (_Bar, _Roll_On, _Toothbrush) over brand defaults, and aligned all 16 forms with the 46 Category__PackType folders.",
     splits: "6,000 train · 1,000 val · 1,000 test",
-    impact: "97.5% Primary / 100.0% Dual-Accept MD5 pack agreement · 91.7%–93.3% Pack Form accuracy vs. 80.6% Phase-1 W6",
-    inspectRunId: "1020-153057-hybrid_pack_specialist_clef-gemini-3.5-flash-lite-priority-hul_golden-5attr-product_brand_base_variant_packaging_type_category",
+    impact: "97.5% Primary / 100.0% Dual-Accept MD5 pack agreement · 91.7%–93.4% Pack Form accuracy vs. 54.9%–56.0% .h5",
+    inspectRunId: "1013-031440-l8_hul_ultimate-gemini-3.5-flash-lite-priority-hul_packs",
   },
   {
     ds: "hul_brands",
@@ -1767,8 +2004,8 @@ const DATASET_ENRICHMENT_ROWS = [
     beforeRaw: "Legacy ABrand folder prefixes (ADove), spelling typos (Tetely, Twinnings), 55 cross-category brand folders, 874 competitor brands hidden in 'Others', and inconsistent M&A brand ownership.",
     afterEnriched: "Canonicalized all 953 named brands (79 Unilever + 874 Competitor), encoded the M&A ownership ledger (Horlicks, Boost, Pureit, Minimalist, OZiva), and built the 926-brand LoRA SFT training set.",
     splits: "8,000 train · 1,000 val · 1,000 test",
-    impact: "89.0% Standalone 926-Brand SFT (0.0% SoS error, EXP-35) · 96.6%–97.7% Cascade Brand · 98.6%–99.3% L1 Owner",
-    inspectRunId: "1018-021011-gemini_classify-gemini-3.5-flash-lite-sft-brands926-hul_brands",
+    impact: "95.9% Brand / 98.4% L1 Owner on hul_brands (#034648) · 97.0%–97.7% Cascade Brand · 98.6%–99.0% L1 Owner",
+    inspectRunId: "1013-034648-l8_hul_ultimate-gemini-3.5-flash-lite-priority-hul_brands",
   },
   {
     ds: "gtmerch_golden",
@@ -1778,8 +2015,8 @@ const DATASET_ENRICHMENT_ROWS = [
     beforeRaw: "Raw gtmerch had 2-class boxes (Display Bay + Product Pack) and campaign filename codes, but 0 human per-box SKU labels (92.1% outside-bay 'Others' boxes), 30 intra-train duplicates, and cardboard headers boxed as packs.",
     afterEnriched: "Linked 352 store photos to 63 official AWP studio planogram templates, added Stage 1.5 cardboard header filtering + physical shelf-plank law, and built 3-Tier 'Human Annotated & Beyond' evaluation.",
     splits: "400 train · 100 val · 200 test (+ 63 AWP studio templates)",
-    impact: "67.52% E2E F2 (+34.95 pp lift, EXP-54/57) · 96.83% Acc / 81.33% F2 on Named Bay SKUs · 574/892 (64.3%) 'Others' upgraded to exact SKUs",
-    inspectRunId: "1021-003631-shelf_generalizable_spine_e2e-gemini-3.5-flash-lite-gtmerch_golden-val",
+    impact: "77.3% N=100 Test Bay Det F2 (83.7% Prec #152407) · 69.8% Bay E2E F2 & 97.2% In-Bay SKU Acc (#003634 EXP-57)",
+    inspectRunId: "1021-003634-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-gtmerch_golden",
   },
   {
     ds: "gt_hul_sessions",
@@ -1790,7 +2027,7 @@ const DATASET_ENRICHMENT_ROWS = [
     afterEnriched: "Removed synthetic gutter shortcuts (Gate 10), enforced 100% neural detection + session-level facing deduplication, and verified 100% named SKU ground truth across all 800 test boxes.",
     splits: "150 train · 50 val · 100 test (800 fully annotated boxes)",
     impact: "75.00% Exact SKU F2 · 96.50% Tier-2 Parity F2 · 99.0% Unilever Owner · 94.5% Brand at ₹0.23/image (EXP-56)",
-    inspectRunId: "1021-003632-shelf_generalizable_spine_e2e-gemini-3.5-flash-lite-gt_hul_sessions",
+    inspectRunId: "1021-003630-shelf_marketshare_generalizable_e2e-gemini-3.5-flash-lite-gt_hul_sessions",
   },
   {
     ds: "hul_sessions",
@@ -1811,8 +2048,8 @@ const DATASET_ENRICHMENT_ROWS = [
     beforeRaw: "Raw toker_dataset (4,767 photos, 28,325 boxes) had only 10 images in test/ (0 handwritten price tags), and 100% (8/8) of test store outlets were leaked into train/.",
     afterEnriched: "Extracted physical outlet_code from every filename and re-split all 4,767 photos across 532 disjoint store outlets (0 shared stores, Gate 13) covering Promo Talkers, Printed Tags, and Handwritten Tags.",
     splits: "3,813 train · 477 val · 477 test (532 disjoint stores)",
-    impact: "85.0% Detection F2 and 89.9% Recall across 477 unseen test shelves (EXP-47, beating 82.0% target)",
-    inspectRunId: "1018-011842-talker_price_tag_detect-gemini-3.5-flash-lite-priority-hul_talkers_golden",
+    impact: "90.0% 2D-Zone F2 / 84.9% Full-Frame F2 and 93.4% Recall across unseen test shelves (#105453 EXP-47)",
+    inspectRunId: "1021-105453-talker_price_tag_detect-gemini-3.5-flash-lite-priority-hul_talkers_golden",
   },
   {
     ds: "hul_promos",
@@ -1822,8 +2059,8 @@ const DATASET_ENRICHMENT_ROWS = [
     beforeRaw: "Promo callouts were baked into variant folder names (e.g., _20_Pct_Extra), polluting base variant visual prototypes and requiring 3–4 weeks of model retraining for every new promo pack.",
     afterEnriched: "Separated promo_type and has_promo into dedicated metadata fields across 240 promo SKUs and paired reference gallery matching with 2x top/bottom promo-strip OCR zoom (EXP-37/48).",
     splits: "4,000 train · 1,000 val · 1,000 test",
-    impact: "84.0% 3-Attr · 93.7%–97.0% Brand · 99.0% Unilever Owner · Cuts new promo onboarding from 4 weeks to 5 minutes",
-    inspectRunId: "1013-025000-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos",
+    impact: "90.0% 3-Attr / 85.0% 5-Attr (#105453 EXP-48) · 84.0% 3-Attr on N=1,000 (#025000) · Cuts new promo onboarding from 4 weeks to 5 minutes",
+    inspectRunId: "1021-105453-promo_ocr_zoom_verifier-gemini-3.5-flash-lite-priority-hul_promos",
   },
 ];
 
@@ -2814,7 +3051,7 @@ async function showTechnicalStory() {
             <ul style="margin:0 0 0 18px;padding:0;display:grid;gap:4px;">
               <li><b>1. Two-Stage Embedding + VLM Cascade (internal module slug: <code>jev</code>):</b> Embeds every Stage-1 ONNX crop (<code>+8%</code> context padding + Shades-of-Gray white balance + horizontal shelf-row height ratio <code>r_h</code>) via <code>gemini-embedding-2</code> (<code>3,072-D</code> fused <code>0.85 * visual + 0.15 * text</code> across up to 8 views/SKU), resolving <b>68% of shelf packs</b> in <code>0.08s/crop</code> at <code>$0</code> VLM cost before calling <code>gemini-3.5-flash-lite</code>.</li>
               <li><b>2. Stage 2A — Calibrated <code>gemini-embedding-2</code> &amp; Color Margin Gate (internal module slug: <code>clm</code>):</b> Standardizes the top-1 vs. top-2 cosine gap into a local Z-score (<code>z_margin = (s_1 - s_2) / sigma_top15</code>) with Local Intrinsic Dimensionality (<code>LID</code>) hubness gating. High-margin hits (<code>s_1 &ge; 0.80</code>, <code>z_margin &ge; 1.38</code>) exit immediately; low-margin ties are deduplicated across adjacent identical facings (<code>3.2x</code> medoid compression: <code>35 packs &rarr; ~11 unique groups</code>) and escalated.</li>
-              <li><b>3. Stage 2B — Multi-Crop Visual Contact-Sheet Verifier (internal module slug: <code>clef</code>):</b> Composes a <code>2x2</code> contact sheet pairing the query crop (plus <code>2x</code> Lanczos zoom strips of its Top-25% header, Middle-30% variant banner, and Bottom-30% net-weight band) side-by-side against the Top-5 candidate studio packshots retrieved by <code>gemini-embedding-2</code>, enabling <code>gemini-3.5-flash-lite</code> (or plug-in <code>LoRA SFT #121755</code>) to execute a constrained 1-of-5 visual diff (<b>81.9% 5-Attr Exact SKU / 95.6% 3-Attr Mean</b> at <b>2.69s</b> and <b>₹0.12/shelf</b>).</li>
+              <li><b>3. Stage 2B — Multi-Crop Visual Contact-Sheet Verifier (internal module slug: <code>clef</code>):</b> Composes a <code>2x2</code> contact sheet pairing the query crop (plus <code>2x</code> Lanczos zoom strips of its Top-25% header, Middle-30% variant banner, and Bottom-30% net-weight band) side-by-side against the Top-5 candidate studio packshots retrieved by <code>gemini-embedding-2</code>, enabling <code>gemini-3.5-flash-lite</code> (or plug-in <code>LoRA SFT #174950</code>) to execute a constrained 1-of-5 visual diff (<b>83.6% (N=1k) / 82.3% (N=5k) 5-Attr Exact SKU</b> at <b>0.82s-2.69s</b> and <b>₹0.12/shelf</b>).</li>
             </ul>
             <div style="margin-top:8px;padding:6px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:11.5px;color:#92400e;">
               <b>Terminology Note:</b> <code>jev</code>, <code>clm</code>, and <code>clef</code> are legacy internal Python module slugs in our <b>in-house Google Cloud Vertex AI codebase</b>—<i>not</i> external open-source models (distinct from Meta's <code>V-JEPA 2</code>, HuggingFace <code>Contrastive-LM/CLM-v0.1-8B</code>, and <code>Cloudflare/clef-flash</code>).
