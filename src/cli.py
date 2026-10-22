@@ -73,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.brand_endpoint")
     s.add_argument("--pack-model", default=None,
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.pack_endpoint")
+    s.add_argument("--gtmerch-model", default=None,
+                   help="legacy_gtmerch_*: .h5 URI instead of config cv_models.gtmerch_model")
     for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "gen_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
         s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
                        help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
@@ -98,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.brand_endpoint")
     s.add_argument("--pack-model", default=None,
                    help="cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.pack_endpoint")
+    s.add_argument("--gtmerch-model", default=None,
+                   help="legacy_gtmerch_*: .h5 URI instead of config cv_models.gtmerch_model")
     for v_role in ("wash_variant", "skin_variant", "p5_variant", "oral_variant", "gen_variant", "nonhul_p6_variant", "nonhul_gen_variant"):
         s.add_argument(f"--{v_role.replace('_', '-')}-model", default=None,
                        help=f"cv_classify: Vertex AI Endpoint or .h5 instead of config cv_models.{v_role}_endpoint")
@@ -229,9 +233,22 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     if a.cmd in ("run", "cloud-run"):
         if not a.model:
-            if set(a.approach) != {"cv_classify"}:
+            keras_approaches = {
+                "cv_classify",
+                "cv_promo_classify",
+                "legacy_gtmerch_planogram",
+                "legacy_gtmerch_e2e",
+                "legacy_mt_planogram",
+                "legacy_mt_e2e",
+            }
+            if set(a.approach) <= keras_approaches:
+                a.model = ["keras-h5"]
+            elif set(a.approach) == {"legacy_gtmerch_yolo"}:
+                a.model = ["gtmerch-yolo-legacy-pt"]
+            elif set(a.approach) == {"legacy_mt_yolo"}:
+                a.model = ["marketshare-yolo-legacy-pt"]
+            else:
                 p.error("the following arguments are required: -m/--model")
-            a.model = ["keras-h5"]
         from utils.cv_models import ROLES
 
         for role in ROLES:  # read by utils/cv_models.CVPipeline.from_config
@@ -293,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
             image=a.image,
             job_name=a.job,
             pull_local=bool(a.pull and not a.no_pull),
+            gtmerch_model=getattr(a, "gtmerch_model", None),
             **{f"{r}_model": getattr(a, f"{r}_model", None) for r in VARIANT_ROLES},
         )
     elif a.cmd == "deploy-cv-endpoints":

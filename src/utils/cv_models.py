@@ -46,7 +46,7 @@ VARIANT_ROLES = (
     "nonhul_p6_variant",
     "nonhul_gen_variant",
 )
-ROLES = ("brand", "pack", *VARIANT_ROLES)
+ROLES = ("brand", "pack", "gtmerch", *VARIANT_ROLES)
 # Model overrides: set by `run --brand-model/--pack-model/--<variant>-model` and by the serving container's env.
 MODEL_ENV = {r: f"SHELF_BENCH_CV_{r.upper()}_MODEL" for r in ROLES}
 VARIANT_SILOS = {
@@ -70,6 +70,7 @@ _GT_VARIANT_KEYS: dict[str, tuple[str, str]] = {
 _DEFAULT_ROLE_MODEL_URIS: dict[str, str] = {
     "brand": "gs://sos-datasets/legacy-models/mt_brand/marketshare_brand.h5",
     "pack": "gs://sos-datasets/legacy-models/mt_pack/marketshare_packtype.h5",
+    "gtmerch": "gs://sos-datasets/legacy-models/gtmerch/17Sep26-moc10-model-gtmerch-pr-0050-0.9480.h5",
     "wash_variant": "gs://sos-datasets/legacy-models/wash_variant/wash_variant.h5",
     "skin_variant": "gs://sos-datasets/legacy-models/skin_variant/skin_variant.h5",
     "p5_variant": "gs://sos-datasets/legacy-models/p5_variant/p5_variant.h5",
@@ -86,6 +87,8 @@ _ROLE_ALIASES = {
     "pack": "pack",
     "pack_type": "pack",
     "packaging_type": "pack",
+    "gtmerch": "gtmerch",
+    "gt_merch": "gtmerch",
     "wash_variant": "wash_variant",
     "variant_wash": "wash_variant",
     "wash": "wash_variant",
@@ -469,8 +472,50 @@ def parse_gt_variant_label(role: str, label: str) -> dict[str, Any]:
     }
 
 
+def parse_gtmerch_class_label(label: str) -> dict[str, Any]:
+    """Parse a 209-class GT Merchandising ``.h5`` class label (``<idx>__<Brand>__<Variant>``) into canonical fields."""
+    from utils.taxonomy.brands import HUL_BRANDS
+    from utils.taxonomy.filenames import parse_variant_folder
+
+    raw = str(label or "").strip()
+    if not raw or raw.isdigit():
+        return {}
+    parts = raw.split("__")
+    while parts and parts[0].isdigit():
+        parts = parts[1:]
+    if not parts:
+        return {}
+    if parts[0] == "O" or "Others" in parts:
+        return {
+            "brand": "Others",
+            "base_variant": "Others",
+            "variant": "Others",
+            "category": "Others",
+            "packaging_type": "Unknown",
+            "product": "Others__Others",
+            "is_hul": False,
+            "gt_label": raw,
+        }
+    folder = f"{parts[0]}__{'__'.join(parts[1:])}" if len(parts) >= 2 else parts[0]
+    p = parse_variant_folder("gtmerch", folder)
+    brand_val = str(p.get("brand") or "")
+    bv_val = str(p.get("base_variant") or "")
+    cat_val = str(p.get("category") or "")
+    pkg_val = str(p.get("packaging_type") or "")
+    return {
+        "brand": brand_val if brand_val != "Unknown" else "",
+        "base_variant": bv_val if bv_val != "Unknown" else "",
+        "variant": str(p.get("variant") or bv_val),
+        "category": cat_val if cat_val != "Unknown" else "",
+        "packaging_type": pkg_val if pkg_val != "Unknown" else "",
+        "product": f"{brand_val}__{bv_val}" if brand_val and bv_val else "",
+        "is_hul": brand_val.lower() in HUL_BRANDS,
+        "gt_label": raw,
+    }
+
+
 def parse_label(role: str, label: str) -> dict[str, str]:
-    """Benchmark fields for one model class (brand_data, Category__PackType, or Brand__Variant / gt-mapping.yml)."""
+    """Benchmark fields for one model class (brand_data, Category__PackType, gtmerch, or Brand__Variant / gt-mapping.yml)."""
     from utils.legacy_benchmark import normalize_legacy_prediction
 
     if not label or str(label).isdigit():
@@ -480,6 +525,13 @@ def parse_label(role: str, label: str) -> dict[str, str]:
         p = normalize_legacy_prediction(brand_pred=label)
         keys = ("brand", "category")
         return {k: str(p[k]) for k in keys if p.get(k) and p[k] != "Unknown"}
+    if r == "gtmerch":
+        info = parse_gtmerch_class_label(str(label).strip())
+        out_gt: dict[str, str] = {}
+        for k in ("brand", "base_variant", "variant", "category", "packaging_type", "product"):
+            if info.get(k) and info[k] != "Unknown":
+                out_gt[k] = str(info[k])
+        return out_gt
     if r in VARIANT_ROLES:
         info = parse_gt_variant_label(r, str(label).strip())
         out: dict[str, str] = {}
@@ -549,7 +601,7 @@ def _find_models(model_dir: str) -> dict[str, str]:
         if not uri.endswith(".h5"):
             continue
         stem = Path(uri).stem.lower()
-        role = normalize_role(stem) or ("pack" if "pack" in stem else "brand" if "brand" in stem else "")
+        role = normalize_role(stem) or ("pack" if "pack" in stem else "brand" if "brand" in stem else "gtmerch" if "gtmerch" in stem else "")
         if role:
             found.setdefault(role, uri)
     return found
@@ -560,6 +612,8 @@ class KerasClassifier:
 
     - ``brand`` (``marketshare_brand.h5``): PIL RGB + nearest-neighbour resize to 299x299 +
       ``inception_v3.preprocess_input`` (``x / 127.5 - 1.0`` in ``[-1, 1]``).
+    - ``gtmerch`` (``17Sep26-moc10-model-gtmerch-pr-0050-0.9480.h5``): PIL RGB + nearest-neighbour
+      resize to 299x299 in ``[0, 255]`` ``float32`` (209-way softmax).
     - ``pack`` (``marketshare_packtype.h5``) and all 7 ``*_variant.h5`` models: OpenCV BGR channel
       order + bilinear resize to 299x299 + ``x / 255.0`` in ``[0, 1]``.
     Input conditioning vectors and output classes are sanitized via ``gt-mapping.yml``.
@@ -617,6 +671,9 @@ class KerasClassifier:
                 if self.role == "brand":
                     rgb = image.convert("RGB").resize((int(w), int(h)), Image.Resampling.NEAREST)
                     feeds.append(np.asarray(rgb, dtype=np.float32)[None] / 127.5 - 1.0)
+                elif self.role == "gtmerch":
+                    rgb = image.convert("RGB").resize((int(w), int(h)), Image.Resampling.NEAREST)
+                    feeds.append(np.asarray(rgb, dtype=np.float32)[None])
                 else:
                     rgb = image.convert("RGB").resize((int(w), int(h)), Image.Resampling.BILINEAR)
                     bgr = np.asarray(rgb, dtype=np.float32)[..., ::-1]
@@ -780,7 +837,7 @@ def _classifier(role: str, ref: str, model_uri: str | None = None) -> KerasClass
 
 
 class CVPipeline:
-    """The brand, pack, and category-routed variant classifiers (in-process ``.h5`` or Vertex AI Endpoints)."""
+    """The brand, pack, gtmerch, and category-routed variant classifiers (in-process ``.h5`` or Vertex AI Endpoints)."""
 
     def __init__(self, refs: Mapping[str, str | None], model_uris: Mapping[str, str | None] | None = None):
         self.runners: dict[str, KerasClassifier | EndpointClassifier] = {
@@ -790,17 +847,25 @@ class CVPipeline:
 
     @classmethod
     def from_config(cls, config: dict, roles: Iterable[str] | None = None) -> CVPipeline:
-        """Benchmark side: the Vertex AI Endpoints in ``cv_models``. ``--brand-model`` /
-        ``--pack-model`` / ``--<variant>-model`` override them with another endpoint or ``.h5``."""
+        """Benchmark side: the Vertex AI Endpoints (or ``.h5`` URIs) in ``cv_models``. ``--brand-model`` /
+        ``--pack-model`` / ``--gtmerch-model`` / ``--<variant>-model`` override them."""
         cv = config.get("cv_models") or {}
         if roles is None:
             roles = ["brand", "pack", *configured_variant_roles(config)]
         norm_roles = [normalize_role(r) for r in roles if normalize_role(r)]
-        refs = {r: os.environ.get(MODEL_ENV[r]) or cv.get(f"{r}_endpoint") for r in norm_roles}
+        refs = {
+            r: (
+                os.environ.get(MODEL_ENV[r])
+                or cv.get(f"{r}_endpoint")
+                or cv.get(f"{r}_model")
+                or (_DEFAULT_ROLE_MODEL_URIS.get(r) if r == "gtmerch" else None)
+            )
+            for r in norm_roles
+        }
         missing = [r for r in norm_roles if not refs[r]]
         if missing:
             raise ValueError(f"no {', '.join(missing)} model: set cv_models.<role>_endpoint in config.yaml")
-        return cls(refs, {r: cv.get(f"{r}_model") for r in norm_roles})
+        return cls(refs, {r: cv.get(f"{r}_model") or _DEFAULT_ROLE_MODEL_URIS.get(r) for r in norm_roles})
 
     @classmethod
     def for_serving(cls, config: dict) -> CVPipeline:
@@ -814,7 +879,10 @@ class CVPipeline:
         return cls({role: refs.get(role)} if role else refs)
 
     def predict(self, image: Image.Image, fields: Sequence[str], category_hint: str | None = None) -> dict[str, str]:
-        """The benchmark fields for one product photo (see ``predict_coupled``)."""
+        """The benchmark fields for one product photo (see ``predict_coupled`` / ``predict_gtmerch``)."""
+        if "gtmerch" in self.runners and "brand" not in self.runners:
+            pred_gt = self.predict_gtmerch(image)
+            return {f: str(pred_gt.get(f, "")) for f in fields}
         fset = set(fields)
         with_pack = "pack" in self.runners and bool({"packaging_type", "category"} & fset)
         with_variant = any(r in self.runners for r in VARIANT_ROLES) and (
@@ -827,6 +895,24 @@ class CVPipeline:
             category_hint=category_hint,
         )
         return {f: pred.get(f, "") for f in fields}
+
+    def predict_gtmerch(self, image: Image.Image) -> dict[str, Any]:
+        """Run the 209-class GT Merchandising ``.h5`` model (``gtmerch`` role) and return canonical fields."""
+        if "gtmerch" not in self.runners:
+            raise ValueError("gtmerch runner is not configured in CVPipeline")
+        cls_name, conf = self.runners["gtmerch"].predict_class(image)
+        info = parse_gtmerch_class_label(cls_name)
+        return {
+            "product": info.get("product", ""),
+            "brand": info.get("brand", ""),
+            "base_variant": info.get("base_variant", ""),
+            "variant": info.get("variant", ""),
+            "category": info.get("category", ""),
+            "packaging_type": info.get("packaging_type", ""),
+            "is_hul": bool(info.get("is_hul", False)),
+            "gtmerch_class": cls_name,
+            "gtmerch_confidence": round(float(conf), 4),
+        }
 
     def predict_coupled(
         self,

@@ -209,7 +209,11 @@ def run_on_cloud(
     if not tasks:
         raise SystemExit("Nothing to run: no approach runs any of the given models")
     s = _session()
-    image = image or build_image(s, project, region, log)
+    needs_cv = any(
+        ap.startswith(("cv_", "legacy_")) or "keras-h5" in models
+        for ap in approaches
+    )
+    image = image or build_image(s, project, region, log, extras="cv" if needs_cv else "")
     args = [
         "run", "-a", *approaches, "-m", *models, "-t", *tiers,
         *(["-d", dataset_override] if dataset_override else []),

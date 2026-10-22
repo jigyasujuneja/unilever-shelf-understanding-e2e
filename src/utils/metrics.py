@@ -72,8 +72,12 @@ def match_identified(
     for i, j in sorted(m["pairs"].items()):
         if pred_ids[i] == gt_ids[j]:
             hits.append(i)
-        elif catalog is not None and gt_labels is not None and j < len(gt_labels):
-            pred_entry = catalog.get(pred_ids[i]) if pred_ids[i] is not None else None
+        elif gt_labels is not None and j < len(gt_labels):
+            pred_entry = (
+                pred_ids[i]
+                if isinstance(pred_ids[i], dict)
+                else (catalog.get(pred_ids[i]) if (catalog is not None and pred_ids[i] is not None) else None)
+            )
             if pred_entry is not None and match_product(pred_entry, gt_labels[j], resolved_fields)["tp"] > 0:
                 hits.append(i)
     tp = len(hits)
@@ -590,7 +594,7 @@ def filter_preds_to_psa_categories(
             kept_ids.append(pid)
             kept_indices.append(orig_idx)
             continue
-        meta = catalog.get(pid) or {}
+        meta = pid if isinstance(pid, dict) else ((catalog.get(pid) if catalog is not None else None) or {})
         p_cat = str(meta.get("category") or "").strip()
         p_is_hul = bool(meta.get("is_hul", True))
         if not p_cat or p_cat in target_cats or (has_others and not p_is_hul):

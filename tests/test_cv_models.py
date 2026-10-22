@@ -390,3 +390,40 @@ def test_coupled_3_stage_pipeline_with_variant_endpoints(monkeypatch):
     assert sess2.calls[1][1]["instances"][0]["brand"] == "Dove"
     assert sess2.calls[2][1]["instances"][0]["category"] == "Hair"
 
+
+def test_gtmerch_209_class_parser_and_legacy_merchandising_approaches():
+    import approaches
+
+    p1 = cv_models.parse_gtmerch_class_label("01__ABru__Bru Gold Coffee Jar")
+    assert p1["brand"] == "Bru" and p1["is_hul"] is True and p1["packaging_type"] == "Jar"
+
+    p2 = cv_models.parse_gtmerch_class_label("85__APonds__Bright Beauty Spot-less Glow Face Wash")
+    assert p2["brand"] == "Ponds" and p2["is_hul"] is True
+
+    p_oth = cv_models.parse_gtmerch_class_label("192__90__O__Others")
+    assert p_oth["brand"] == "Others" and p_oth["is_hul"] is False
+
+    # Verify gtmerch KerasClassifier preprocessing uses [0, 255] RGB
+    gt_clf = cv_models.KerasClassifier(
+        "gtmerch",
+        "gs://sos-datasets/legacy-models/gtmerch/17Sep26-moc10-model-gtmerch-pr-0050-0.9480.h5",
+        ("01__ABru__Bru Gold Coffee Jar", "85__APonds__Bright Beauty Spot-less Glow Face Wash"),
+    )
+    gt_clf._model = FakeKeras(1, n=2, inputs=((None, 299, 299, 3),))
+    img = Image.new("RGB", (64, 64), (200, 100, 50))
+    cls_name, conf = gt_clf.predict_class(img)
+    assert cls_name == "85__APonds__Bright Beauty Spot-less Glow Face Wash" and conf == pytest.approx(0.9)
+    assert gt_clf._model.feeds[0, 0, 0].tolist() == pytest.approx([200.0, 100.0, 50.0], abs=1e-5)
+
+    reg = approaches.all_approaches()
+    for name in (
+        "legacy_gtmerch_yolo",
+        "legacy_mt_yolo",
+        "legacy_gtmerch_planogram",
+        "legacy_gtmerch_e2e",
+        "legacy_mt_planogram",
+        "legacy_mt_e2e",
+        "cv_promo_classify",
+    ):
+        assert name in reg
+

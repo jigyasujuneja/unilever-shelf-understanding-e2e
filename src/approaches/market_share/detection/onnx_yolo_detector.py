@@ -555,3 +555,106 @@ class DistilledYolo960SoftNms(DistilledYoloOnnx):
         return merged_boxes
 
 
+@register
+class LegacyGtmerchYolo(Approach):
+    """Legacy GT Merchandising 2-Class YOLOv8n Detector (`gtmerch_asset_sku_intermediary_17092026.pt` / `.onnx`)."""
+
+    name = "legacy_gtmerch_yolo"
+    models = ["gtmerch-yolo-legacy-pt"]
+    conf_thr = 0.08
+    onnx_uri = "gs://sos-datasets/legacy-models/gtmerch/gtmerch_asset_sku_intermediary_17092026.onnx"
+    architecture = (
+        "Legacy GT Merchandising 2-Class YOLOv8n (`gtmerch_asset_sku_intermediary_17092026.pt` exported to ONNX: "
+        "Class 0 = display/promo asset, Class 1 = SKU facing, 640x640, conf>=0.08) -> greedy NMS"
+    )
+    steps = [
+        "Setup (once per run): load legacy GT Merchandising YOLOv8n (`gtmerch_asset_sku_intermediary_17092026.onnx`) into CPUExecutionProvider",
+        "Execute 2-class 640x640 neural forward pass separating Class 0 display/promo assets from Class 1 SKU facings ($0 token cost)",
+        "Confidence filter (conf >= 0.08) + greedy NMS at IoU 0.55",
+    ]
+
+    def setup(self, config: dict, ctx: Context) -> None:
+        cv = (config or {}).get("cv_models") or {}
+        uri = cv.get("gtmerch_yolo_model") or self.onnx_uri
+        local_dir = Path(os.environ.get("SHELF_BENCH_ONNX_DIR", str(CACHE_DIR)))
+        self.session = _load_onnx_session(
+            uri, local_fallback=local_dir / "gtmerch_asset_sku_intermediary_17092026.onnx"
+        )
+
+    def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        t0 = time.perf_counter()
+        neural_boxes, neural_scores = _run_yolo_onnx(
+            self.session, image, conf_thr=self.conf_thr, iou_thr=0.55, ctx=ctx
+        )
+        asset_boxes = list(getattr(ctx, "detected_asset_boxes", []))
+        boxes, scores = _run_yolo_onnx_multiscale(
+            self.session, image, conf_thr=self.conf_thr, iou_thr=0.55, ctx=ctx
+        )
+        if neural_boxes and len(neural_boxes) >= len(boxes):
+            boxes, scores = neural_boxes, neural_scores
+        ctx.detected_asset_boxes = asset_boxes
+        ms = round((time.perf_counter() - t0) * 1000, 1)
+        ctx.trace.step(
+            "Legacy GT Merchandising YOLOv8n (2-Class: Asset + SKU)",
+            f"{len(boxes)} SKU boxes + {len(asset_boxes)} promo/display asset boxes in {ms} ms ($0 token cost)",
+            boxes=boxes,
+            info={
+                "onnx_ms": ms,
+                "mean_conf": round(float(np.mean(scores)), 3) if scores else 0.0,
+                "asset_boxes": len(asset_boxes),
+                "neural_sku_boxes": len(neural_boxes),
+                "model": "gtmerch_asset_sku_intermediary_17092026.pt",
+            },
+        )
+        return boxes
+
+
+@register
+class LegacyMtYolo(Approach):
+    """Legacy Modern Trade 1-Class YOLOv8n Detector (`marketshare_yolo.pt` / `.onnx`)."""
+
+    name = "legacy_mt_yolo"
+    models = ["marketshare-yolo-legacy-pt"]
+    conf_thr = 0.08
+    onnx_uri = "gs://sos-datasets/legacy-models/mt_yolo/marketshare_yolo.onnx"
+    architecture = (
+        "Legacy Modern Trade 1-Class YOLOv8n (`marketshare_yolo.pt` exported to ONNX: "
+        "Class 0 = object, 640x640, conf>=0.08) -> greedy NMS"
+    )
+    steps = [
+        "Setup (once per run): load legacy Modern Trade YOLOv8n (`marketshare_yolo.onnx`) into CPUExecutionProvider",
+        "Execute 1-class 640x640 neural forward pass + wide-strip tiling ($0 token cost)",
+        "Confidence filter (conf >= 0.08) + greedy NMS at IoU 0.55",
+    ]
+
+    def setup(self, config: dict, ctx: Context) -> None:
+        cv = (config or {}).get("cv_models") or {}
+        uri = cv.get("mt_yolo_model") or self.onnx_uri
+        local_dir = Path(os.environ.get("SHELF_BENCH_ONNX_DIR", str(CACHE_DIR)))
+        self.session = _load_onnx_session(uri, local_fallback=local_dir / "marketshare_yolo.onnx")
+
+    def detect(self, image: Image.Image, ctx: Context) -> list[Box]:
+        t0 = time.perf_counter()
+        neural_boxes, neural_scores = _run_yolo_onnx(
+            self.session, image, conf_thr=self.conf_thr, iou_thr=0.55, ctx=ctx
+        )
+        boxes, scores = _run_yolo_onnx_multiscale(
+            self.session, image, conf_thr=self.conf_thr, iou_thr=0.55, ctx=ctx
+        )
+        if neural_boxes and len(neural_boxes) >= len(boxes):
+            boxes, scores = neural_boxes, neural_scores
+        ms = round((time.perf_counter() - t0) * 1000, 1)
+        ctx.trace.step(
+            "Legacy Modern Trade YOLOv8n (marketshare_yolo.pt)",
+            f"{len(boxes)} boxes in {ms} ms ($0 token cost)",
+            boxes=boxes,
+            info={
+                "onnx_ms": ms,
+                "mean_conf": round(float(np.mean(scores)), 3) if scores else 0.0,
+                "neural_boxes": len(neural_boxes),
+                "model": "marketshare_yolo.pt",
+            },
+        )
+        return boxes
+
+
