@@ -125,3 +125,66 @@ class CVClassify(Approach):
             )
         pred = {f: out.get(f, "") for f in self.evaluated_fields}
         return pred if any(pred.values()) else None
+
+
+@register
+class CVPromoClassify(CVClassify):
+    """Legacy 9-Model InceptionV3 Cascade evaluated on W9 Promotional & Multipack SKUs (`hul_promos`)."""
+
+    name = "cv_promo_classify"
+    use_case = "merchandising"
+    task = "promo_detection"
+    dataset = "hul_promos"
+
+    def setup(self, config: dict, ctx: Context) -> None:
+        if not self.evaluated_fields:
+            self.evaluated_fields = (
+                "product",
+                "brand",
+                "base_variant",
+                "category",
+                "packaging_type",
+                "is_hul",
+                "promo_type",
+            )
+        super().setup(config, ctx)
+
+    def identify(self, image: Image.Image, ctx: Context) -> dict | None:
+        from approaches.merchandising.promo_detection.jev_promo_verifier import _normalize_promo_token
+
+        out = self.pipeline.predict_coupled(
+            image,
+            with_pack=self.with_pack,
+            with_variant=self.with_variant,
+        )
+        promo_tok = _normalize_promo_token(
+            f"{out.get('variant') or ''} {out.get('gt_variant') or ''} {out.get('variant_class') or ''}"
+        )
+        out["promo_type"] = promo_tok
+        if "is_hul" not in out:
+            from utils.taxonomy.brands import HUL_BRANDS
+
+            out["is_hul"] = str(out.get("brand") or "").lower() in HUL_BRANDS
+        ctx.trace.step(
+            f"Legacy 9-Model CV Promo Cascade: {out.get('brand') or '?'} / {out.get('base_variant') or '?'}",
+            f"brand={out.get('brand') or '?'}, variant={out.get('base_variant') or '?'}, pack={out.get('packaging_type') or '?'}, promo_type={promo_tok}",
+            info={
+                k: out[k]
+                for k in (
+                    "brand",
+                    "base_variant",
+                    "product",
+                    "packaging_type",
+                    "category",
+                    "is_hul",
+                    "promo_type",
+                    "brand_confidence",
+                    "variant_confidence",
+                    "pack_confidence",
+                )
+                if k in out
+            },
+        )
+        pred = {f: out.get(f, "") for f in self.evaluated_fields}
+        return pred if any(v not in ("", None) for v in pred.values()) else None
+

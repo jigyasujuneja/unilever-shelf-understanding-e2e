@@ -38,6 +38,9 @@ cv_models:
   gen_variant_model: gs://sos-datasets/legacy-models/gen_variant/gen_variant.h5
   nonhul_p6_variant_model: gs://sos-datasets/legacy-models/nonhul_p6_variant/nonhul_p6_variant.h5
   nonhul_gen_variant_model: gs://sos-datasets/legacy-models/nonhul_gen_variant/nonhul_gen_variant.h5
+  gtmerch_model: gs://sos-datasets/legacy-models/gtmerch/17Sep26-moc10-model-gtmerch-pr-0050-0.9480.h5
+  gtmerch_yolo_model: gs://sos-datasets/legacy-models/gtmerch/gtmerch_asset_sku_intermediary_17092026.onnx
+  mt_yolo_model: gs://sos-datasets/legacy-models/mt_yolo/marketshare_yolo.onnx
   brand_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/4323610123659378688
   pack_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/5408977633855668224
   wash_variant_endpoint: projects/ul-fs-s-sandbx-16-prj/locations/us-central1/endpoints/1656353244349202432
