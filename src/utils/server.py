@@ -329,7 +329,7 @@ class Handler(BaseHTTPRequestHandler):
             def _bg() -> None:
                 try:
                     try:
-                        n = runner.pull(pull_src, res_dir, include_images=False, finalize_compute=False)
+                        n = runner.pull(pull_src, res_dir, include_images=True, finalize_compute=False)
                     except TypeError:
                         n = runner.pull(pull_src, res_dir)
                     if n > 0:
@@ -444,6 +444,8 @@ class Handler(BaseHTTPRequestHandler):
                 "styles.css",
                 "cio.js",
                 "cio.css",
+                "demo.mp4",
+                "demo_poster.png",
                 "unilever_simple_exec_funnel.png",
                 "data_audit_pipeline.png",
                 "shelf_bay_vs_sku_example.png",
@@ -451,6 +453,8 @@ class Handler(BaseHTTPRequestHandler):
                 "bay_split_cleanup_example.png",
                 "duplicate_upload_cleanup_example.png",
             ):
+                if parts[1].endswith(".mp4"):
+                    return self._send_video(STATIC / parts[1])
                 if parts[1].endswith(".js"):
                     ctype = "text/javascript; charset=utf-8"
                     cc = "no-cache"
@@ -519,6 +523,36 @@ class Handler(BaseHTTPRequestHandler):
                 from utils.experiment_matrix import build_experiments_and_models_catalog
 
                 summary, images = runner.load_run(parts[2], eff_dir)
+                lb = _cached_call(f"lb:{eff_dir}", lambda: runner.leaderboard(eff_dir))
+                lb_row = next((r for r in lb if r.get("run_id") == parts[2]), None)
+                if lb_row:
+                    merged_summary = dict(summary)
+                    for k in (
+                        "primary_score",
+                        "primary_score_label",
+                        "raw_primary_score",
+                        "raw_primary_score_label",
+                        "field_accuracy",
+                        "planogram_metrics",
+                        "sos_metrics",
+                        "bay_scoped_metrics",
+                        "human_and_beyond",
+                        "annotated_row_box_metrics",
+                        "enrichment_metrics",
+                        "eval_samples",
+                        "total_gt_boxes",
+                        "short_id",
+                        "short_model",
+                        "approach_title",
+                        "approach_intuition",
+                        "exp_id",
+                        "exp_title",
+                        "is_oracle_box_diagnostic",
+                        "is_closed_set_gpu",
+                    ):
+                        if lb_row.get(k) is not None:
+                            merged_summary[k] = lb_row[k]
+                    summary = merged_summary
                 cat = _cached_call(f"models:{eff_dir}", lambda: build_experiments_and_models_catalog(eff_dir))
                 return self._json({
                     "summary": summary,

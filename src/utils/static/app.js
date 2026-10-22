@@ -3180,7 +3180,9 @@ async function showRun(runId) {
   const single = task === "classification";
   const fa = s.field_accuracy || {};
   const evalFields = Array.isArray(s.evaluated_fields) && s.evaluated_fields.length ? s.evaluated_fields : null;
-  const primaryScore = task === "detection" || task === "end_to_end" ? s.f2 : s.accuracy;
+  const scopeMeta = getEvalScopeMeta(s);
+  const primaryScore = s.primary_score ?? (task === "detection" || task === "end_to_end" ? s.f2 : s.accuracy);
+  const scoreLabel = s.primary_score_label || scopeMeta.scoreLabel || tInfo.scoreLabel;
   const unitLabel = DATASETS[s.dataset]?.unitType === "shelf" ? "shelf" : "crop";
 
   const [head, cells] = {
@@ -3279,9 +3281,9 @@ async function showRun(runId) {
     <!-- 4 Headline KPI Cards Only -->
     <div class="m3-kpi-grid" style="margin-bottom:14px">
       <div class="m3-kpi-card">
-        <div class="m3-kpi-label">Primary Score (${esc(tInfo.scoreLabel)})</div>
+        <div class="m3-kpi-label">Primary Score (${esc(scoreLabel)})</div>
         <div class="m3-kpi-value" style="color:var(--accent)">${pct(primaryScore)}</div>
-        <div class="m3-kpi-sub">${rightCount.toLocaleString()} of ${images.length.toLocaleString()} images (${totalEvalSamples.toLocaleString()} total eval samples)</div>
+        <div class="m3-kpi-sub">${s.raw_primary_score_label ? `${esc(s.raw_primary_score_label)} &middot; ` : ""}${rightCount.toLocaleString()} of ${images.length.toLocaleString()} images (${totalEvalSamples.toLocaleString()} total eval samples)</div>
       </div>
       <div class="m3-kpi-card">
         <div class="m3-kpi-label">Taxonomy / Field Accuracy</div>
