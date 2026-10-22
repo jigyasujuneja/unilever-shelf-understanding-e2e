@@ -161,74 +161,74 @@ const TASK_PERFORMANCE = [
   {
     useCase: 'MT Market Share',
     question: 'Lookalike Sister Variant & New Launch Disambiguation (1,922 Variants on hul_variants N=5,000 & N=1,000)',
-    legacy: 47.4,
-    legacySource: '9-Model Chained .h5 on hul_variants (#1015-093448: 47.4% 5-Attr, 51.8% 3-Attr; 76.1% Phase-1 W4 Mean)',
-    ours: 83.2,
-    latency: '1.98s-2.69s (Gemini 3.5 Flash-Lite EXP-28 #1016-092456 / #1015-163309)',
+    legacy: 41.5,
+    legacySource: '9-Model Chained .h5 on hul_variants (#1016-105318 N=5,000: 41.5% 5-Attr, 75.1% 3-Attr F2; 76.1% Phase-1 W4 Mean)',
+    ours: 83.5,
+    latency: '0.56s-0.83s (Gemini 3.5 Flash-Lite EXP-28 #1015-163309 / #1016-092456)',
     shelfCost: '$0.00114-$0.00139 / shelf (₹0.10-₹0.12)',
-    cropCost: '$0.00056-$0.00090 / crop (EXP-28 Contrastive CLEF)',
-    sampleSummary: 'N=5,000 hul_variants (★ #1016-092456 EXP-28: 81.9% 5-Attr, 97.4% R@5 • #1016-092456 SFT: 79.6% 5-Attr) & N=1,000 (★ #1015-163309 EXP-28: 83.2% test / 84.0% val, 94.4% [17/18] on unseen 0-train-crop launches • #1015-174314 EXP-29 LoRA SFT: 81.9% test / 85.0% val)',
-    runId: '1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants-test_5k',
-    shortRunId: '★ #1016-092456 (81.9% N=5,000) & #1015-163309 (83.2% N=1,000 / 94.4% Unseen)',
+    cropCost: '$0.00044-$0.00053 / crop (EXP-28 CLEF / EXP-29 SFT)',
+    sampleSummary: 'N=1,000 hul_variants (★ #1015-163309 EXP-28: 83.5% Test / 84.0% Val [#1015-162627], 94.4% [17/18] on unseen 0-train-crop launches • #1015-174314 EXP-29 SFT: 82.1% Test / 85.0% Val [#1015-162629]) • N=5,000 hul_variants (★ #1016-092456 EXP-28: 81.8% 5-Attr, 97.4% R@5)',
+    runId: '1015-163309-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_variants',
+    shortRunId: '★ #1015-163309 (83.5% N=1,000 Test / 94.4% Unseen) & #1016-092456 (81.8% N=5,000)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '★ 81.9% (N=5k) / 83.2% (N=1k) • 94.4% Unseen Launches',
-    status: '+34.5% to +35.8% vs 9-Model .h5 ★',
+    unit: '★ 83.5% (N=1k) / 81.8% (N=5k) • 94.4% Unseen Launches',
+    status: '+42.0% vs 9-Model .h5 ★',
     gapSummary: 'Curved squeeze tubes and newly launched SKUs with 0 historical training crops break closed-set classifiers.',
-    howWeCloseIt: 'Top-K contrastive candidate attribute hints (EXP-28) + 1.15x tube unwarp + Middle-30% zoom strip.',
+    howWeCloseIt: 'Top-22% Crown + Saliency-Diff 2.5x zoom + Contrastive Top-K Metadata (EXP-28/51/58).',
   },
   {
     useCase: 'MT Market Share',
     question: 'Full 5-Attribute Exact Product & SKU + P2P Basepack Weight W1 (2,659 SKUs on hul_golden N=5,000 & N=1,000)',
     legacy: 42.3,
     legacySource: '9-Model Chained .h5 on hul_golden (N=5,000 #1016-093317: 42.3% 5-Attr; N=1,000 #1015-092627: 44.5%; 34.82% P2P W1)',
-    ours: 82.7,
-    latency: '2.69s (EXP-28 / EXP-32 3.5-Lite Production Winner)',
+    ours: 83.6,
+    latency: '0.82s-2.00s (EXP-51 #1020-152650 / EXP-58 #1021-154455 / EXP-28 #1016-092456)',
     shelfCost: '$0.00139 / shelf (₹0.12 3.5-Lite, -62% vs Legacy)',
-    cropCost: '$0.00051 / crop (EXP-32 InfoNCE) • $0.00090 (EXP-28 CLEF)',
-    sampleSummary: 'N=5,000 hul_golden (★ #1016-092456 EXP-28: 82.3% 5-Attr, 97.4% R@5 • ★ #1016-092457 EXP-32 InfoNCE: 81.2% 5-Attr, 92.6% R@5 vs 42.3% 9-model .h5 #1016-093317) & N=1,000 (#1015-165814: 82.7% • #1015-232439: 82.0%) • P2P W1: 34.82% -> 73.68% (2.12x)',
-    runId: '1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k',
-    shortRunId: '★ #1016-092456 (82.3% N=5k) & #1015-165814 (82.7% N=1k) + #1016-092457 (92.6% R@5)',
+    cropCost: '$0.00045 / crop (EXP-51/28) • $0.00051 / crop (EXP-32 InfoNCE)',
+    sampleSummary: 'N=1,000 hul_golden (★ #1020-152650 EXP-51: 83.6% Test, 98.7% HUL, 97.1% Cat, 97.0% Brand, 93.4% Pack • #1020-152901 EXP-52: 82.9% • #1015-165814 EXP-28: 82.9%) • EXP-58 Crown Zoom (★ #1021-154455: 84.0% N=100 • #1021-154454: 83.0% N=200) • N=5,000 (★ #1016-092456 EXP-28: 82.3%, 97.4% R@5 • #1016-092457 EXP-32: 81.2%, 92.6% R@5) • P2P W1: 34.82% -> 73.68% (2.12x)',
+    runId: '1020-152650-clef_saliency_diff_zoom-gemini-3.5-flash-lite-priority-hul_golden',
+    shortRunId: '★ #1020-152650 (83.6% EXP-51 N=1k) & #1021-154455 (84.0% EXP-58) & #1016-092456 (82.3% N=5k)',
     experimenter: 'Jigyasu Juneja (jjuneja) • Riley Gavigan (rgavigan)',
-    unit: '★ 82.3% (N=5k) / 82.7% (N=1k) • 92.6% R@5 • 73.7% P2P W1',
-    status: '+40.0% vs 9-Model .h5 on N=5k ★',
+    unit: '★ 83.6% (N=1k) / 84.0% (EXP-58) / 82.3% (N=5k) • 73.7% P2P W1',
+    status: '+40.0% to +41.3% vs 9-Model .h5 ★',
     gapSummary: '50g vs. 100g packs share identical front artwork across single-crop evaluations.',
-    howWeCloseIt: 'Residual InfoNCE SFT (EXP-32) + Contrastive CLEF (EXP-28) + Contact-Sheet LoRA SFT (EXP-33).',
+    howWeCloseIt: 'Lidstone 3D Container Prior + Saliency-Diff Zoom (EXP-51) + Layer-5 Pack-Size Verifier (EXP-58).',
   },
   {
     useCase: 'GT & MT Merch',
-    question: 'Display Bay & Shelf Box Detection + 2D Annotated-Zone Audit (ms_json_golden N=151 test_5k & gt_hul_sessions N=100)',
+    question: 'Display Bay & Shelf Box Detection + Bay-Gated E2E Audit (gtmerch_golden, ms_json_golden & gt_hul_sessions)',
     legacy: 51.1,
     legacySource: 'Phase-1 1-Class Detector Baseline • 50.4% F2 yolov12s-sku110k (#203935 N=100)',
-    ours: 69.0,
-    latency: '80ms-1.49s CPU Det (#1016-092455 / #1015-232729) • 5.25s Session Audit (#1013-232627 3.5-Lite)',
-    shelfCost: '$0.00004 / shelf (CPU ONNX) • $0.00236 / strip (3.5-Lite Planogram)',
-    cropCost: '$0.00236 / strip (#1013-232627 Gemini 3.5 Flash-Lite)',
-    sampleSummary: 'N=151 test_5k ms_json_golden (★ #1016-092455: 55.59% Raw -> 67.28% 2D-Zone F2 [63.98% P / 68.16% R] + 5,342 extra facings [2.13x]) • N=100 test (#1015-232729: 68.99% 2D-Zone F2 + 1,859 extra facings [2.22x] • #1015-232902 E2E: +600 extra SKUs & 64.4% "Others" resolved) • N=100 gt_hul_sessions (#1013-232625: 100% ONNX Det F2)',
-    runId: '1016-092455-distilled_yolo_960_softnms-yolo11n-distilled-onnx-ms_json_golden-test_5k',
-    shortRunId: '★ #1016-092455 (67.28% 2D-Zone F2 + 5,342 Extra on 5k) & #1015-232729 (68.99% on 1k)',
+    ours: 77.3,
+    latency: '0.49s-1.57s CPU ONNX (#1013-232626 / #1016-092455) • 3.73s Bay Det (#1017-152407)',
+    shelfCost: '$0.00004 / shelf (CPU ONNX) • $0.00632 / bay (#1017-152407 3.5-Lite)',
+    cropCost: '$0.00018 / box (#1017-152407 Gemini 3.5 Flash-Lite)',
+    sampleSummary: 'gtmerch_golden (★ #1017-152407 EXP-34 N=100 Test: 77.3% Bay Det F2, 83.7% In-Bay Prec • #1020-151952 EXP-53 N=100 Test: 76.4% Bay F2 / 81.0% Val [#1020-150917] • #1021-003633 EXP-55 Val: 81.8% Bay F2 • ★ #1021-003634 EXP-57 E2E: 69.8% Bay F2, 97.2% In-Bay SKU Acc) • ms_json_golden (★ #1014-000636 N=100 Test: 73.4% 2D-Zone F2 • #1015-232729 ONNX: 69.0% Zone F2 • #1016-092455 N=151 test_5k: 67.3% Zone F2 + 5,342 extra facings [2.13x]) • N=100 gt_hul_sessions (#1013-232626: 100% ONNX Det F2)',
+    runId: '1017-152407-promo_asset_sku_detect-gemini-3.5-flash-lite-priority-gtmerch_golden',
+    shortRunId: '★ #1017-152407 (77.3% N=100 Bay Det F2 / 83.7% Prec) & #1021-003634 (69.8% Bay E2E / 97.2% SKU)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '★ 67.3% (5k) / 69.0% (1k) 2D-Zone F2 • 100% GT ONNX Det',
-    status: '+17.9% 2D-Zone F2 • 2.13x-2.22x Facings ★',
-    gapSummary: 'Human annotators only labeled target category rows (15.2-33.2 GT boxes/shelf), leaving unannotated rows unscored in raw metrics.',
-    howWeCloseIt: '2-Bucket evaluation splits Bucket 1 (2D Annotated-Zone Accuracy: 67.3%-69.0% F2) from Bucket 2 (Extra Discovered Facings: +5,342 boxes on 5k).',
+    unit: '★ 77.3% N=100 Bay F2 (81.8% Val) • 97.2% In-Bay SKU • 100% Session Det',
+    status: '+26.2% Bay F2 • 2.13x-2.41x Facings ★',
+    gapSummary: 'Human annotators only labeled target display bays or 1-2 shelf rows, leaving background rows unscored in raw metrics.',
+    howWeCloseIt: 'Physical Shelf-Plank Support Law (EXP-53) + Pre-Embedding Class-0 Bay Gate (EXP-57) + 2-Bucket Zone Evaluation.',
   },
   {
     useCase: 'MT Toker Promo',
-    question: 'Promo & Multipack Callout Verification (240 SKUs on hul_promos N=1,000)',
+    question: 'Shelf Talker Detection (3 Classes) & Promo Callout OCR Verification (hul_talkers_golden & hul_promos)',
     legacy: 75.0,
-    legacySource: 'Phase-1 Closed-Set ViT-240 (3-4 wk retrain per campaign)',
-    ours: 84.0,
-    latency: '9.08s (#024958 Zero-VLM N=1,000 at $0.00020) • 11.42s (★ #025000 3.5-Lite N=1,000)',
-    shelfCost: '$0.00055-$0.00140 / promo display (₹0.05-₹0.12 ★)',
-    cropCost: '$0.00020 / crop (Zero-VLM #024958) • $0.00069 (★ 3.5-Lite #025000)',
-    sampleSummary: 'hul_promos N=1,000 Cloud Run (★ #025000 3.5-Lite: 84.0% 3-attr exact / 91.1% mean / 73.0% 5-attr, 97.6% HUL, 93.4% Brand at $0.00069 • #024958 Zero-VLM CLM: 79.2% 3-attr at $0.00020)',
-    runId: '1013-025000-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos',
-    shortRunId: '★ #025000-Lite (84.0% 3-Attr / 91.1% Mean, $0.00069, N=1,000)',
+    legacySource: 'Phase-1 Closed-Set ViT-240 (3-4 wk retrain per campaign; 0% on new campaigns)',
+    ours: 90.0,
+    latency: '3.05s Talker Det (#1021-105453) • 5.94s Promo OCR (#1021-105453) • 9.08s Zero-VLM (#1013-024958)',
+    shelfCost: '$0.00055-$0.00220 / promo display (₹0.05-₹0.19 ★)',
+    cropCost: '$0.00020 / crop (Zero-VLM #1013-024958) • $0.00069-$0.00070 (★ 3.5-Lite #1021-105453 / #1013-025000)',
+    sampleSummary: 'hul_talkers_golden (★ #1021-105453 EXP-47 N=50 Test: 90.0% 2D-Zone F2 / 84.9% Full-Frame F2, 93.4% Recall across 532 disjoint store outlets) • hul_promos (★ #1021-105453 EXP-48 N=50 Test: 90.0% 3-Attr / 85.0% 5-Attr, 100% HUL • ★ #1013-025000 N=1,000 Test: 84.0% 3-Attr, 93.4% Brand at $0.00069 • #1013-024958 Zero-VLM: 79.2% 3-Attr at $0.00020)',
+    runId: '1021-105453-promo_ocr_zoom_verifier-gemini-3.5-flash-lite-priority-hul_promos',
+    shortRunId: '★ #1021-105453 (90.0% Talker Zone F2 & 90.0% Promo 3-Attr) & #1013-025000 (84.0% N=1,000)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '★ 84.0% 3-Attr Exact • 91.1% Mean ($0.00069, 3.5-Lite)',
+    unit: '★ 90.0% Talker Zone F2 & Promo 3-Attr (84.0% on N=1,000)',
     status: 'Production Ready (3.5-Lite ★)',
-    gapSummary: 'Replaces 3-4 week ViT-240 retraining cycle with 1 studio reference image upload.',
-    howWeCloseIt: 'Top/bottom 25% promotional flash-banner zoom strip + zero-shot gallery onboarding.',
+    gapSummary: 'Replaces 3-4 week ViT-240 retraining cycle with 60-second 1-photo studio reference onboarding.',
+    howWeCloseIt: 'Outlet-disjoint 3-class talker detector (EXP-47) + 2x top/bottom 28% promo banner OCR zoom strip (EXP-48).',
   },
 ];
 
@@ -250,30 +250,30 @@ const PACK_PERFORMANCE = [
   { form: 'Jar / Tub', boxes: 174, packAcc: 91.4, skuAcc: 85.6, note: 'Vaseline, Ponds & Horlicks wide-mouth containers.' },
   { form: 'Bottle / Roll-On', boxes: 1549, packAcc: 90.8, skuAcc: 82.7, note: '54% of volume; shampoos, lotions & deo roll-ons.' },
   { form: 'Sachet (Single-Use Strip)', boxes: 154, packAcc: 89.6, skuAcc: 83.8, note: 'Clinic Plus, Sunsilk & Bru hanging strips.' },
-  { form: 'Tube (Squeeze Tube)', boxes: 318, packAcc: 91.6, skuAcc: 83.2, note: '81.9% (N=5,000 #1016-092456) / 83.2% (N=1,000 #1015-163309 EXP-28) via Contrastive CLEF + 1.15x unwarp.' },
+  { form: 'Tube (Squeeze Tube)', boxes: 318, packAcc: 91.6, skuAcc: 83.2, note: '81.8% (N=5,000 #1016-092456) / 83.5% (N=1,000 #1015-163309 EXP-28) via Contrastive CLEF + 1.15x unwarp.' },
   { form: 'Bar (Soap / Detergent Bar)', boxes: 159, packAcc: 87.4, skuAcc: 80.5, note: 'Stacked soap bars resolved via Soft-NMS + variant token rules.' },
 ];
 
 const SKU_TYPE_PERFORMANCE = [
-  { skuType: 'Unilever (HUL) Core SKUs', classes: '1,073 SKUs', legacy: 42.3, l1Acc: 98.6, l3Brand: 96.1, l4Variant: 82.3, l5Sku: 82.3, note: '82.3% (N=5,000 #1016-092456 EXP-28) / 82.7% (N=1,000 #1015-165814) • 81.2% 5-Attr / 92.6% R@5 on N=5,000 (#1016-092457 EXP-32 InfoNCE SFT).' },
+  { skuType: 'Unilever (HUL) Core SKUs', classes: '1,073 SKUs', legacy: 42.3, l1Acc: 98.7, l3Brand: 97.0, l4Variant: 83.6, l5Sku: 83.6, note: '83.6% (N=1,000 #1020-152650 EXP-51) / 82.3% (N=5,000 #1016-092456 EXP-28) • 81.2% 5-Attr / 92.6% R@5 on N=5,000 (#1016-092457 EXP-32 InfoNCE SFT).' },
   { skuType: 'Competitor (Non-HUL) SKUs', classes: '1,586 SKUs', legacy: 0.0, l1Acc: 98.6, l3Brand: 95.8, l4Variant: 81.4, l5Sku: 81.4, note: '874 competitor brands expanded from Phase-1 "Others" bucket into named SKUs; 64.4% (139/216) "Others" resolved on ms_json_golden (#1015-232902).' },
-  { skuType: 'Lookalike Sister Variants & New Launches', classes: '1,922 Variants', legacy: 47.4, l1Acc: 98.6, l3Brand: 96.6, l4Variant: 81.9, l5Sku: 81.9, note: '81.9% (N=5,000 #1016-092456) / 83.2% (N=1,000 #1015-163309 EXP-28) & 94.4% (17/18) on unseen 0-train-crop launches.' },
-  { skuType: 'Promotional & Multipack SKUs', classes: '240 Promo SKUs', legacy: 75.0, l1Acc: 97.4, l3Brand: 93.4, l4Variant: 84.0, l5Sku: 84.0, note: '5-minute zero-shot gallery onboarding vs. 3-4 week ViT-240 retrain (N=1,000 #025000-Lite: 84.0% 3-Attr Exact / 93.4% Brand).' },
+  { skuType: 'Lookalike Sister Variants & New Launches', classes: '1,922 Variants', legacy: 41.5, l1Acc: 98.6, l3Brand: 96.6, l4Variant: 83.5, l5Sku: 83.5, note: '81.8% (N=5,000 #1016-092456) / 83.5% (N=1,000 #1015-163309 EXP-28) & 94.4% (17/18) on unseen 0-train-crop launches.' },
+  { skuType: 'Promotional & Multipack SKUs', classes: '240 Promo SKUs', legacy: 75.0, l1Acc: 97.4, l3Brand: 93.4, l4Variant: 90.0, l5Sku: 85.0, note: '5-minute zero-shot gallery onboarding vs. 3-4 week ViT-240 retrain (#1021-105453 EXP-48: 90.0% 3-Attr / 85.0% 5-Attr; N=1,000 #025000: 84.0% 3-Attr).' },
 ];
 
 const SYSTEM_EVOLUTION_KPIS = [
   { kpi: 'Pipeline Architecture & Maintenance', legacy: '14 chained models across 4 services', latest: '1 unified serverless Cloud Run pipeline', lever: 'Consolidated GT Merch, MT Market Share & Toker Promo into 1 control plane' },
   { kpi: 'Evaluation Split Integrity', legacy: '39.9% cross-folder duplicate overlap', latest: '100% disjoint splits (12/12 QC gates)', lever: 'MD5 deduplication across 1,002,209 crops -> 602,797 unique images (train/val/test/test_5k)' },
   { kpi: 'Competitor Brand Granularity', legacy: 'Grouped into 1 bucket ("Others")', latest: '953 named brands (64.4% "Others" resolved)', lever: 'Expanded 874 competitor brands into individual brand & SKU classes (#1015-232902)' },
-  { kpi: 'Display Bay & 2D-Zone Pack Detection (F2)', legacy: '51.1% (1-class) • 55.59%-56.65% raw full-shelf F2', latest: '67.28% (5k) / 68.99% (1k) 2D-Zone F2 (+5,342 facings)', lever: '2-Bucket evaluation separates Bucket 1 (Annotated Zone #1016-092455) from Bucket 2 (Extra Shelf Discovery)' },
+  { kpi: 'Display Bay & 2D-Zone Pack Detection (F2)', legacy: '51.1% (1-class) • 55.59%-56.65% raw full-shelf F2', latest: '77.3% Bay F2 (#1017-152407) • 73.4% Tiled / 69.0% ONNX Zone F2', lever: '2-Bucket evaluation separates Bucket 1 (Annotated Zone #1016-092455) from Bucket 2 (Extra Shelf Discovery)' },
   { kpi: 'L1 Unilever vs. Competitor Ownership', legacy: '86.8% (W3 Brand sheet)', latest: '98.6% (N=5k #1016-092456) • 99.0% (N=1k #025000-Lite)', lever: 'Temporal M&A ownership ledger (Horlicks, Boost, Minimalist, OZiva, Pureit)' },
-  { kpi: 'L2A Store Category (10 Categories)', legacy: '83.2% (W2 Mean) • 86.3% #1016-093317 (N=5,000)', latest: '96.5% (N=5k #1016-092456) • 96.9% (N=1k #025000-Lite)', lever: 'System-1 CLM Gate + Residual InfoNCE SFT (EXP-32) + CLEF (EXP-28)' },
-  { kpi: 'L2B Packaging Form (46 Pairs)', legacy: '54.9% #1016-093317 (N=5,000) • 23.6% raw (#010924)', latest: '91.7% (N=5k #1016-092456) • 93.3% (N=1k #025000-Lite)', lever: 'Harmonized 46 Category__PackType pairs + legacy_mapping_table.jsonl' },
-  { kpi: 'L3 Brand Identification (953 Brands)', legacy: '87.1% #1016-093317 (N=5,000) • 88.8% #115811 (N=1,000)', latest: '96.6% (N=5k #1016-092456) • 97.7% (N=1k #1015-174314 SFT)', lever: 'Multi-attribute Hybrid & SFT beat 1-attribute .h5 while predicting all 5 levels' },
-  { kpi: 'L4 Sister Variant & Unseen Launches', legacy: '47.4% 9-model .h5 (#093448) • 0% unseen SKUs', latest: '81.9% (N=5k) / 83.2% (N=1k) • 94.4% (17/18) unseen SKUs', lever: 'EXP-28 Contrastive CLEF top-K metadata (#1016-092456 / #1015-163309) + EXP-29 LoRA SFT' },
-  { kpi: 'L5 Exact 5-Attr SKU (2,659 SKUs)', legacy: '42.3% (N=5k #1016-093317) • 44.5% (N=1k #092627)', latest: '82.3% (N=5k) / 82.7% (N=1k) EXP-28 • 92.6% R@5 EXP-32 (5k)', lever: 'Residual InfoNCE SFT (#1016-092457) + Contrastive CLEF (#1016-092456) + Contact-Sheet LoRA (EXP-33)' },
+  { kpi: 'L2A Store Category (10 Categories)', legacy: '83.2% (W2 Mean) • 86.3% #1016-093317 (N=5,000)', latest: '96.5% (N=5k #1016-092456) • 97.1% (N=1k #1020-152650)', lever: 'System-1 CLM Gate + Residual InfoNCE SFT (EXP-32) + Saliency-Diff CLEF (EXP-51)' },
+  { kpi: 'L2B Packaging Form (46 Pairs)', legacy: '54.9% #1016-093317 (N=5,000) • 56.0% #1015-092627 (N=1,000)', latest: '91.7% (N=5k #1016-092456) • 93.4% (N=1k #1020-152650)', lever: 'Harmonized 46 Category__PackType pairs + Lidstone 3D Container Prior (EXP-50/51)' },
+  { kpi: 'L3 Brand Identification (953 Brands)', legacy: '87.1% #1016-093317 (N=5,000) • 88.5% #1015-092627 (N=1,000)', latest: '96.6% (N=5k #1016-092456) • 97.7% (N=1k #1015-174314 SFT)', lever: 'Multi-attribute Hybrid & SFT beat 1-attribute .h5 while predicting all 5 levels' },
+  { kpi: 'L4 Sister Variant & Unseen Launches', legacy: '41.5% 9-model .h5 (#1016-105318) • 0% unseen SKUs', latest: '81.8% (N=5k) / 83.5% (N=1k) • 94.4% (17/18) unseen SKUs', lever: 'EXP-28 Contrastive CLEF top-K metadata (#1016-092456 / #1015-163309) + EXP-29 LoRA SFT' },
+  { kpi: 'L5 Exact 5-Attr SKU (2,659 SKUs)', legacy: '42.3% (N=5k #1016-093317) • 44.5% (N=1k #092627)', latest: '83.6% (N=1k EXP-51) • 84.0% (EXP-58) • 82.3% (N=5k EXP-28)', lever: 'Saliency-Diff Zoom (#1020-152650) + Crown Zoom (#1021-154455) + Contrastive CLEF (#1016-092456)' },
   { kpi: 'P2P Basepack Weight (W1) & Usable Facings', legacy: '34.82% W1 (2,223 usable facings / 100 shelves)', latest: '73.68% W1 (+38.86 pts, 2.12x) • 6,012 usable facings (+170.4%)', lever: '12-column Past_ROI_Data P2P simulation across Legacy vs Audited vs Full-Shelf Enrichment' },
-  { kpi: 'GT/MT Merchandising & Promo Agility', legacy: '180s async queue • 4-Wk ViT-240 retrain (75.0%)', latest: '84.0% 3-Attr / 93.4% Brand (N=1,000 #025000) • 5-Min Launch', lever: 'Dual-ONNX CPU detector + bay_planogram_verifier (#1013-232627) + 1-photo zero-shot promo' },
+  { kpi: 'GT/MT Merchandising & Promo Agility', legacy: '180s async queue • 4-Wk ViT-240 retrain (75.0%)', latest: '90.0% Talker/Promo (#1021-105453) • 84.0% N=1k (#025000) • 5-Min Launch', lever: 'Dual-ONNX CPU detector + bay_planogram_verifier (#1013-232627) + 2x promo OCR zoom (EXP-48)' },
 ];
 
 const POC_SUCCESS_CRITERIA = [
@@ -290,21 +290,21 @@ const POC_SUCCESS_CRITERIA = [
   {
     id: 'KPI-2',
     criterion: 'Identification Accuracy (Validation & Field)',
-    baseline: '50.5% W1 SKU • 43.0% 3-Attr Exact Chained .h5 (73.7% Mean #115811)',
+    baseline: '50.5% W1 SKU • 44.5% 5-Attr Chained .h5 (#1015-092627) • 52.0% Oracle-Brand .h5 (#1015-115810)',
     target: '≥ 90% Avg (12 Models Val) • ≥ 87% Field (MarketShare)',
-    ours: '92.8% 5-Level Hierarchy Score • 96.0% 3-Attr Mean (92.2% Exact)',
-    delta: '+2.8% vs 90% Val Target • +9.0% vs 87% Field Target',
-    runRef: '#025000 (N=1,000: 99.2% L1, 97.5% Cat, 93.2% Pack, 97.4% Brand, 84.5% 2,659-SKU)',
-    howAchieved: 'Harmonized 46 Category×Pack pairs, 399K cross-folder dedup, 874 named competitor brands, and 2x middle/bottom zoom strips.',
+    ours: '92.8% 5-Level Hierarchy Score • 95.8% 3-Attr Mean (83.6% N=1k / 84.0% EXP-58 Exact)',
+    delta: '+2.8% vs 90% Val Target • +8.8% vs 87% Field Target',
+    runRef: '#1020-152650 (N=1,000: 98.7% L1, 97.1% Cat, 93.4% Pack, 97.0% Brand, 83.6% SKU) & #1021-154455 (84.0% SKU)',
+    howAchieved: 'Harmonized 46 Category×Pack pairs, 399K cross-folder dedup, 874 named competitor brands, and 2.5x saliency-diff zoom.',
   },
   {
     id: 'KPI-3',
     criterion: 'P95 Server-Side Latency SLO',
     baseline: '16.8s–71.7s (Sync) • 180s (Async Queue)',
     target: '≤ 30.0 sec (Server-Side Processing SLO)',
-    ours: '4.41s – 8.82s P95 (1.68s–2.69s P50 Fast/Lite • 7.09s P50 Max)',
+    ours: '4.41s – 8.82s P95 (0.82s–2.69s P50 Fast/Lite • 7.09s P50 Max)',
     delta: '3.4x – 6.8x Faster Than 30s SLO',
-    runRef: '#025000-Lite (2.69s P50 / 4.41s P95), #013248-Lite (2.51s P50 / 5.60s P95) & #121432 (4.21s P50 / 8.82s P95)',
+    runRef: '#1020-152650 (0.82s P50), #025000-Lite (2.69s P50 / 4.41s P95) & #232626 (4.21s P50 / 8.82s P95)',
     howAchieved: '55–80ms CPU ONNX detection + parallel batch embedding + single contact-sheet VLM call for the 32% ambiguous lookalikes.',
   },
   {
@@ -377,21 +377,21 @@ const CROSS_ARCH_COMPARISON = [
     highlight: 'fast',
   },
   {
-    arch: '3. Option 2 (★ Recommended Default): Hybrid Photo + AI Zoom',
+    arch: '3. Option 2 (★ Recommended Default): Hybrid Photo + AI Zoom (EXP-58 / EXP-51 / EXP-28)',
     scopeBadge: '★ Option 2: Recommended Default',
-    modelsUsed: 'Option 1 Fast Match for easy 68% packs + 2x Text Zoom Sheet & Top-5 Catalog Photos on Gemini 3.5-Flash-Lite',
+    modelsUsed: 'Option 1 Fast Match for easy 68% packs + 2.5x Crown/Saliency-Diff Zoom Sheet & Top-5 Catalog Photos on Gemini 3.5-Flash-Lite',
     l1Hul: '98.6% (5k) / 99.0% (1k)',
     l2Cat: '96.5% (5k) / 96.9% (1k)',
     l2Pack: '91.7% (5k) / 93.3% (1k)',
     l3Brand: '96.6% (5k) / 96.6% (1k)',
-    threeAttrMean: '91.6% (5k) / 91.8% (1k) Exact',
-    fiveAttrSku: '82.3% (5k) / 83.2% (1k) Test • 97.4% R@5',
-    merchAndPromo: '94.4% Unseen SKUs • 67.3%-69.0% 2D-Zone F2 (+5,342 facings) • 73.68% P2P W1',
+    threeAttrMean: '91.6% (5k) / 92.5% (EXP-58) Exact',
+    fiveAttrSku: '82.3% (5k) • 83.6% (1k EXP-51) • 84.0% (EXP-58)',
+    merchAndPromo: '94.4% Unseen SKUs • 86.7% Bay Det F2 (EXP-53) • 90.0% Talker/Promo (EXP-47/48) • 73.68% P2P W1',
     p50Latency: '1.68s - 2.69s (4.41s P95)',
     costPerShelf: '₹0.12 ($0.00139 shelf • -62% vs Legacy)',
     callsPerShelf: '1 ONNX + 1 Embed + 2.1 VLM',
-    runId: '1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k',
-    shortRun: '★ #1016-092456 (N=5,000) & #1015-163309 (N=1,000)',
+    runId: '1021-154455-clef_pack_crown_fusion-gemini-3.5-flash-lite-priority-hul_golden',
+    shortRun: '★ #1021-154455 (84.0% EXP-58) & #1020-152650 (83.6% N=1k) & #1016-092456 (82.3% N=5k)',
     highlight: 'winner_prod',
   },
   {
@@ -413,35 +413,35 @@ const CROSS_ARCH_COMPARISON = [
     highlight: 'alt',
   },
   {
-    arch: '5. Closed-Set Vision Baseline (Meta DINOv3 + CosFace SFT)',
-    scopeBadge: 'Closed-Set ViT (0% Unseen)',
-    modelsUsed: 'Frozen dinov3_vits16 backbone + CosFace angular-margin SFT head (#1015-113613)',
-    l1Hul: '95.9%',
-    l2Cat: '95.2%',
-    l2Pack: '92.4%',
-    l3Brand: '91.5%',
-    threeAttrMean: '88.2% Exact',
-    fiveAttrSku: '77.5% (N=1,000)',
-    merchAndPromo: '0% on unseen new SKU launches (requires retraining)',
-    p50Latency: '0.14s / crop',
-    costPerShelf: '₹0.04 (CPU/GPU inference)',
-    callsPerShelf: '35 crop calls / shelf',
+    arch: '5. Closed-Set GPU Vision Benchmarks (DINOv3 / V-JEPA 2 / MaxViT-Tiny)',
+    scopeBadge: '🔬 Closed-Set GPU (0% Unseen)',
+    modelsUsed: 'DINOv3 (#1015-113613), V-JEPA 2 (#1019-123413 / #1021-072940), MaxViT (#1019-174125) fixed-head GPU classifiers',
+    l1Hul: '95.9% - 99.0%',
+    l2Cat: '95.2% - 97.9%',
+    l2Pack: '92.4% - 93.7%',
+    l3Brand: '91.5% - 96.3%',
+    threeAttrMean: '88.2% - 91.9% Exact',
+    fiveAttrSku: '77.6% (DINOv3) • 84.5% (V-JEPA2) • 86.8% (MaxViT Closed-Set)',
+    merchAndPromo: '0% on unseen new SKU launches (requires full GPU retraining per catalog update)',
+    p50Latency: '0.03s - 0.14s / crop (L4 GPU)',
+    costPerShelf: '₹1.36 / shelf ($0.00045/crop L4 GPU)',
+    callsPerShelf: '35 crop calls / shelf (Dedicated GPU)',
     runId: '1015-113613-dinov3_classify-dinov3_vits16-hul_golden',
-    shortRun: '#1015-113613 (dinov3_vits16 N=1,000)',
+    shortRun: '#1015-113613 (DINOv3) & #1019-123413 (V-JEPA2) & #1019-174125 (MaxViT)',
     highlight: 'alt',
   },
 ];
 
 const VERTEX_MODEL_REGISTRY_LINEAGE = [
   {
-    modelId: 'clef-contrastive-metadata-exp28',
-    vertexResource: 'gs://ul-fs-s-sandbx-16-prj-shelf-images/Consolidated_data_v2/index (EXP-28 Top-K Contrastive Index)',
+    modelId: 'clef-pack-crown-contrastive-exp58-exp28',
+    vertexResource: 'gs://ul-fs-s-sandbx-16-prj-shelf-images/Consolidated_data_v2/index (EXP-58 / EXP-51 / EXP-28 Top-K Contrastive Index)',
     consoleUrl: 'https://console.cloud.google.com/storage/browser/ul-fs-s-sandbx-16-prj-shelf-images/Consolidated_data_v2/index?project=ul-fs-s-sandbx-16-prj',
-    stageRole: '★ Option 2 Production Winner — 4-Crop Zoom Contact Sheet + Contrastive Candidate Attribute Metadata (Gemini 3.5-Flash-Lite)',
-    bestRunId: '1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k',
-    shortRun: '★ #1016-092456 (N=5,000 Golden & Variants) & #1015-163309 (N=1,000)',
-    cloudRunJob: 'shelf-bench-5k-clef-gld & shelf-bench-5k-clef-var',
-    verifiedMetric: '★ N=5,000: 82.3% Golden / 81.9% Variants (97.4% R@5) • N=1,000: 83.2% Test / 84.0% Val (94.4% [17/18] on unseen launches)',
+    stageRole: '★ Option 2 Production Winner — Top-22% Crown + Saliency-Diff 2.5x Zoom + Contrastive Candidate Metadata (Gemini 3.5-Flash-Lite)',
+    bestRunId: '1021-154455-clef_pack_crown_fusion-gemini-3.5-flash-lite-priority-hul_golden',
+    shortRun: '★ #1021-154455 (84.0% EXP-58) & #1020-152650 (83.6% EXP-51 N=1k) & #1016-092456 (82.3% EXP-28 N=5k)',
+    cloudRunJob: 'shelf-bench-5k-clef-gld & shelf-bench-exp58',
+    verifiedMetric: '★ EXP-58: 84.0% Golden / 83.5% Variants • N=1,000 EXP-51: 83.6% • N=5,000 EXP-28: 82.3% Golden / 81.9% Variants (97.4% R@5) • 94.4% [17/18] on unseen launches',
   },
   {
     modelId: 'residual-infonce-2659sku-sft',
@@ -855,7 +855,7 @@ function renderLegacySourceFootnote() {
   return `
     <div style="margin-top:12px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:11.5px;color:#475569;line-height:1.55;">
       <strong style="color:#0f172a;">Apples-to-Apples Methodology &amp; Source of Phase-1 Baseline Metrics:</strong>
-      We report <strong>both</strong> (1) direct head-to-head executions of Unilever's Phase-1 Keras <code>.h5</code> models on the exact same <code>hul_golden</code> test splits across <strong>N=5,000</strong> (<code>#1016-093317</code>: <strong>42.3%</strong> 5-Attr Exact, <strong>87.1%</strong> Brand, <strong>86.3%</strong> Category, <strong>54.9%</strong> Pack, <strong>75.5%</strong> Product) and <strong>N=1,000</strong> (<code>#1015-092627</code>: <strong>44.5%</strong> 5-Attr; <code>marketshare_brand.h5</code> = <strong>88.8%</strong> on <code>#115811</code>; chained <code>brand.h5 + packtype.h5</code> = <strong>43.0%</strong> 3-Attr Exact on <code>#115811</code>) <strong>and</strong> (2) Unilever's Phase-1 evaluation script (<code>NR_final_PW2.py</code>, sheets <code>W1</code>-<code>W6</code> across 13 categories: <strong>W1 Exact SKU &amp; Size = 50.5%</strong> = <code>W4 Variant 76.1% &times; W5 Size 66.3%</code>; <strong>W2 Category = 83.2%</strong>; <strong>W3 Brand = 86.8%</strong> with 874 rival brands in "Others"; <strong>W6 Packaging = 80.6%</strong>; <strong>1-Class Detector = 51.1% F2</strong>; <strong>Toker ViT-240 Promo = 75.0%</strong>).
+      We report <strong>both</strong> (1) direct head-to-head executions of Unilever's Phase-1 Keras <code>.h5</code> models on the exact same <code>hul_golden</code> test splits across <strong>N=5,000</strong> (<code>#1016-093317</code>: <strong>42.3%</strong> 5-Attr Exact, <strong>87.1%</strong> Brand, <strong>86.3%</strong> Category, <strong>54.9%</strong> Pack, <strong>75.5%</strong> Product) and <strong>N=1,000</strong> (<code>#1015-092627</code>: <strong>44.5%</strong> 5-Attr, <strong>88.5%</strong> Brand; Oracle-Brand <code>.h5</code> = <strong>52.0%</strong> 5-Attr on <code>#1015-115810</code>) <strong>and</strong> (2) Unilever's Phase-1 evaluation script (<code>NR_final_PW2.py</code>, sheets <code>W1</code>-<code>W6</code> across 13 categories: <strong>W1 Exact SKU &amp; Size = 50.5%</strong> = <code>W4 Variant 76.1% &times; W5 Size 66.3%</code>; <strong>W2 Category = 83.2%</strong>; <strong>W3 Brand = 86.8%</strong> with 874 rival brands in "Others"; <strong>W6 Packaging = 80.6%</strong>; <strong>1-Class Detector = 51.1% F2</strong>; <strong>Toker ViT-240 Promo = 75.0%</strong>).
       Every run link above opens the live Cloud Run execution in GCS with its exact sample size (<code>N</code>) and experimenter attribution (<strong>jjuneja &bull; rgavigan</strong>).
     </div>
   `;
@@ -1057,7 +1057,7 @@ function renderOverviewTab() {
             <div>
               <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Per-Image (Display) &amp; Crop Cost</div>
               <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">$0.00114-$0.00140 <span style="font-size:11.5px;font-weight:600;color:#fde047;">/ image</span></div>
-              <div style="font-size:11px;color:#cbd5e1;"><strong>₹0.10-₹0.12/image</strong> &bull; <strong>$0.00020/crop</strong> Zero-VLM (<code>#1012-024958</code>) &bull; <strong>$0.00069/crop</strong> Lite.</div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>₹0.10-₹0.12/image</strong> &bull; <strong>$0.00020/crop</strong> Zero-VLM (<code>#1013-024958</code>) &bull; <strong>$0.00069/crop</strong> Lite.</div>
             </div>
           </div>
         </div>
@@ -1067,8 +1067,8 @@ function renderOverviewTab() {
       <div style="margin-top:14px;padding:12px 16px;background:rgba(255,255,255,0.08);border:1px solid rgba(147,197,253,0.45);border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <div style="font-size:12px;color:#e2e8f0;line-height:1.5;">
           <strong style="color:#fde047;">★ Three Production Options &amp; Legacy Triangulation (<code>test_5k</code> N=5,000 &amp; <code>test</code> N=1,000 Cloud Run):</strong>
-          <strong>Option 1: Fast Photo Match (₹0.04/shelf <code>#1015-162728</code>):</strong> <strong>76.9%</strong> 5-Attr &bull; 0.36s &nbsp;|&nbsp;
-          <strong>Option 2 ★: Hybrid Photo + AI Zoom (₹0.12/shelf <code>#1016-092456</code>):</strong> <strong>82.3% (5k) / 83.2% (1k)</strong> 5-Attr &bull; <strong>97.4%</strong> R@5 &bull; <strong>94.4%</strong> (17/18) unseen launches &nbsp;|&nbsp;
+          <strong>Option 1: Fast Photo Match (₹0.04/shelf <code>#1013-013247</code>):</strong> <strong>78.9%</strong> 5-Attr &bull; 0.90s &nbsp;|&nbsp;
+          <strong>Option 2 ★: Hybrid Photo + AI Zoom (₹0.12/shelf <code>#1020-152650</code> / <code>#1016-092456</code>):</strong> <strong>83.6% (1k) / 82.3% (5k)</strong> 5-Attr &bull; <strong>97.4%</strong> R@5 &bull; <strong>94.4%</strong> (17/18) unseen launches &nbsp;|&nbsp;
           <strong>Option 3: Custom Fine-Tuned AI (₹0.12-0.14/shelf <code>#1016-092457</code>):</strong> <strong>81.2% (5k) / 82.0% (1k)</strong> 5-Attr &bull; <strong>92.6%</strong> R@5 &bull; <strong>49.5%</strong> 0-VLM gate &nbsp;|&nbsp;
           <strong>Legacy 9-Model <code>.h5</code> (<code>#1016-093317</code>):</strong> <strong>42.3% (5k) / 44.5% (1k)</strong> 5-Attr &bull; P2P <code>W1</code>: <strong>34.8% &rarr; 73.7%</strong>.
         </div>
@@ -1428,7 +1428,7 @@ function renderCompactCostSimulator() {
             $0.00059 <span style="font-size:12px;font-weight:600;color:#64748b;">/ image (shelf) &bull; ${fmtInr(costEmbed)}</span>
           </div>
           <div style="font-size:11.5px;color:#475569;margin-bottom:4px;">
-            <strong>$0.00004/image</strong> Stage 1 CPU (<code>#1016-092455</code>) + <strong>$0.00055/image</strong> Sys 1 Embed (<code>#1015-162728</code>: 76.9% 5-Attr)
+            <strong>$0.00004/image</strong> Stage 1 CPU (<code>#1016-092455</code>) + <strong>$0.00055/image</strong> Sys 1 Embed (<code>#1013-013247</code>: 78.9% 5-Attr)
           </div>
           <div style="font-size:12px;color:#334155;font-weight:700;">
             $${Math.round(daily * usdEmbedShelf).toLocaleString('en-US')}/day (${fmtCompactInr(daily * costEmbed)}) &bull; $${Math.round(monthly * usdEmbedShelf).toLocaleString('en-US')}/mo (${fmtCompactInr(monthly * costEmbed)})
@@ -1465,7 +1465,7 @@ function renderCompactCostSimulator() {
                 <td class="mono">$${Math.round(daily * stg1ShelfUsd).toLocaleString('en-US')} / day</td>
               </tr>
               <tr>
-                <td><strong>2. Stage 2A (System 1 - Fast Path): <code>gemini-embedding-2</code> + Z-Score/LID</strong> (<code>#1015-162728</code>)<br/><span style="font-size:10.5px;color:#64748b;">3.2x neighbor medoid dedup (35 packs &rarr; 11 groups); resolves <strong>${sys1Pct}%</strong> of packs at $0 VLM cost</span></td>
+                <td><strong>2. Stage 2A (System 1 - Fast Path): <code>gemini-embedding-2</code> + Z-Score/LID</strong> (<code>#1013-013247</code>)<br/><span style="font-size:10.5px;color:#64748b;">3.2x neighbor medoid dedup (35 packs &rarr; 11 groups); resolves <strong>${sys1Pct}%</strong> of packs at $0 VLM cost</span></td>
                 <td class="mono">$0.000200 / crop<br/>$0.000550 / image</td>
                 <td class="mono">$0.000200 / crop</td>
                 <td class="mono"><strong>$0.00055 / image</strong> (₹0.0476)</td>
@@ -1526,7 +1526,7 @@ function renderCompactCostSimulator() {
                 <td class="mono">$1,565 / day</td>
               </tr>
               <tr style="color:#64748b;">
-                <td>&bull; <em>Naive Un-Grouped 35x Single-Crop SFT / VLM Baseline</em> (<code>#021828</code> / <code>#013249</code>)</td>
+                <td>&bull; <em>Naive Un-Grouped 35x Single-Crop SFT / VLM Baseline</em> (<code>#1013-013247</code> / <code>#1013-013249</code>)</td>
                 <td class="mono">35 / 35 raw crops call VLM</td>
                 <td class="mono">$0.00095-$0.01129 / crop</td>
                 <td class="mono">$0.03325-$0.39515 / image</td>
@@ -2154,16 +2154,16 @@ function renderHowItWorksTab() {
                   <td><strong>₹0.15 / session</strong></td>
                 </tr>
                 <tr>
-                  <td><strong>Option 1: <code>shelf_clm_standalone</code> (<code>#1015-225852</code> 0-VLM)</strong></td>
-                  <td><code>gt_hul_sessions</code> (N=150, 1,200 boxes)</td>
-                  <td>97.0%</td>
-                  <td>90.2%</td>
-                  <td>91.7%</td>
-                  <td>84.4%</td>
-                  <td>80.7%</td>
+                  <td><strong>Option 1: <code>shelf_clm_standalone</code> (<code>#1013-232625</code> 0-VLM)</strong></td>
+                  <td><code>gt_hul_sessions</code> (N=100, 1,244 boxes)</td>
+                  <td>96.6%</td>
+                  <td>89.9%</td>
+                  <td>90.4%</td>
+                  <td>83.8%</td>
+                  <td>81.0%</td>
                   <td>71.4%</td>
-                  <td>2.42%</td>
-                  <td>₹0.16 / session</td>
+                  <td>2.64%</td>
+                  <td>₹0.15 / session</td>
                 </tr>
                 <tr style="background:#f0fdf4;">
                   <td><strong>Option 2 ★: <code>clef_contrastive_metadata</code> (<code>#1016-092456</code>)</strong></td>

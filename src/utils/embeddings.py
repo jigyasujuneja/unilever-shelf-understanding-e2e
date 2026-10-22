@@ -13,10 +13,12 @@ from __future__ import annotations
 import base64
 import logging
 import random
+import threading
 import time
 from contextlib import nullcontext
 
 import google.auth
+import requests
 from google.auth.transport.requests import AuthorizedSession
 from PIL import Image
 
@@ -34,6 +36,7 @@ SKUS = {"embedding_image": (VERTEX_AI, "Embeddings for multimodal - Image (input
         "gemini_embedding_image_token": (VERTEX_AI, "Gemini MM Embedding - Image Input"),
         "gemini_embedding_text_token": (VERTEX_AI, "Gemini MM Embedding - Text Input")}
 
+_EMB_CACHE_LOCK = threading.Lock()
 _EMB_RESPONSE_CACHE: dict[tuple[str, str], tuple[list[float], dict[str, int | float], int]] = {}
 _DISK_CACHE_LOADED = False
 _DISK_CACHE_DIRTY = 0
@@ -53,9 +56,10 @@ def _disk_cache_path():
 
 def _ensure_disk_cache_loaded() -> None:
     global _DISK_CACHE_LOADED
-    if _DISK_CACHE_LOADED:
-        return
-    _DISK_CACHE_LOADED = True
+    with _EMB_CACHE_LOCK:
+        if _DISK_CACHE_LOADED:
+            return
+        _DISK_CACHE_LOADED = True
     import os
     import pickle
 
@@ -64,7 +68,8 @@ def _ensure_disk_cache_loaded() -> None:
         try:
             data = pickle.loads(cp.read_bytes())
             if isinstance(data, dict):
-                _EMB_RESPONSE_CACHE.update(data)
+                with _EMB_CACHE_LOCK:
+                    _EMB_RESPONSE_CACHE.update(data)
             if os.environ.get("CLOUD_RUN_JOB"):
                 cp.unlink(missing_ok=True)
             return
@@ -76,7 +81,8 @@ def _ensure_disk_cache_loaded() -> None:
         raw = dataset.read_bytes(GCS_EMB_CACHE_URI)
         data = pickle.loads(raw)
         if isinstance(data, dict):
-            _EMB_RESPONSE_CACHE.update(data)
+            with _EMB_CACHE_LOCK:
+                _EMB_RESPONSE_CACHE.update(data)
         if not os.environ.get("CLOUD_RUN_JOB"):
             cp.write_bytes(raw)
     except Exception:
@@ -85,20 +91,22 @@ def _ensure_disk_cache_loaded() -> None:
 
 def flush_embedding_disk_cache() -> None:
     global _DISK_CACHE_DIRTY
-    if _DISK_CACHE_DIRTY <= 0:
-        return
+    with _EMB_CACHE_LOCK:
+        if _DISK_CACHE_DIRTY <= 0:
+            return
+        snapshot = dict(_EMB_RESPONSE_CACHE)
+        _DISK_CACHE_DIRTY = 0
     import os
     import pickle
 
     cp = _disk_cache_path()
     tmp = cp.with_suffix(".pkl.tmp")
     try:
-        payload = pickle.dumps(dict(_EMB_RESPONSE_CACHE))
+        payload = pickle.dumps(snapshot)
         if not os.environ.get("CLOUD_RUN_JOB"):
             cp.unlink(missing_ok=True)
             tmp.write_bytes(payload)
             tmp.replace(cp)
-        _DISK_CACHE_DIRTY = 0
         try:
             from utils import dataset
 
@@ -108,6 +116,17 @@ def flush_embedding_disk_cache() -> None:
             pass
     except Exception:
         pass
+
+
+def _build_session(creds) -> AuthorizedSession:
+    sess = AuthorizedSession(creds)
+    if hasattr(sess, "mount"):
+        from requests.adapters import HTTPAdapter
+
+        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64)
+        sess.mount("https://", adapter)
+        sess.mount("http://", adapter)
+    return sess
 
 
 class VertexEmbeddings:
@@ -125,14 +144,21 @@ class VertexEmbeddings:
                     f"/locations/{loc}/publishers/google/models/{model}:"
                     + ("embedContent" if self.gemini else "predict"))
         self.dimension = dimension or (768 if self.gemini else 512)
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        self.session = AuthorizedSession(creds)
-        if hasattr(self.session, "mount"):
-            from requests.adapters import HTTPAdapter
+        self._creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        self._owner_thread = threading.current_thread()
+        self._tls = threading.local()
+        self.session = _build_session(self._creds)
+        self._default_session = self.session
 
-            adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64)
-            self.session.mount("https://", adapter)
-            self.session.mount("http://", adapter)
+    def _get_session(self):
+        # Preserve test mock compatibility when `self.session` is replaced or called on the owner thread
+        if self.session is not self._default_session or threading.current_thread() is self._owner_thread:
+            return self.session
+        sess = getattr(self._tls, "session", None)
+        if sess is None:
+            sess = _build_session(self._creds)
+            self._tls.session = sess
+        return sess
 
     def image(self, image: Image.Image, ctx=None) -> list[float]:
         import hashlib
@@ -142,17 +168,24 @@ class VertexEmbeddings:
 
         def _do():
             global _DISK_CACHE_DIRTY
-            if "ul-fs" in self.url and cache_key in _EMB_RESPONSE_CACHE:
-                return _EMB_RESPONSE_CACHE[cache_key]
+            if "ul-fs" in self.url:
+                with _EMB_CACHE_LOCK:
+                    cached = _EMB_RESPONSE_CACHE.get(cache_key)
+                if cached is not None:
+                    return cached
             res = (
                 self._embed({"inlineData": {"mimeType": "image/jpeg", "data": b64}})
                 if self.gemini
                 else self._predict({"image": {"bytesBase64Encoded": b64}}, "imageEmbedding", {"embedding_image": 1})
             )
             if "ul-fs" in self.url:
-                _EMB_RESPONSE_CACHE[cache_key] = res
-                _DISK_CACHE_DIRTY += 1
-                if _DISK_CACHE_DIRTY >= 40:
+                should_flush = False
+                with _EMB_CACHE_LOCK:
+                    _EMB_RESPONSE_CACHE[cache_key] = res
+                    _DISK_CACHE_DIRTY += 1
+                    if _DISK_CACHE_DIRTY >= 40:
+                        should_flush = True
+                if should_flush:
                     flush_embedding_disk_cache()
             return res
 
@@ -164,17 +197,24 @@ class VertexEmbeddings:
 
         def _do():
             global _DISK_CACHE_DIRTY
-            if "ul-fs" in self.url and cache_key in _EMB_RESPONSE_CACHE:
-                return _EMB_RESPONSE_CACHE[cache_key]
+            if "ul-fs" in self.url:
+                with _EMB_CACHE_LOCK:
+                    cached = _EMB_RESPONSE_CACHE.get(cache_key)
+                if cached is not None:
+                    return cached
             res = (
                 self._embed({"text": text})
                 if self.gemini
                 else self._predict({"text": text}, "textEmbedding", {"embedding_text_char": len(text)})
             )
             if "ul-fs" in self.url:
-                _EMB_RESPONSE_CACHE[cache_key] = res
-                _DISK_CACHE_DIRTY += 1
-                if _DISK_CACHE_DIRTY >= 40:
+                should_flush = False
+                with _EMB_CACHE_LOCK:
+                    _EMB_RESPONSE_CACHE[cache_key] = res
+                    _DISK_CACHE_DIRTY += 1
+                    if _DISK_CACHE_DIRTY >= 40:
+                        should_flush = True
+                if should_flush:
                     flush_embedding_disk_cache()
             return res
 
@@ -228,12 +268,22 @@ class VertexEmbeddings:
         return data["predictions"][0][key], billed, attempts
 
     def _post(self, body: dict) -> tuple[dict, int]:
-        # 429 / 5xx back-off. The quota is per minute, so wait long enough to reach the next
-        # minute, with jitter so parallel threads (and Cloud Run tasks) don't retry in step.
+        # 429 / 5xx and transient TLS/socket back-off with jitter across concurrent worker threads.
+        sess = self._get_session()
+        last_exc: Exception | None = None
+        r = None
+        attempt = 0
         for attempt in range(12):
-            r = self.session.post(self.url, json=body, timeout=60)
-            if r.status_code not in (429, 500, 502, 503, 504):
-                break
+            try:
+                r = sess.post(self.url, json=body, timeout=60)
+                if r.status_code not in (429, 500, 502, 503, 504):
+                    break
+            except (requests.exceptions.RequestException, OSError) as exc:
+                last_exc = exc
+                if attempt == 11:
+                    raise
             time.sleep(min(60, 2 ** attempt) * (0.5 + random.random()))
+        if r is None:
+            raise last_exc or RuntimeError("embedding request returned no response")
         r.raise_for_status()
         return r.json(), attempt + 1

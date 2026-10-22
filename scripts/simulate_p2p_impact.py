@@ -82,6 +82,7 @@ def render_markdown_readout(res: dict) -> str:
 
 def upload_p2p_to_gcs(out_dir: Path, doc_path: Path) -> list[str]:
     from google.cloud import storage
+
     import runner
 
     project = runner.load_config()["gcp"]["project"]

@@ -656,6 +656,28 @@ class _VLMResponseCache:
 
 
 def _retryable(e: Exception) -> bool:
-    s = str(e)
-    return any(k in s for k in ("429", "500", "502", "503", "504", "RESOURCE_EXHAUSTED",
-                                "UNAVAILABLE", "DEADLINE", "timed out", "Connection", "mTLS"))
+    s = str(e).lower()
+    return any(
+        k in s
+        for k in (
+            "429",
+            "500",
+            "502",
+            "503",
+            "504",
+            "resource_exhausted",
+            "unavailable",
+            "deadline",
+            "timed out",
+            "timeout",
+            "connection",
+            "reset by peer",
+            "remotedisconnected",
+            "server disconnected",
+            "ssl",
+            "eof",
+            "readerror",
+            "broken pipe",
+            "mtls",
+        )
+    )
