@@ -819,7 +819,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "retrieval",
         "dataset": "hul_golden",
         "approaches": ["hierarchical_clm_jev", "clm_contrastive", "coarse_jev_laya"],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash"],
+        "models": ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"],
         "splits": ["train", "val", "test"],
         "hypothesis": (
             "Pruning the 2,745-class search space via a Stage-2A Multi-Prototype (Category, Brand, Pack) "
@@ -848,7 +848,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "retrieval",
         "dataset": "hul_golden",
         "approaches": ["l8_hul_ultimate", "jev_laya_global_wb", "jev_laya_hybrid"],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash"],
+        "models": ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"],
         "splits": ["train", "val", "test"],
         "hypothesis": (
             "Minkowski p=6 Shades-of-Gray full-shelf illuminant estimation + inner-80% foreground CIELAB "
@@ -876,8 +876,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "use_case": "merchandising",
         "task": "planogram_compliance",
         "dataset": "gtmerch_golden",
-        "approaches": ["bay_planogram_verifier"],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
+        "approaches": ["bay_planogram_verifier", "shelf_merchandising_bay_e2e"],
+        "models": ["gemini-3.5-flash-lite", "gemini-3.8-flash"],
         "splits": ["train", "val", "test"],
         "hypothesis": (
             "Combining Class 0 display-bay/cooler asset containment (27.8% in-asset vs 72.2% open-aisle "
@@ -906,6 +906,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "end_to_end",
         "dataset": "gtmerch_golden",
         "approaches": [
+            "shelf_merchandising_bay_e2e",
+            "shelf_generalizable_spine_e2e",
             "shelf_hierarchical_clm_jev",
             "shelf_clm_standalone",
             "shelf_l8_ultimate",
@@ -914,7 +916,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
             "stitched_e2e",
             "gemini_e2e",
         ],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-embedding-2", "yolo11n-distilled-onnx"],
+        "models": ["gemini-3.5-flash-lite", "gemini-embedding-2", "yolo11n-distilled-onnx", "gemini-3.8-flash"],
         "splits": ["train", "val", "test"],
         "hypothesis": (
             "Stage-1 Distilled ONNX YOLO detector ($0 detection token cost) paired with Stage-2 "
@@ -974,8 +976,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "use_case": "merchandising",
         "task": "promo_detection",
         "dataset": "hul_promos",
-        "approaches": ["jev_promo_verifier", "clm_promo_matcher"],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-embedding-2"],
+        "approaches": ["jev_promo_verifier", "promo_ocr_zoom_verifier", "clm_promo_matcher"],
+        "models": ["gemini-3.5-flash-lite", "gemini-embedding-2", "gemini-3.8-flash"],
         "splits": ["val", "test"],
         "hypothesis": (
             "Adding a high-resolution promo-header/footer zoom band (jev_promo_verifier) boosts exact "
@@ -1002,8 +1004,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "use_case": "merchandising",
         "task": "planogram_compliance",
         "dataset": "hul_sessions",
-        "approaches": ["bay_planogram_verifier"],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
+        "approaches": ["bay_planogram_verifier", "shelf_merchandising_bay_e2e", "shelf_marketshare_generalizable_e2e"],
+        "models": ["gemini-3.5-flash-lite", "gemini-3.8-flash"],
         "splits": ["val", "test"],
         "hypothesis": (
             "Row-clustered left-to-right sequence smoothing reduces HUL vs Competitor Share-of-Shelf "
@@ -1060,7 +1062,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "retrieval",
         "dataset": "hul_golden",
         "approaches": ["clef_standalone", "clef_flash_decision", "jev_laya_zoom_strip"],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
+        "models": ["gemini-3.5-flash-lite", "gemini-3.8-flash"],
         "splits": ["val", "test"],
         "hypothesis": (
             "Appending a 2x horizontal zoom strip of the bottom 30% net-weight/variant band (+10.5 dB "
@@ -1089,7 +1091,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "retrieval",
         "dataset": "hul_golden",
         "approaches": ["jev_laya_zscore_lid", "clm_standalone"],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
+        "models": ["gemini-3.5-flash-lite", "gemini-3.8-flash"],
         "splits": ["val", "test"],
         "hypothesis": (
             "Replacing fixed cosine margin thresholds with local z-score margin (z >= 1.05 distinct / "
@@ -1117,7 +1119,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "classification",
         "dataset": "hul_brands",
         "approaches": ["clm_standalone_classify", "clm_classify", "clef_flash_classify", "djev_classify"],
-        "models": ["gemini-embedding-2", "gemini-3.8-flash", "gemini-3.5-flash-lite"],
+        "models": ["gemini-embedding-2", "gemini-3.5-flash-lite", "gemini-3.8-flash"],
         "splits": ["val", "test"],
         "hypothesis": (
             "Conditioning is_hul attribution on capture_date and base_variant via brand_sku_live_registry.json "
@@ -1147,8 +1149,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "use_case": "market_share",
         "task": "retrieval",
         "dataset": "hul_golden",
-        "approaches": ["hierarchical_clm_jev", "l8_hul_ultimate"],
-        "models": ["gemini-3.5-flash-lite-sft", "gemini-3.5-flash-sft"],
+        "approaches": ["sft_clm_clef_cascade", "hierarchical_clm_jev", "l8_hul_ultimate"],
+        "models": ["gemini-3.5-flash-lite-sft", "gemini-3.5-flash-lite", "gemini-3.5-flash-sft"],
         "splits": ["train", "val", "test"],
         "hypothesis": (
             "Fine-tuning a rank-4 LoRA adapter on zero-leakage hul_golden train crops and hard-negative "
@@ -1175,8 +1177,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "use_case": "merchandising",
         "task": "planogram_compliance",
         "dataset": "gtmerch_golden",
-        "approaches": ["bay_planogram_verifier"],
-        "models": ["gemini-3.8-flash"],
+        "approaches": ["bay_planogram_verifier", "shelf_merchandising_bay_e2e"],
+        "models": ["gemini-3.5-flash-lite", "gemini-3.8-flash"],
         "splits": ["train", "val", "test"],
         "hypothesis": (
             "Reasoning jointly over Class 0 asset boundaries, shelf-row graphs, and empty horizontal "
@@ -1204,7 +1206,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "retrieval",
         "dataset": "hul_golden",
         "approaches": ["cold_start_lid_discovery"],
-        "models": ["gemini-3.8-flash"],
+        "models": ["gemini-3.5-flash-lite", "gemini-3.8-flash"],
         "splits": ["val", "test"],
         "hypothesis": (
             "When LID > 9.5 and Z-Score margin < 1.25 signal an unseen new-launch SKU (30% visual gallery held out), "
@@ -1235,7 +1237,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "detection",
         "dataset": "gtmerch_golden",
         "approaches": ["distilled_yolo_onnx", "yolo_sku110k_onnx", "single_pass_dedup", "tiled_dedup"],
-        "models": ["yolo11n-distilled-onnx", "yolov12s-sku110k-onnx", "gemini-3.8-flash", "gemini-3.5-flash-lite"],
+        "models": ["yolo11n-distilled-onnx", "yolov12s-sku110k-onnx", "gemini-3.5-flash-lite", "gemini-3.8-flash"],
         "splits": ["train", "val", "test"],
         "hypothesis": (
             "Dual-head Distilled ONNX CPU detection (YOLOv12s-SKU110K + Distilled-YOLO11n) with Class 0 "
@@ -1263,6 +1265,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "classification",
         "dataset": "hul_golden",
         "approaches": [
+            "hybrid_classify",
             "djev_classify",
             "clm_standalone_classify",
             "clm_classify",
@@ -1272,7 +1275,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
             "gemini_classify",
             "hierarchy_classify",
         ],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-embedding-2"],
+        "models": ["gemini-3.5-flash-lite", "gemini-embedding-2", "gemini-3.8-flash"],
         "splits": ["val", "test"],
         "hypothesis": (
             "Cross-modal dual-prototype CLM InfoNCE (clm_standalone_classify) and Photometric dJEV "
@@ -1301,6 +1304,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "end_to_end",
         "dataset": "hul_sessions",
         "approaches": [
+            "shelf_marketshare_generalizable_e2e",
+            "shelf_merchandising_bay_e2e",
             "shelf_hierarchical_clm_jev",
             "session_overlap_dedup_e2e",
             "detect_l8_ultimate",
@@ -1308,7 +1313,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
             "detect_onnx_jev_laya",
             "shelf_clm_standalone",
         ],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-embedding-2"],
+        "models": ["gemini-3.5-flash-lite", "gemini-embedding-2", "gemini-3.8-flash"],
         "splits": ["val", "test"],
         "hypothesis": (
             "Combining Stage-1 Distilled ONNX detection with Stage-2 Hierarchical Brand-Gate + CLM InfoNCE "
@@ -1336,6 +1341,8 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
         "task": "end_to_end",
         "dataset": "ms_json_golden",
         "approaches": [
+            "shelf_marketshare_generalizable_e2e",
+            "shelf_960_softnms_e2e",
             "shelf_hierarchical_clm_jev",
             "shelf_clm_standalone",
             "gemini_e2e",
@@ -1345,7 +1352,7 @@ POC_EXPERIMENTS: list[dict[str, Any]] = [
             "hierarchical_clm_jev",
             "clm_standalone",
         ],
-        "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-embedding-2", "yolo11n-distilled-onnx", "yolov12s-sku110k-onnx"],
+        "models": ["gemini-3.5-flash-lite", "gemini-embedding-2", "yolo11n-distilled-onnx", "yolov12s-sku110k-onnx", "gemini-3.8-flash"],
         "splits": ["train", "val", "test"],
         "hypothesis": (
             "Curating clean-pixel, unannotated full-shelf photos from gs://ms-json-dataset/gt/ (separating "
@@ -3251,6 +3258,7 @@ def build_experiments_and_models_catalog(results_dir: Path | str = "results") ->
 
         matched_runs.sort(
             key=lambda r: (
+                1 if "3.8-flash" not in str(r.get("model") or "") else 0,
                 1 if (exp["task"] == "detection" or (float(r.get("hierarchical_tree_score", 0.0)) >= 0.70 and float(r.get("is_hul_accuracy", 1.0)) >= 0.70 and float(r.get("brand_accuracy", 1.0)) >= 0.70)) else 0,
                 2 if r.get("is_exact_dataset") else (1 if r.get("is_golden_dataset") else 0),
                 3 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 5000 else (2 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 1000 else (1 if int(r.get("eval_samples") or r.get("total_eval_boxes") or 0) >= 500 else 0)),
