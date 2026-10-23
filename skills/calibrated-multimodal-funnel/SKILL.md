@@ -13,7 +13,7 @@ description: >-
 
 ## 1. When to Use This Architecture
 
-Use this 3-stage visual decision funnel whenever classifying or retrieving fine-grained visual entities across `1,000-10,000+` catalog classes under strict latency (`<3s` p95) and unit-cost (`<$0.002/scene`) budgets, where:
+Use this 4-stage visual decision funnel whenever classifying or retrieving fine-grained visual entities across `1,000-10,000+` catalog classes under strict latency (`<3s` p95) and unit-cost (`<$0.002/scene`) budgets, where:
 - Closed-set classifiers fail on zero-shot product launches (`0%` unseen accuracy without retraining).
 - Single-pass full-scene VLMs suffer coordinate drift (`~51%` F2 on `30+` items) and high token cost.
 - Zero-token VLM choice heads collapse to 50/50 guessing on lookalike sister variants differing only in `<10px` weight or pack-type typography.
@@ -35,7 +35,7 @@ Never feed a single contrast-stretched image buffer to both an embedding model a
    - Combine $k=4$ medoid prototypes per SKU with a global Top-2K floor so tail brands are never starved by head-brand hubness (`CSLS` local intrinsic dimensionality correction).
 3. **Lidstone-Smoothed 3D Container Prior (`EXP-52`)**:
    - Score 16 physical container forms using aspect ratio $h/w$, top-crown taper, and shelf-plank height ratio $h/h_{\text{plank}}$ smoothed with Lidstone $\epsilon = 0.01$: $-\lambda \ln P_{\text{Lidstone}}(\text{pack})$.
-4. **Adaptive Fast-Exit Gate (`60%-68%` 0-VLM Resolution)**:
+4. **Adaptive Fast-Exit Gate (`60%-68%` Embedding Match Without Generative VLM Decoding)**:
    - Auto-accept Stage 2A Rank-1 when top-1/top-2 probability margin $P_1 - P_2 \ge 0.14$ and $Z \ge 1.65$ (and top candidates do not collide on sister pack sizes).
 
 ## 4. Stage 2B: Saliency-Diff & Crown Contact Sheets + Calibrated Readout (`CLEF`)
