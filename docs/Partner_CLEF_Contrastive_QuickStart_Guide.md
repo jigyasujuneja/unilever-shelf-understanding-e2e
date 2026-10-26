@@ -233,3 +233,21 @@ source .venv/bin/activate
 # Run the 5-crop + 5-shelf verification smoke test on Cloud Run
 .venv/bin/shelf-bench smoke-test-clef --crops 5 --shelves 5 --cloud-run
 ```
+
+---
+
+## 6. Running the Full Benchmark Suite
+
+To reproduce the 5,000-sample `hul_golden` benchmark evaluation (`test_5k`) for `clef_contrastive_metadata`:
+
+```bash
+.venv/bin/shelf-bench run \
+  -a clef_contrastive_metadata \
+  -m gemini-3.5-flash-lite \
+  -t priority \
+  -d hul_golden \
+  --split test_5k \
+  --limit 5000 \
+  --workers 16
+```
+*(Pass `--limit 50` for a quick 50-sample evaluation, or replace `run` with `cloud-run` to execute as a Cloud Run Job.)*
