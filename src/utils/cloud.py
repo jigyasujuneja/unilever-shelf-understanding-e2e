@@ -226,6 +226,9 @@ def run_on_cloud(
     return 0
 
 
+LAST_EXECUTION_NAME: str | None = None
+
+
 def run_cli_on_cloud(
     cli_args: list[str],
     image: str | None = None,
@@ -237,6 +240,7 @@ def run_cli_on_cloud(
     log=print,
 ) -> str:
     """Execute any ``shelf-bench`` subcommand on Cloud Run Jobs in ``us-central1`` with zero local execution."""
+    global LAST_EXECUTION_NAME
     cfg = load_config()
     gcp = cfg["gcp"]
     project, region = gcp["project"], gcp["region"]
@@ -254,8 +258,10 @@ def run_cli_on_cloud(
     job_url = deploy_job(s, project, region, image, cli_args, tasks, job_cfg)
     log(f"Executing `shelf-bench {' '.join(cli_args)}` on Cloud Run job {job_url.rsplit('/', 1)[-1]} ({region}) ...")
     op = _ok(s.post(f"{job_url}:run", json={}))
+    exec_id = op.get("metadata", {}).get("name", "").rsplit("/", 1)[-1]
+    LAST_EXECUTION_NAME = exec_id
     log(f"  execution: https://console.cloud.google.com/run/jobs/executions/details/{region}/"
-        f"{op.get('metadata', {}).get('name', '').rsplit('/', 1)[-1]}?project={project}")
+        f"{exec_id}?project={project}")
     _wait_op(s, op["name"], log=log, every=15)
     return image
 
@@ -331,7 +337,6 @@ def deploy_ui(image: str | None = None, log=print) -> str:
         },
     }
     primary_uri = ""
-    ref_bindings = None
     for svc_name in services:
         is_api_only = svc_name == "clef-contrastive-api"
         svc_body = dict(body, iapEnabled=not is_api_only)
@@ -339,18 +344,7 @@ def deploy_ui(image: str | None = None, log=print) -> str:
         op = _ok(s.patch(f"{base}/{svc_name}?updateMask=template,iapEnabled,launchStage", json=svc_body, timeout=60) if exists
                  else s.post(f"{base}?serviceId={svc_name}", json=svc_body, timeout=60))
         uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
-        if svc_name == primary_name:
-            ref_bindings = s.get(f"{base}/{svc_name}:getIamPolicy", timeout=30).json().get("bindings")
-        elif ref_bindings and not s.get(f"{base}/{svc_name}:getIamPolicy", timeout=30).json().get("bindings"):
-            clean_bindings = [
-                {
-                    "role": b["role"],
-                    "members": [m for m in b.get("members", []) if not (is_api_only and "gcp-sa-iap" in m)],
-                }
-                for b in ref_bindings
-            ]
-            s.post(f"{base}/{svc_name}:setIamPolicy", json={"policy": {"bindings": clean_bindings}}, timeout=30)
-        auth_mode = "Cloud Run IAM (project-only gcloud token)" if is_api_only else "Direct IAP enabled"
+        auth_mode = "Project IAM (gcloud token)" if is_api_only else "Direct IAP enabled"
         log(f"Deployed {svc_name}: {uri} ({auth_mode})")
         if svc_name == primary_name or not primary_uri:
             primary_uri = uri
