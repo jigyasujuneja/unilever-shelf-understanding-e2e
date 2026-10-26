@@ -61,6 +61,9 @@ def test_registry_has_builtin_approaches():
         "shelf_plank_tiling_e2e", "shelf_generalizable_spine_e2e",
         "distilled_yolo_960_stage0_clahe", "promo_asset_bay_scoped_plank_detect",
         "shelf_marketshare_generalizable_e2e", "shelf_merchandising_bay_e2e",
+        "cv_promo_classify",
+        "legacy_gtmerch_yolo", "legacy_gtmerch_planogram", "legacy_gtmerch_e2e",
+        "legacy_mt_yolo", "legacy_mt_planogram", "legacy_mt_e2e",
     }
     for ap in approaches.all_approaches().values():
         assert ap.architecture and ap.steps
