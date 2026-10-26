@@ -215,17 +215,21 @@ print(resp.json())
 
 ---
 
-## 5. CLI Usage & Cloud Run Execution
+## 5. CLI Usage & Cloud Run Execution (From Repo Root)
 
-You can also run batch predictions or Cloud Run jobs directly using the `shelf-bench` CLI:
+If you have cloned the repository, `shelf-bench` is installed inside `.venv/bin/shelf-bench` (run `make venv` first if `.venv` does not exist yet). Either prefix commands with `.venv/bin/shelf-bench` or activate the virtual environment (`source .venv/bin/activate`):
 
 ```bash
-# Predict a single crop (executed locally or stream from GCS)
-shelf-bench predict-crop gs://marketshare-datasets/.../crop.jpg
+# Option A: Activate the virtual environment once in your terminal
+source .venv/bin/activate
+
+# Option B: Or call .venv/bin/shelf-bench directly:
+# Predict a single crop (executed 100% on Cloud Run without downloading images)
+.venv/bin/shelf-bench predict-crop gs://marketshare-datasets/.../crop.jpg --cloud-run
 
 # Predict a full shelf (executed 100% on Cloud Run without downloading images)
-shelf-bench predict-shelf gs://marketshare-datasets/.../shelf.jpg --cloud-run
+.venv/bin/shelf-bench predict-shelf gs://marketshare-datasets/.../shelf.jpg --cloud-run
 
 # Run the 5-crop + 5-shelf verification smoke test on Cloud Run
-shelf-bench smoke-test-clef --crops 5 --shelves 5 --cloud-run
+.venv/bin/shelf-bench smoke-test-clef --crops 5 --shelves 5 --cloud-run
 ```
