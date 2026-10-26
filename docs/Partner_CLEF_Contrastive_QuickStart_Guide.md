@@ -12,15 +12,13 @@ Welcome to the **CLEF Contrastive Contact-Sheet Cascade API**. This guide provid
 * **Shelf Detector**: `distilled_yolo_onnx` (CPU ONNX Stage 1 detector in ~40ms)
 * **Master Catalog**: **2,659 SKUs** from `hul_golden` (Unilever + Competitor brands)
 
-### Service Endpoints
+### Service Endpoint
 
-Deployed in `us-central1` on Google Cloud Run (`ul-fs-s-sandbx-16-prj`):
+Deployed in `us-central1` on Google Cloud Run (`ul-fs-s-sandbx-16-prj`), protected by GCP Project IAM (`roles/run.invoker` / `roles/owner`):
 
-| Endpoint Role | Base URL | Auth Mode |
+| Service | Base URL | Routes |
 | :--- | :--- | :--- |
-| **CLEF Contrastive Dedicated API** | `https://clef-contrastive-api-jbn2qgbina-uc.a.run.app` | Cloud Run IAM (`gcloud auth print-identity-token` for GCP project members) |
-| **Control Plane & UI** | `https://perfect-store-control-plane-jbn2qgbina-uc.a.run.app` | Direct IAP (Browser OAuth) |
-| **Shelf UI & Leaderboard** | `https://shelf-ui-jbn2qgbina-uc.a.run.app` | Direct IAP (Browser OAuth) |
+| **`clef-contrastive-api`** | `https://clef-contrastive-api-jbn2qgbina-uc.a.run.app` | `POST /api/predict/crop`<br>`POST /api/predict/shelf`<br>`GET /api/predict/health` |
 
 ---
 

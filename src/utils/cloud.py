@@ -315,7 +315,7 @@ def deploy_ui(image: str | None = None, log=print) -> str:
     gcp, cr = cfg["gcp"], cfg.get("cloud_run", {})
     project, region = gcp["project"], gcp["region"]
     primary_name = cr.get("service", "shelf-ui")
-    services = list(dict.fromkeys([primary_name, "perfect-store-control-plane", "clef-contrastive-api"]))
+    services = list(dict.fromkeys([primary_name, "perfect-store-control-plane"]))
     if gcp.get("results") and Path(runner.RESULTS_DIR).is_dir() and any(Path(runner.RESULTS_DIR).glob("*/summary.json")):
         pushed = runner.push(gcp["results"], overwrite=True, prune_remote=False)
         log(f"Pushed {pushed} local run(s) + experiments_registry.json + qc_audit_report.json to {gcp['results']}")
@@ -332,28 +332,52 @@ def deploy_ui(image: str | None = None, log=print) -> str:
                 "image": image,
                 "args": ["serve", "--pull", "--host", "0.0.0.0", "--port", "8080"],
                 "ports": [{"containerPort": 8080}],
-                "resources": {"limits": {"cpu": "4", "memory": "8Gi"}},
+                "resources": {"limits": {"cpu": "2", "memory": "4Gi"}},
             }],
         },
     }
     primary_uri = ""
     for svc_name in services:
-        is_api_only = svc_name == "clef-contrastive-api"
-        svc_body = dict(body, iapEnabled=not is_api_only)
         exists = s.get(f"{base}/{svc_name}", timeout=30).status_code == 200
-        op = _ok(s.patch(f"{base}/{svc_name}?updateMask=template,iapEnabled,launchStage", json=svc_body, timeout=60) if exists
-                 else s.post(f"{base}?serviceId={svc_name}", json=svc_body, timeout=60))
+        op = _ok(s.patch(f"{base}/{svc_name}?updateMask=template,iapEnabled,launchStage", json=body, timeout=60) if exists
+                 else s.post(f"{base}?serviceId={svc_name}", json=body, timeout=60))
         uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
-        auth_mode = "Project IAM (gcloud token)" if is_api_only else "Direct IAP enabled"
-        log(f"Deployed {svc_name}: {uri} ({auth_mode})")
+        log(f"Deployed {svc_name}: {uri} (Direct IAP enabled)")
         if svc_name == primary_name or not primary_uri:
             primary_uri = uri
     return primary_uri
 
 
 def deploy_clef_contrastive_api(image: str | None = None, log=print) -> str:
-    """Deploy CLEF Contrastive Cloud Run services (shelf-ui, perfect-store-control-plane, clef-contrastive-api)."""
-    return deploy_ui(image=image, log=log)
+    """Deploy the standalone CLEF Contrastive Cloud Run inference service (``clef-contrastive-api``)
+    without touching the UI services (``shelf-ui``, ``perfect-store-control-plane``)."""
+    cfg = load_config()
+    gcp = cfg["gcp"]
+    project, region = gcp["project"], gcp["region"]
+    svc_name = "clef-contrastive-api"
+    s = _session()
+    image = image or build_image(s, project, region, log)
+    log(f"Container image: {image}")
+    base = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services"
+    body = {
+        "launchStage": "BETA",
+        "iapEnabled": False,
+        "template": {
+            "scaling": {"minInstanceCount": 1, "maxInstanceCount": 10},
+            "containers": [{
+                "image": image,
+                "args": ["serve", "--host", "0.0.0.0", "--port", "8080"],
+                "ports": [{"containerPort": 8080}],
+                "resources": {"limits": {"cpu": "4", "memory": "8Gi"}},
+            }],
+        },
+    }
+    exists = s.get(f"{base}/{svc_name}", timeout=30).status_code == 200
+    op = _ok(s.patch(f"{base}/{svc_name}?updateMask=template,iapEnabled,launchStage", json=body, timeout=60) if exists
+             else s.post(f"{base}?serviceId={svc_name}", json=body, timeout=60))
+    uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
+    log(f"Deployed {svc_name}: {uri} (Project IAM via gcloud token)")
+    return uri
 
 
 deploy_marketshare_api = deploy_clef_contrastive_api

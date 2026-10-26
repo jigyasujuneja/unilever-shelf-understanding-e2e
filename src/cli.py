@@ -279,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser(
         "deploy-clef-api",
         aliases=["deploy-api", "deploy-exp28"],
-        help="Deploy CLEF Contrastive Cloud Run services (shelf-ui, perfect-store-control-plane, clef-contrastive-api)",
+        help="Deploy standalone CLEF Contrastive Cloud Run API service (clef-contrastive-api)",
     )
     s.add_argument("--image", default=None, help="pre-built container image")
 
