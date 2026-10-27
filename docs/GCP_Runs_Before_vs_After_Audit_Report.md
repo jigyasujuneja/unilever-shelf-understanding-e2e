@@ -8,7 +8,6 @@
 > 3. **Sample-Size Scaling across Wild Shelf (`ms_json_golden`, `gtmerch_golden`), GT Sessions (`gt_hul_sessions`), and Crop Benchmarks (`hul_golden`, `hul_variants`, `hul_packs`, `hul_brands`)**, and
 > 4. **The Complete Before-vs-After GCP Run Audit Table** showing what improved, what remained invariant, and why.
 
----
 
 ## 1. MT Market Share Models on GT Sessions (`gt_hul_sessions` & `hul_sessions`) vs. Legacy `.h5` CV Pipeline
 
@@ -40,7 +39,6 @@ We also evaluated the existing chained Keras `.h5` pipeline (`marketshare_brand.
 | **`1015-113613-dinov3_classify-dinov3_vits16`** | **Supervised Fine-Tuned `DINOv3-ViT-S/16` + CosFace Head** | `hul_golden` ($N=1,000$) | `95.9%` | `95.2%` | `91.5%` | `92.4%` | `77.5%` | **`88.2%`** | **`77.5%`** | Unified 1-backbone CosFace classifier eliminates multi-model chaining error (`44.5% -> 77.5%`), but still requires retraining for new SKUs and trails our 2-Stage Hybrid (`82.6%-84.8%`). |
 | **`1013-025000-clef_standalone-gemini-3.5-flash-lite`** | **Our 2-Stage Hybrid (`gemini-embedding-2` CLM + `gemini-3.5-flash-lite` CLEF)** | `hul_golden` ($N=1,000$) | **`99.0%`** | **`96.9%`** | **`96.6%`** | **`93.3%`** | **`82.6%`** | **`91.6%`** | **`82.6%`** | **`+38.1%` higher 5-Attr accuracy** than chained `.h5` (`82.6%` vs `44.5%`), **`59.1%` zero-generative-VLM fast gate**, and **zero retraining** when new SKUs launch. |
 
----
 
 ## 2. Summary of the 5 Priority Engineering Fixes & 2 Mathematical CLM Fixes
 
@@ -53,7 +51,6 @@ We also evaluated the existing chained Keras `.h5` pipeline (`marketshare_brand.
 | **Priority 5** | [`runner.py`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/runner.py#L430-L545)<br>[`onnx_yolo_detector.py`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/approaches/market_share/detection/onnx_yolo_detector.py#L247-L345) | **10-Category SOS & `Past_ROI_Data` Contract + Pure-Neural Panoramic ONNX Mode:** Added `category_sos_metrics` across all 10 retail categories (`Hair Care`, `Skin Care`, `Oral Care`, `Foods`, `Tea`, `Coffee`, `DMT`, `PW`, `Laundry`, `HH`), `past_roi_summary`, and `SHELF_BENCH_DISABLE_STRIP_GUTTER=1` horizontal sliding-window ONNX tiling. | `169 / 209` runs (`100%` of Unilever non-detection runs) now contain full 10-category `category_sos_metrics` and `past_roi_summary` in GCS. |
 | **Math Fix A & B** | [`clm.py`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/utils/clm.py#L40-L170)<br>[`metrics.py`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/src/utils/metrics.py#L121-L142) | **Out-of-Family CSLS Hubness Masking + SKU-Prototype `coarse_brand_gate` + Open-Set `"Other"` Equivalence:** Masked same-SKU reference twins out of $r_T(y_j)$ in `compute_csls_hubness`, aggregated by SKU prototype before brand voting in `coarse_brand_gate`, and credited open-set competitor (`is_hul=False` vs `is_others_catchall=True`) equivalence in `match_product`. | Eliminated catalog-frequency bias against 1-variant HUL brands and lifted scored accuracy on open-set wild shelves (`gtmerch_golden` from `0.10%` to **`68.13%`** on matched boxes; `ms_json_golden` from `8.00%` to **`28.7%-58.42%`**). |
 
----
 
 ## 3. Before-vs-After Audit Across Wild Shelf (`gtmerch_golden` & `ms_json_golden`) and Crop Benchmarks (`hul_golden`, `hul_variants`, `hul_packs`, `hul_brands`)
 
@@ -80,7 +77,6 @@ We also evaluated the existing chained Keras `.h5` pipeline (`marketshare_brand.
 | **`hul_brands`** ($N=1,000$) | `1013-034648-l8_hul_ultimate-gemini-3.5-flash-lite-priority-hul_brands` | `0.0%` -> **`60.6%`** | **`98.20%`** | **`95.60%`** | **`95.90%`** | **`89.80%`** | **`88.20%`** | **`80.90%`** | **`1.10%`** | **`1.20%`** |
 | **`hul_promos`** ($N=60$) | `1013-031440-promo_band_verifier-gemini-3.5-flash-lite-priority-hul_promos` | `0.0%` | **`98.33%`** | **`95.00%`** | **`95.00%`** | **`91.67%`** | **`88.33%`** | **`88.33%`** *(Promo Acc)* | **`0.00%`** | **`1.67%`** |
 
----
 
 ## 4. Forensic Audit of Standalone `DINOv3/v2` SFT vs. 2-Stage Hybrid & Top 3 MVP Shortlist for A/B Testing
 

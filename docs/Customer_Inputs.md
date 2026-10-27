@@ -2,7 +2,6 @@
 
 *This document catalogs, visualizes, and explains the existing customer source code assets under [`docs/customer_code/`](customer_code/) deployed on Microsoft Azure (with cross-cloud data ingestion from Google Cloud Storage). Each file is accompanied by its corresponding Mermaid workflow diagram located under [`docs/diagrams/customer_inputs/`](diagrams/customer_inputs/) and a detailed technical breakdown.*
 
----
 
 ## Overview & Component Inventory
 
@@ -56,13 +55,11 @@ flowchart LR
   end
 ```
 
----
 
 ## 1. Azure Data Factory (ADF) Pipelines
 
 Both ADF pipelines follow a standardized pattern to ingest the most recently modified CSV file from **Google Cloud Storage (GCS)** into **Azure Database for MySQL**, rotating the existing target table into a `temp_*` backup table prior to ingestion.
 
----
 
 ### 1.1 `Outlet_Cluster_Segment_Pipeline_ProdProcess.json`
 
@@ -136,7 +133,6 @@ flowchart TD
        ```
      * **Column Mapping (`TabularTranslator`, `writeBatchSize: 10000`):** Maps 7 `String` CSV columns (`hul_code`, `branch_desc`, `cluster`, `cluster_desc`, `area`, `area_desc`, `ol_segment`) to `varchar` columns in Azure MySQL.
 
----
 
 ### 1.2 `ROI_Pipeline.json`
 
@@ -213,13 +209,11 @@ flowchart TD
 | `basepack code` | `String` | `basepack` | `varchar` |
 | `occurance` | `String` | `occ` | `int` (`Int32`) |
 
----
 
 ## 2. ASP Frontend Logic Apps
 
 The ASP Frontend Logic Apps act as stateful HTTP orchestration gateways between retail execution client applications and the backend Azure ML computer vision endpoints hosted on AKS. Both workflows use an **asynchronous callback pattern**: as soon as a valid request with images arrives, the Logic App returns `HTTP 200` to the caller while continuing in the background to invoke Azure ML and push the resulting payload to `DYNAMIC_TASK_API`.
 
----
 
 ### 2.1 `gt-merchandising-endpoint-prod.json`
 
@@ -294,7 +288,6 @@ flowchart TD
    * Checks whether current India Standard Time (`IST`) is between `07:30` and `18:00`.
    * If within business hours, iterates (`For_each`) over every image in `triggerBody()['Image_Names']`, fetches an access token per image, and posts a degraded/fallback merchandising record (`output_type: "partial_output"`, `AWP_Presence: "N"`, `AWP_Sim_Score: "0"`, `Envision_Sim_Score: "0"`, `Earning: "0"`) to `DYNAMIC_TASK_API`.
 
----
 
 ### 2.2 `marketshare-endpoint-mt-prod-aks2.json`
 
@@ -349,13 +342,11 @@ flowchart TD
    * **Static Token Authentication:** Uses a pre-configured `DYNAMIC_TASK_API_TOKEN` from `Environement_Variables` rather than making a separate `GET` call to `ACCESS_TOKEN_API` on every request.
    * **Single Failure Callback:** On `TIMEDOUT`, `SKIPPED`, or `FAILED`, posts a single request-level failure payload (`StatusCode: 500`, `Remarks: "Internal Server Error"`, `Recognised_Packs: ""`) to `DYNAMIC_TASK_API` rather than looping over individual images.
 
----
 
 ## 3. ASP Start/Stop Logic Apps
 
 To control Azure compute expenditure, two recurrence-triggered Logic Apps manage the daily power state (`start` / `stop`) of the Azure Kubernetes Service (`Microsoft.ContainerService/managedClusters`) clusters hosting the CV models.
 
----
 
 ### 3.1 `marketsharestartcluster.json`
 
@@ -401,7 +392,6 @@ flowchart TD
    * Parses the cluster array `["masked-cluster-001", "masked-cluster-002"]` (`Clusters_to_Start`).
    * Loops through each cluster in `For_each_AKS_cluster` and invokes the Azure Resource Manager (`arm-1`) `POST` operation `/subscriptions/<sub-id>/resourcegroups/<rg>/providers/Microsoft.ContainerService/managedClusters/<cluster>/start?x-ms-api-version=2021-03-01`.
 
----
 
 ### 3.2 `marketsharestopcluster.json`
 
@@ -459,13 +449,11 @@ flowchart TD
    * When `hour == 19 AND (day == 0 OR day == 6)`, iterates over the two AKS clusters and stops them one hour later (at **19:00 IST**) on Saturdays and Sundays.
    * On the off-hour triggers (19:00 on weekdays or 18:00 on weekends), neither condition matches and the workflow exits with no action.
 
----
 
 ## 4. Path-to-Purchase (P2P) Python Scripts
 
 The `docs/customer_code/p2p/` scripts implement the offline recommendation scoring engine that computes product-to-product and brand-to-brand association scores per outlet segment (`ol_segment`) and cluster (`cluster_id`).
 
----
 
 ### 4.1 `NR_Brand_Hair_Beverages.py`
 
@@ -539,7 +527,6 @@ flowchart TD
    * **Step 4 (Combined Sub-Category Calculation):** Calls [`Sub_category_Combined(Category)`](customer_code/p2p/NR_Brand_Hair_Beverages.py#L157-L234) across all segments (`Segment_id = "Combined"`) at the `sub_category` level and writes `./p2p_<Category>/Combined__<Category>.csv`.
    * **Step 5 (Azure Blob Storage Cleanup & Upload):** Deletes all existing blobs under `new-p2p/Brands/<Category>/` via [`list_all_files`](customer_code/p2p/NR_Brand_Hair_Beverages.py#L50-L64) and [`delete_files`](customer_code/p2p/NR_Brand_Hair_Beverages.py#L66-L74), then uploads all newly generated `.csv` files from `./p2p_<Category>/`.
 
----
 
 ### 4.2 `NR_final_PW2.py`
 

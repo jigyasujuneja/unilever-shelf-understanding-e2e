@@ -3,7 +3,6 @@
 
 *This document outlines the resourcing requirements, application portfolio, model inventory, estimated timelines, key milestones, and engagement path to assess, migrate/refactor, and transition Unilever's **Shelf Understanding** backend applications under **Sales EDGE to MT PC** - including **MT MarketShare**, **MT Merchandising**, **MT Toker Compliance**, and **Share of Shelf (SOS) Pipeline** - from Proof of Concept (POC) assessment to a scalable production application and architecture within Unilever's Google Cloud Platform (GCP) environment.*
 
----
 
 ## 1. Document Metadata
 
@@ -20,7 +19,6 @@
 | **Customer Technical Lead** | Technical Lead | Draft |
 | **Customer SMEs** | Retail Execution, Computer Vision & Merchandising SMEs | Draft |
 
----
 
 ## 2. Application Portfolio & Model Inventory
 
@@ -52,11 +50,10 @@ The following 13 computer vision and multimodal models underpin the General Trad
 | **Merchandising Product Recognition** | `Inceptionnet` | Merchandising | 1 | Detects products within the merchandising window. |
 | **Total** |: |: | **13** | **Complete baseline model suite across GT, MT & Merchandising** |
 
----
 
 ## 3. Customer Resourcing Requirements
 
-To ensure a successful delivery, robust knowledge transfer, and a smooth transition to operational ownership, Unilever will provide **5 dedicated Partner FTEs** (alongside domain SMEs) from project kickoff through completion:
+To ensure a successful delivery, resilient knowledge transfer, and a smooth transition to operational ownership, Unilever will provide **5 dedicated Partner FTEs** (alongside domain SMEs) from project kickoff through completion:
 
 *   **Partner Engineering Team (5 FTEs):**
     *   **Role & Responsibilities:** Co-assess and benchmark the 13 baseline models (`YOLO`, `XceptioNet`, `Inceptionnet`, `ViT-B-16-plus-240`) and evaluate migration pathways to **`Gemini 3.5 Flash-Lite`**, **`Gemini 3.8 Flash`**, and **`gemini-embedding`** across the target **Sales EDGE to MT PC** workloads; provision GCP environment infrastructure, configure IAM roles and storage buckets, build high-throughput image ingestion pipelines, and co-design the scalable application architecture for Phase 2.
@@ -66,7 +63,6 @@ To ensure a successful delivery, robust knowledge transfer, and a smooth transit
     *   **Engagement:** Participate in weekly review sessions (**1-2 times per week**) to validate category/variant taxonomies, promotional compliance thresholds, and Share-of-Shelf calculation rules.
     *   **Rationale:** Active SME feedback ensures model assessment metrics align directly with real-world retail execution and Modern Trade compliance standards.
 
----
 
 ## 4. Estimated Timeline & Strategic Grouping
 
@@ -89,7 +85,6 @@ To ensure a successful delivery, robust knowledge transfer, and a smooth transit
     *   **Phase 4: Production Ramping (End of Q4 2026):**
         *   **Scope & Transition:** Following the architectural specification from the FDE & PSO teams, production ramping is presumed to begin towards the end of Q4 2026 as the workload migrates from Azure to GCP. During this phase, Google will also continue the handover of operational maintenance to the co-build team on the Unilever side to stabilize adoption. *(Not shown on Gantt chart).*
 
----
 
 ## 5. Key Milestones & Engagement Path
 
@@ -97,7 +92,7 @@ The engagement is structured into distinct phases reflecting Unilever's immediat
 
 > [!IMPORTANT]
 > **Timeline & Scope Notice: Phase 2 (Starting October 23, 2026: TO BE DEFINED):**
-> As visually highlighted in the Gantt chart by the **To be Defined** marker, all deliverables, application engineering tasks, and architectural implementation work in **Phase 2: MVP for Scalable Application** scheduled from **October 23, 2026 onwards** are intentionally marked as **To be Defined** pending formal review at the **POC Completion Milestone**.
+> As visually shown in the Gantt chart by the **To be Defined** marker, all deliverables, application engineering tasks, and architectural implementation work in **Phase 2: MVP for Scalable Application** scheduled from **October 23, 2026 onwards** are intentionally marked as **To be Defined** pending formal review at the **POC Completion Milestone**.
 
 ```mermaid
 %%{init: {'themeCSS': '.grid .tick line { stroke: #9ca3af; stroke-dasharray: 4, 4; stroke-width: 1px; }'}}%%
@@ -120,7 +115,6 @@ gantt
     To be Defined                                      :crit, p2_tbd, 2026-10-23, 2026-11-27
 ```
 
----
 
 ### Milestone Breakdown by Phase
 
@@ -154,14 +148,12 @@ gantt
     *   *Goal:* Deliver comprehensive POC migration assessment findings, 13-model benchmark results, Gemini VLM / embedding migration recommendations across **MT MarketShare** and **MT Merchandising**, and Phase 2 target architecture on October 23, 2026.
     *   *Activities:* Conduct formal readout with Unilever and Google stakeholders to sign off on Phase 1 results and approve the Phase 2 MVP execution roadmap.
 
----
 
 ### Phase 2: MVP for Scalable Application (October 23 to Late November 2026)
 
 7.  **To be Defined (Oct 23 to Nov 27, 2026)**
     *   *Goal:* Detailed tasks, MVP scope, system integrations, and production cutover milestones will be defined upon completion of the Phase 1 POC Completion Milestone on October 23, 2026.
 
----
 
 ### Phase 3: Mobile Application Integration *(Advisory Support: Not on Gantt Chart)*
 
@@ -169,7 +161,6 @@ gantt
     *   *Goal:* Integrate the processing pipeline and its downstream analytical outputs directly into Unilever's mobile channels.
     *   *Engagement Model:* Google will provide technical advisory support rather than hands-on implementation work during this phase.
 
----
 
 ### Phase 4: Production Ramping *(End of Q4 2026: Not on Gantt Chart)*
 

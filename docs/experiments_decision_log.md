@@ -3,7 +3,6 @@
 **Canonical GCS Results Bucket:** `gs://ul-fs-s-sandbx-16-prj-shelf-images/results/`  
 **Live Dashboards:** `/exec` (Executive Summary) • `/engineering` (Engineering Workbench)
 
----
 
 ## 1. Executive Summary of Our Experimental Journey
 
@@ -16,7 +15,6 @@ Rather than guessing which model or architecture works best for Unilever's `506,
 4. **Why the 4-Crop Contact Sheet Unlocks `93.3%-100%` SKU Accuracy (`EXP-08`, `EXP-09`):** Sending a single composite image (**Contact Sheet**) containing the store crop + zoomed-in bottom-30% weight strip alongside the top-5 reference gallery images allows `Gemini 3.5 Flash-Lite` / `3.8 Flash` to compare fine typography side-by-side, lifting exact SKU accuracy from `84.4%` to **`93.3%-100%`**.
 5. **Why Grouping Identical Neighboring Packs Cuts Cost by `4x` (`EXP-14`):** On a real supermarket shelf with `25` facings, `4-5` identical packs sit side-by-side in a brand block. Grouping identical adjacent packs (`25` facings $\rightarrow$ `~6` unique product groups) cuts Stage 2B calls by `75%`, bringing total shelf cost down to **`₹0.12/shelf` (`₹1.18L / mo` per `1M` shelves)**.
 
----
 
 ## 2. Completed Experiments (`EXP-01` to `EXP-19`): What We Did, Learned & Decided
 
@@ -42,7 +40,6 @@ Rather than guessing which model or architecture works best for Unilever's `506,
 | **`EXP-18`** | Open-Set Competitor Discovery (`hul_golden`) | **Unsupervised New-SKU Discovery (`cold_start_lid_discovery`)** | **`91.2% Cluster Purity`** on unlisted competitor packs | Crops with low gallery similarity (`<0.68`) and high LID represent unlisted regional competitors; clustering them + reading label text via Gemini auto-discovers new SKUs for the web crawler. | Scheduled as weekly catalog expansion job (`1,637 -> 3,500+` rival SKUs). |
 | **`EXP-19`** | packaging Boundary Hygiene (`hul_packs`) | **Canonical Packaging Taxonomy + Duplicate Quarantine** | **`96.7%-100% Pack Accuracy`** (vs. `W6=80.6%` legacy) | Removing `8,398` synthetic `copy*.jpg` files and resolving `57` dual-labeled `Bottle/Jar` MD5s lifted packaging accuracy by `+16.1%` over legacy `W6`. | Locked into `src/utils/taxonomy/` and enforced by Gate 2 & Gate 3 in `src/utils/qc.py`. |
 
----
 
 ## 3. Phase-2 Sequential Experiment Plan (`EXP-20` to `EXP-25`): Checking Incrementality Step-by-Step
 
@@ -66,7 +63,6 @@ To measure the **exact incremental gain ($\Delta$)** of each improvement, we exe
 | **9** | **`EXP-29`**<br/>Multi-Medoid `k=3` Shelf Gallery + Gemini 3.5 Flash-Lite LoRA SFT Cascade (`sft_clm_clef_cascade`) | Builds `k=3` real-shelf k-means medoids per SKU strictly from `splits['train']` (zero `val`/`test` leak) and cascades to our live Vertex AI Gemini 3.5 Flash-Lite LoRA SFT endpoint (`projects/663686437672/locations/us/endpoints/8037166116251893760`) + Contrastive Metadata CLEF fallback for unseen SKUs. | Supervised Fine-Tuning + Zero-Shot Catalog Extensibility (`hul_variants`, `hul_golden`) | `78.6%` `clm_standalone` (`hul_golden` `N=1,000`) | **Completed (`val` `N=200` + `test` `N=1,000`)**:<br/>• **`hul_variants` (`gemini-3.5-flash-lite-sft`)**: **`84.0%` `val` / `81.9%` `test` 5-Attr** (`91.1%` 3-Attr, `88.9%` `0`-shot unseen, `89.2%` `1-5` few-shot).<br/>• **`hul_variants` (`gemini-3.5-flash-lite`)**: **`85.0%` `val` / `81.7%` `test` 5-Attr**.<br/>• **`hul_golden`**: **`85.0%` `val` / `81.3%` `test` 5-Attr** (`+2.7 pp` vs. `clm_standalone`). | `uv run shelf-bench cloud run -a sft_clm_clef_cascade -m gemini-3.5-flash-lite-sft -d hul_variants --split test --limit 1000` |
 | **10** | **`EXP-30`**<br/>Wild-Shelf Container-Split 960px Soft-NMS (`distilled_yolo_960_softnms`) | Splits coarse full-shelf container detections when $\ge 2$ non-overlapping (`IoU < 0.25`) 960px tile detections lie inside (`IoA >= 0.65`) and cover $\ge 35\%$ of the container area, replacing merged brand-block boxes with individual pack detections at `$0` CPU cost. | Wild MT & GT Shelves (`ms_json_golden`, `gtmerch_golden`) | `31.9%` Single-Pass CPU ONNX F2 (`ms_json_golden`) | **Completed (`val` + `test`)**:<br/>• **`ms_json_golden`**: **`54.34%` `val` (`N=60`) / `54.42%` `test` (`N=100`) F2** (**`64.75%` `val` / `64.30%` `test` Recall**, `|Val - Test|` gap = **`0.08 pp`**).<br/>• **`gtmerch_golden`**: **`53.94%` `val` (`N=100`) / `50.09%` `test` (`N=200`) F2** (`55.07%` `val` Recall). | `uv run shelf-bench cloud run -a distilled_yolo_960_softnms -m yolo11n-distilled-onnx -d ms_json_golden --split test --limit 100` |
 
----
 
 ## 4. Live GCS Dataset Scale & 12-Gate Automated QC Verification (`allow_offline_fixture=False`)
 
@@ -83,7 +79,6 @@ All 8 Golden manifests in `gs://marketshare-datasets/derived_manifests/*/rpc.jso
 | **`ms_json_golden`** | `38` shelves (`705` boxes) | `25` shelves (`434` boxes) | `27` shelves (`463` boxes) | **`52` shelves / `897` boxes** (`1,602` total boxes) | `233` train / `168` val | **PASS (`12/12`)** |
 | **`hul_sessions`** | `30` sessions (`240` boxes) | `20` sessions (`160` boxes) | `25` sessions (`200` boxes) | **`45` sessions / `360` boxes** (`600` total boxes) | `87` train / `67` test | **PASS (`12/12`)** |
 
----
 
 ## 5. Verification of the 3 Anti-Overfitting Gates (`EXP-28`, `EXP-29`, `EXP-30`)
 
@@ -97,5 +92,4 @@ To guarantee zero hardcoding (`src/utils/metrics.py` untouched) and zero test-sp
 | **`EXP-29` (`sft_clm_clef_cascade`, `3.5-flash-lite`)** | `hul_variants` | **`85.0%`** (`92.0%` 3Attr) | **`81.7%`** (`90.8%` 3Attr) | `+3.30 pp` | **`88.9%` (`16/18`)** | **`88.0%` (`139/158`)** | **`83.8%` (`192/229`)** | **`78.8%` (`469/595`)** |
 | **`EXP-29` (`sft_clm_clef_cascade`, `3.5-flash-lite`)** | `hul_golden` | **`85.0%`** (`92.5%` 3Attr) | **`81.3%`** (`90.2%` 3Attr) | `+3.70 pp` | **`88.9%` (`16/18`)** | **`88.6%` (`140/158`)** | **`83.8%` (`192/229`)** | **`78.0%` (`464/595`)** |
 | **`EXP-30` (`distilled_yolo_960_softnms`, `yolo11n-onnx`)** | `ms_json_golden` | **`54.34%` F2** (`64.75%` Rec) | **`54.42%` F2** (`64.30%` Rec) | **`0.08 pp` F2 (PASS $\le 2.0\%$)** | N/A (Stage 1 Det) | N/A | N/A | N/A |
-
 

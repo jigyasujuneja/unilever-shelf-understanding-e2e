@@ -22,7 +22,7 @@ Use this 4-stage visual decision funnel whenever classifying or retrieving fine-
 
 Never feed a single contrast-stretched image buffer to both an embedding model and an OCR/VLM verifier:
 1. **Illuminant Normalization (Minkowski $p=6$ Shades-of-Gray)**:
-   - Estimate channel illuminant $\mu_c = \left(\frac{1}{HW}\sum_{x,y} I_c(x,y)^p\right)^{1/p}$ with $p=6$ so specular highlights set the white reference without washing out mid-tones.
+   - Estimate channel illuminant $\mu_c = \left(\frac{1}{HW}\sum_{x,y} I_c(x,y)^p\right)^{1/p}$ with $p=6$ so specular shows set the white reference without washing out mid-tones.
 2. **Dual Image Buffers**:
    - **Buffer A (`color_image`, Unsharpened Linear RGB)**: Route to Stage 2A embedding retrieval and inner-80% CIELAB color scoring. Applying `CLAHE` before Stage 2A warps brand color ratios and drops retrieval accuracy by `-6.0 pp`.
    - **Buffer B (`detector_image`, CIELAB `L* CLAHE` + Unwarp)**: Route to Stage 1 edge detection and Stage 2B contact sheets (`+0.8 pp` micro-text OCR gain).

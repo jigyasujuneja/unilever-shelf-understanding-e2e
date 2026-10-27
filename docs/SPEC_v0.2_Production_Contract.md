@@ -4,7 +4,6 @@
 **Canonical Data & Results Bucket:** `gs://ul-fs-s-sandbx-16-prj-shelf-images`  
 **Pipeline Version:** `v0.2`
 
----
 
 ## 1. Upstream & Downstream Production Contract (`PR05` -> `PR19` -> `PR06-PR08` -> `PR09-PR11`)
 
@@ -19,7 +18,6 @@
    - Any store photo exceeding the `PT180S` processing window or encountering upstream transient exhaustion MUST emit `contract_status = "RETRY_PENDING"`, `awp_presence = "PENDING"`, and `earning_override = None` to `PR19_pubsub_dlq`.
    - Workers MUST NEVER emit `Earning = '0'` on a timeout or infrastructure error, preventing false retailer payout denials in `PR09-PR11`.
 
----
 
 ## 2. Canonical 5-Level Taxonomy & Schema Invariants
 
@@ -31,7 +29,6 @@ Every prediction and ground-truth label across all 10 canonical datasets (`hul_g
 - **L4 (`base_variant`):** Canonical variant family stripped of pack-size and container suffixes.
 - **L5 (`product` / `sku_id`, `promo_type`):** Exact 2,659-SKU catalog identity (`1..2659` in `data/hul_golden/rpc.json`, verified via `catalog_sha256`).
 
----
 
 ## 3. Zero-Leakage, Zero-Fallback, and Zero-Error Production Gates (15 Hard QC Gates)
 

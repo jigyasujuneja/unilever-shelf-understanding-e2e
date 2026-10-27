@@ -2,7 +2,6 @@
 
 This playbook structures next week's sessions for two distinct audiences - **Decision Makers** (Commercial, Product & Executive Leadership) and **Partners** (LTIMindtree, Bizom, Data & ML Engineering Teams) - backed by `63` verified Cloud Run benchmark runs in `gs://ul-fs-s-sandbx-16-prj-shelf-images/results/` and documented in [`docs/experiments_decision_log.md`](file:///usr/local/google/home/jjuneja/jjuneja-unilever-shelf-understanding/docs/experiments_decision_log.md).
 
----
 
 ## 1. The 4-Act Story & Architectural Intuition (Jargon-Free Framing)
 
@@ -14,13 +13,12 @@ This playbook structures next week's sessions for two distinct audiences - **Dec
   2. **Step 2: Group Identical Neighbors & Instant Reference Lookup (`Stage 2A Embedding Search`: resolves 68% of packs at ₹0.011):** Groups identical side-by-side packs on the same shelf row (`25` facings $\rightarrow$ `~6` unique product groups, cutting work by `4x`) and matches them against our `2,745`-SKU reference gallery using `gemini-embedding-2`.
   3. **Step 3: Side-by-Side Visual Verification Only for Hard Lookalikes (`Stage 2B Contact Sheet`: 32% of packs):** Only when two sister variants or sizes look nearly identical, we build **one composite image** showing the store crop + zoomed-in variant/weight strips side-by-side with the top-5 studio reference images for `Gemini 3.5 Flash-Lite`.
 
----
 
-## 1B. 80% ASD-STE100 Visual Onboarding: 5 Key Engineering Decisions & Data Remediation Foundation
+## 1B. 80% ASD-STE100 Visual Onboarding: 5 Core Engineering Decisions & Data Remediation Foundation
 
 Stakeholders do not need internal experiment ticket codes (`EXP-01..25`) to onboard and trust our system. We follow **80% of the ASD-STE100 Simplified Technical English standard** (short active sentences, one approved term per concept, zero ML jargon like *"medoid"* or *"bi-encoder"*, and a concrete store-shelf example for every rule):
 
-### A. 5 Key Engineering Decisions & Why They Work
+### A. 5 Core Engineering Decisions & Why They Work
 
 | # | Plain-English Decision (What We Did & How) | Problem It Solves (Why Legacy Failed) | Intuitive Store-Shelf Example | Verified Impact |
 | :-: | :--- | :--- | :--- | :--- |
@@ -40,7 +38,6 @@ Stakeholders do not need internal experiment ticket codes (`EXP-01..25`) to onbo
    - Restored **`874` competitor brands** (`Colgate`, `Nivea`, `Pantene`, `Dettol`, `Biotique`, `Dabur`, `Ariel`, `Tide`, `Patanjali`) that legacy scripts had collapsed into `"Others"` (`14.7%` of all boxes) or brand-only strings (`Ponds`, `Lux`, `Lifebuoy`, `Boost`, `Comfort`, `Colgate`).
 3. **Stage 3 (`12/12` Automated QC Gates):** Enforces `0` MD5 train/test leaks, `0` `"Unknown"` or `"__Others"` fallbacks, `0` synthetic grid coordinates, and `100%` 5-level taxonomy consistency.
 
----
 
 ## 1C. Real Evaluated Proof Examples by Every Use Case & Task Level (`0` Hallucinations, `0` Fallbacks)
 
@@ -55,7 +52,6 @@ Every example in the `/exec` **Interactive Task-Level Proof Explorer** is loaded
 | **5. Direct 5-Level Catalog Classification (`TASK-CLS`: Owner/Cat/Pack/Brand/SKU)** | `1009-000112-djev_classify-gemini-3.5-flash-lite-priority-hul_brands` / `test_00080.jpg` (`264x511`) & `1008-235947-djev_classify-...-hul_golden-val` / `val_00162.jpg` (`195x261`) | **5-Level Classification (`96.7%` Brand, `90.0%` SKU):**<br/>• `test_00080.jpg`: `Dove__Dryness_Care__Conditioner_Tube` (`Tube`, `Hair_Care`, `is_hul=True`)<br/>• `val_00162.jpg`: `Pukka__Ashwagandha_Tulsi` (`Carton`, `Beverages`, `is_hul=True`)<br/>• `val_00063.jpg`: `Oralb__Cavity_Defense_123_Manual_Toothbrush` (`Carton`, `Oral_Care`, `is_hul=False`) | Shows simultaneous 5-level taxonomy classification across HUL and Non-HUL (`Oralb`, `Bournvita`, `Complan`, `Nescafe`) products. |
 | **6. Zero-Shot Promo & Price-Off Verification (`TASK-PRM`: MT Toker)** | `1009-000050-jev_promo_verifier-gemini-3.5-flash-lite-priority-hul_promos-val` / `val_00091.jpg` (`84x31`) & `val_00007.jpg` (`91x119`) | **Promo Pack Match (`90.0%-100%`):**<br/>• `val_00091.jpg`: `Ayush__Purifying_Turmeric` promo pack<br/>• `val_00007.jpg`: `Himalaya__Oil` promo pack (`Non-HUL` rival promo)<br/>• Also evaluates `Nescafe__Sunrise_Coffee_with` and `Red_Label__Leaf_Poly` promo packs. | Proves zero-shot promo verification across both Unilever (`Ayush`, `Red Label`) and competitor (`Himalaya`, `Nescafe`) promo packs. |
 
----
 
 ## 2. Task-by-Task Success KPIs vs. Legacy Production Baseline (`W1-W6`)
 
@@ -69,7 +65,6 @@ Every example in the `/exec` **Interactive Task-Level Proof Explorer** is loaded
 | **6. Exact SKU, Size & Promo (`L5` 2,745 SKUs + 240 Promos)** | `W5 (Size) = 45.61%` (`PW`), `46.25%` (`Oral`); **Compound Exact SKU `W1 = 31.85%-70.55%` (Mean: 50.5%)** | **>= 85.0% E2E / >= 90.0% Crop** | **93.3%** (`hul_golden` Flash)<br/>**93.4% Box / 88.7% E2E** (`ms_json`)<br/>**93.3%-100%** (`hul_promos`) | **6.6%-11.3% E2E gap:**<br/>1. Unscoped national catalog (`2,745` SKUs vs `~300` sold in a store format).<br/>2. Cropping strips physical scale (`100g` vs `250g` look identical when resized). | **• Product/API (`Ref: EXP-20`):** Pass `Outlet_Code -> ol_segment` to filter gallery (`2,745 -> ~300` SKUs).<br/>**• Algo (`Ref: EXP-23`):** Compare pack height against same-row neighbors ($h_{\text{box}} / \bar{h}_{\text{row}}$). |
 | **7. End-to-End Shelf Pipeline (`TASK-E2E`, `TASK-PLN`)** | `PT180S` (3-min) timeout; `51% F2` when bays & SKUs mixed | **>= 92% Det F2, <= 2% SoS Error, <= ₹0.50/shelf** | **94.7% Det F2 / 97.9% E2E F2** (`gtmerch`)<br/>**94.3% E2E F2** (`ms_json`)<br/>**97.2% Bay Purity / 94.6% OOS**<br/>**₹0.12/shelf** | **Store Execution Edge Cases:**<br/>1. Multi-photo aisle overlap (`hul_sessions`) double-counts border packs.<br/>2. Sideways-stacked soap bars (`83.6%`) and hanging sachet strips. | **• Algo (`Ref: EXP-24, EXP-25`):** `960px` high-res scan for overlapping strips + cross-photo border column deduplication.<br/>**• Business Rule:** Lock sachet-hanger depth multiplier (`e.g., 1 strip = 8 units`). |
 
----
 
 ## 3. Granular Breakdown by Category, Packaging Form & Variant Type (`n = 2,844` Unilever Boxes)
 
@@ -99,7 +94,6 @@ Every example in the `/exec` **Interactive Task-Level Proof Explorer** is loaded
 | **Tube (Squeeze Tube)** | `318` | **94.0%** | **77.0%** | **#1 Variant Bottleneck (drives `Skin 81.7%` & `Oral 80.8%`):** Curved squeeze tubes (*Biotique*, *Closeup*) addressed by **Store-Format Catalog Filter + Middle-30% Strip Zoom (`Ref: EXP-20 + EXP-21`)**. |
 | **Bar (Soap / Detergent Bar)** | `159` | **89.3%** | **83.6%** | **#2 Variant Bottleneck (drives `PW 80.7%`):** Sideways-stacked soap bars (*Ayush*, *Lux*) addressed by **Store-Format Catalog Filter + 960px Narrow-Bar Scan (`Ref: EXP-20 + EXP-24`)**. |
 
----
 
 ## 4. Process Refactoring Across All 4 Workloads (What Is Solved in GCP Now vs. Cutover)
 
@@ -109,7 +103,6 @@ Every example in the `/exec` **Interactive Task-Level Proof Explorer** is loaded
 | **2. MT & GT Merchandising** (`104,571/day`) | When `Azure_ML_Call` times out (`PT180S`), exception handler sends `AWP_Presence='N', Earning='0'` to `DYNAMIC_TASK_API`: **unfairly penalizing store owners with ₹0 payout!** | **YES (100% Built)** | **`bay_planogram_verifier` (`6.5s`, `97.2%` Bay Purity, `94.6%` OOS)** separates `RETRY_PENDING` from `COMPLIANCE_FAIL`, with deterministic Stage 2A embedding fallback. *Cutover:* Point `DYNAMIC_TASK_API` to Cloud Run status field. |
 | **3. MT Toker Promo** (`78,025/day`) | Fixed 240-class `ViT-B-16-plus-240` model requires `3-4` weeks of crop collection and retraining per new promo campaign. | **YES (100% Built)** | **5-Minute Zero-Shot Promo Launch (`jev_promo_verifier`, `93.3%-100%`)**: Drop 1 reference image into `gs://.../hul_promos/gallery/`. *Cutover:* Grant Trade Marketing GCS folder access. |
 | **4. SOS & P2P Engine** (`NR_final_PW2.py`) | Hairpins `GCS -> ADF -> Azure MySQL (DROP/RENAME) -> Python VM` (`segments[300:600]` hardcoded slice bug!) -> Azure Blob, using `W1=32%-57%` exact pack weights. | **YES (100% Built)** | **In-Place BigQuery SQL (`src/utils/bigquery_catalog.py`)**: Computes Share of Shelf and P2P association across **100% of segments in `<5s`** with `81%-100%` SKU accuracy. *Cutover:* Point P2P export to BigQuery table. |
----
 
 ## 5. Tailored Next-Week Agendas
 
@@ -130,7 +123,6 @@ Every example in the `/exec` **Interactive Task-Level Proof Explorer** is loaded
    - Inspect the **3 Vertex AI GPU CustomJobs (`EXP-26`)** in `ul-fs-s-sandbx-16-prj` (`us-central1`): `customJobs/2150288373313437696` (`Cloudflare/clef-flash`), `customJobs/8202000372592541696` (`Contrastive-LM/CLM-v0.1-8B`), and `customJobs/8146831277157253120` (`Cloudflare/clef-27b`).
    - Walk through repointing the Azure Logic App webhooks to GCP Cloud Run.
 
----
 
 ## 6. Quick TL;DR Guide: Using the 8 Golden Datasets (`ms_json_golden`, `gtmerch_golden`, `hul_*`) for `val` / `test`
 
@@ -167,5 +159,4 @@ test_samples = dataset.sample_images(split="test", limit=0, seed=0, root=root, n
 catalog      = dataset.rpc_catalog(root)   # {sku_id: 5-level taxonomy dict}
 gallery      = dataset.rpc_gallery(root)   # {sku_id: ['gs://...', ...]}
 ```
-
 

@@ -2,7 +2,6 @@
 
 This one-pager explains the datasets in [`data/`](../data/) (and `gs://marketshare-datasets/derived_manifests/`), the design thinking behind them in plain English, which dataset to pick for each engineering task, and how to combine `gallery + train` when fine-tuning a supervised classifier.
 
----
 
 ## 1. The Thinking Behind Our Data Design (In Plain English)
 
@@ -31,7 +30,6 @@ To support both **visual retrieval pipelines** and **supervised fine-tuning (SFT
    * **`val` and `test`**: Held-out query images from separate physical store visits (`1,253` store visits in `val`, `1,226` in `test`, with `0` shared store visits). Stratified `~50%` HUL / `~50%` Non-HUL across all 10 categories and packaging forms.
    * **`train` (`train.jsonl`)**: Additional store crops left over after reserving `gallery`, `val`, and `test`.
 
----
 
 ## 2. Quick Reference: All Datasets & Which One to Use
 
@@ -46,7 +44,6 @@ To support both **visual retrieval pipelines** and **supervised fine-tuning (SFT
 | **[`data/gtmerch_golden/`](../data/gtmerch_golden/rpc.json)**<br>`gs://.../derived_manifests/gtmerch_golden/` | **`2,659` classes** | `10,082` | `400` / `100` / `200` shelves<br>(`14,692` / `3,824` / `8,070` boxes) | **Stage 1 Dual-Class Display Bay (`Class 0`) vs. Product (`Class 1`) Detection & Bay Isolation**. Built from `gs://gtmerch-marketshare`. Use this to evaluate separating branded promotional headers/coolers (`asset_boxes`) from product facings (`boxes`) and verifying in-bay brand purity. |
 | **[`data/hul_sessions/`](../data/hul_sessions/rpc.json)**<br>*(Alias: `data/gt_hul_sessions/`)* | **`2,659` classes** | `10,082` | `150` / `50` / `100` strips<br>(`1,200` / `400` / `800` boxes) | **Multi-Facing Store Session Retrieval & Row Smoothing**. Groups `8` verified crops from the same store visit (`session_id`) into a `1760x260` strip. Use this to test Stage 2 medoid deduplication, 1D row smoothing (`[P, ?, P] -> P`), and session SOS (do not use for Stage 1 box detection). |
 
----
 
 ## 3. How to Train a Supervised Classifier (SFT) on `hul_variants` or `hul_golden`
 
@@ -96,7 +93,6 @@ If you are running Vertex AI / Gemini Supervised Fine-Tuning or need the uncappe
 3. **Uncapped Raw HUL Variant Corpus (`381,619` HUL crops across `1,104` folders)**:
    * `gs://marketshare-datasets/input_data/jsonl/train.jsonl`
 
----
 
 ## 4. Important Rules & Nuances to Know Before Running Experiments
 
@@ -113,7 +109,6 @@ If you are running Vertex AI / Gemini Supervised Fine-Tuning or need the uncappe
 4. **Deterministic Subsampling via [`sample_images()`](../src/utils/dataset.py#L222-L260)**:
    * Passing `--limit 50 --seed 0` (for fast screening) or `--limit 1000 --seed 0` / `--limit 0` (for full evaluation with `±1.3%` 95% confidence intervals) selects the exact same interleaved `50% HUL / 50% Non-HUL` subset on every machine, making all runs directly comparable.
 
----
 
 ## 5. Client Discovery & Sign-Off Questions: GT Data, `Others` Catch-Alls, Unmapped Classes & Production Usage
 
@@ -157,7 +152,6 @@ Use these targeted, evidence-backed questions when reviewing the data and legacy
 3. **Day-1 Cold-Start Onboarding for New Launches & Rare Tail SKUs (`356` classes with `1-4` images)**:
    * *Question*: **When Unilever launches a new variant or promo pack with only `1` to `4` studio renders (`HUL-*`), how do you onboard it without waiting weeks to collect `100+` store crops for softmax retraining?** *(In our 2-Stage Hybrid pipeline, dropping `1-4` studio renders into `rpc.json["gallery"]` makes a new SKU live in `< 60 seconds` with zero retraining; for supervised training, merging `rpc.json["gallery"] + splits["train"]` immediately provides `22,104` leak-free images across `100%` of the `1,922` `hul_variants` classes.)*
 
----
 
 ## 6. Operational Architecture Comparison & Top 3 MVP Shortlist for A/B Testing
 
@@ -195,7 +189,6 @@ Stratifying the `1,000` held-out test crops of `hul_golden` by how many labeled 
 3. **MVP Arm C (Maximum-Precision Specialist for Priority MT/GT Accounts): `960px Soft-NMS ONNX + Stage-2A CLM Fast Gate + Stage-2B Vertex LoRA SFT Gemini 3.5 Flash-Lite`**
    * **Role in MVP**: Swaps the zero-shot Stage-2B VLM call for the fine-tuned Vertex AI LoRA SFT endpoint (`#6726259894726295552`), lifting fine-grained **L6 Variant accuracy to `95.9%` and L8 E2E accuracy to `93.5%`**, while retaining the `hul_gallery` retrieval path for newly launched SKUs.
 
----
 
 ## 7. Next-Wave Architectural Improvements & Experiments (`EXP-28` to `EXP-32`)
 
@@ -218,4 +211,3 @@ To capture that `11.5 pp` headroom (`81.8% -> 93.3%`) and lift wild-shelf Stage-
 5. **`EXP-32` (`dino_clm_clef_cascade`): 3-Tier Local + Cloud Hybrid Cascade**
    * *Gap Addressed*: Every crop currently invokes a network RPC to `gemini-embedding-2`.
    * *Design*: Use local `DINOv2/v3` SFT strictly as a **Tier-0 Ultra-High-Margin Gate (`conf >= 0.85, margin >= 0.55`)** for known head SKUs (`>98.5%` precision), and route all other crops (long-tail, low-margin, new launches, and open-set competitors) to `gemini-embedding-2` CLM + `Gemini 3.5 Flash-Lite` CLEF.
-

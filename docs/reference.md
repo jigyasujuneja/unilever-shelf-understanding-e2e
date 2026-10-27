@@ -28,7 +28,7 @@ Every number comes from GCP itself; no prices are hard-coded ([pricing.py](../sr
 
 | Part | Quantity (measured) | Price (source) |
 |------|---------------------|----------------|
-| Gemini | Every response's `usage_metadata`: tokens split by **traffic type Vertex actually served** (standard / priority / flex), modality (text / image), cached vs uncached, and output + thinking | The matching SKU in the **Cloud Billing Catalog API**, fetched at the start of each run (e.g. `Gemini 3.8 Flash Global Image Input Priority - Predictions`) |
+| Gemini | Every response's `usage_metadata`: tokens split by **traffic type Vertex served** (standard / priority / flex), modality (text / image), cached vs uncached, and output + thinking | The matching SKU in the **Cloud Billing Catalog API**, fetched at the start of each run (e.g. `Gemini 3.8 Flash Global Image Input Priority - Predictions`) |
 | Promotional credit | Gemini list cost | `promotions` in `config.yaml` (Gemini 3.x Flash: 50% credit back until 2026-12-31). Promotions are paid back as billing credits, so they are not in the catalog |
 | Other APIs (embeddings) | What the approach bills with `ctx.bill(unit, amount)` | The Billing Catalog SKUs the approach lists in `skus` |
 | Cloud Run | Task start → completion from the **Cloud Run Admin API**, rounded up to 100 ms, × vCPU and GiB | `Jobs CPU in <region>` / `Jobs Memory in <region>` catalog SKUs |
@@ -72,7 +72,7 @@ Vertex can downgrade a priority or flex request to standard when capacity is sho
 When a dedicated Priority SKU is absent from the Cloud Billing Catalog (or for custom/tuned
 endpoints), `pricing.py` derives `priority/<kind>` at `1.8x` the `standard/<kind>` rate
 (`PRIORITY_MULTIPLIER = 1.8`). The run summary's `priority_served` / `flex_served` field is the
-share of calls actually served at that tier.
+share of calls served at that tier.
 
 ## Retrieval with a vector database (AlloyDB)
 
@@ -128,7 +128,7 @@ Every run, local or Cloud Run, is **one OpenTelemetry trace** in Cloud Trace
 |------|-----------------|
 | `run <run_id>` | approach, model, tier, split / limit / seed, owner, Cloud Run execution + task; at the end F2, recall, precision, p50/p95/p99, cost/img, total tokens, traffic served |
 | `image <image_id>` | gt / pred / tp / fp / fn, F2, latency, cost (net + list + other APIs), tokens, error (span status = ERROR); each `ctx.trace.step` is a span event |
-| `gemini <model>` | `gen_ai.usage.input_tokens` / `output_tokens`, thinking tokens, image vs text vs cached input tokens, traffic type Vertex actually served, tier requested, attempts + one `retry` event per 429/5xx, finish reason, response id / model version, temperature / max tokens / thinking level, image size and JPEG bytes, model latency, cost. Its log entry also has the **prompt and response text** |
+| `gemini <model>` | `gen_ai.usage.input_tokens` / `output_tokens`, thinking tokens, image vs text vs cached input tokens, traffic type Vertex served, tier requested, attempts + one `retry` event per 429/5xx, finish reason, response id / model version, temperature / max tokens / thinking level, image size and JPEG bytes, model latency, cost. Its log entry also has the **prompt and response text** |
 | `embedding <model>` | one per crop / text embedded while scoring an image: model, image or text, dimension, latency, attempts, billed units (`shelf_bench.billed.*`). Reference-photo embeddings in setup are billed but not traced |
 
 Links are stored with the results and shown on the run page:
@@ -289,7 +289,7 @@ flowchart LR
 
 ### 3. Category / Brand / Variant Classification (`input_data/variant_[category]/train/` → `input_data/jsonl/`)
 * **Source Structure:** 5 category trees (`variant_gen`, `variant_oral`, `variant_p5`, `variant_skin`, `variant_wash`) containing `1,104` raw `<Brand>__<Variant>` folders (`381,619` raw images across 5 categories and 57 brands).
-* **Label Cleaning & Promo Suffix Stripping (`clean_variant_name`, `parse_variant_folder`):** Normalizes stray spaces (`_ ` → `_`) and repeated underscores (`__` → `_`), and strips price/promo/artwork suffixes (`_Rs_10`, `_Rs_5`, `_B3G1`, `_PO3`, `_Pack_Of_2`, `_New`, `_Old`, `_1Old_pack`) into **`1,068` canonical `(category, brand, base_variant)` classes**.
+* **Label Cleaning & Promo Suffix Stripping (`clean_variant_name`, `parse_variant_folder`):** Normalizes stray spaces (`_ ` → `_`) and repeated confirms (`__` → `_`), and strips price/promo/artwork suffixes (`_Rs_10`, `_Rs_5`, `_B3G1`, `_PO3`, `_Pack_Of_2`, `_New`, `_Old`, `_1Old_pack`) into **`1,068` canonical `(category, brand, base_variant)` classes**.
 * **Multi-Task Stratified Outputs (`build_marketshare_variant_jsonl`):**
   * 1,068 per-class `<category>__<Brand>__<Variant>.jsonl` files + val-filtered, MD5-deduplicated `train.jsonl` (`331,734` examples).
   * **Joint All-3 (`--task all3`):** `train_stratified.jsonl` (`8,115` lines, up to `8`/class) & `val_stratified.jsonl` (`2,128` lines, up to `2`/class) → `{"category": "...", "brand": "...", "variant": "..."}`.
