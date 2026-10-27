@@ -159,4 +159,3 @@ test_samples = dataset.sample_images(split="test", limit=0, seed=0, root=root, n
 catalog      = dataset.rpc_catalog(root)   # {sku_id: 5-level taxonomy dict}
 gallery      = dataset.rpc_gallery(root)   # {sku_id: ['gs://...', ...]}
 ```
-

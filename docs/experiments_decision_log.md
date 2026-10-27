@@ -92,4 +92,3 @@ To guarantee zero hardcoding (`src/utils/metrics.py` untouched) and zero test-sp
 | **`EXP-29` (`sft_clm_clef_cascade`, `3.5-flash-lite`)** | `hul_variants` | **`85.0%`** (`92.0%` 3Attr) | **`81.7%`** (`90.8%` 3Attr) | `+3.30 pp` | **`88.9%` (`16/18`)** | **`88.0%` (`139/158`)** | **`83.8%` (`192/229`)** | **`78.8%` (`469/595`)** |
 | **`EXP-29` (`sft_clm_clef_cascade`, `3.5-flash-lite`)** | `hul_golden` | **`85.0%`** (`92.5%` 3Attr) | **`81.3%`** (`90.2%` 3Attr) | `+3.70 pp` | **`88.9%` (`16/18`)** | **`88.6%` (`140/158`)** | **`83.8%` (`192/229`)** | **`78.0%` (`464/595`)** |
 | **`EXP-30` (`distilled_yolo_960_softnms`, `yolo11n-onnx`)** | `ms_json_golden` | **`54.34%` F2** (`64.75%` Rec) | **`54.42%` F2** (`64.30%` Rec) | **`0.08 pp` F2 (PASS $\le 2.0\%$)** | N/A (Stage 1 Det) | N/A | N/A | N/A |
-
