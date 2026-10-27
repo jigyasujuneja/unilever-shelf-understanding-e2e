@@ -19,16 +19,17 @@ description: >-
 3. **Auto-Polling Dual-Persona Control Plane (`PULL_TTL_S = 30.0`)**:
    - Run a stateless Cloud Run UI server polling GCS every 30 seconds to serve two persona-specific views from the same ground-truth artifacts:
      - **`/engineering` Portal**: Task leaderboards (`TASK-E2E`, `TASK-RET`, `TASK-CLS`, `TASK-DET`, `TASK-PLN`, `TASK-PRM`), 5-level accuracy breakdowns (`L1..L5`), `15/15` QC gate badges, and per-box shelf inspection modals.
-     - **`/exec` Portal**: Executive transformation matrix, audited GCP Cloud Billing SKU cost simulator (`₹/crop` and `₹/shelf`), and Pay-for-Performance (`P2P`) payout ROI simulator.
+     - **`/exec` Portal**: Executive transformation matrix, audited GCP Cloud Billing SKU cost simulator, and Pay-for-Performance (`P2P`) payout ROI simulator.
 
 ## 2. Audited GCP Cloud Billing SKU Cost Modeling & Burst FinOps (`EXP-26`)
 
 1. **Exact Billing SKU Attribution**:
-   - Compute unit economics from audited GCP Cloud Billing SKU rates rather than rough list-price guesses (e.g., `gemini-embedding-2` SKU `330D-7FB0-87C5`, `gemini-3.5-flash-lite` input/output SKUs `8271-FF1A-6295` / `D47E-C6CE-1E1A`, and Cloud Run vCPU/RAM seconds).
+   - Compute unit economics from audited GCP Cloud Billing SKU rates rather than rough list-price guesses (e.g., `gemini-embedding-2` `768-D` Matryoshka slice SKU `330D-7FB0-87C5`, `gemini-3.5-flash-lite` input/output SKUs `8271-FF1A-6295` / `D47E-C6CE-1E1A`, and Cloud Run vCPU/RAM seconds).
 2. **Diurnal Burst Traffic FinOps Formula (Serverless vs. Dedicated GPUs)**:
    - Field retail uploads arrive in sharp diurnal spikes (`60%` of `500,000` daily store photos uploaded between `17:00` and `21:00` local time, peaking at `20.8 shelves/sec`).
-   - Dedicated self-hosted GPU clusters (`24x L4/A100` replicas holding `52 GB` VRAM for 26B models) sit **83% idle for 20 hours/day**, costing `$0.0064/shelf` (`$96,000/month`).
-   - Combining **Stage 1 CPU ONNX (`$0` token cost)** + **`3.5x` Spatial Medoid Deduplication** + **`68%` Stage 2A Embedding Fast-Exit** + **Stage 1.5 Pre-Embedding Bay Gate (`-61%` background crops)** compresses serverless VLM calls by **`90.8%`**, achieving **`$0.0014/shelf` (`$21,000/month`)** with zero idle GPU spend.
+   - Dedicated self-hosted GPU clusters (`g2-standard-24` L4 replicas at `$50,700/month`, or 26B A100 clusters at `$96,000/month`) sit **83% idle for 20 hours/day**.
+   - Combining **Stage 1 CPU ONNX (`$0` token cost)** + **`3.5x` Spatial Medoid Deduplication** + **`68%` Stage 2A `768-D` Embedding Fast-Exit (`0` generative VLM tokens)** + **Stage 1.5 Pre-Embedding Bay Gate (`-61%` background crops)** compresses serverless VLM calls by **`90.8%`**, achieving **`$0.00139/shelf` (`$21,100/month`)** and saving **`$355K/year` steady-state (`$630K/year` festive peak)**.
+   - Under the linear stress cost model $C(r) = \$0.00055 + r \cdot \$0.00254$, even a **100% VLM escalation spike ($r = 1.00$)** caps at **`$0.00309/shelf`**, remaining below the **`$0.00380/shelf`** legacy ceiling.
 3. **Net Cost-Negative Online Smart Sampling**:
    - Replace uniform `5%` human/pro-judge auditing with 3-tier asymmetric routing:
      - **Tier 0 (`100%` sample)**: Items triggering `0.045` Energy Vetoes, `PR-14` pack-size switches, or circuit-breaker fallbacks.

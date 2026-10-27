@@ -1,13 +1,5 @@
 # Data Forensics, Integration, and Enrichment
 
-| Field | Specification |
-| :--- | :--- |
-| **Specification Scope** | Master Catalog, Data Hygiene & Runtime Enrichment Specification (`LLD001 v0.2`) |
-| **Target GCP Projects** | Prod: `ul-cd-p-932295-prj` (CMEK Cloud Storage, Cloud SQL MySQL 8.4) \| Sandbox: `ul-fs-s-sandbx-16-prj` |
-| **Data & Catalog Scope** | `5.14M` Raw Objects (`1,002,209` Crops + `53,019` Shelf JSONs + `14,043` Bay/Talker Shelves) -> **`2,659`-SKU Catalog (`SHA-256: b2dc368a0bf972a6`)** \| `11` Golden Suites \| **`15/15` QC Gates** |
-| **Daily Production Scale** | **`506,531` Baseline Photos/Day** (`323,935` Market Share + `104,571` Merchandising + `78,025` Toker Promo; `800,000` Peak/Day) |
-| **Live Reference Links** | [Executive Portal (`/cio`)](https://perfect-store-control-plane-jbn2qgbina-uc.a.run.app/cio) \| [Engineering Leaderboard](https://shelf-ui-jbn2qgbina-uc.a.run.app) \| [Executive Deck](https://docs.google.com/presentation/d/1fAUfafjcLUQkTtz8k0ACxANVkKcfHhCcaYEKuNtM_8s/edit) |
-
 ## Context and Scope
 
 Field representatives upload 506,531 store shelf photos per day (15.20M/month) across Modern Trade gondolas, General Trade Kirana shops, and branded display bays and talkers. In Unilever's legacy storage, raw training and evaluation assets sat across four disconnected Google Cloud Storage buckets totaling 5.14M objects, while production inference chained 14 legacy model artifacts and collapsed 874 rival brands into `"Others"`.
@@ -94,7 +86,7 @@ Because `brand_data` lacked variants/packs, `variant_*` lacked pack types on 70.
 
 ### Error Waterfall
 
-Partitioning `hul_golden:test_5k` (`#1016-093317`), `1K` (`#1015-092627`), and `1K` Oracle Brand (`#1015-115810`) into mutually exclusive failure stages isolates where legacy crops fail:
+Partitioning `hul_golden:test_5k`, `1K`, and `1K` Oracle Brand into mutually exclusive failure stages isolates where legacy crops fail:
 
 | Waterfall Stage | Mutually Exclusive Condition | Real 5K (`N=5,000`) | Real 1K (`N=1,000`) | Oracle Brand 1K (`N=1,000`) |
 | :--- | :--- | :---: | :---: | :---: |

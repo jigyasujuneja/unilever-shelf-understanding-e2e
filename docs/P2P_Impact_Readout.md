@@ -5,7 +5,7 @@
 - Formula: `Association_Score = (W1*S_pack + W2*S_subcat + W3*S_brand + W4*S_variant + W5*S_size + W6*S_pkg) / sum(W_k), where W1 = (W4 * W5) / 100`.
 - Compares 4 concrete scenarios on `gt_hul_sessions` (100 store visit strips) and `ms_json_golden` (100 LabelMe store shelves).
 
-## 2. Scenario Comparison (`gt_hul_sessions` — 100 Store Visits)
+## 2. Scenario Comparison (`gt_hul_sessions`: 100 Store Visits)
 
 | Scenario | Usable P2P Facings | Usable Share (%) | Unique Brands | Unique Basepacks | Mean $W_1$ Weight (%) | Mean Association Score |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -14,7 +14,7 @@
 | 3. Ours (+ Competitor `'Others'` Recovery) | 800 | 100.0% | 108 | 338 | 73.68% | 0.2683 |
 | 4. Ours (+ Full-Shelf Unannotated Enrichment) | 800 | 100.0% | 108 | 338 | 73.68% | 0.2683 |
 
-## 3. Scenario Comparison (`ms_json_golden` — 100 Modern Trade Store Shelves)
+## 3. Scenario Comparison (`ms_json_golden`: 100 Modern Trade Store Shelves)
 
 | Scenario | Usable P2P Facings | Usable Share (%) | Unique Brands | Unique Basepacks | Mean $W_1$ Weight (%) | Mean Association Score |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |

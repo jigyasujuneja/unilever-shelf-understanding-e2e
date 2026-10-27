@@ -12,7 +12,7 @@ Every approach lives under `src/approaches/<use_case>/<task>/` and is auto-disco
 | Pattern | Where to put it | What to implement | Copy from |
 |---------|-----------------|-------------------|-----------|
 | **1. Standalone detector / classifier / retriever** | `market_share/{detection,classification,retrieval}/` | `@register` subclass with `detect(image, ctx)` or `identify(image, ctx, allowed_ids=None)` | [`single_pass_dedup.py`](../src/approaches/market_share/detection/single_pass_dedup.py), [`hierarchy_classify.py`](../src/approaches/market_share/classification/hierarchy_classify.py), [`embedding_retrieval.py`](../src/approaches/market_share/retrieval/embedding_retrieval.py) |
-| **2. Multi-step composition** (`detect -> retrieve`, `detect -> classify`, or `detect -> classify -> retrieve`) | `market_share/end_to_end/` | `compose("my_e2e", DetectorCls, *IdentifierClasses, dataset="shelves")` — intermediate classifiers filter the catalog via `narrow(image, catalog, ctx) -> set[int]` | [`detect_identify.py`](../src/approaches/market_share/end_to_end/detect_identify.py) |
+| **2. Multi-step composition** (`detect -> retrieve`, `detect -> classify`, or `detect -> classify -> retrieve`) | `market_share/end_to_end/` | `compose("my_e2e", DetectorCls, *IdentifierClasses, dataset="shelves")`: intermediate classifiers filter the catalog via `narrow(image, catalog, ctx) -> set[int]` | [`detect_identify.py`](../src/approaches/market_share/end_to_end/detect_identify.py) |
 | **3. Single-invocation detect + classify** (e.g. fine-tuned Gemini or Agent Platform endpoint returning boxes + `sku_id`s in 1 call) | `market_share/end_to_end/` | `@register` subclass with `task = "end_to_end"` and `detect_and_identify(image, ctx) -> (boxes, sku_ids)` | [`_single_call_end_to_end_template.py`](../src/approaches/market_share/end_to_end/_single_call_end_to_end_template.py) |
 | **4. Custom / non-Gemini model** (e.g. YOLO, DiffusionGemma, Vertex endpoint) | Any task folder | Set `models = ["my-model-id"]` (and `also_calls = [...]` if hybrid), initialize your client/weights in `setup(config, ctx)`, and optionally bill non-Gemini SKUs with `ctx.bill(unit, amount)` | [`embedding_retrieval.py`](../src/approaches/market_share/retrieval/embedding_retrieval.py) |
 
@@ -33,7 +33,7 @@ Every number comes from GCP itself; no prices are hard-coded ([pricing.py](../sr
 | Other APIs (embeddings) | What the approach bills with `ctx.bill(unit, amount)` | The Billing Catalog SKUs the approach lists in `skus` |
 | Cloud Run | Task start → completion from the **Cloud Run Admin API**, rounded up to 100 ms, × vCPU and GiB | `Jobs CPU in <region>` / `Jobs Memory in <region>` catalog SKUs |
 | Cloud Storage | 1 read per image + the annotations file, 2 result writes | `Regional Standard Class A/B Operations` SKUs (paid rate) |
-| ₹ | — | The USD→INR rate GCP billing uses (catalog `currencyConversionRate`) |
+| ₹ |: | The USD→INR rate GCP billing uses (catalog `currencyConversionRate`) |
 
 A Cloud Run task can't know its own billed duration, so it stores a provisional compute figure;
 `shelf-bench pull` (run automatically after `cloud-run`) replaces it with the real task
@@ -261,7 +261,7 @@ flowchart LR
 
 ## `gs://marketshare-datasets` Supervised Fine-Tuning (SFT) JSONL Methodology ([`src/utils/tuning.py`](../src/utils/tuning.py))
 
-All three hierarchical classification datasets in `gs://marketshare-datasets` (`pack_data`, `brand_data`, and `input_data`) are prepared using **GCS object metadata only** (`list_gcs_image_blobs()` / `list_gcs_image_uris()` — never downloading or modifying image bytes) and formatted in Vertex AI Gemini Supervised Fine-Tuning `GenerateContent` JSONL schema:
+All three hierarchical classification datasets in `gs://marketshare-datasets` (`pack_data`, `brand_data`, and `input_data`) are prepared using **GCS object metadata only** (`list_gcs_image_blobs()` / `list_gcs_image_uris()`: never downloading or modifying image bytes) and formatted in Vertex AI Gemini Supervised Fine-Tuning `GenerateContent` JSONL schema:
 
 ```mermaid
 flowchart LR
@@ -276,7 +276,7 @@ flowchart LR
 * **Target JSON:** `{"category": "<Category>", "pack_type": "<PackType>"}` (`PACK_PROMPT`).
 * **Outputs (`build_marketshare_pack_jsonl`):**
   * 46 per-folder `<Category>__<PackType>.jsonl` files + val-filtered, MD5-deduplicated `train.jsonl` (`90,042` examples, excluding all `val_stratified` URIs and MD5s).
-  * `val_stratified.jsonl` (`445` examples: 10% of originals per class bounded to `5–10` examples) and `train_stratified.jsonl` (`5,239` examples: up to `120` non-overlapping examples per class), both shuffled with `seed=42`.
+  * `val_stratified.jsonl` (`445` examples: 10% of originals per class bounded to `5-10` examples) and `train_stratified.jsonl` (`5,239` examples: up to `120` non-overlapping examples per class), both shuffled with `seed=42`.
 
 ### 2. Brand Classification (`brand_data/brand/brand_data/` → `brand_data/brand/jsonl/`)
 * **Source Structure:** 941 raw directories (`522,102` raw images, ~555 images/folder with `copy*.jpg` and `- Copy.jpg` augmentations).

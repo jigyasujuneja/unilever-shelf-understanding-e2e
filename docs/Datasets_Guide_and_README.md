@@ -167,7 +167,7 @@ When selecting which architectures to transfer to the MVP stage and field A/B te
 
 Stratifying the `1,000` held-out test crops of `hul_golden` by how many labeled shelf crops each SKU had in `splits["train"]` (`15,989` crops across `1,538` classes out of `2,659` total catalog classes) exposes why closed-set supervised classifiers (`cv_classify` and `dinov3_classify`) fail on the long tail and on newly launched SKUs:
 
-| SKU Frequency in `hul_golden/train` | Share of Test Split ($N=1,000$) | **Standalone `DINOv3/v2` SFT (`#113613`)** | **CLM `gemini-embedding-2` 0-VLM (`#013247`)** | **2-Stage Hybrid `Gemini 3.5 Flash-Lite` (`#025000`)** | Operational Implication |
+| SKU Frequency in `hul_golden/train` | Share of Test Split ($N=1,000$) | **Standalone `DINOv3/v2` SFT (`#113613`)** | **CLM `gemini-embedding-2` zero-generative-VLM (`#013247`)** | **2-Stage Hybrid `Gemini 3.5 Flash-Lite` (`#025000`)** | Operational Implication |
 | :--- | :---: | :---: | :---: | :---: | :--- |
 | **`16+` train crops** (Head SKUs) | `59.5%` ($595$ crops) | **`90.9%`** ($541/595$) | `75.2%` | `78.1%` | Closed-set SFT memorizes the ~150 highest-volume SKUs that have dozens of shelf crops in `train`. |
 | **`6 to 15` train crops** (Mid-tier SKUs) | `22.9%` ($229$ crops) | `70.7%` ($162/229$) | `84.2%` | **`89.5%`** | Below 16 training crops, closed-set SFT drops **`18.8 pp` behind** the 2-Stage Hybrid. |
@@ -177,20 +177,20 @@ Stratifying the `1,000` held-out test crops of `hul_golden` by how many labeled 
 
 ### 6B. Six-Dimension Operational Decision Matrix
 
-| Operational Requirement | Legacy 9-Model `.h5` Chain (`cv_classify`) | Standalone `DINOv3/v2` SFT (`dinov3_classify`) | **MVP Arm A: `CLM Standalone` (`gemini-embedding-2` 0-VLM)** | **MVP Arm B (Primary Winner): `2-Stage Hybrid` (`CLM + Gemini 3.5 Flash-Lite`)** | **MVP Arm C (Max-Precision SFT): `Hybrid + LoRA SFT Gemini 3.5 Flash-Lite`** |
+| Operational Requirement | Legacy 9-Model `.h5` Chain (`cv_classify`) | Standalone `DINOv3/v2` SFT (`dinov3_classify`) | **MVP Arm A: `CLM Standalone` (`gemini-embedding-2` zero-generative-VLM)** | **MVP Arm B (Primary Winner): `2-Stage Hybrid` (`CLM + Gemini 3.5 Flash-Lite`)** | **MVP Arm C (Max-Precision SFT): `Hybrid + LoRA SFT Gemini 3.5 Flash-Lite`** |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1. `hul_golden` / `hul_variants` Accuracy (3-Attr / 5-Attr)** | `51.0%` / `44.5%` *(Disqualified)* | `88.2%` / `77.5%` *(Head-skewed)* | **`89.5%` / `78.6%`** | **`91.6%` / `82.6%`** *(Zero-shot)* | **`96.7%` L4 / `93.5%` L8** *(Fine-tuned)* |
 | **2. New SKU Launch / Promo Onboarding (`0` shelf training crops)** | **`0.0%`** *(Requires full `.h5` retraining)* | **`0.0%`** *(Fixed `1,538`-row weight matrix; `1,121` catalog SKUs missing)* | **`73.1%`** *(Add `1` reference image to `hul_gallery`, live in `<60s`)* | **`80.8%`** *(Add `1` reference image to `hul_gallery`, live in `<60s`)* | **`80.8%+`** *(Gallery handles new SKUs; LoRA SFT boosts established lines)* |
 | **3. Rare & Regional Long-Tail SKUs (`1-2` shelf crops)** | `< 15.0%` | **`27.9%`** *(Overfits to `16+` crop head SKUs)* | **`74.6%`** | **`79.1%` (`+51.2 pp` over DINOv3)** | **`88.0%+`** |
 | **4. Open-Set Competitor Rejection (`Other` on Wild Shelves)** | **Fails (`50.0%` L1 HUL)** *(Predicts HUL on 100% of crops)* | **Fails** *(No abstention threshold; forces `argmax` into 1,538 classes)* | **Passes (`94.9%` L1 HUL on `gtmerch_golden`)** | **Passes (`95.2%` L1 HUL, `1.88%` SOS error on `gtmerch_golden`)** | **Passes (`98.4%` L1 HUL)** |
 | **5. Fine-Print Pack Size (`50g` vs `100g`) & Promo (`B4G1`, `Rs 10`) OCR** | **No** *(224px CNN)* | **No** *(224px patch average)* | **Partial** *(Visual embedding only)* | **Yes (`88.3%` on `hul_promos`, bottom-30% Zoom-Strip OCR)** | **Yes (`93.5%` L8 E2E)** |
-| **6. Cost per Crop & Day-2 MLOps Maintenance** | `₹0.0035` compute + **High MLOps** (9 separate `.h5` models to retrain) | `₹0.0022` compute + **High MLOps** (Must collect & label `16+` shelf crops per new SKU) | **`₹0.0219`** (`0` VLM calls, **Zero Retraining**) | **`₹0.0538`** (`59.1%` 0-VLM gate, **Zero Retraining**) | **`₹0.0365`** (`europe-west4` LoRA endpoint + quarterly SFT refresh) |
+| **6. Cost per Crop & Day-2 MLOps Maintenance** | `₹0.0035` compute + **High MLOps** (9 separate `.h5` models to retrain) | `₹0.0022` compute + **High MLOps** (Must collect & label `16+` shelf crops per new SKU) | **`₹0.0219`** (`0` VLM calls, **Zero Retraining**) | **`₹0.0538`** (`59.1%` zero-generative-VLM gate, **Zero Retraining**) | **`₹0.0365`** (`europe-west4` LoRA endpoint + quarterly SFT refresh) |
 
 ### 6C. Recommended Top 3 MVP Shortlist for Production Transfer & A/B Testing
 
-1. **MVP Arm A (Ultra-Low-Cost / High-Throughput Baseline): `960px Soft-NMS ONNX + CLM Standalone (gemini-embedding-2, 0-VLM)`**
+1. **MVP Arm A (Ultra-Low-Cost / High-Throughput Baseline): `960px Soft-NMS ONNX + CLM Standalone (gemini-embedding-2, zero-generative-VLM)`**
    * **Role in MVP**: Zero generative VLM calls (`₹0.022/crop`, `0.21s` p50), delivering **`89.5%` 3-Attribute (`Brand + Category + Pack`) accuracy** (`98.6%` HUL vs Competitor) and **`80.7%` 3-Attr on `gt_hul_sessions`** with `<60s` catalog extensibility across all `2,659` SKUs. Best suited for high-volume GT Kirana audits where 3-Attribute Share-of-Shelf is the primary contract metric.
-2. **MVP Arm B (Primary Production Champion): `960px Soft-NMS ONNX + Stage-2A CLM Fast Gate (59% 0-VLM) + Stage-2B Contrastive CLEF (Gemini 3.5 Flash-Lite)`**
+2. **MVP Arm B (Primary Production Champion): `960px Soft-NMS ONNX + Stage-2A CLM Fast Gate (59% zero-generative-VLM) + Stage-2B Contrastive CLEF (Gemini 3.5 Flash-Lite)`**
    * **Role in MVP**: Resolves ~60% of easy crops via Arm A at 0 VLM cost, and routes the ~40% hard sister variants and promo packs to `Gemini 3.5 Flash-Lite` with bottom-30% Zoom-Strip Contact Sheets. Delivers **`91.6%` 3-Attr / `82.6%+` 5-Attr on `hul_golden`**, **`88.3%` on `hul_promos`**, **`80.8%` on brand-new zero-shot SKUs**, and **`1.88%` SOS error on wild `gtmerch_golden` shelves** with zero retraining.
 3. **MVP Arm C (Maximum-Precision Specialist for Priority MT/GT Accounts): `960px Soft-NMS ONNX + Stage-2A CLM Fast Gate + Stage-2B Vertex LoRA SFT Gemini 3.5 Flash-Lite`**
    * **Role in MVP**: Swaps the zero-shot Stage-2B VLM call for the fine-tuned Vertex AI LoRA SFT endpoint (`#6726259894726295552`), lifting fine-grained **L6 Variant accuracy to `95.9%` and L8 E2E accuracy to `93.5%`**, while retaining the `hul_gallery` retrieval path for newly launched SKUs.

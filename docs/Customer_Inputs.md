@@ -13,11 +13,11 @@ The customer's existing shelf-understanding and Path-to-Purchase (P2P) recommend
 | **1. Azure Data Factory (ADF)** | [`Outlet_Cluster_Segment_Pipeline_ProdProcess.json`](customer_code/ADF/Outlet_Cluster_Segment_Pipeline_ProdProcess.json) | [`Outlet_Cluster_Segment_Pipeline_ProdProcess.mmd`](diagrams/customer_inputs/Outlet_Cluster_Segment_Pipeline_ProdProcess.mmd) | Finds the latest `Outlet_Cluster_Segment_*.csv` in GCS and loads it into Azure MySQL (`cluster_mapping`). |
 | **1. Azure Data Factory (ADF)** | [`ROI_Pipeline.json`](customer_code/ADF/ROI_Pipeline.json) | [`ROI_Pipeline.mmd`](diagrams/customer_inputs/ROI_Pipeline.mmd) | Finds the latest `Past_ROI_Data_*.csv` in GCS and loads historical shelf ROI detections into Azure MySQL (`Past_ROI_Data`). |
 | **2. ASP Frontend Logic Apps** | [`gt-merchandising-endpoint-prod.json`](customer_code/asp%20frontend%20logic%20apps/gt-merchandising-endpoint-prod.json) | [`gt-merchandising-endpoint-prod.mmd`](diagrams/customer_inputs/gt-merchandising-endpoint-prod.mmd) | HTTP ingestion endpoint for GT Merchandising; acknowledges requests, calls Azure ML, and posts results or per-image fallback tasks to Dynamic Task API. |
-| **2. ASP Frontend Logic Apps** | [`marketshare-endpoint-mt-prod-aks2.json`](customer_code/asp%20frontend%20logic%20apps/marketshare-endpoint-mt-prod-aks2.json) | [`marketshare-endpoint-mt-prod-aks2.mmd`](diagrams/customer_inputs/marketshare-endpoint-mt-prod-aks2.mmd) | HTTP ingestion endpoint for MT MarketShare; enforces `07:30–18:00 IST` window before calling Azure ML (`PT180S` timeout) and callbacks to Dynamic Task API. |
+| **2. ASP Frontend Logic Apps** | [`marketshare-endpoint-mt-prod-aks2.json`](customer_code/asp%20frontend%20logic%20apps/marketshare-endpoint-mt-prod-aks2.json) | [`marketshare-endpoint-mt-prod-aks2.mmd`](diagrams/customer_inputs/marketshare-endpoint-mt-prod-aks2.mmd) | HTTP ingestion endpoint for MT MarketShare; enforces `07:30-18:00 IST` window before calling Azure ML (`PT180S` timeout) and callbacks to Dynamic Task API. |
 | **3. ASP Start/Stop Logic Apps** | [`marketsharestartcluster.json`](customer_code/asp%20startstop%20logic%20apps/marketsharestartcluster.json) | [`marketsharestartcluster.mmd`](diagrams/customer_inputs/marketsharestartcluster.mmd) | Scheduled Logic App (`07:30 IST` daily) that starts the MarketShare AKS clusters via Azure Resource Manager (ARM). |
-| **3. ASP Start/Stop Logic Apps** | [`marketsharestopcluster.json`](customer_code/asp%20startstop%20logic%20apps/marketsharestopcluster.json) | [`marketsharestopcluster.mmd`](diagrams/customer_inputs/marketsharestopcluster.mmd) | Scheduled Logic App that stops AKS clusters at `18:00 IST` on weekdays (`Mon–Fri`) and `19:00 IST` on weekends (`Sat–Sun`). |
+| **3. ASP Start/Stop Logic Apps** | [`marketsharestopcluster.json`](customer_code/asp%20startstop%20logic%20apps/marketsharestopcluster.json) | [`marketsharestopcluster.mmd`](diagrams/customer_inputs/marketsharestopcluster.mmd) | Scheduled Logic App that stops AKS clusters at `18:00 IST` on weekdays (`Mon-Fri`) and `19:00 IST` on weekends (`Sat-Sun`). |
 | **4. P2P Python Scripts** | [`NR_Brand_Hair_Beverages.py`](customer_code/p2p/NR_Brand_Hair_Beverages.py) | [`NR_Brand_Hair_Beverages.mmd`](diagrams/customer_inputs/NR_Brand_Hair_Beverages.mmd) | Computes segment-level brand cosine similarity and combined sub-category similarity from `past_roi_data` in MySQL and uploads CSVs to Azure Blob Storage. |
-| **4. P2P Python Scripts** | [`NR_final_PW2.py`](customer_code/p2p/NR_final_PW2.py) | [`NR_final_PW2.mmd`](diagrams/customer_inputs/NR_final_PW2.mmd) | Combines 5 component similarity tables (`sub_category`, `Brand`, `variant`, `size`, `Packaging_type`) with model accuracy weights (`W1–W6`) into final cluster-level `Association_Score` CSVs on Azure Blob Storage. |
+| **4. P2P Python Scripts** | [`NR_final_PW2.py`](customer_code/p2p/NR_final_PW2.py) | [`NR_final_PW2.mmd`](diagrams/customer_inputs/NR_final_PW2.mmd) | Combines 5 component similarity tables (`sub_category`, `Brand`, `variant`, `size`, `Packaging_type`) with model accuracy weights (`W1-W6`) into final cluster-level `Association_Score` CSVs on Azure Blob Storage. |
 
 ### End-to-End Customer System Interaction
 
@@ -288,9 +288,9 @@ flowchart TD
    * Checks `@greater(length(triggerBody()['Image_Names']), 0)`.
    * **If `False` (`else`):** Immediately returns HTTP `404` (`{"message": "No Images", "messagecode": 404}`).
    * **If `True`:** Simultaneously returns HTTP `200` (`Acknowledgement`) to the caller and dispatches an HTTP `POST` (`Azure_ML_Call`) with the full `@triggerBody()` to `AZUREML_API`.
-4. **Success Path (`Success` Scope — runs when `Azure_ML_Call` `SUCCEEDED`):**
+4. **Success Path (`Success` Scope: runs when `Azure_ML_Call` `SUCCEEDED`):**
    * Calls `ACCESS_TOKEN_API` (`GET` with `USER`, `PASSWORD`, `REQID` headers) to obtain a dynamic bearer token, parses the token JSON, and `POST`s the raw `Azure_ML_Call` response body to `DYNAMIC_TASK_API`.
-5. **Exception Path (`Exception` Scope — runs when `Azure_ML_Call` `TIMEDOUT` or `FAILED`):**
+5. **Exception Path (`Exception` Scope: runs when `Azure_ML_Call` `TIMEDOUT` or `FAILED`):**
    * Checks whether current India Standard Time (`IST`) is between `07:30` and `18:00`.
    * If within business hours, iterates (`For_each`) over every image in `triggerBody()['Image_Names']`, fetches an access token per image, and posts a degraded/fallback merchandising record (`output_type: "partial_output"`, `AWP_Presence: "N"`, `AWP_Sim_Score: "0"`, `Envision_Sim_Score: "0"`, `Earning: "0"`) to `DYNAMIC_TASK_API`.
 
@@ -344,7 +344,7 @@ flowchart TD
 1. **Trigger & Input Validation (`manual` Request Trigger):**
    * Validates required fields `Image_Names`, `Outlet_Code`, `RSCode`, `Request_ID`, `Salesman_Code`, and optional `psa_category`.
 2. **Key Architectural Differences vs. GT Merchandising (`gt-merchandising-endpoint-prod.json`):**
-   * **Upfront Business-Hours Gate (`07:30–18:00 IST`):** Unlike GT Merchandising (which always calls Azure ML and only checks business hours in the exception handler), MT MarketShare checks whether current IST is between `07:30` and `18:00` **before** invoking `Azure_ML_Call_-_endpoint`. Requests arriving outside `07:30–18:00 IST` receive HTTP `200` (`Acknowledgement`) but are silently dropped because the underlying AKS clusters are stopped overnight.
+   * **Upfront Business-Hours Gate (`07:30-18:00 IST`):** Unlike GT Merchandising (which always calls Azure ML and only checks business hours in the exception handler), MT MarketShare checks whether current IST is between `07:30` and `18:00` **before** invoking `Azure_ML_Call_-_endpoint`. Requests arriving outside `07:30-18:00 IST` receive HTTP `200` (`Acknowledgement`) but are silently dropped because the underlying AKS clusters are stopped overnight.
    * **Explicit Timeout & Retry Configuration:** `Azure_ML_Call_-_endpoint` sets `timeout: "PT180S"` (3 minutes) and `retryPolicy: {"type": "none"}`.
    * **Static Token Authentication:** Uses a pre-configured `DYNAMIC_TASK_API_TOKEN` from `Environement_Variables` rather than making a separate `GET` call to `ACCESS_TOKEN_API` on every request.
    * **Single Failure Callback:** On `TIMEDOUT`, `SKIPPED`, or `FAILED`, posts a single request-level failure payload (`StatusCode: 500`, `Remarks: "Internal Server Error"`, `Recognised_Packs: ""`) to `DYNAMIC_TASK_API` rather than looping over individual images.
@@ -396,7 +396,7 @@ flowchart TD
 1. **Schedule (`Run_at_the_start_of_the_business_day`):** Fires daily at **07:30 IST** (`hours: ["7"]`, `minutes: [30]`, `India Standard Time`), matching the `07:30` opening window in the frontend Logic Apps.
 2. **Sunday Check Condition (`Condition_check_if_it_is_Sunday`):**
    * Evaluates `@equals(dayOfWeek(formatDateTime(addToTime(utcNow(),330,'Minute'),'yyyy-MM-dd')), 10)`.
-   * **Implementation Nuance:** In Azure Logic Apps Workflow Definition Language, `dayOfWeek()` returns an integer from `0` (Sunday) to `6` (Saturday). Comparing `dayOfWeek(...)` to `10` intentionally (or inadvertently) forces the condition to evaluate to `False` on every day of the week—effectively bypassing the single-cluster Sunday start (`Invoke_resource_operation_to_start_MT_002_AKS`) and always executing the `else` branch.
+   * **Implementation Nuance:** In Azure Logic Apps Workflow Definition Language, `dayOfWeek()` returns an integer from `0` (Sunday) to `6` (Saturday). Comparing `dayOfWeek(...)` to `10` intentionally (or inadvertently) forces the condition to evaluate to `False` on every day of the week - effectively bypassing the single-cluster Sunday start (`Invoke_resource_operation_to_start_MT_002_AKS`) and always executing the `else` branch.
 3. **Cluster Startup (`Else` Branch):**
    * Parses the cluster array `["masked-cluster-001", "masked-cluster-002"]` (`Clusters_to_Start`).
    * Loops through each cluster in `For_each_AKS_cluster` and invokes the Azure Resource Manager (`arm-1`) `POST` operation `/subscriptions/<sub-id>/resourcegroups/<rg>/providers/Microsoft.ContainerService/managedClusters/<cluster>/start?x-ms-api-version=2021-03-01`.
@@ -452,7 +452,7 @@ flowchart TD
 
 #### Detailed Explanation
 1. **Schedule (`Run_at_the_end_of_the_business_day`):** Triggers twice daily at **18:00 IST** and **19:00 IST** (`hours: [18, 19]`, `minutes: [0]`).
-2. **Variable Initialization (`day_-_hour`):** Computes `day` (`dayOfWeek` in IST: `0`=Sunday, `1..5`=Mon–Fri, `6`=Saturday) and `hour` (`18` or `19`).
+2. **Variable Initialization (`day_-_hour`):** Computes `day` (`dayOfWeek` in IST: `0`=Sunday, `1..5`=Mon-Fri, `6`=Saturday) and `hour` (`18` or `19`).
 3. **Weekday Shutdown (`Condition_-_Mon-Fri`):**
    * When `day >= 1 AND day <= 5 AND hour == 18`, iterates over `["masked-cluster-001", "masked-cluster-002"]` and calls the ARM `stop` endpoint (`managedClusters/<cluster>/stop`).
 4. **Weekend Shutdown (`Condition-_Sun_and_Sat`):**
@@ -582,7 +582,7 @@ flowchart TD
 ```
 
 #### Detailed Explanation
-1. **Purpose:** Computes the final **weighted product-pair Association Score** for Personal Wash (`Categories = ["PW"]`, segments `300:600`) by blending 6 hierarchical similarity levels—Pack Confidence (`W1`), Sub-Category (`W2`), Brand (`W3`), Variant (`W4`), Size (`W5`), and Packaging Type (`W6`)—weighted by the CV model accuracies for each hierarchy level.
+1. **Purpose:** Computes the final **weighted product-pair Association Score** for Personal Wash (`Categories = ["PW"]`, segments `300:600`) by blending 6 hierarchical similarity levels - Pack Confidence (`W1`), Sub-Category (`W2`), Brand (`W3`), Variant (`W4`), Size (`W5`), and Packaging Type (`W6`) - weighted by the CV model accuracies for each hierarchy level.
 2. **Model Accuracy Weighting Table (`Accuracies`):**
    The script defines empirically measured CV model accuracies across 10 product categories, computing $W_1 = \frac{W_4 \times W_5}{100}$:
 

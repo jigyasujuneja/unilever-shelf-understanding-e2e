@@ -1,13 +1,5 @@
 # Merchandising Pipeline Design
 
-| Field | Specification |
-| :--- | :--- |
-| **Specification Scope** | `LLD001 v0.1` -> `v0.2` Sections 3, 4.1, 4.1.1.2, 4.2, 6.1, and 9.3 |
-| **Target GCP Projects** | Prod: `ul-cd-p-932295-prj` \| QA: `ul-cd-q-932296-prj` \| Sandbox: `ul-fs-s-sandbx-16-prj` |
-| **Workload Scope** | Display-Bay Merchandising (`104,571` imgs/day, `20.6%`) + Toker Promo (`78,025` Promo & Talker imgs/day, `15.4%`) = **`182,596` Shelves/Day** (Cloud SQL MySQL 8.4) |
-| **Recommended Design** | **Shared 4-Stage Spine + Stage 1.5 Class-0 Bay Gate (`-61%` Clutter) + 63-`AWP` Row Graph + Promo/Talker Verifiers** |
-| **Headline Outcome** | **98.81% Val / 97.19% Test In-Bay SKU** \| **97.2%-100% Purity** \| **95.1% Brand Block & 94.6% OOS Recall** \| **90.02% Talker F2** \| **0 False `Earning = '0'`** |
-
 ## Context and Problem
 
 Merchandising and Promotional Compliance audits govern monthly retailer trade incentives (`Earning`) across 182,596 daily store photos (`104,571` Display-Bay/Planogram photos plus `78,025` Toker promotional pack and talker photos). Each audit checks four spatial and campaign criteria:
@@ -21,10 +13,10 @@ In Unilever's legacy Azure stack and `LLD001 v0.1`, Merchandising ran on separat
 
 | Legacy Component | `LLD001 v0.1` Configuration | Audited Production Defect |
 | :--- | :--- | :--- |
-| **`gt-merchandising-endpoint-prod.json` (`PR05 -> PR06 -> PR09`)** | Validates 11 JSON fields; calls `ACCESS_TOKEN_API` per request & per image; `PT180S` timeout. | **False `Earning = "0"` payout bug:** On any `PT180S` timeout or `5xx` error, the failure handler sent `AWP_Presence: "N", Earning: "0"` to `DYNAMIC_TASK_API` and zeroed store payouts. |
-| **GT Merch Detector (`gtmerch_asset_sku...onnx`, `PR14`)** | 640px 2-class YOLOv8n (`Class 0` bay + `Class 1` pack) on dedicated GPU endpoint (`PR14`). | Cross-class greedy NMS let large `Class 0` bay boxes suppress interior `Class 1` packs (**51.1% Bay F2**) and dropped narrow hanging sachets (`HAN`). |
-| **GT Merch Classifier (`17Sep26-moc10...h5`, `PR14`)** | RGB `NEAREST` 299x299, unscaled `[0, 255]` `float32` (conflicts with `[-1, 1]` and `[0, 1]` `.h5` models). | Flat **209-class** softmax (`44.5%` crop / **0.10%** uncalibrated wild-shelf SKU accuracy), emits **0 `PackType`**, and dumps 92.1% of Kirana shelves into `"O"`/`"Others"`. |
-| **MT Merch (`marketshare_yolo.onnx`) & `ViT-240` (`PR14`)** | 1-class 640px detector + closed-set 240x240 Vision Transformer (`240` promo classes). | `0.0%` `Class 0` bay isolation in MT; `ViT-B-16-plus-240` required 3 to 4 weeks of field collection and retraining per 4-week festive campaign (**0.0% Day-0 recall**). |
+| **`gt-merchandising-endpoint-prod.json`** | Validates 11 JSON fields; calls `ACCESS_TOKEN_API` per request & per image; `PT180S` timeout. | **False `Earning = "0"` payout bug:** On any `PT180S` timeout or `5xx` error, the failure handler sent `AWP_Presence: "N", Earning: "0"` to `DYNAMIC_TASK_API` and zeroed store payouts. |
+| **GT Merch Detector (`gtmerch_asset_sku...onnx`)** | 640px 2-class YOLOv8n (`Class 0` bay + `Class 1` pack) on dedicated GPU endpoint. | Cross-class greedy NMS let large `Class 0` bay boxes suppress interior `Class 1` packs (**51.1% Bay F2**) and dropped narrow hanging sachets (`HAN`). |
+| **GT Merch Classifier (`17Sep26-moc10...h5`)** | RGB `NEAREST` 299x299, unscaled `[0, 255]` `float32` (conflicts with `[-1, 1]` and `[0, 1]` `.h5` models). | Flat **209-class** softmax (`44.5%` crop / **0.10%** uncalibrated wild-shelf SKU accuracy), emits **0 `PackType`**, and dumps 92.1% of Kirana shelves into `"O"`/`"Others"`. |
+| **MT Merch (`marketshare_yolo.onnx`) & `ViT-240`** | 1-class 640px detector + closed-set 240x240 Vision Transformer (`240` promo classes). | `0.0%` `Class 0` bay isolation in MT; `ViT-B-16-plus-240` required 3 to 4 weeks of field collection and retraining per 4-week festive campaign (**0.0% Day-0 recall**). |
 | **Legacy Talker Detector (`toker_dataset`)** | Trained on 4,767 shelves (28,325 boxes) with a 10-image test split. | **All 8 test stores (8/8) leaked into train** (**49.2% raw F2** on store-disjoint shelves), with **0 handwritten price tags** evaluated. |
 
 ## Goals and Non-Goals
@@ -84,7 +76,7 @@ Legacy `gtmerch.h5` classified isolated crops into 209 flat labels without check
 
 ### Promo Verification
 Festive packs (`B1G1`, `B3G1`, `PO2`, `Rs 10 Off`, `20% Extra`, `Free Tub`) run for 3 to 6 weeks and outpace 3-to-4-week `ViT-B-16-plus-240` retraining cycles. Our Dual-Band Promo Verifier (`hul_promos`, 240 promo SKUs) composes `[Full Crop | 2x Top-28% Header | 2x Bottom-28% Footer | Studio Reference Anchors]` and extracts `{has_promo, promo_type, price_read}` in one `Gemini 3.5 Flash-Lite` call (₹0.066/crop):
-- **Five-minute onboarding:** Uploading 1 studio artwork image and 1 promo rule row reaches 84.0% (`1K`) to 90.0%-96.0% (`EXP-48`) 3-attribute promo accuracy and 88.3% exact 5-attribute + promo match without retraining.
+- **Five-minute onboarding:** Uploading 1 studio artwork image and 1 promo rule row reaches 84.0% (`1K`) to 90.0%-96.0% (holdout) 3-attribute promo accuracy and 88.3% exact 5-attribute + promo match without retraining.
 
 ### Shelf Talkers
 We repaired the leaked `toker_dataset` (`hul_talkers_golden`) through physical `outlet_code` isolation across 532 stores (`3,813` train / `477` val / `477` test shelves) spanning `promo_talker`, `printed_price_tag`, and `handwritten_price_tag`. Pairing our 960px 3-class CPU ONNX detector with batched `Gemini 3.5 Flash-Lite` OCR reaches 90.02% 2D-zone Det F2 (84.87% raw F2 vs. 49.2% baseline) in 3.05s at ₹0.211/shelf and reads rupee tags at 93% to 100% accuracy inside `<untrusted_pack_text>` tags.
@@ -116,8 +108,8 @@ When inference succeeds (`contract_status = "OK"`), the worker populates `AWP_Pr
 | :--- | :--- | :--- | :--- | :--- |
 | **Display Bay Isolation** | `gtmerch_golden` (`200` test shelves) | `51.1%` F2 (greedy NMS) | 960px Dual-Class CPU ONNX | **99.0% Bay mAP50 / 94.7% Bay F2** (`80 ms` CPU, ₹0 GPU) |
 | **Clutter Pruning & In-Bay SKU** | `gtmerch_golden` (63 `AWP` templates) | 209-cls `.h5` (`44.5%` crop / `0.1%` wild) | Stage 1.5 Gate (`-61%`) + Option 2 | **98.81% Val / 97.19% Test SKU**, **97.2%-100% Purity**, **₹0.18-₹0.22** |
-| **In-Bay E2E Compliance** | `gtmerch_golden` (`Val` & `Test`) | `51.2%` single-call VLM | `shelf_merchandising_bay_e2e` (`EXP-57`) | **77.70% Val / 69.81% Test Bay E2E F2** (`66.44% / 62.79%` raw) |
+| **In-Bay E2E Compliance** | `gtmerch_golden` (`Val` & `Test`) | `51.2%` single-call VLM | `shelf_merchandising_bay_e2e` | **77.70% Val / 69.81% Test Bay E2E F2** (`66.44% / 62.79%` raw) |
 | **2D Planogram & OOS Gaps** | `gtmerch_golden` (`132` required rows) | Flat crop count (`0` row logic) | 1D+Hough Plank + 63-`AWP` Graph | **95.1% Brand-Block Purity**, **94.6% OOS Void Recall** |
-| **Festive Promo Verification** | `hul_promos` (`240` promo SKUs) | `ViT-240` (`0%` Day-0, 3-4 wk retrain) | Dual-Band 2x Top/Bot Zoom | **84.0% (`1K`) to 90.0%-96.0% (`EXP-48`)**, **88.3% exact**, **₹0.066/crop** |
+| **Festive Promo Verification** | `hul_promos` (`240` promo SKUs) | `ViT-240` (`0%` Day-0, 3-4 wk retrain) | Dual-Band 2x Top/Bot Zoom | **84.0% (`1K`) to 90.0%-96.0% (holdout)**, **88.3% exact**, **₹0.066/crop** |
 | **Shelf Talkers & Price Tags** | `hul_talkers_golden` (`477` test, `532` stores) | 10-img leaked split (`49.2%` raw F2) | 3-Class CPU ONNX + Batched OCR | **90.02% Zone F2 / 84.87% Raw F2** (`3.05s` P50, **₹0.211/shelf**) |
-| **Timeout Payout Safety** | `EXP-59` Fault-Injection (`180s` SLA) | Emits `AWP_Presence: "N", Earning: "0"` | `RETRY_PENDING` + Pub/Sub DLQ | **0 false `Earning = '0'` denials** (`100%` Locust verified) |
+| **Timeout Payout Safety** | SLA Fault-Injection (`180s` SLA) | Emits `AWP_Presence: "N", Earning: "0"` | `RETRY_PENDING` + Pub/Sub DLQ | **0 false `Earning = '0'` denials** (`100%` Locust verified) |

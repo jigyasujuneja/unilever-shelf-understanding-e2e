@@ -1,20 +1,12 @@
 # Cost Breakdown and Accuracy
 
-| Field | Specification |
-| :--- | :--- |
-| **Specification Scope** | FinOps & Model Accuracy Reconciliation for `LLD001 v0.2` in `ul-cd-p-932295-prj` |
-| **Daily Workload Mix** | **`506,531` Baseline Photos/Day** (`15.20M/mo`): `323,935` MS (`194,361` MT + `129,574` GT) + `104,571` Merch + `78,025` Toker \| **Peak:** `800,000/day` (`24.0M/mo`) |
-| **Pricing Authority** | Live GCP Cloud Billing Catalog API (`cloudbilling.googleapis.com`, `1 USD = ₹95.98875`, Zero Unpriced Sidecars) |
-| **Market Share Unit Cost** | **₹0.120 / 35-Pack Shelf (`USD 0.00139`)** Priority PayGo (`₹0.095` Standard \| `₹0.080` Flex \| `₹0.045` Option 1 Embedding-Only) = **₹18.24L/mo** pure MS (-62.5%) |
-| **4-Workload Portfolio Spend** | **₹67,438 / Day = ₹20.23 Lakhs / Month** at `506.5K/day` (**Saves ₹28.40L/mo = ₹3.41 Cr/yr, -58.4%** vs. ₹48.63L Legacy `v0.1`; **₹26.40L/mo** at `800K/day` peak) |
-
 ## Scope and Billing Method
 
 Benchmark runs query Google's live `cloudbilling.googleapis.com` Catalog API at runtime and bind exact SKU list prices across Vertex AI (`C7E2-9256-1C43`), Cloud Run (`152E-C115-5142`), and Google Cloud Storage (`95FF-2EF5-5EA1`) at `1 USD = ₹95.98875`.
 
 The tables below cover object storage, Cloud Run CPU compute, multimodal embeddings, in-memory indexing, and VLM tokens. They reconcile both the per-shelf Market Share receipt (₹0.120/shelf) and the 4-workload blended portfolio budget (₹20.23 Lakhs/month across Market Share, Display-Bay Merchandising, Toker Promo, and online canary auditing).
 
-### Goals and Non-Goals
+## Goals and Non-Goals
 - **Goals:** Price all cloud SKUs with zero unpriced GPU or Vector DB sidecars; reconcile unit costs at `506,531` baseline and `800,000` peak daily photos; and report matched accuracy across all 9 legacy `.h5` models, 10 store categories (`W1..W6`), 15 container forms, and ownership cohorts.
 - **Non-Goals:** Negotiated Unilever Enterprise Agreement (EA) discounts are excluded so list-price PayGo numbers establish a conservative upper bound.
 
@@ -72,9 +64,9 @@ Display-Bay Merchandising runs additional 2D planogram and OOS checks (`₹0.180
 
 ## Architecture Cost Comparison
 
-Over 60% of store uploads arrive between 17:00 and 21:00 IST. Self-hosted open-weight GPU pools (`Qwen3.5/CLEF` on `NVIDIA L4`) sized for evening peak sit 83% idle for 20 hours per day and cost 4.6x to 5.1x more than serverless PayGo APIs:
+Over 60% of store uploads arrive between 17:00 and 21:00 IST. Self-hosted open-weight GPU pools (`Qwen3.5` on `NVIDIA L4`) sized for evening peak sit 83% idle for 20 hours per day and cost 4.6x to 5.1x more than serverless PayGo APIs:
 
-| Architecture Option | Serving Tier & Escalation | 5-Attr SKU Acc (`5K` / `EXP-58`) | Pure MS / Shelf | Pure MS Monthly | 4-Workload Monthly | Savings vs. Legacy |
+| Architecture Option | Serving Tier & Escalation | 5-Attr SKU Acc (`5K` Holdout) | Pure MS / Shelf | Pure MS Monthly | 4-Workload Monthly | Savings vs. Legacy |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Option 1: Embedding-Only** | `gemini-embedding-2` (`0` generative VLM calls) | `80.9%` (`1K`) | **₹0.045** | ₹6.84 Lakhs | **₹8.15 Lakhs** | **-₹40.48L/mo (-83.2%)** |
 | **Option 2 (Flex Batch 0.5x)** | `Embed-2` + `Flash-Lite` Flex (next-AM) | `82.3% / 84.0%` | **₹0.080** | ₹12.16 Lakhs | **₹13.85 Lakhs** | **-₹34.78L/mo (-71.5%)** |
@@ -97,16 +89,16 @@ Cloud Run Job `shelf-bench-legacy-audit-n2xn2` sized three hosting topologies fo
 
 ## Benchmark Summary
 
-| Benchmark Suite & Split | Primary Metric | Legacy `v0.1` (Run ID) | Option 1 (Embed-Only) | Option 2 Hybrid (`EXP-28` / `EXP-58`) | Option 3 / `3.8-Flash` |
+| Benchmark Suite & Split | Primary Metric | Legacy `v0.1` Baseline | Option 1 (Embed-Only) | Option 2 Hybrid | Option 3 / `3.8-Flash` |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **`hul_golden` (`test_5k`, `N=5,000`)** | 5-Attr SKU Acc (`±1.1%` CI) | `42.32%` (`2,116/5,000`, `#1016-093317`) | `~79.8%` | **`82.30%` strict / `83.20%` remap** (`#1016-092456`) | `83.6%` (`3.8-Flash`) |
-| **`hul_golden` (`N=1,000` Val / Test)** | 5-Attr SKU Acc | `44.50%` (`#1015-092627`; `52.00%` Oracle `#1015-115810`) | `80.90%` | **`83.00% Val / 82.70% Test`** (`EXP-28`) | `84.30% Val` (`#1019-171444`) |
-| **`hul_golden` (`EXP-58` Size Switch)** | 5-Attr SKU Acc (`Val 200 / Test 100`) | `42.32%-44.50%` | `80.90%` | **`83.50% Val / 84.00% Test`** (`#1021-154453/55`) | `84.50%` (`V-JEPA 2` GPU) |
+| **`hul_golden` (`test_5k`, `N=5,000`)** | 5-Attr SKU Acc (`±1.1%` CI) | `42.32%` (`2,116/5,000`) | `~79.8%` | **`82.30%` strict / `83.20%` remap** | `83.6%` (`3.8-Flash`) |
+| **`hul_golden` (`N=1,000` Val / Test)** | 5-Attr SKU Acc | `44.50%` (`52.00%` Oracle Brand) | `80.90%` | **`83.00% Val / 82.70% Test`** | `84.30% Val` |
+| **`hul_golden` (Size Switch)** | 5-Attr SKU Acc (`Val 200 / Test 100`) | `42.32%-44.50%` | `80.90%` | **`83.50% Val / 84.00% Test`** | `84.50%` (`V-JEPA 2` GPU) |
 | **`hul_variants` (1,922 SKUs, `1K` & `5K`)** | Sister-Variant 5-Attr SKU | `~41.8%` | `81.20%` (`1K`) | **`84.00% Val / 83.50% Test (1K)`** \| **`81.84% (5K)`** | `85.00% Val / 82.10% Test` |
 | **`gt_hul_sessions` (`150` Visits, `1,200` Boxes)** | 3-Attr / 5-Attr / SoS MAE | `~51.0%` 3-Attr (`48.26%` 5K) | `80.37% / 70.63%` | **`83.00% Val / 82.13% Test`** (`73.5% / 72.4%` 5-Attr, **`2.00%` MAE**) | **`85.34%` / `1.13%` MAE** |
 | **`ms_json_golden` (`100` Shelves, `3,709` Boxes)** | Pocket Det F2 / P2P `W1` | `56.65%` F2 / **`34.82%` `W1`** | `67.28%-68.99%` F2 | **`68.99%` Det F2** / **`73.68%` `W1` (2.12x)** / **`1.25%` MAE** | `74.48%` Tiled VLM (`₹2.15`) |
 | **`gtmerch_golden` (`200` Shelves, 63 `AWP`)** | Bay F2 / In-Bay SKU / E2E F2 | `51.1%` Bay / `44.5%` crop (`0.1%` wild) | `94.7%` Bay F2 | **`94.7%` Bay** / **`98.81% Val, 97.19% Test` SKU** / **`77.70% Val, 69.81% Test` E2E** | `95.1%` Block / `94.6%` OOS |
-| **`hul_promos` (`1K` & `EXP-48`) & `talkers` (`477`)** | Promo Acc / Talker Zone F2 | `0.0%` Day-0 / `49.2%` Talker | `79.20%` Promo | **`84.0% (1K) to 90.0%-96.0%` Promo** \| **`90.02%` Talker F2** | `88.3%` Exact 5-Attr+Promo |
+| **`hul_promos` (`1K` & Holdout) & `talkers` (`477`)** | Promo Acc / Talker Zone F2 | `0.0%` Day-0 / `49.2%` Talker | `79.20%` Promo | **`84.0% (1K) to 90.0%-96.0%` Promo** \| **`90.02%` Talker F2** | `88.3%` Exact 5-Attr+Promo |
 
 ## Legacy Head Breakdown
 
@@ -126,7 +118,7 @@ Chained 5-Attr Pass (42.32%) = 100% - Stage 1 Brand Loss (12.94%) - Stage 2 Cat 
 | **`gen_variant.h5`** (`145` cls, PW/Hair/Deo) | `177 / 185` | 65.7% (57.1% 5-Attr) | `88.7% / 84.86%` | `57.1% / 48.65%` | **80.8%** | **+23.7 pts** |
 | **`oral_variant.h5`** (`57` cls, Oral Care) | `161 / 162` | 85.7% (45.7% 5-Attr) | `79.5% / 79.01%` | `32.9% / 38.89%` | **83.2%** | **+50.3 pts** |
 | **`brand.h5` + `packtype.h5`** | `5,000` | `100%` Oracle / `60.20%` Pack | `87.06%` Brand / `54.86%` Pack | `29.60%` Pack Loss (`71.92%` w/ Catalog) | **96.1% Brand / 91.7% Pack** | **+9.0 / +36.8 pts** |
-| **Matched N=5,000 Total** | **5,000** | **`52.00%` Ceiling (1K)** | **`76.22%` Variant** | **`42.32%` (`2,116/5,000`)** | **`82.30%` (`84.00%` EXP-58)** | **+40.0 pts (1.95x)** |
+| **Matched N=5,000 Total** | **5,000** | **`52.00%` Ceiling (1K)** | **`76.22%` Variant** | **`42.32%` (`2,116/5,000`)** | **`82.30%` (`84.00%` size-switch)** | **+40.0 pts (1.95x)** |
 
 ## Accuracy Slices
 
@@ -174,5 +166,5 @@ Sideways soap `Bar` crops (70.8%) and curved `Tube` crops (76.8%, raised to 89.0
 | :--- | :--- | :---: | :---: | :--- |
 | **Unilever (`is_hul = True`)** | N = 2,523 (`test_5k`) | `48.51%` SKU (`87.08%` Var, `94.45%` Brand) | **88.8% SKU / 98.1% Brand / 98.4% `is_hul`** | Drives `W1 = 73.68%` basepack P2P weight (2.12x legacy). |
 | **Competitor (`is_hul = False`)** | N = 2,477 (`test_5k`) | `36.01%` SKU (`65.16%` Var [`-21.92 pp`], `"Others"`) | **75.7% SKU / 94.1% Brand / 98.8% `is_hul`** | Enables brand-level SoS across 874 named rivals (1.00% False HUL). |
-| **Rare Long-Tail (1-2 Crops)** | 356 rare SKUs (`#1015-113613`) | 27.9% vision SFT (0.0% train-only) | **79.1% Exact SKU (+51.2 pts)** | Multimodal studio anchor matching works from 1 image. |
-| **Day-0 Product Launches** | 18 unseen new SKUs (`EXP-15`) | **0.0% (0 / 18)** across `.h5` & `MaxViT` | **94.4% (17 / 18) in 60 seconds** | Removes 3-to-4-week new-pack and promo retraining lag. |
+| **Rare Long-Tail (1-2 Crops)** | 356 rare SKUs | 27.9% vision SFT (0.0% train-only) | **79.1% Exact SKU (+51.2 pts)** | Multimodal studio anchor matching works from 1 image. |
+| **Day-0 Product Launches** | 18 unseen new SKUs | **0.0% (0 / 18)** across `.h5` & `MaxViT` | **94.4% (17 / 18) in 60 seconds** | Removes 3-to-4-week new-pack and promo retraining lag. |

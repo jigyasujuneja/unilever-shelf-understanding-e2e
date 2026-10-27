@@ -1,13 +1,5 @@
 # Model Whitelisting Report
 
-| Field | Specification |
-| :--- | :--- |
-| **Specification Scope** | `LLD001 v0.1` -> `v0.2` Sections 2.2, 5.3 (`IST0001092`), 5.5, and 10.1.2 |
-| **Submitted To** | Unilever AI Foundations (AIF), Cloud Security, Enterprise Architecture, and Legal Review Boards |
-| **Target GCP Projects** | Prod: `ul-cd-p-932295-prj` \| QA: `ul-cd-q-932296-prj` \| Sandbox: `ul-fs-s-sandbx-16-prj` (Shared VPC `ul-fs-p-plvpc-01`, PSC `gfr-fs-p-psc-subnet-01`) |
-| **Governance Trigger** | `LLD001 v0.1` Sec 5.5 & 10.1.2 (`17 Aug 2026`) marked AIF review *"Not Applicable"*; `v0.2` marks Sec 5.5 **Required** for 2 Google-managed APIs and **closes `IST0001092`** |
-| **Whitelisting Ask** | **Approve 3 Tier-1 Production Assets** (+ 3 Optional Tier-2 Audit/Challenger Assets); **Retire 14 Legacy GPU Artifacts**; **Exclude 8 R&D Models** |
-
 ## Governance Scope
 
 Unilever's draft `LLD001 v0.1` (`17 Aug 2026` AI Foundations note in Sections 5.5 and 10.1.2) bypassed AI Foundations whitelisting by lifting custom Keras `.h5`, ONNX, and `ViT` weights onto 11 to 14 dedicated Vertex AI Online GPU Endpoints. That setup required Security Exception `IST0001092` (Sections 2.2 and 5.3) to run End-of-Life `Python 3.8.20 / 3.9.25 / 3.10.11`, legacy `keras`, and `azure-cli` inside GCP containers at 42.32% SKU accuracy and ₹48.63 Lakhs/month.
@@ -22,7 +14,7 @@ Unilever's draft `LLD001 v0.1` (`17 Aug 2026` AI Foundations note in Sections 5.
 - **Data protection and IP indemnity:** Restrict cloud inference calls to Google first-party GA models covered by Google Cloud Enterprise Terms, Zero Data Retention, and Google GenAI IP Indemnity.
 
 ### Non-Goals
-- **Self-hosted open-weight models:** None of the 8 open-weight R&D models (`Qwen3.5/CLEF`, `CLM-8B`, `DINOv3`, `DINOv2`, `V-JEPA 2`, `MaxViT`) are requested for production whitelisting.
+- **Self-hosted open-weight models:** None of the 8 open-weight R&D models (`Qwen3.5-9B`, `Qwen3-VL-8B`, `DINOv3`, `DINOv2`, `V-JEPA 2`, `MaxViT`) are requested for production whitelisting.
 
 ```mermaid
 flowchart TB
@@ -81,19 +73,19 @@ Eight open-weight vision backbones and VLMs benchmarked in `ul-fs-s-sandbx-16-pr
 
 | Evaluated R&D Model | Source & License | Sandbox Result | Reason for Exclusion |
 | :--- | :--- | :--- | :--- |
-| **`MaxViT-Tiny-224`** (`timm`) | HuggingFace (`Apache-2.0`) | `86.77%` closed-set `hul_variants` (`#1019-174125`) | Covers 1,922 classes (misses 737 SKUs), scores **0.0% on Day-0 launches**, and needs full retraining on pack updates. |
-| **`V-JEPA 2`** (`vitl16` / `vitg16`) | Meta (`MIT` / `Apache-2.0`) | `84.50%` `hul_golden` (`1K`, `#1019-123413`) | Requires dedicated GPU serving (**83% idle** off-peak) and head retraining when new SKUs launch. |
+| **`MaxViT-Tiny-224`** (`timm`) | HuggingFace (`Apache-2.0`) | `86.77%` closed-set `hul_variants` | Covers 1,922 classes (misses 737 SKUs), scores **0.0% on Day-0 launches**, and needs full retraining on pack updates. |
+| **`V-JEPA 2`** (`vitl16` / `vitg16`) | Meta (`MIT` / `Apache-2.0`) | `84.50%` `hul_golden` (`1K`) | Requires dedicated GPU serving (**83% idle** off-peak) and head retraining when new SKUs launch. |
 | **`DINOv3`** (`vitb14` / `vitl16`) | Meta **DINOv3 License** | `79.79%` `hul_variants` (`27.9%` on 1-2 crop SKUs) | **Restrictive custom Meta license** requires separate legal review; drops to 27.9% on rare tail SKUs. |
 | **`DINOv2`** (`vits14` / `vitb14`) | Meta (`Apache-2.0`) | `71.8%-76.4%` `hul_golden` (`0.0%` on 1,121 unseen) | Trails Option 2 (`83.5%-84.0%`) on `50g` vs. `100g` identical bottle shapes and requires GPU serving. |
-| **`clef-flash` (`Qwen3.5-9B`) & `clef-27b`** | Qwen / Apache-2.0 (`vLLM` L4) | Competitive crop accuracy (`EXP-26`) | **5.1x higher TCO (₹0.614/shelf, ₹93.3L/mo):** 24x L4 GPUs sit **83% idle** 20 hrs/day, plus third-party weight governance. |
-| **`CLM-v0.1-8B` (`Qwen3-VL-8B`)** | Alibaba Qwen License | Surpassed by `gemini-embedding-2` (`₹0.047/shelf`) | Requires self-hosted GPU containers and CVE patching vs. zero-idle managed `gemini-embedding-2`. |
+| **`Qwen3.5-9B` & `Qwen3.5-27B`** | Qwen / Apache-2.0 (`vLLM` L4) | Competitive crop accuracy | **5.1x higher TCO (₹0.614/shelf, ₹93.3L/mo):** 24x L4 GPUs sit **83% idle** 20 hrs/day, plus third-party weight governance. |
+| **`Qwen3-VL-8B` (Fine-Tuned)** | Alibaba Qwen License | Surpassed by `gemini-embedding-2` (`₹0.047/shelf`) | Requires self-hosted GPU containers and CVE patching vs. zero-idle managed `gemini-embedding-2`. |
 | **`hul-yolov12s-sku110k-detector-onnx`** | Sandbox Teacher Model | Offline distillation teacher only | Used offline during dataset generation; excluded from production container images. |
 
 ## Legacy Decommission
 
 Unilever's Project Plan listed 13 logical models, while `LLD001 v0.1` and Cloud Storage held 14 weight files (including `2.31 GB` across 9 Market Share `.h5` binaries totaling `3,053` softmax classes). All 14 artifacts retire at Phase-3 cutover:
 
-| Project Plan Row (`13` Logical Models) | Deployed GCS / `LLD001 PR14` Artifact (`14` Files) | Reconciliation Note | `LLD001 v0.2` Replacement |
+| Project Plan Row (`13` Logical Models) | Deployed GCS / Legacy Endpoint Artifact (`14` Files) | Reconciliation Note | `LLD001 v0.2` Replacement |
 | :--- | :--- | :--- | :--- |
 | **1. SKU Detection (`1` YOLOv8)** | `1.` `marketshare_yolo.onnx` (1-class 640px) | 1:1 match (`MT/GT Market Share`). | `hul-yolo11n-distilled.onnx` (960px 2-class CPU). |
 | **2. Brand ID (`2` XceptionNet: HUL & Non-HUL)** | `2.` `marketshare_brand.h5` (`274.10 MB`, `941` cls) | Plan counted `2` models; GCS merged into `1` `.h5` (`-1`). | `gemini-embedding-2` + 2,659-SKU RAM index (`96.1%` Brand). |
@@ -112,5 +104,5 @@ Unilever's Project Plan listed 13 logical models, while `LLD001 v0.1` and Cloud 
 | **2. Private Service Connect & IAM** | Routes `gfr-fs-p-cloudrun-01` -> PSC `gfr-fs-p-psc-subnet-01`; Workload Identity + Secret Manager (`0` static JSON keys). | `LLD001` network & IAM spec |
 | **3. Prompt-Injection Isolation** | Wraps shelf OCR inside `<untrusted_pack_text>` XML tags with `enum`-constrained JSON schema decoding (`1..K` or `0`). | Stage-2B, Promo, and Talker verifiers |
 | **4. Open-Set Competitor Guard** | Two-tier cosine veto (`0.045` lead guard + `s1 >= 0.45` floor) blocks forced Unilever tags on unknown rivals (**1.00% False HUL**). | Automated QC & competitor guardrail |
-| **5. Fail-Open Payout Quarantine** | `180s` SLA timeouts or `429`/`5xx` errors route to Pub/Sub DLQ (`RETRY_PENDING`, `earning_override = null`; **0 false `Earning = '0'`**). | `EXP-59` & Locust fault-injection |
+| **5. Fail-Open Payout Quarantine** | `180s` SLA timeouts or `429`/`5xx` errors route to Pub/Sub DLQ (`RETRY_PENDING`, `earning_override = null`; **0 false `Earning = '0'`**). | SLA & Locust fault-injection |
 | **6. Immutable Catalog & Billing Log** | Logs `catalog_sha256` (`b2dc368a0bf972a6`), Cloud Trace `trace_id`, token counts, and live Cloud Billing SKU cost to BigQuery. | Cloud Trace & billing export |

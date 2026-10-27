@@ -1,13 +1,5 @@
 # Path to Production
 
-| Field | Specification |
-| :--- | :--- |
-| **Specification Scope** | Rollout, Canary/A-B Experimentation & Cutover Specification (`LLD001 v0.1` -> `v0.2`) |
-| **Target GCP Environments** | Prod: `ul-cd-p-932295-prj` \| QA: `ul-cd-q-932296-prj` \| Sandbox: `ul-fs-s-sandbx-16-prj` \| Shared VPC: `ul-fs-p-plvpc-01` |
-| **Traffic & Surge SLA** | **`506,531` Baseline to `800,000` Peak Photos/Day** \| Evening Surge (`17:00-21:00 IST`): **`20.8` to `40.0` Imgs/Sec** \| Shelf Latency: **`2.69s` P50 / `6.40s` P95** (`180s` SLA) |
-| **Load-Test Verification** | **`locust 2.46.7`** across `10`, `40`, and `80` concurrent workers (**`570` Requests, `0.00%` Failure Rate**) + **`159/159` `pytest`** + **`15/15` QC Gates** |
-| **Cutover Strategy** | **4-Phase Paired Shadow, Cluster Canary & 50/50 A/B via Cloud Pub/Sub** (`Shadow` -> `10% Canary` -> `50/50 A/B` -> `100% Cutover`) with **60s Auto-Abort & `<5-Min` Rollback** |
-
 ## Context and Scope
 
 Unilever's draft `LLD001 v0.1` lifted 14 legacy Azure models onto 11 to 14 custom Vertex AI Online Endpoints called synchronously by up to 510 Cloud Run worker nodes (`2 vCPU / 8 GiB`) and required Security Exception `IST0001092` for EOL Python 3.8-3.10 and `azure-cli`.
@@ -31,11 +23,11 @@ At `500,000` shelves/day (`25M` crops = `75M` serial `.h5` passes/day; `3,123` t
 | `LLD001` Section | `LLD001 v0.1` Draft Baseline | `LLD001 v0.2` Production Update | Operational Benefit |
 | :--- | :--- | :--- | :--- |
 | **Sec 2.2 & 5.3 (`IST0001092`)** | Exception for EOL `Python 3.8-3.10`, legacy `keras`, and `azure-cli`. | **Closes `IST0001092`:** `python:3.12-slim` + `onnxruntime` (MIT) + `google-genai`; `0` `.h5` or Azure CLI. | Clears container CVE backlog before go-live. |
-| **Sec 3 (`KDD 11-14`) & 4.1 (`PR14`)** | 11 to 14 custom `.h5` / `ViT` / `.onnx` Vertex Online GPU Endpoints (`PR14`). | **Retires `PR14`:** In-process 960px CPU ONNX (`80 ms`) + `<25 MB` RAM index; PSC calls to `Embed-2` & `Flash-Lite`. | Lifts SKU accuracy from `42.32%` to `82.3%-84.0%`; saves `₹28.40L/mo`. |
-| **Sec 4.1.1.2 (New `PR19` Bus)** | Synchronous HTTP from `PR05` to `PR06-PR08`; post-`18:00 IST` MS drops. | **Adds `PR19` Pub/Sub:** `Sub A` (`v0.1` control) + `Sub B` (`v0.2` treatment/shadow) + `shelf-inference-dlq`. | Buffers 24x7 surges (`<150 ms` ack) and isolates canary/A-B arms. |
-| **Sec 4.2 (`PR09` Callback)** | Emitted `AWP_Presence: "N", Earning: "0"` on `PT180S` Merch timeout. | Closed payout state machine: `contract_status = "RETRY_PENDING"`, `awp_presence = "PENDING"`, `earning_override = null`. | **0 false `Earning = '0'` denials** during network or quota spikes. |
+| **Sec 3 & 4.1 (GPU Endpoints)** | 11 to 14 custom `.h5` / `ViT` / `.onnx` Vertex Online GPU Endpoints. | **Retires custom GPU endpoints:** In-process 960px CPU ONNX (`80 ms`) + `<25 MB` RAM index; PSC calls to `Embed-2` & `Flash-Lite`. | Lifts SKU accuracy from `42.32%` to `82.3%-84.0%`; saves `₹28.40L/mo`. |
+| **Sec 4.1.1.2 (Cloud Pub/Sub Bus)** | Synchronous HTTP from ingestion router to Cloud Run workers; post-`18:00 IST` MS drops. | **Adds Cloud Pub/Sub:** `Sub A` (`v0.1` control) + `Sub B` (`v0.2` treatment/shadow) + `shelf-inference-dlq`. | Buffers 24x7 surges (`<150 ms` ack) and isolates canary/A-B arms. |
+| **Sec 4.2 (Task Callback API)** | Emitted `AWP_Presence: "N", Earning: "0"` on `PT180S` Merch timeout. | Closed payout state machine: `contract_status = "RETRY_PENDING"`, `awp_presence = "PENDING"`, `earning_override = null`. | **0 false `Earning = '0'` denials** during network or quota spikes. |
 | **Sec 5.5 & 10.1.2 (AIF Review)** | `17 Aug 2026` note marked *"Not Applicable (no foundation model used)"*. | Marks Sec 5.5 **Required** for `gemini-embedding-2` and `gemini-3.5-flash-lite` (Tab 4). | Zero Data Retention, enterprise terms, and GenAI IP Indemnity. |
-| **Sec 6.1 & 9.3 (`PR06-08` Sizing)** | Sized `PR06-PR08` at `2 vCPU, 8 GiB RAM, max 510 nodes`. | Resizes `PR06-PR08` to **`4 vCPU, 8 GiB RAM, min 4 / max 80 nodes`** (`concurrency = 8`). | `80 ms` CPU ONNX; cuts max worker footprint by **84%**. |
+| **Sec 6.1 & 9.3 (Worker Sizing)** | Sized Cloud Run workers at `2 vCPU, 8 GiB RAM, max 510 nodes`. | Resizes Cloud Run workers to **`4 vCPU, 8 GiB RAM, min 4 / max 80 nodes`** (`concurrency = 8`). | `80 ms` CPU ONNX; cuts max worker footprint by **84%**. |
 
 ### Service Topology
 

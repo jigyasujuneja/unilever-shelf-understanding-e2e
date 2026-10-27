@@ -1,13 +1,5 @@
 # Market Share Pipeline Design
 
-| Field | Specification |
-| :--- | :--- |
-| **Specification Scope** | `LLD001 v0.1` -> `v0.2` Sections 3, 4.1, 4.1.1.2, 4.2, 6.1, and 9.3 |
-| **Target GCP Projects** | Prod: `ul-cd-p-932295-prj` \| QA: `ul-cd-q-932296-prj` \| Sandbox: `ul-fs-s-sandbx-16-prj` |
-| **Workload Scope** | Modern Trade (`194,361/day`, `Sales EDGE`) + General Trade (`129,574/day`, `Shikhar`) = **`323,935` Shelves/Day** (`64.0%` of `506,531` daily photos) |
-| **Recommended Design** | **Option 2 Hybrid (`DistilledYolo960SoftNms` CPU ONNX + `gemini-embedding-2` + `Gemini 3.5 Flash-Lite` 3-Band Zoom)** |
-| **Headline Outcome** | **82.3% (`N=5,000`) / 83.5% Val to 84.0% Test 5-Attr SKU Acc** (+40.0 pts vs. 42.32% Legacy) \| **2.69s P50** \| **₹0.120 / Shelf** (-62.5% Cost) |
-
 ## Context and Problem
 
 Market Share audits calculate Unilever's corporate, category, brand, container, and basepack Share-of-Shelf (SoS) across Modern Trade supermarket gondolas and General Trade Kirana counters. Field representatives upload 323,935 Market Share photos per day inside a 506,531-photo portfolio (`800,000` peak), with over 60% arriving between 17:00 and 21:00 IST.
@@ -41,14 +33,14 @@ Each Azure legacy artifact and `LLD001 v0.1` component maps directly to its `LLD
 
 | Azure Legacy Asset | `LLD001 v0.1` Draft | Audited `v0.1` / Legacy Defect | `LLD001 v0.2` Production Design |
 | :--- | :--- | :--- | :--- |
-| **`marketshare-endpoint-mt-prod-aks2.json`** | `PR05` sync HTTP to `PR07/PR08` | Drops post-`18:00 IST` uploads after `HTTP 200`; static token; `retryPolicy: none` on `PT180S`. | `PR05` publishes to **`PR19` Pub/Sub** (`24x7` queue, `<150 ms` ack); Secret Manager + Workload Identity. |
-| **`marketsharestartcluster` & `stopcluster.json`** | Scheduled `PR14` GPU scaling | `dayOfWeek == 10` bug starts clusters Sundays; `18:00 IST` stop kills evening uploads. | **Retired.** Serverless `PR07/PR08` (`min 4, max 80`) + Vertex PayGo scale 24x7 (`₹0` overnight idle). |
-| **`marketshare_yolo.onnx` + 9 `.h5` Heads** | `PR14` Custom Endpoints (`IST0001092`) | 42.32% SKU accuracy; 3 conflicting RGB/BGR resizers; EOL Python 3.8-3.10 + `azure-cli`. | **Retired (`IST0001092` closed).** Python 3.12 runs 960px CPU ONNX (`80 ms`) + `gemini-embedding-2` + `Flash-Lite` via PSC. |
-| **`Outlet_Cluster_Segment` & `ROI_Pipeline.json`** | `PR11` Composer + `PR16/17` MySQL | `Set variable2` outside `ifTrueActivities` logs `"Moved"` on empty runs; `'Model_Output'` dropped. | `PR11` DAG fixes empty-folder check and loads 7-col `cluster_mapping` (`10K` batch) + 12-col `Past_ROI_Data` (`2K` batch). |
+| **`marketshare-endpoint-mt-prod-aks2.json`** | Sync HTTP to MT/GT Cloud Run | Drops post-`18:00 IST` uploads after `HTTP 200`; static token; `retryPolicy: none` on `PT180S`. | Ingestion router publishes to **Cloud Pub/Sub** (`24x7` queue, `<150 ms` ack); Secret Manager + Workload Identity. |
+| **`marketsharestartcluster` & `stopcluster.json`** | Scheduled Vertex GPU scaling | `dayOfWeek == 10` bug starts clusters Sundays; `18:00 IST` stop kills evening uploads. | **Retired.** Serverless MT/GT Cloud Run (`min 4, max 80`) + Vertex PayGo scale 24x7 (`₹0` overnight idle). |
+| **`marketshare_yolo.onnx` + 9 `.h5` Heads** | Custom Vertex GPU Endpoints (`IST0001092`) | 42.32% SKU accuracy; 3 conflicting RGB/BGR resizers; EOL Python 3.8-3.10 + `azure-cli`. | **Retired (`IST0001092` closed).** Python 3.12 runs 960px CPU ONNX (`80 ms`) + `gemini-embedding-2` + `Flash-Lite` via PSC. |
+| **`Outlet_Cluster_Segment` & `ROI_Pipeline.json`** | Cloud Composer + Cloud SQL MySQL | `Set variable2` outside `ifTrueActivities` logs `"Moved"` on empty runs; `'Model_Output'` dropped. | Composer DAG fixes empty-folder check and loads 7-col `cluster_mapping` (`10K` batch) + 12-col `Past_ROI_Data` (`2K` batch). |
 
 ### Legacy Model Audit
 
-Cloud Run Job `shelf-bench-legacy-audit-n2xn2` evaluated all 9 Market Share `.h5` weights (`2,308.49 MB` / `2.31 GB`, `3,053` cumulative classes across 9 `n1-standard-4` endpoints) on matched `N=5,000` (`#1016-093317`), `N=1,000` (`#1015-092627`), and Oracle Brand (`#1015-115810`) splits:
+Cloud Run Job `shelf-bench-legacy-audit-n2xn2` evaluated all 9 Market Share `.h5` weights (`2,308.49 MB` / `2.31 GB`, `3,053` cumulative classes across 9 `n1-standard-4` endpoints) on matched `N=5,000`, `N=1,000`, and Oracle Brand splits:
 
 | Legacy `.h5` Model (`gs://sos-datasets/legacy-models/`) | Input Prep & Binary Size | Classes | Isolated Var (Oracle 1K) | Chained Var (5K Silo / Routed) | Chained 5-Attr SKU (5K Silo / Routed) | Option 2 5-Attr SKU (5K) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -61,7 +53,7 @@ Cloud Run Job `shelf-bench-legacy-audit-n2xn2` evaluated all 9 Market Share `.h5
 | **`gen_variant.h5` (PW/Hair/Deo)** | BGR `[0, 1]` + 1-hot (`254.08 MB`; `177 / 185`) | 145 | 65.7% | `88.7%` (`84.86%`) | `57.1%` (`48.65%`) | **80.8%** (+23.7 pts) |
 | **`oral_variant.h5` (Oral Care)** | BGR `[0, 1]` + 1-hot (`254.15 MB`; `161 / 162`) | 57 | 85.7% | `79.5%` (`79.01%`) | `32.9%` (`38.89%`) | **83.2%** (+50.3 pts) |
 | **`marketshare_packtype.h5` (Stage 3)** | BGR `[0, 1]` + `10`-D Cat (`253.93 MB`) | 46 | `60.20%` Pack (1K) | `54.86%` Pack | **`29.60%` Stage-4 loss (`1,480`)** | **91.7% Pack** (+36.8 pts) |
-| **9-Model Compound Total** | **Serial 3-step chain (`2.31 GB` total)** | **3,053 -> 2,659** | **`52.00%` Ceiling (1K)** | **`76.22%` Variant** | **`42.32%` (`2,116/5,000`; `44.50%` 1K)** | **`82.30%` (`83.20%` remap / `84.00%` EXP-58)** |
+| **9-Model Compound Total** | **Serial 3-step chain (`2.31 GB` total)** | **3,053 -> 2,659** | **`52.00%` Ceiling (1K)** | **`76.22%` Variant** | **`42.32%` (`2,116/5,000`; `44.50%` 1K)** | **`82.30%` (`83.20%` remap / `84.00%` size-switch)** |
 
 Even with 100% Oracle Brand labels, the `.h5` chain hits a 52.00% ceiling because 1,480 of 5,000 crops (29.60%) pass Variant only to fail at `marketshare_packtype.h5` (21.81% on sachets, 15.35% on wrappers, and 0% on `PW__Bar`, `Roll_On`, and `Spray`). Bypassing that pack classifier via our 2,659-SKU catalog lookup lifts legacy `test_5k` accuracy from 42.32% to 71.92%; Option 2 then closes the -21.92 pp competitor variant gap (`65.16%` Rival vs. `87.08%` Unilever) and raises `W1` from 34.82% to 73.68%.
 
@@ -115,7 +107,7 @@ The remaining 32% (~3.5 groups per shelf) are lookalike ties (`50g` vs. `100g` s
 1. **Three-band zoom sheet and tube unwarping:** Builds `[Full Crop | 2x Bottom-30% Weight Band | 2.5x Reference-Variance Band | Top-22% Cap Crown]`. Squeeze tubes (`h/w >= 1.75`) receive 1.15x horizontal foreshortening correction, which raises tube SKU accuracy from 77.0% to 89.0%.
 2. **Prefix context caching (88.4% hit rate):** Places invariant catalog rubrics first so repeated prefixes bill at 90% off (`USD 0.054` vs. `USD 0.54 / 1M` Priority tokens).
 3. **Pre-choice evidence decoding and logprob fusion:** Decodes `pack_size_read`, `distinctive_cue`, and `brand_read` before `choice` (+8.9 pts over choice-first) and fuses VLM logprobs (0.62) with Stage-2A similarity (0.38) when top-2 token margin falls below `0.35`.
-4. **Deterministic pack-size switch (`<1 ms`):** Matches parsed `g`/`ml` stamps against shortlist sister SKUs (83.50% Val / 84.00% Test on `EXP-58`, Paired McNemar `p = 0.006`, 0 cross-brand errors), guarded by a `0.045` cosine veto and open-set competitor floor (1.00% False HUL Rate).
+4. **Deterministic pack-size switch (`<1 ms`):** Matches parsed `g`/`ml` stamps against shortlist sister SKUs (83.50% Val / 84.00% Test on holdout evaluation, Paired McNemar `p = 0.006`, 0 cross-brand errors), guarded by a `0.045` cosine veto and open-set competitor floor (1.00% False HUL Rate).
 
 ### Stage 3 Shelf Aggregation
 
@@ -160,7 +152,7 @@ The Modern Trade and General Trade Cloud Run workers accept Unilever's inbound r
 | Alternative Evaluated | Sandbox Result | Reason Rejected as Primary Default |
 | :--- | :--- | :--- |
 | **Option 1: Pure `gemini-embedding-2` (Embedding-Only)** | **80.9%** 5-Attr (`1K`), `0.90s` P50, `₹0.045/shelf` | Trails by `-2.7 pp` on identical-artwork `50g` vs. `100g` stamps; retained as `>85%` quota spillover brake (`0` generative VLM calls). |
-| **Option 3: LoRA SFT (`EXP-29/33`)** | **85.0% Val / 82.1% Test** (`hul_variants`), `₹0.125/shelf` | Wider `2.9 pp` val-to-test gap vs. `0.5 pp` on Option 2 and needs periodic SFT refreshes; kept as Tier-2 challenger. |
+| **Option 3: LoRA SFT (Rank-4 Adapter)** | **85.0% Val / 82.1% Test** (`hul_variants`), `₹0.125/shelf` | Wider `2.9 pp` val-to-test gap vs. `0.5 pp` on Option 2 and needs periodic SFT refreshes; kept as Tier-2 challenger. |
 | **Closed-Set `MaxViT-Tiny` / `V-JEPA 2`** | `86.77%` (`hul_variants`) / `84.50%` (`hul_golden` 1K) | Misses 737 catalog SKUs on `MaxViT`, scores **0.0% on Day-0 launches**, and leaves GPUs 83% idle off-peak. |
 | **Full-Shelf Single-Call VLM** | `45.6%-46.3%` E2E on `ms_json_golden`, `₹1.41-₹2.15/shelf` | Attention dilution across 35 to 120 small packs cuts accuracy below 47% at **11.7x** higher shelf cost. |
 
