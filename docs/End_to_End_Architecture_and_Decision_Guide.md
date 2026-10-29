@@ -1,128 +1,197 @@
-# End-to-End Architecture and Decision Guide
+# **End-to-End Architecture Guide**
 
-## Context & Problem Statement
+## **Context**
 
-Field representatives upload 506,531 store shelf photos per day (`15.20M/month`, `800,000/day` peak) from `Sales EDGE` across Modern Trade supermarkets and `Shikhar` across General Trade Kirana shops. Over 60% of daily traffic arrives during a four-hour evening window between 17:00 and 21:00 IST. Those photos drive two commercial workflows: corporate and brand Share-of-Shelf (SoS) reporting (`323,935` photos/day) and monthly retailer trade incentive payouts (`182,596` Merchandising and Promotional Compliance photos/day).
+This guide summarizes the target architecture across the six tabs of this design document, sized for 500,000 store shelf photos per day (15.0M per month).
 
-Unilever's legacy Azure stack and draft `LLD001 v0.1` lift-and-shift design split those workflows across 14 separate model weights hosted on dedicated GPU endpoints. An audit of the raw cloud storage buckets (`5.14M` objects), legacy `.h5` and `ONNX` binaries, and orchestration workflows exposed five production bottlenecks:
+Field uploads arrive from the Sales EDGE (Modern Trade) and Shikhar (General Trade) apps during the 10.5-hour daytime store window (07:30 to 18:00 IST).
 
-1. **Serial model chaining caps SKU accuracy at 42.32%:** Market Share chained one 640px detector into nine InceptionV3 `.h5` crop classifiers (`2.31 GB`, `3,053` softmax classes). Although isolated variant heads scored 65.7% to 98.9%, serial errors across brand (`12.94%` loss), category (`5.04%`), variant (`10.10%`), and 299x299 square-distorted packaging (`29.60%` loss on `1,480` of `5,000` crops) depressed blind `N=5,000` 5-attribute SKU accuracy to `42.32%` and held Pay-for-Performance (P2P) basepack reliability (`W1`) at `34.82%`.
-2. **Closed-set blindness on new launches and competitors:** Adding a new Unilever SKU or a 4-week festive promo pack (`B1G1`, `Rs 10 Off`, `20% Extra`) scored `0.0%` (`0/18`) for 3 to 4 weeks until field teams collected and retrained store crops. Meanwhile, `874` regional competitor brands collapsed into coarse `"Others"` buckets (`-21.92 pp` rival variant gap).
-3. **Kirana bay suppression and flat planogram scoring:** Cross-class greedy NMS in the legacy 640px Merchandising detector let large display-bay boxes suppress interior product packs (`51.1%` Bay F2), while the 209-class Merchandising `.h5` classifier ignored row order, brand blocking, and Out-of-Stock (OOS) empty shelf gaps.
-4. **Evening upload drops and false zero-payout penalties:** Market Share workflows rejected uploads after `18:00 IST` (`HTTP 200` returned to mobile while payloads dropped), and Merchandising timeouts (`>180s`) emitted `AWP_Presence: "N", Earning: "0"` to the task callback API and zeroed retailer payouts.
-5. **High GPU idle cost and EOL runtime debt:** Hosting 11 to 14 dedicated GPU endpoints across a 4-hour evening peak cost `₹0.320` per Market Share shelf (`₹48.63 Lakhs/month` across all 4 workloads) and required Security Exception `IST0001092` for End-of-Life `Python 3.8-3.10` and `azure-cli`.
+These photos drive two daily business workflows: [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu) (Share of Shelf) and [Merchandising Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.b5xo3ahiv7af) (retailer payouts).
 
-![Figure 1: Legacy 14-Model Stack vs. Unified 4-Stage GCP Architecture](images/fig_pipeline_design_marketshare_merch.png)
+In the existing system (LLD001 v0.1), both workflows run across 14 separate model weights hosted on dedicated GPU endpoints.
 
-*Figure 1: Comparison of the 14-model GPU chain (`42.32%` SKU accuracy, `₹48.63L/mo`) against the unified 4-stage serverless architecture (`82.3%-84.0%` SKU accuracy, `₹20.23L/mo`).*
+As detailed in [Existing Model Analysis](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.ipskbbbvu50h), chaining separate classifiers compounds errors at every step and caps five-label SKU accuracy at 42.32% on 5,000 crops.
 
-## Unified Architecture Target State
+- **Goals:** Replace the existing 14-model GPU stack on Google Cloud to lift 5,000-crop SKU accuracy from 42.32% to 82.30% to 84.00% (95.20% on 1,000 crops), onboard new SKUs in under 60 seconds without retraining, process daytime and post-18:00 IST uploads 24x7 without drops, and lower AI inference cost to $0.00160 (₹0.15) per shelf (see [Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j)).
+- **Non-Goals:** Changing mobile capture apps, network perimeters, or downstream database tables. Load balancers, Cloud Armor WAF, the Shared VPC perimeter, Cloud Composer, and Cloud SQL MySQL 8.4 schemas stay unchanged.
 
-`LLD001 v0.2` replaces all 14 legacy model endpoints with a single 4-stage catalog funnel running inside stateless Python 3.12 Cloud Run CPU workers (`4 vCPU, 8 GiB RAM, min 4 / max 80`) behind a durable Cloud Pub/Sub event queue. Workers execute spatial detection and catalog indexing on CPU (`₹0` GPU and `₹0` Vector DB cost) and call two managed Vertex AI APIs (`gemini-embedding-2` and `gemini-3.5-flash-lite`) over Private Service Connect inside Unilever's Shared VPC (`ul-fs-p-plvpc-01`).
+## **Key Findings**
 
-![Figure 2: Serverless Production Architecture on Google Cloud](images/architecture.png)
+Testing on the leak-free single-crop (1,000 and 5,000 crops), full-shelf, and display-bay benchmarks built in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) established six findings:
 
-*Figure 2: Shared VPC topology connecting mobile ingestion, Pub/Sub surge buffering, Cloud Run CPU spatial workers, Private Service Connect Vertex AI APIs, and Cloud SQL / BigQuery persistence.*
+- **Replacing the classifier chain with a four-stage funnel doubles accuracy:** Matching clear products in memory and reading fine print on lookalikes lifts five-label SKU accuracy from 42.32% to 82.30% to 84.00% on 5,000 crops (95.20% on 1,000 crops).
+- **Looking up pack type in the catalog removes the single largest error source:** In [Existing Model Analysis](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.ipskbbbvu50h), 29.60% of crops got brand, category, and variant right and then failed on the 46-folder pack classifier. Looking up container shape in the 2,659-SKU catalog lifts existing accuracy from 42.32% to 71.92% (+29.60 pp) before changing any vision model.
+- **Two-thirds of crops need no LLM call:** Comparing each crop against a < 25 MB in-memory photo gallery (`gemini-embedding-2`) resolves 68% of product groups in under 1 millisecond on CPU. Only the remaining 32% of lookalike ties (such as 50g vs. 100g sister packs) are sent to `gemini-3.5-flash-lite`.
+- **New launches work on Day 1 without retraining:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), 1,121 of 2,659 catalog SKUs (42.2%) had zero training crops, where closed-set classifiers score 0.0%. Adding 3 to 5 reference photos to the in-memory gallery takes under 60 seconds and reaches 94.4% (17/18) on unseen launches.
+- **Filtering out background store clutter saves 80% of merchandising API calls:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), 61.0% to 92.1% of Kirana store boxes sat outside the Unilever display bay. Keeping only in-bay products (IoA >= 0.50) prunes 61.0% of counter clutter before recognition begins.
+- **Queuing and CPU workers eliminate post-18:00 IST drops at 500,000 shelves/day:** Buffering uploads in Cloud Pub/Sub and running stateless Python 3.12 Cloud Run CPU workers (4 vCPU / 8 GiB; 10 to 12 active containers during 07:30 to 18:00 IST, max 80) handles bursts up to 80 workers with 0.00% HTTP errors (2.69s median latency) and replaces false zero-payout timeouts with `RETRY_PENDING`.
 
-```mermaid
-flowchart TB
-    ING["1. Mobile Ingestion & Pub/Sub Queue<br/>506,531 Photos/Day (<150 ms HTTP 202 Ack, 0 Post-18:00 Drops)"] --> DET["2. Stage 0 & 1: Dual-Buffer + 960px CPU ONNX (80 ms)<br/>99.0% Bay & 96.2% Pack mAP50 | -61% Clutter Gate | 35 -> ~11 Twin Medoids"]
-    DET --> EMB["3. Stage 2A: gemini-embedding-2 + <25 MB RAM Index<br/>2,659 SKUs (10,082 Studio & Clean Anchors) + Shape Priors"]
-    EMB -->|"68% Clear Margin (0 LLM Tokens)"| OUT["5. Stage 3: Row Graph, P2P & Callback Guard<br/>63-AWP Planogram | 874 Rivals | W1 = 73.68% | RETRY_PENDING Guard"]
-    EMB -->|"32% Lookalike Ties (~3.5 Groups/Shelf)"| VLM["4. Stage 2B: Gemini 3.5 Flash-Lite 3-Band Zoom<br/>88.4% Prefix Cache + <1 ms Pack-Size Switch"]
-    VLM --> OUT
-```
 
-### Four Runtime Stages
-1. **Stage 0 & Stage 1 (Photometry & CPU Spatial Detection, `92 ms` CPU):** Shades-of-Gray white balance splits each photo into an unsharpened RGB buffer for color-accurate embeddings and an L* contrast-boosted buffer for edge detection (`-6.0 pp` hue-shift error avoided). Our distilled 960px dual-class CPU ONNX detector separates `Class 0` display bays (`99.0%` mAP50) from `Class 1` product packs (`96.2%` mAP50), enforces horizontal shelf-plank support, prunes `61%` of out-of-bay Kirana counter clutter before cloud calls, and groups touching identical neighbors (`35` facings compressed into `~11` medoids, `3.2x`).
-2. **Stage 2A (Multimodal Catalog Fast-Exit, `68%` of groups):** Batch-encodes the `~11` medoids via `gemini-embedding-2`, applies a `2.4 MB` residual InfoNCE adapter, and scores cosine similarity against all `2,659` SKUs (`10,082` anchors) in `<1 ms` inside `<25 MB` of container RAM. Clear-margin matches (`68%` of groups) exit immediately with all 5 attributes and `0` generative LLM tokens.
-3. **Stage 2B (Three-Band Zoom Verification, `32%` ties):** Batches the remaining `~3.5` lookalike ties per shelf (`50g` vs. `100g` sister sizes, curved tubes, or subtle variant banners) into one `Gemini 3.5 Flash-Lite` composite contact sheet (`[Full Crop | 2x Bottom Weight Band | 2.5x Saliency Band | Top Cap Crown]`, `88.4%` prefix cache hit rate) followed by a `<1 ms` deterministic gram/ml pack-size switch (`83.50%` Val / `84.00%` Test exact SKU).
-4. **Stage 3 (Spatial Compliance, Rival Resolution & Payout Guardrail):** Smooths category continuity along shelf planks (`1.25%` single-shelf SoS MAE; `2.00%` multi-shot visit MAE), deduplicates overlapping aisle panoramas, evaluates `63` `AWP_Code` row-by-row planogram templates, upgrades `"Others"` into `874` named competitor brands (`1.00%` False Unilever Rate), and routes any `>180s` timeout or `5xx` error to `RETRY_PENDING` dead-letter retry so transient faults do not trigger false `Earning = "0"` retailer denials.
+*Figure 1: Four-stage pipeline flow combining a 960px Distilled YOLO11n CPU ONNX detector (Stage 1), in-memory gemini-embedding-2 vector retrieval (Stage 2A, 68% direct match), batched gemini-3.5-flash-lite visual tie-breaking (Stage 2B, 32% lookalike ties), and business use-case solvers (Stage 3).*
 
-## Data & Catalog Governance
+## **How the New Pipeline Works**
 
-Raw client storage held `1,002,209` isolated crops and `67,062` store shelf annotations across four unlinked buckets (`brand_data` lacked variants and pack shapes; `70.7%` of `variant_*` lacked pack suffixes; `54.2%` of `pack_data` lacked SKU names). Training or scoring directly on raw folders introduced `399,769` byte duplicates, `20,421` filename collisions (`21.4%` false-match rate), `8,398` synthetic `copy*`/`DA_TBC_*` files, burned-in red/green QA boxes on legacy `mt/` shelves, and `4.95%` train-to-test store leakage.
+Every shelf photo passes through four stages inside a single stateless Cloud Run CPU worker.
 
-Our deterministic catalog builder linked all silos by cryptographic `MD5` byte digest and a 7-step container resolver without dropping a single real camera degradation (`100%` of blurry, tiny `<64px`, and foil-glare crops remain in `val`, `test`, and `test_5k`):
-- **Locked 5-level `2,659`-SKU catalog (`SHA-256: b2dc368a0bf972a6`):** Unifies `1,048` Unilever variants, `874` rival variants (`1,922` in `hul_variants`), and `737` brand-level lines across `10` categories and `18` container forms (`0` `"Unknown"` fields), with `100%` backward parity onto Unilever's `46` legacy `Category__PackType` pairs. Simply bypassing `marketshare_packtype.h5` via this catalog lifts legacy `N=5,000` SKU accuracy from `42.32%` to `71.92%` (`+29.60 pp`) before visual model upgrades.
-- **Store-disjoint evaluation (`15/15` automated QC gates):** Isolates `11` Golden benchmark suites (`132,844` verified boxes) by physical `outlet_code` (`356` MT stores + `532` Talker stores) and store-visit ID (`2,479` disjoint visits).
-- **Under-60-second Day-0 onboarding:** Uploading `1` studio packshot and `1` catalog row appends an embedding anchor to the `<25 MB` RAM gallery in `<60 seconds` and reaches `94.4%` (`17/18`) blind Day-0 accuracy (`5 minutes` for festive promo packs at `84%-96%` accuracy) without 3-to-4-week retraining cycles.
+Stages 0 through 2B identify every product on the shelf, and Stage 3 runs the domain solvers detailed in [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu) and [Merchandising Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.b5xo3ahiv7af).
 
-## Market Share & Merchandising Workload Comparison
 
-| Capability / Metric | Legacy Baseline (`v0.1` Audit) | Target `v0.2` (Option 2) | Commercial Impact |
-| :--- | :---: | :---: | :--- |
-| **Blind 5-Attr Exact SKU (`N=5,000`)** | `42.32%` (`44.50%` on `1K`) | **82.30% (`5K`) / 83.5% Val - 84.0% Test** | **+40.0 pp** SKU lift; closes rival gap (`36.0% -> 75.7%`). |
-| **Day-0 Unseen Launch Accuracy (`18` SKUs)** | `0.0%` (`0 / 18`, 3-4 wk lag) | **94.4% (`17 / 18`) in `<60s`** | Captures launch & 4-week festive promo share from Day 1. |
-| **P2P Basepack Weight `W1` (`ms_json_golden`)** | `34.82%` (`2,223` usable facings) | **73.68% (`6,012` verified facings)** | **2.12x `W1` reliability** & **+170.4%** usable facings/100 shelves. |
-| **Competitor Share-of-Shelf (`"Others"`)** | Collapsed into `"Others"` | **874 Named Rivals (`1.00%` False HUL)** | Brand-vs-brand competitive SoS (`1.25%` shelf / `2.00%` visit MAE). |
-| **Merchandising Display-Bay Isolation** | `51.1%` Bay F2 (greedy NMS) | **94.7% Bay F2 (`99.0%` mAP50)** | Stage 1.5 prunes **61% counter clutter** (`-80%` bay API cost). |
-| **In-Bay SKU, Planogram & OOS Gaps** | `44.5%` crop (`0.1%` wild), `0` row logic | **98.81% Val / 97.19% Test SKU** | **95.1% brand-block purity** & **94.6% OOS recall** across 63 `AWP`s. |
-| **Promo Packs & 3-Class Shelf Talkers** | `0%` Day-0 `ViT` / `49.2%` Talker F2 | **84%-96% Promo / 90.02% Talker F2** | Reads printed & handwritten rupee tags (`93%-100%` OCR). |
-| **Evening Surge & Timeout Payout Safety** | Post-`18:00 IST` drops; `Earning: "0"` | **24x7 Pub/Sub + `RETRY_PENDING`** | **0 lost evening visits** and **0 false `Earning = "0"` denials**. |
+*Figure 2: Production cloud topology connecting mobile uploads, Cloud Pub/Sub buffering, stateless Cloud Run CPU workers, Private Service Connect Vertex AI endpoints, and Cloud SQL and BigQuery storage.*
 
-## Production Options & Cost Analysis
 
-All unit costs bind directly to live Google Cloud Billing Catalog SKU IDs (`1 USD = ₹95.98875`) with zero unpriced GPU or Vector DB sidecars. Because >60% of uploads arrive during a 4-hour evening burst, self-hosted open-weight GPU pools (`24x NVIDIA L4`) sit `83%` idle for 20 hours/day (`₹98.40L/mo`), whereas serverless PayGo APIs bill strictly per uploaded photo:
+*Figure 3: End-to-end request lifecycle showing how shared Stage 1 detections and Stage 2 identities feed the 8 Market Share tasks (Row A) and 4 Merchandising tasks (Row B).*
 
-![Figure 3: Monthly Cloud Portfolio Spend and Matched N=5,000 Accuracy Slices](images/fig_finops_cost_and_slice_deepdive.png)
+### **Stage 0 and Stage 1: Image Cleanup and Shelf Detection (92 ms CPU)**
 
-*Figure 3: Monthly 4-workload cloud spend at `506,531` photos/day (`15.20M/month`) alongside matched `N=5,000` accuracy across legacy `.h5` silos and difficult container shapes.*
+**Data insight driving design:** Auditing raw store photos in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) showed 35.5% motion blur, 66.1% sub-64px cutouts, and partial shelf annotations (~40% of visible packs boxed).
 
-| Architecture Option | How It Works | 5-Attr SKU Acc | Pure MS / Shelf | 4-Workload Monthly (`15.2M`) | Net Monthly Savings vs. Legacy | Recommended Role |
-| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
-| **Option 1: Embedding-Only** | CPU ONNX + `gemini-embedding-2` (`768-D` Matryoshka, `0` generative VLM tokens, `0.90s` P50) | `80.9%` (`90.1%` 3-Attr) | **₹0.045** | **₹8.15 Lakhs** | **-₹40.48L/mo (-83.2%)** | `>85%` evening quota brake & ultra-low-cost GT tier. |
-| **Option 2: Hybrid (`Recommended`)** | Option 1 (`68%` exit) + `Flash-Lite` 3-band zoom on `32%` ties (`2.69s` P50) | **`82.3% (5K) / 84.0%`** | **₹0.120** (`₹0.095` Std / `₹0.080` Flex) | **₹20.23 Lakhs** (`₹16.32L` Std) | **-₹28.40L/mo (-58.4%, ₹3.41 Cr/yr)** | **Primary production default** across all 4 workloads. |
-| **Option 3: LoRA SFT Challenger** | Option 2 + tenant-isolated `Flash-Lite` LoRA adapter (`₹0/hr` idle) | `82.1%` Test / `85.0%` Val | **₹0.125** | **₹21.10 Lakhs** | **-₹27.53L/mo (-56.6%)** | Optional Phase-2 A/B challenger on dense MT aisles. |
-| **Legacy GPU Baseline (`v0.1`)** | 14 `.h5`/`ViT`/`ONNX` models on dedicated GPU endpoints | `42.32%` (`0%` Day-0) | ₹0.320 | **₹48.63 Lakhs** | Baseline (`0.0%`) | Retire after Phase-2 A/B sign-off + 7-day warm hold. |
+Brightening dark shelves helped box detection but shifted dark blue sachets toward black (-6.0 pp), while fine-tuning YOLO on partially boxed shelves taught it to suppress unboxed products.
 
-## Security & Governance Controls
+- **Dual-buffer image preparation (12 ms):** The worker keeps two copies in memory: a contrast-boosted copy (LAB L*-channel CLAHE) for box detection, and a white-balanced, colour-true RGB copy for SKU recognition, plus a 1.15x cylindrical unwarp on narrow tubes so edge text stays readable.
+- **Finding bays, products, and talkers via Distilled YOLO11n and YOLO11s ONNX (80 ms):** A 960px Distilled YOLO11n CPU ONNX detector (2.6M parameters) locates Class 0 display bays (99.0% mAP50) and Class 1 product packs (96.2% mAP50) in one pass, while a 960px YOLO11s ONNX detector finds 3-class promotional shelf talkers (98.2% mAP50).
+- **Why we distill on SKU-110K instead of fine-tuning on partially boxed store shelves:** Distilling YOLO11n from a 1280px YOLOv12s teacher pre-trained on exhaustively boxed SKU-110K (11,762 shelves, 1.73M boxes) and checkout layouts (800 images) avoids false-negative penalties on unboxed store pockets.
+- **In-bay filtering and adjacent twin grouping:** Class-aware Soft-NMS keeps display bays from erasing products inside them, a Display Boundary Filter (IoA >= 0.50) drops 61.0% of counter clutter outside the bay, and perceptual hash grouping collapses adjacent identical packs into ~11 unique crops per 35-facing shelf (3.2x fewer API calls).
 
-Upgrading to `LLD001 v0.2` strengthens Unilever's security and AI governance posture across four controls:
-- **Closes Security Exception `IST0001092`:** Retires EOL `Python 3.8-3.10`, legacy `.h5` deserialization, and `azure-cli` in favor of `python:3.12-slim`, `onnxruntime` (MIT license), and `google-genai` (`0` static service-account JSON keys).
-- **AI Foundations Tier-1 Whitelisting:** Updates `LLD001` Section 5.5 from *"Not Applicable"* to **Required** for two first-party Google GA APIs (`gemini-embedding-2` and `gemini-3.5-flash-lite`), covered by Google Cloud Enterprise Terms, **Zero Data Retention** (`0` customer training), and Google GenAI IP Indemnity. None of the 8 evaluated open-weight R&D models (`DINOv3`, `Qwen3.5`, `V-JEPA 2`, `MaxViT`) enter production.
-- **Zero-egress VPC & untrusted OCR isolation:** All Vertex AI calls traverse Private Service Connect (`gfr-fs-p-psc-subnet-01`) inside `ul-fs-p-plvpc-01`, and shelf sticker text is isolated inside `<untrusted_pack_text>` XML tags with `enum`-constrained JSON schema decoding.
-- **Detector open-source license choice:** Runtime containers use MIT-licensed `onnxruntime`; Unilever Legal can either reference Unilever's existing Ultralytics Enterprise License (`Track A`) or swap in our drop-in `Apache-2.0` (`RT-DETR` / `YOLOX`) distilled 960px ONNX graph in 48 hours (`Track B`).
+### **Stage 2A: Matching Clear Products in Memory (< 1 ms CPU)**
 
-### LLD Component Mapping
+**Data insight driving design:** Stratifying test crops by training sample count in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) revealed that 42.2% of catalog SKUs (1,121 of 2,659) have zero training crops and 356 rare SKUs have only 1 to 2 crops.
 
-For Unilever Infrastructure and Security reviewers tracing box IDs from `LLD001 v0.1` to `v0.2`, only the inference and queueing tier changes while perimeter, Composer, Cloud SQL, and CMEK storage stay intact:
+Closed-set classifiers score 0.0% on unseen SKUs and 27.9% on 1 to 2 crop SKUs, motivating a training-free reference gallery that embeds all ~11 unique shelf crops in one batched `gemini-embedding-2` call (180 ms):
 
-| Functional Tier | `LLD001 v0.1` Draft | `LLD001 v0.2` Target State |
-| :--- | :--- | :--- |
-| **Perimeter & Ingestion Router** | Load Balancers, Cloud Armor WAF, Frontend/Backend Cloud Run (sync dispatch) | **Unchanged perimeter**; the ingestion router publishes async events + `(cluster, ol_segment)` canary hash (`<150 ms` `HTTP 202`). |
-| **Async Event Bus & DLQ** | Not present (post-`18:00 IST` MS drops; sync `180s` timeouts) | **Added:** Cloud Pub/Sub (`Sub A` legacy, `Sub B` target, + dead-letter retry topic). |
-| **Serverless Inference Workers** | `2 vCPU / 8 GiB, max 510` nodes calling external GPU endpoints (`IST0001092`) | **Upgraded:** `Python 3.12, 4 vCPU / 8 GiB, min 4 / max 80` running 960px CPU ONNX + `<25 MB` RAM catalog (`IST0001092` closed). |
-| **Custom GPU Model Endpoints** | 11 to 14 custom Vertex AI Online GPU Endpoints (`₹48.63L/mo`) | **Retired** after Phase-3 cutover; replaced by PSC calls to `gemini-embedding-2` & `gemini-3.5-flash-lite`. |
-| **Callback, ETL & Cloud SQL** | Task Callback API (`Earning: "0"` on timeout), Composer, Cloud SQL MySQL 8.4 | **Unchanged DDL**; adds `RETRY_PENDING` timeout guard on the task callback API and fixes empty-folder check in Cloud Composer. |
-| **Dual-Region CMEK Storage** | Dual-region CMEK Cloud Storage buckets | **Unchanged**; adds 256-way MD5 hex prefix sharding and SHA-256-locked `2,659`-SKU gallery manifest. |
+- **Offline gallery build with Multi-Prototype K=3 K-Means and Residual InfoNCE[^c1] Adapter:** We pool 10,082 clean reference crops covering all 2,659 Unilever SKUs and 874 competitor brands, encode each into a 768-D vector with `gemini-embedding-2`, and store up to K = 3 angle centroids per SKU (< 25 MB RAM) plus a 2.4 MB Residual InfoNCE Adapter that separates sister variants.
+- **Runtime matching in worker RAM (68% Direct Match, < 1 ms):** A single matrix multiply (`[11, 768] @ [768, 10082]`) with aspect-ratio filtering scores all 11 crops against all 2,659 SKUs in 0.12 ms inside worker RAM without an external vector database. When the top-1 score is >= 0.78 and the margin over the runner-up SKU is >= 0.04 (68% of groups), the worker commits all five SKU labels immediately with zero LLM tokens.
 
-## Canary Deployment & Rollout Strategy
+### **Stage 2B: Reading Fine Print on Lookalikes (32% Ties)**
 
-Load testing with `locust 2.46.7` across `10`, `40`, and `80` concurrent workers (`570` requests) verified `0.00%` HTTP/socket failures and `<4.90s` P95 latency (`2.69s` P50 on 35-pack shelves; `14` active containers needed at `40 images/sec` festive surge). Before scaling to 100%, rollout proceeds through four gated phases with 60-second automated circuit breakers (`<5-minute` zero-DDL rollback):
+**Data insight driving design:** Error trace analysis in [Existing Model Analysis](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.ipskbbbvu50h) and [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu) showed that `gemini-embedding-2` already places the true SKU in its Top-5 shortlist on 93.3% of crops.
 
-![Figure 4: Locust Stress Test, Latency Bridge, and 4-Phase Canary & A/B Cutover](images/fig_path_to_prod_locust_and_rollout.png)
+Over 63% of remaining Stage 2A misses are lookalike sister variants (SPF 30 vs. SPF 50), gram/ml size twins (50g vs. 100g), or coupled `<Category>__<Pack>` errors (29.60% failure rate):
 
-*Figure 4: Concurrency load-test results (`0.00%` failures up to `80` workers), batched Cloud Run latency bridge (`2.69s` P50), and the 4-phase shadow, cluster canary, and 50/50 A/B cutover.*
+- **Zoomed four-panel contact sheet:** For the remaining 32% of groups (~3.5 ties per shelf), the worker stitches `[Full Crop | 2x Bottom Net-Weight Band | 2.5x Saliency-Diff Band | Top Cap Crown]` alongside the top 5 candidate SKU names and pairwise diff tokens from Stage 2A (88.4% context prefix cache hit rate).
+- **Pre-choice text reading and catalog pack lookup:** One batched call to `gemini-3.5-flash-lite` transcribes visible brand, variant words, and gram/ml weight inside isolated `<untrusted_pack_text>` tags before picking the winning SKU via Bayesian Product-of-Experts fusion, and maps container shape deterministically from the 2,659-SKU catalog (+29.60 pp lift).
 
-1. **Phase 0: Paired Dark Shadow (Weeks 1-2):** Legacy `v0.1` serves `100%` of live callbacks while `v0.2` processes a `100%` shadow copy into BigQuery (`0` production DB writes). Gate: `>= 99.9%` completion on `1M+` live shelves and `>= 75%` blinded SME Paired McNemar win share on `500` discordant crops (`p < 0.01`).
-2. **Phase 1: 10% Stratified Cluster Canary (Weeks 3-4):** Routes `10%` of `(cluster, ol_segment)` blocks (`~50.6K` photos/day, locked for the full 30-day P2P settlement cycle so co-occurrence matrices do not mix arms) to `v0.2`, with a `20%` cross-arm BigQuery mirror. Gate: `0` false `Earning = "0"` tickets, False Unilever Rate `<= 1.5%`, and 24h salesman re-shoot rate `<= Control`.
-3. **Phase 2: 50/50 Stratified A/B & Post-18:00 Recovery (Weeks 5-6):** Expands to `50%` of `(cluster, ol_segment)` blocks plus `100%` of post-`18:00 IST` Market Share uploads over a complete monthly `ROI_Pipeline` run. BigQuery publishes both `sos_v01_continuity` and `sos_v02_calibrated` views so brand analytics signs off 4-week share splice multipliers. Gate: realized `W1 >= 70.0%` vs. `~34.8%` Control and audited unit cost `<= ₹0.130/MS shelf`.
-4. **Phase 3: 100% Cutover & Endpoint Retirement (Week 7+):** Routes `100%` of traffic to `v0.2`, holds legacy endpoints at minimum replica for 7 days, then deletes all 14 legacy endpoints and closes `IST0001092`.
+### **Stage 3: Scoring the Shelf for Business Use Cases (< 5 ms CPU)**
 
-## Stakeholder Sign-Offs & Deep-Dive Index
+Once every box on the shelf has a verified SKU identity and `(x, y)` coordinate, Stage 3 executes the deterministic business rules detailed in [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu) and [Merchandising Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.b5xo3ahiv7af):
 
-Four stakeholder sign-offs unlock Phase-0 shadow deployment next week:
-1. **Unilever Data Engineering (Tab 1):** Approve the `2,659`-SKU catalog rules (`Horlicks` `Bottle`/`Jar` boundary, `497` twin-folder merges, `69` promo-pack rollups, and raw pre-overlay `mt/` shelf exports).
-2. **AI Foundations & Legal (Tab 4):** Approve Tier-1 whitelisting for `gemini-embedding-2` and `gemini-3.5-flash-lite` under Section 5.5 and select Stage-1 ONNX Detector `Track A` (existing Ultralytics Enterprise license) or `Track B` (`Apache-2.0` export).
-3. **Cloud Infra & Security (Tabs 2, 3, 6):** Approve adding the Cloud Pub/Sub queue + dead-letter topic, `RETRY_PENDING` callback handling, and `Python 3.12` `4 vCPU / 8 GiB` worker sizing (`IST0001092` closure).
-4. **Brand Analytics & Commercial Ops (Tabs 5, 6):** Approve Option 2 Priority PayGo (`₹20.23L/mo`, `₹28.40L/mo` savings) and the 30-day `(cluster, ol_segment)` A/B & SoS continuity splice protocol.
+- **Market Share and P2P Basepack Weight ([Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu)):** Counts Unilever vs. 874 named competitor facings per category, adjusts for classifier sensitivity and specificity via Rogan-Gladen prevalence calibration and multi-shot panorama deduplication (0.93% Modern Trade SoS error; 1.00% multi-photo visit SoS error), and computes P2P Basepack Weight (`W1 = 73.68%`).
+- **Merchandising Across Three Pillars ([Merchandising Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.b5xo3ahiv7af)):** Executes **(1) Share of Shelf (SoS) & In-Bay Layout** (63 `AWP_Code` templates, `2.38%` strip SoS error, `94.4%–95.1%` brand-block purity, `92.6%` OOS gap F1), **(2) Promotions & Price Tags** (`94.1%` `"50% Free"`, `95.6%` `"Price Off"`, `90.02%` 3-class talker F2), and **(3) Bay Display & Clutter Filtering** (`98.8%` `Class 0` Bay F2, `61.0%` out-of-bay counter clutter pruned in `< 1 ms` CPU).
 
-| Tab | Deep-Dive Specification | Primary Audience & Contents |
-| :--- | :--- | :--- |
-| **Tab 1** | [**Data Forensics & Enrichment**](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) | `5.14M`-object audit, MD5 cross-bucket joins, 46-to-18 pack proof, `15/15` QC gates, and P2P `W1` simulation. |
-| **Tab 2** | [**Market Share Pipeline Design**](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu) | 9-model `.h5` audit (`42.32%`), Dual-Buffer photometry, 960px CPU ONNX, `<25 MB` RAM fast-exit, and 3-band zoom. |
-| **Tab 3** | [**Merchandising Pipeline Design**](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.b5xo3ahiv7af) | `Class 0` bay isolation (`-61%` clutter), 63-`AWP` row/OOS graph, 5-min promo onboarding, 3-class talkers, and `RETRY_PENDING`. |
-| **Tab 4** | [**Model Whitelisting Report**](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.9ne6rbyfqntg) | AI Foundations Tier-1/Tier-2 table, `Track A/B` ONNX licensing, 8 excluded R&D models, and 14-model retirement map. |
-| **Tab 5** | [**Cost Breakdown & Deep Dive**](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.87w0utgujfjp) | Live Cloud Billing SKU table, `₹0.120/shelf` & `₹20.23L/mo` budget, legacy GPU sizing, and 10-category / 15-pack slices. |
-| **Tab 6** | [**Path to Production & Cutover**](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.2mps6q7v4dun) | `LLD001` section deltas, `locust 2.46.7` load test (`570` reqs, `0%` errors), cluster A/B design, and 60s circuit breakers. |
+## **How We Evaluated & Results**
+
+Every benchmark dataset in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) is partitioned by store outlet and MD5 image digest so zero store fixtures or duplicate photos leak between train, val, and test splits across all 2,659 SKUs and 892 stores.
+
+### **1. Executive Map Across Document Tabs**
+
+The six tabs of this document follow a direct sequence from raw data forensics and baseline root-cause analysis to pipeline design, capacity sizing, and governance:
+
+
+| **Document Tab** | **How It Connects to Other Tabs** | **Headline Validated Outcome** |
+| --- | --- | --- |
+| **1. [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0)** | Cleans the 7 raw GCS silos into the 2,659-SKU catalog and 11 leak-free benchmarks used by every downstream tab. | Unified **2,659 Unilever SKUs + 874 competitor brands**, separated 18 canonical pack shapes from store aisles, and eliminated 399,769 cross-silo duplicates and burned-in QA boxes. |
+| **2. [Existing Model Analysis](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.ipskbbbvu50h)** | Benchmarks the existing 14-model GPU stack on the clean splits from Tab 1 to isolate the exact failure modes fixed in Tabs 3 and 4. | Chaining 9 classifiers compounds errors to **42.32% 5-attribute accuracy** on 5,000 crops (52.00% even with 100% Oracle Brand), scores **0.0% on 1,121 unseen SKUs**, and drops **51.1%** of merchandising bays. |
+| **3. [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu)** | Uses the shared Stage 1 detector and Stage 2A/2B retrieval funnel to solve all **8 Market Share tasks** and feed P2P weights. | Lifts 5,000-crop accuracy to **82.3% to 84.0% (95.2% on 1,000 crops)**, **Modern Trade SoS error to 0.93%**, **multi-photo visit SoS error to 1.00%**, and **P2P Basepack W1 from 34.82% to 73.68%**. |
+| **4. [Merchandising Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.b5xo3ahiv7af)** | Structures Merchandising into **3 Pillars** (1. SoS & In-Bay Layout, 2. Promotions & Price Tags, 3. Bay Display & Clutter Filtering) on top of the shared funnel. | Prunes **61.0% of out-of-bay counter clutter**, reaching **2.38% strip SoS error**, **98.2% in-bay Brand/Cat/Pack** (`64.3%` strict SKU), **94.4% to 95.1% brand-block purity**, **94.1% to 95.6% Promo Offer**, and **90.02% 3-class Talker F2**. |
+| **5. [Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j)** | Sizes daytime Cloud Run containers and Vertex AI throughput for the funnel in Tabs 3 and 4 at **500,000 shelves/day (15M/month)**. | Prices all Google Cloud services bottom-up across daytime store hours (07:30 to 18:00 IST) at **$0.00160 (₹0.15) per shelf** for AI inference and retires all 14 GPU endpoints and Document AI. |
+| **6. [Model Whitelisting Report](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.m11c1bw64077)** | Governs the production models selected in Tabs 3, 4, and 5 under LLD001 Section 5.5 AI Foundations compliance. | Whitelists **3 Tier-1 production assets** (Distilled YOLO11n/s CPU ONNX detectors, `gemini-embedding-2`, and `gemini-3.5-flash-lite`) under Zero Data Retention, CMEK, and Google IP Indemnity. |
+
+### **2. Use-Case & Task Summary (8 Market Share + 3 Merchandising Pillars)**
+
+The table below summarizes all production tasks evaluated in [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu) and [Merchandising Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.b5xo3ahiv7af):
+
+
+| **Domain & Solution Task** | **Evaluation Dataset & Scope** | **Existing Baseline** | **New Pipeline Result & Business Impact** |
+| --- | --- | --- | --- |
+| **MS 1: Full-Shelf Market Share (Modern Trade & Kirana)** | 200 Modern Trade & 151 General Trade full shelves | 34.82% P2P W1; competitors pooled in "Others" | **0.93% Modern Trade SoS error** (2.28% facing error); **68.3% Kirana row F2**; upgrades 66.4% of "Others" to exact SKUs; **P2P Basepack W1 = 73.68% (2.12x)**. |
+| **MS 2: Multi-Photo Store Visit Deduplication** | 100 to 150 store visits (2 to 5 overlapping aisle photos/visit) | Double-counts overlapping aisle photos | **1.00% to 2.25% visit SoS error** across overlapping photos (96.5% client-parity F2, 0.0% False Unilever attribution). |
+| **MS 3: Single-Crop SKU Classification at Scale** | 5,000 held-out product crops across 892 stores | 42.32% 5-attribute SKU (87.1% Brand, 54.9% Pack) | **82.30% exact 5-attribute SKU** (96.1% Brand, 91.7% Pack) in 0.82s (+40.0 pp, p < 10^-6). |
+| **MS 4: High-Precision Cap & Fine-Print Zoom** | 1,000 held-out product crops (4-panel zoom sheet) | 44.50% (52.00% with Oracle Brand) | **83.5% Val / 84.0% Test** single-pass zoom (94.0% Pack, 96.5% Brand) and **95.20%** on the full hybrid production lock. |
+| **MS 5: Zero-LLM & Fast-Skip Embedding Retrieval** | 5,000 crops & 18 unseen Day-0 product launches | 0.0% on 1,121 unseen catalog SKUs | **81.2% with 50% LLM skip** and **78.9% to 80.9% with zero LLM calls**; **94.4% (17/18) on Day-0 launches in < 60s**. |
+| **MS 6: Lookalike Sister Variant Disambiguation** | 1,000 lookalike crops across 1,922 sister variants | 44.50% on 9-model classifier chain | **85.0% Val / 83.5% Test** across lookalike sister variants and size twins in 0.56s. |
+| **MS 7: Brand & Competitor Attribution** | 1,000 crops spanning Unilever & 874 rival brands | 87.1% Brand; rivals grouped into "Others" | **95.9% exact Brand, 98.4% ownership accuracy, 0.4% False Unilever** (94.4% Brand in zero-LLM mode). |
+| **MS 8: 3D Packaging Shape Classification** | 1,000 & 5,000 crops across 18 canonical container shapes | 54.86% on standalone pack-type model | **93.3% to 94.0% (1K) and 91.7% (5K)** combining catalog lookup with top-cap crown zoom. |
+| **Merch Pillar 1: Share of Shelf (SoS) & In-Bay Layout** | 100 strips (`gt_hul_sessions`) & 25 test bays (`gtmerch_golden`) | 51.1% Bay F2; 53.2% E2E strict basepack; 58.0% Planogram | **2.38% strip SoS error**; **98.2% avg. Brand/Cat/Pack** (`64.3%` strict Exact-SKU on test bays; `574` `"Others"` boxes named); **94.4% to 95.1% purity**; **92.6% OOS F1**. |
+| **Merch Pillar 2: Promotions and Price Tags** | 1,000 promo crops (`hul_promos`) & 50 test shelves (`hul_talkers_golden`) | 75.0% fixed ViT (23.5% `"50% Free"`); 49.2% Talker F2 | **84.0% Brand+Cat+Pack** (`93.7%` Brand, `94.1%` `"50% Free"`, `95.6%` `"Price Off"`); **90.02% annotated-zone Talker F2** (`98.2%` mAP50) in 3.05s. |
+| **Merch Pillar 3: Bay Display and Clutter Filtering** | 100 full store shelves (`gtmerch_golden` test) | 0% filtered (61.0% counter clutter sent to classifier) | **98.8% `Class 0` Bay F2**; prunes **61.0% out-of-bay counter clutter (`< 1 ms` CPU)**; **77.3% full-shelf box F2** (`94.7%` pre-cut block purity) in 3.7s. |
+
+### **3. Architecture Options Overview**
+
+The table below compares the four evaluated architecture options at 500,000 shelves/day (see [Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j) for complete infrastructure and SKU pricing tables):
+
+*Figure 4: Monthly cloud spend at 500,000 shelves/day across architecture options (Panel A) alongside accuracy across Market Share tasks (Panel B1) and Merchandising tasks (Panel B2).*
+
+
+| **Architecture Option** | **How It Works** | **5-Attribute SKU Accuracy (1K / 5K)** | **AI Inference Cost / Shelf** | **Operational Trade-Off** |
+| --- | --- | --- | --- | --- |
+| **Option 3: Hybrid + Local CPU ONNX Embedder** | Distilled INT8 CPU ONNX embedder ($0 Embedding API) + `gemini-3.5-flash-lite` on 32% ties | 94.8% / 82.1% to 83.8% | $0.00058 (₹0.06) | Lowest variable cost; requires maintaining local ONNX embedder alongside gallery. |
+| **Option 1: Embedding-Only** | 960px Distilled YOLO11n ONNX + `gemini-embedding-2` (0 LLM tokens, 0.90s median latency) | 91.6% / 78.9% to 80.9% | $0.00105 (₹0.10) | Fastest turnaround; lower accuracy on fine-print gram/ml size twins. |
+| **Option 2: Hybrid (Recommended)** | **Option 1 (68% direct match) + `gemini-3.5-flash-lite` on 32% lookalike ties (2.69s median latency)** | **95.2% / 82.3% to 84.0%** | **$0.00160 (₹0.15)** | **Best accuracy on lookalike variants and promo bands; Day-1 SKU onboarding in < 60s.** |
+| **Existing GPU Baseline (v0.1)** | 14 separate model weights on dedicated L4 GPU endpoints + Document AI | 44.5% / 42.32% | $0.00200 to $0.00267 | Saturates above 150,000 shelves/day and requires retraining for every new launch. |
+
+### **4. Error Taxonomy, Confidence Calibration & Operational Limitations**
+
+To prevent downstream cross-sell algorithms from consuming low-evidence guesses on blurred or occluded crops, the pipeline logs calibrated per-attribute confidences (`confidence["brand"]`, `confidence["base_variant"]`, `confidence["packaging_type"]`, `confidence["category"]`), `joint_confidence` in `[0.02, 0.985]` (eliminating `1.0` confidence saturation from `84.1%` to `0.0%`), and `abstain_recommended`:
+
+- **82.2% of SKU errors still get `Brand` right (`148 / 180` errors on 1,000 crops):** Out of 180 crops with any attribute error, **53.3% (`96`)** have `Brand`, `Category`, and `Packaging Type` 100% correct and differ only on micro-text sibling variants (`margin < 0.025`, e.g., *Lakme Sunscreen SPF 50* vs. *SPF 24*), **22.2% (`40`)** are same-brand container shifts (*Comfort Bottle* vs. *Pouch*), **6.7% (`12`)** are multi-category brands (*Dove*), **9.4% (`17`)** are within-category cross-brand errors, and only **8.3% (`15` crops, `1.5%` of total)** are severe blur/occlusion misses.
+- **Stage-B reject abstention & hierarchical fallback:** Whenever the Stage-B contact-sheet verifier returns `choice = 0` ("none match / unreadable"), `joint_confidence` is capped at `<= 0.36` (`abstain_recommended = True`) and the endpoint returns `None` when abstention is enabled. For sibling-variant ties (`margin < 0.025`), downstream callers can either apply a global/category confidence threshold (`88.0%–90.7%` variant precision and `98.8%–99.4%` brand precision at $\tau \in [0.78, 0.85]$) or use **per-field abstention** (`abstain_per_field = True`) to keep high-confidence `Brand + Category + Pack` predictions while abstaining only on `base_variant`.
+
+## **Path to Production & Rollout**
+
+Production rollout, daytime capacity sizing, and governance are consolidated here and in [Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j) and [Model Whitelisting Report](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.m11c1bw64077) (replacing the standalone deprecated rollout tab).
+
+### **1. Specification Updates (LLD001 v0.1 to v0.2) & Daytime Sizing**
+
+Updating LLD001 from `v0.1` to `v0.2` keeps external load balancers, Cloud Armor WAF, mobile capture apps, and Cloud SQL MySQL 8.4 schemas unchanged while making six targeted infrastructure improvements:
+
+1. **Runtime Security (Closes IST0001092):** Upgrades worker containers to `python:3.12-slim` with `onnxruntime` and `google-genai`, removing end-of-life Python 3.8 to 3.10 packages, existing classifier weights, and static credentials.
+2. **Serverless Inference Consolidation:** Retires the 14 dedicated GPU endpoints and Document AI in favor of in-process 960px Distilled YOLO11n/s CPU ONNX detection plus Private Service Connect calls to `gemini-embedding-2` and `gemini-3.5-flash-lite`.
+3. **Cloud Pub/Sub Surge Buffering:** Places a Cloud Pub/Sub queue and dead-letter topic between the ingestion router and Cloud Run workers to absorb daytime bursts and post-18:00 IST uploads without dropped connections (`< 150 ms` HTTP 202 acknowledgment).
+4. **Timeout Quarantine (`RETRY_PENDING`):** Replaces false `Earning = "0"` payout rejections on 180-second timeouts with `contract_status = "RETRY_PENDING"` for automatic background retry.
+5. **AI Foundations Governance ([Model Whitelisting Report](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.m11c1bw64077)):** Covers all Vertex AI calls under Zero Data Retention, CMEK encryption, and Google Cloud IP Indemnity, with zero open-weight R&D models deployed in production.
+6. **Daytime Worker Sizing & Load Validation ([Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j)):** Grouping adjacent identical facings (`35` to `~11` unique crops) and batching API calls reduces per-shelf latency from `94.6s` (sequential script) to **`2.69s` P50**. Across the 10.5-hour daytime window (`07:30 to 18:00 IST`), 500,000 shelves/day averages `13.2 shelves/sec`, requiring **10 to 12 active `4 vCPU / 8 GiB` Cloud Run containers** (`25 to 40` at a `2.5x` midday peak, max 80), verified across 570 load-test requests with **0.00% HTTP failures** and P95 latency under 5.0 seconds.
+
+*Figure 5: Concurrency load testing across 10, 40, and 80 workers with zero HTTP failures (Panel A) and per-shelf latency reduction from sequential execution to batched Cloud Run workers (Panel B).*
+
+### **2. Four-Stage Rollout & Automated Rollback**
+
+Because monthly P2P payouts aggregate store visits across a 30-day billing cycle, splitting traffic randomly by photo would mix `v0.1` and `v0.2` predictions inside the same store's monthly scorecard.
+
+Instead, the ingestion router hashes each store cluster (`CRC32(cluster:ol_segment) % 100`) so every store stays on a single pipeline version for the full 30-day billing cycle, while Rogan-Gladen prevalence calibration keeps category Share-of-Shelf trendlines continuous across versions.
+
+If HTTP 5xx errors exceed 0.5%, P95 latency exceeds 15.0s, or `RETRY_PENDING` callbacks exceed 3.0%, automated circuit breakers route live traffic back to the control subscription in under 60 seconds with zero database schema changes.
+
+
+*Figure 6: Store-cluster hash router locked for the 30-day billing cycle across control and treatment subscriptions with automated rollback under 60 seconds.*
+
+
+| **Rollout Stage (500,000 Shelves/Day Scale)** | **Traffic Split** | **Downstream Database & Callback Writes** | **Go / No-Go Exit Criteria** |
+| --- | --- | --- | --- |
+| **Stage 1: Paired Dark Shadow** | 100% live to `v0.1`; 100% shadow copy to `v0.2` | `v0.2` writes only to BigQuery audit tables (zero live callbacks or Cloud SQL writes). | >= 99.9% completion on 1M+ shelves; P95 < 12s; blinded 500-crop SME Paired McNemar >= 75% win share (p < 0.01). |
+| **Stage 2: 10% Cluster Canary** | 10% of store clusters (~50,000 shelves/day) routed to `v0.2` | `v0.2` writes live callbacks and Cloud SQL for 10% of clusters; 20% BigQuery audit continues. | 0 false zero-payout timeouts; False Unilever rate <= 1.5%; 24h re-shoot rate <= Control; SoS MAE <= 2.5%. |
+| **Stage 3: 50/50 Stratified A/B** | 50% of store clusters (~250,000 shelves/day) + 100% post-18:00 IST uploads routed to `v0.2` for 30 days | Full P2P monthly scoring and Share-of-Shelf continuity splice across control and treatment arms. | Treatment P2P Basepack W1 >= 70.0% vs. Control ~34.82%; AI inference unit cost <= $0.00160 (₹0.15) / shelf. |
+| **Stage 4: 100% Production Cutover** | 100% of 500,000 shelves/day served by Cloud Run CPU workers (`v0.2`) | Drain `v0.1` subscription, hold warm standby during burn-in, then retire all 14 GPU endpoints and Document AI. | Close security exception `IST0001092` in ServiceNow and decommission existing GPU endpoints. |
+
+## **Appendix & Stakeholder Sign-Off**
+
+### **1. Verification Suite & Stakeholder Approvals**
+
+All 159 unit and integration tests pass (`159/159`), covering store-disjoint benchmark splits, 2,659-SKU catalog completeness, P2P Basepack Weight (`W1..W6`) math, Rogan-Gladen prevalence adjustment, Paired McNemar significance testing, 63-template planogram alignment, `<untrusted_pack_text>` prompt isolation, and `RETRY_PENDING` timeout handling.
+
+
+| **Stakeholder Group** | **Primary Document Tab** | **Scope of Approval** |
+| --- | --- | --- |
+| **Unilever Data Engineering** | [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) | 2,659-SKU catalog linkage rules, 46-to-18 pack mapping, and store-disjoint benchmark splits. |
+| **AI Foundations & Legal** | [Model Whitelisting Report](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.m11c1bw64077) | Section 5.5 Tier-1 whitelisting (`gemini-embedding-2`, `gemini-3.5-flash-lite`) and Distilled YOLO11n/s CPU ONNX deployment. |
+| **Cloud Infra & Security** | [End-to-End Architecture Guide](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.erkk4n45aac9) & [Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j) | Cloud Pub/Sub queue + dead-letter topic, `RETRY_PENDING` callback handling, and Python 3.12 worker sizing (`IST0001092`). |
+| **Brand Analytics & Commercial Ops** | [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu) & [Merchandising Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.b5xo3ahiv7af) | Option 2 production architecture at 500,000 shelves/day and 30-day store-cluster A/B rollout. |
+
+### **2. FAQ**
+
+- **Why not use a Vision-Language Model directly to detect all boxes on the shelf?** A store shelf contains 35 to 120 tightly packed items. Asking a Vision-Language Model to emit 50+ bounding-box coordinate strings takes 4 to 6 seconds and misses small hanging sachets (< 65% recall). Our 960px Distilled YOLO11n CPU ONNX detector finds 96.2% to 99.0% of boxes in 80 ms on CPU at zero API cost.
+- **Why not fine-tune a closed-set classifier as the default?** As shown in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), supervised fine-tuning drops to 27.9% on rare SKUs (1 to 2 training crops) and 0.0% on new launches (1,121 catalog SKUs without training crops). Keeping `gemini-embedding-2` and `gemini-3.5-flash-lite` frozen and storing SKU knowledge in the < 25 MB reference gallery reaches 94.4% (17/18) on unseen launches in under 60 seconds with zero retraining.
+- **What happens if a request takes longer than the 180-second SLA?** Instead of returning `AWP_Presence: "N", Earning: "0"` (which wrongly denies the retailer's payout), the worker returns `contract_status = "RETRY_PENDING"` and routes the message to the dead-letter queue for automatic background retry.
+
+
+---
+[^c1]: Anil Sener: @jjuneja@google.com What is the best link to describe this algorithm.
+    - Jigyasu Juneja: Linked directly in the table. It combines two papers: (1) Residual Feature Adapter: Gao et al., 'CLIP-Adapter: Better Vision-Language Models with Feature Adapters' (https://arxiv.org/abs/2110.04544), and (2) InfoNCE Contrastive Loss: Oord et al., 'Representation Learning with Contrastive Predictive Coding' (https://arxiv.org/abs/1807.03748) / Supervised Contrastive Learning (https://arxiv.org/abs/2004.11362). It is a 2.4 MB matrix applying v' = Norm(v + alpha * W2 * GELU(W1 * v)) on 768-D gemini-embedding-2 vectors.

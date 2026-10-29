@@ -1,115 +1,163 @@
-# Merchandising Pipeline Design
+# **Merchandising Pipeline Design**
 
-## Context and Problem
+## **Context**
 
-Merchandising and Promotional Compliance audits govern monthly retailer trade incentives (`Earning`) across 182,596 daily store photos (`104,571` Display-Bay/Planogram photos plus `78,025` Toker promotional pack and talker photos). Each audit checks four spatial and campaign criteria:
+Field representatives photograph Unilever display bays, hanging strips, promotional packs, and shelf-rail talkers in General Trade (GT) and Modern Trade (MT) stores during daytime operating hours (07:30 to 18:00 IST). As outlined in the [End-to-End Architecture Guide](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.erkk4n45aac9), the pipeline is sized for 500,000 store shelf photos per day (15.0M per month).
 
-1. **Display bay isolation:** Verify that the retailer kept Unilever's paid fixture (`WIN` window bay, `CTU` countertop unit, `MB2`/`MB3` multi-bay gondola, or `HAN` hanging sachet strip) stocked with Unilever products free of competitor intrusion.
-2. **Row-level planogram compliance:** Match physical shelves inside that bay against the assigned `AWP_Code` row sequence, brand blocking, and facing quotas across 63 templates (132 required rows), and locate horizontal Out-of-Stock (OOS) empty gaps.
-3. **Promotional pack verification:** Confirm that packs carry active campaign callouts (`B1G1`, `B3G1`, `PO2`, `PO3`, `Rs 10 Off`, `Extra 20%`, `Free Container`) rather than baseline stock.
-4. **Shelf talkers and price tags:** Detect promotional shelf danglers, printed price-rail clips, and handwritten rupee discount tags mounted on shelf edges.
+Retailer payouts against Unilever's 63 Always-Winning Planogram (`AWP_Code`) templates depend on three pillars:
 
-In Unilever's legacy Azure stack and `LLD001 v0.1`, Merchandising ran on separate detectors and classifiers from Market Share. Auditing the legacy Azure Logic App and five Merchandising/Promo models exposed five production defects:
+- **1. Share of Shelf (SoS) and in-bay layout:** Name each product inside the paid display bay (`is_hul`, `category`, `brand`, `base_variant`, `packaging_type`), compute in-bay Share of Shelf, and check that each brand sits in one contiguous block without empty Out-of-Stock (OOS) gaps.
+- **2. Promotions and price tags:** Read on-pack promotional offers (such as Buy 1 Get 1 Free, 50% Extra, or ₹10 Off) and find the three kinds of shelf-rail tag (`promo_talker`, `printed_price_tag`, `handwritten_price_tag`).
+- **3. Bay display and clutter filtering:** Locate the branded Unilever fixture (`Class 0` — window bays, countertop units, multi-bay units, and full wall displays, while keeping frameless `HAN` hanging strips separate) and remove surrounding counter products before SKU lookup.
 
-| Legacy Component | `LLD001 v0.1` Configuration | Audited Production Defect |
-| :--- | :--- | :--- |
-| **`gt-merchandising-endpoint-prod.json`** | Validates 11 JSON fields; calls `ACCESS_TOKEN_API` per request & per image; `PT180S` timeout. | **False `Earning = "0"` payout bug:** On any `PT180S` timeout or `5xx` error, the failure handler sent `AWP_Presence: "N", Earning: "0"` to `DYNAMIC_TASK_API` and zeroed store payouts. |
-| **GT Merch Detector (`gtmerch_asset_sku...onnx`)** | 640px 2-class YOLOv8n (`Class 0` bay + `Class 1` pack) on dedicated GPU endpoint. | Cross-class greedy NMS let large `Class 0` bay boxes suppress interior `Class 1` packs (**51.1% Bay F2**) and dropped narrow hanging sachets (`HAN`). |
-| **GT Merch Classifier (`17Sep26-moc10...h5`)** | RGB `NEAREST` 299x299, unscaled `[0, 255]` `float32` (conflicts with `[-1, 1]` and `[0, 1]` `.h5` models). | Flat **209-class** softmax (`44.5%` crop / **0.10%** uncalibrated wild-shelf SKU accuracy), emits **0 `PackType`**, and dumps 92.1% of Kirana shelves into `"O"`/`"Others"`. |
-| **MT Merch (`marketshare_yolo.onnx`) & `ViT-240`** | 1-class 640px detector + closed-set 240x240 Vision Transformer (`240` promo classes). | `0.0%` `Class 0` bay isolation in MT; `ViT-B-16-plus-240` required 3 to 4 weeks of field collection and retraining per 4-week festive campaign (**0.0% Day-0 recall**). |
-| **Legacy Talker Detector (`toker_dataset`)** | Trained on 4,767 shelves (28,325 boxes) with a 10-image test split. | **All 8 test stores (8/8) leaked into train** (**49.2% raw F2** on store-disjoint shelves), with **0 handwritten price tags** evaluated. |
+[Existing Model Analysis](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.ipskbbbvu50h) and [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) found four problems with the existing GT Merchandising chain and its data:
 
-## Goals and Non-Goals
+- **The classifier cannot tell pack sizes apart:** 36% of pack classes merge 2 to 4 pack sizes into one label (such as `100ml_200ml`), and 24% are `"90__O__<Brand>"` catch-alls.
+- **Most boxes sit outside the bay:** In `gtmerch-marketshare`, only 7.9% to 39.0% of `Class 1` product boxes sit inside a `Class 0` Unilever bay; the remaining 61.0% to 92.1% sit on surrounding Kirana counter shelves.
+- **Counting SKUs misses layout problems:** Summing SKU counts across a bay passes shelves where brands are scattered across rows and misses empty gaps in the middle of a row.
+- **New planograms and promos need retraining:** Promo offers were baked into class names (such as `_B3G1` or `_Rs_10`), and raw talker data was not split by store outlet.
 
-### Goals
-- **Payout timeout quarantine:** Eliminate false `Earning = "0"` timeout penalties on `DYNAMIC_TASK_API` callbacks via a closed payout state machine (`contract_status = "RETRY_PENDING"`, `awp_presence = "PENDING"`, `earning_override = null`) backed by Pub/Sub dead-letter retries.
-- **Bay isolation and clutter pruning:** Lift `Class 0` bay F2 from 51.1% to 94.7% (`99.0%` mAP50), prune 61% of out-of-bay Kirana counter clutter before calling cloud APIs, and cut shelf cost by 80% (`₹2.27` unscoped down to ₹0.180-₹0.220/shelf).
-- **Planogram and promo verification:** Reach `>= 95%` brand-block purity, `>= 94%` OOS void recall across all 63 `AWP_Code` templates, 5-minute promo onboarding (84.0%-96.0% accuracy), and 90.02% store-disjoint talker zone F2.
+### **Goals and Non-Goals**
 
-### Non-Goals
-- **Inbound mobile schema or DDL changes:** The ingestion API retains the 11-field `Shikhar` / `Sales EDGE` JSON contract, and Cloud SQL MySQL 8.4 table schemas remain unchanged.
+- **Goals:** Measure in-bay Share of Shelf (`2.38%` SoS error) and check row layout and OOS gaps against all 63 `AWP_Code` templates without retraining; read on-pack offers (`84.0%` brand/category/pack correct; `94.1%` to `95.6%` on `"50% Free"` and `"Price Off"`) and 3-class shelf-rail talkers (`90.0%` zone F2); and filter out `61.0%` of surrounding counter clutter before SKU lookup.
+- **Non-Goals:** Changing field-rep mobile capture apps or downstream retailer payout database schemas.
 
-## Shared Architecture
+## **Key Findings**
 
-The Merchandising worker runs the same Python 3.12 Cloud Run container (`4 vCPU, 8 GiB RAM`), 960px CPU ONNX detector, and `<25 MB` 2,659-SKU RAM catalog as Market Share, extended by four spatial and promotional modules:
+All figures below come from **test-split runs** on store-disjoint splits built in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0). Validation scores on the 15-shelf `gtmerch_golden` validation split (~95% exact SKU) overstate performance because thresholds were tuned there, so only held-out test results are reported:
 
-```mermaid
-flowchart TB
-    A["1. Inbound Request: Ingestion API + Pub/Sub Queue<br/>11-Field Merch Payload + Target AWP_Code"] --> B["2. Shared Stage 0 & 1: 960px Dual-Class CPU ONNX<br/>Class 0 Display Bay (99.0%) + Class 1 Pack (96.2%)"]
-    B --> C["3. Stage 1.5: Geometric Class-0 Bay Gate<br/>Containment >= 0.55 | Prunes 61% Counter Clutter (-80% Cost)"]
-    C --> D["4. Shared Stage 2A & 2B: Embed-2 + 32% Zoom<br/>98.81% Val / 97.19% Test In-Bay Exact SKU"]
-    D --> E["5A. Stage 3A: 63-AWP Row Graph<br/>95.1% Brand Block | 94.6% OOS Recall"]
-    D --> F["5B. Stage 3B: Dual-Band Promo<br/>84%-96% Acc | 5-Min Onboarding"]
-    A --> G["Stage 1T: 3-Class Talker & Tag Path<br/>Printed + Handwritten | 90.02% Zone F2"]
-```
+- **1. Share of Shelf (SoS) & In-Bay Layout:** On 100 test strips (`gt_hul_sessions`, 800 boxes), the layout verifier reaches **2.38% Share-of-Shelf error**, **96.9% HUL ownership**, **72.5% exact 5-attribute SKU accuracy**, and **100% brand-block purity**. On end-to-end display bays (`gtmerch_golden` test shelves), the pipeline names the **exact SKU on 64.3%** of in-bay products (comparable to the existing classifier's `61.4%` strict basepack score), gets **brand, category, and pack right 98.2% of the time on average** (`94.8%` across the 3,420-crop in-bay set), reaches **68.2% to 69.8% in-bay end-to-end F2**, and upgrades **574 `"Others"` boxes** into specific SKUs.
+- **2. Promotions and Price Tags:** On 1,000 `hul_promos` test crops, separating the 69 promo suffixes from base variants gets **brand, category, and pack all right 84.0% of the time** (up from `75.0%` on the existing 240-class ViT baseline) and reaches **94.1% on `"50% Free"`** and **95.6% on `"Price Off"`** headers. Across all 9 raw `promo_type` labels, exact offer-code match is **40.3%** because raw labels spell the same offer in multiple ways. On 50 `hul_talkers_golden` test shelves, 3-class talker detection reaches **90.0% annotated-zone F2** (`84.9%` full-frame F2) in `3.05 s` and discovers **+84 real unlabelled rail tags** (`1.3x` coverage).
+- **3. Bay Display and Clutter Filtering:** De-duplicating `Class 0` bays separately from `Class 1` products stops bay boxes from deleting the products inside them (lifting Bay F2 from `51.1%` to `98.8%`). Shelf-plank and bay-boundary filtering drops **61.0% of surrounding counter clutter** before SKU lookup, and fast box-only bay detection on 100 test shelves reaches **77.3% bay-scoped F2** in `3.7 s` without SKU lookup.
 
-The Merchandising worker also removes the per-request and per-image `ACCESS_TOKEN_API` round-trips in the legacy Logic App. Caching OAuth tokens in worker memory (`55-minute` TTL via Secret Manager) saves 300 to 600 ms per multi-image upload.
+| **Merchandising Pillar** | **Test Set & Scope** | **Existing Baseline** | **Test Result & Operational Impact** |
+| --- | --- | --- | --- |
+| **1. Share of Shelf (SoS) & In-Bay Layout** | 100 `gt_hul_sessions` strips (800 boxes) & `gtmerch_golden` test bays | 61.4% classifier / 53.2% E2E strict basepack; 44.5% uncropped[^c1]; SKU counts only | **2.38% SoS error & 96.9% HUL ownership** (72.5% SKU, 100% block purity on strips); **64.3% strict exact SKU & 98.2% avg. brand/category/pack** on E2E bays (94.8% across 3,420 crops); **574 `"Others"` boxes named**; **92.6% OOS gap F1**. |
+| **2. Promotions and Price Tags** | 1,000 `hul_promos` test crops & 50 `hul_talkers_golden` test shelves | 75.0% 240-class ViT (23.5% on `"50% Free"`); 64.2% talker mAP@50 (49.2% F2) | **84.0% brand + category + pack all correct** (73.0% 5-attr SKU, **94.1% `"50% Free"`, 95.6% `"Price Off"`, 40.3% raw 9-way `promo_type`**); **90.0% annotated-zone talker F2** (84.9% full-frame, +84 valid tags in 3.05 s). |
+| **3. Bay Display and Clutter Filtering** | 100 `gtmerch_golden` test shelves (box-only) & 9,194 bay photos | 51.1% Bay F2; 86.8% Class 1 F2 on 200 pre-cropped bays; 61.0% counter clutter | **98.8% Bay F2**; **prunes 61.0% of out-of-bay counter clutter** before SKU lookup; **77.3% bay-scoped F2 in 3.7 s** for fast box-only bay checks (filters printed wing and header art). |
 
-## Bay Detection
 
-In Kirana stores (`gtmerch_golden`), sponsored Unilever fixtures sit behind crowded shop counters alongside rival snacks, grains, and unbranded jars. Our distilled 960px dual-class CPU ONNX detector isolates `Class 0` display bays (99.0% mAP50) and `Class 1` packs (96.2% mAP50) on independent Soft-NMS channels:
-- **Class-isolated Soft-NMS:** Stops large bay boxes from suppressing interior packs and lifts display-bay F2 from 51.1% to 94.7% in 80 ms on CPU (`₹0` GPU cost).
-- **Bay-zone precision:** Scoring inside paid bays reaches 79.59% Val / 77.33% Test Bay-Scoped Det F2 (81.77% with plank alignment), compared against 31.9% uncalibrated full-scene baselines.
+*Figure 1: Five-stage Merchandising pipeline. Stage 1 prepares two copies of the image, Stage 2 finds bays, packs, and talkers, Stage 3 removes out-of-bay counter clutter, Stage 4 names each product and promo claim, and Stage 5 checks Share of Shelf, row layout, and OOS gaps.*
 
-![Figure 1: Spatial Separation of Class-0 Display Bays and Class-1 Product Packs](images/shelf_bay_vs_sku_example.png)
+## **How the Pipeline Works**
 
-*Figure 1: Dual-class separation isolating paid Unilever display bays (cyan, `Class 0`) and in-bay packs (green, 27.8%) from background counter stock (orange, 72.2%).*
+### **Stage 1: Two Image Buffers for Lighting**
 
-## Bay Gating
+**Data insight driving design:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), Kirana photos mixed dark rack interiors, warm tungsten bulbs, and flash glare on foil sachets. Boosting contrast helped box detection but shifted brand colours (dark navy Vaseline turned purple, yellow Vim washed out).
 
-Across 9,276 raw `gtmerch` Kirana photos (359,398 `Class 1` boxes), 92.1% of visible packs sit outside the `Class 0` Unilever bay. Embedding background counter items wastes `₹2.27/shelf` and triggers false compliance rejections. Stage 1.5 Pre-Embedding Bay Gating runs between Stage 1 and Stage 2A:
+Stage 1 therefore builds two copies of each photo in memory (12 ms):
 
-1. **Geometric containment (`containment >= 0.55`):** Filters `Class 1` boxes by intersection-over-pack-area inside `Class 0` bay frames: 61% of background clutter drops out (35 raw packs down to 14-15 in-bay packs), and shelf cost drops by 80% (₹0.180-₹0.220/shelf at `6.5s` P50).
-2. **Hanger (`HAN`) open-strip fallback:** Flexible sachet strips (`Clinic Plus`, `Sunsilk`, `Rin`) lack rigid frames. When `Asset_Type` or `AWP_Code` specifies `HAN` (or 0 rigid bays appear), Stage 1.5 switches to vertical strip-column grouping so hanging sachets are retained.
-3. **End-to-end bay compliance (`gtmerch_golden`):** Reaches 98.81% Val / 97.19% Test in-bay exact SKU accuracy, 97.2% to 100.0% in-bay purity, 77.70% Val / 69.81% Test Bay E2E F2 (vs. 51.2% single-call VLM), and 63.33% Rogan-Gladen `"Others"` rival resolution.
+- **Colour-true copy:** Shades-of-Gray white balance corrects the store's light colour on non-clipped pixels so brand colours stay accurate when Stage 4 crops each product.
+- **Contrast-boosted copy:** Local contrast enhancement (`CLAHE`) is applied to lightness (`L*`) only, leaving colour channels (`a*`, `b*`) untouched so dark back-row sachets and faint shelf-rail tags stay visible to the detector.
 
-## Planogram Engine
+### **Stage 2: Bay, Product, and Talker Detection**
 
-Legacy `gtmerch.h5` classified isolated crops into 209 flat labels without checking shelf row order, brand blocking, or empty gaps. Our 2D spatial-graph planogram and OOS engine enforces all 63 `AWP_Code` fixture templates (132 required rows):
+**Data insight driving design:** Raw `gtmerch` annotations had 49 train-to-test leaked shelves (fixed by store-level splitting in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0)) and boxed only target stretches of open aisles, meaning a detector trained directly on partial store boxes learns to suppress valid unboxed packs.
 
-1. **Shelf-plank clustering:** Projects in-bay pack bottom edges (`y_max`) onto a 1D vertical density profile fused with 2D Hough shelf lines and groups packs into ordered rows (`Row 1 = Top` to `Row N = Bottom`) under `±12°` camera tilt.
-2. **Row-level `AWP_Code` graph alignment:** Matches observed `(Row, Left-to-Right SKU Sequence)` against the assigned `AWP_Code` across `WIN`, `CTU`, `MB2`, `MB3`, and `HAN` fixtures to score `AWP_Presence`, `AWP_Sim_Score`, and `Envision_Sim_Score`.
-3. **Brand-block purity and rival intrusion:** Flags competitor SKUs (`is_hul = False`) inside sponsored Unilever bays (97.2% to 100.0% intrusion precision) and audits contiguous brand blocks (95.1% purity).
-4. **Horizontal Out-of-Stock void detection:** Measures inter-pack spacing (`delta_x`) along each plank. Empty spans exceeding `1.25x` row median pack width (`delta_x > 1.25 * w_row`) without back-wall stock emit localized OOS alerts (94.6% recall).
+Stage 2 supports two detection paths plus a parallel talker pass:
 
-## Promo and Talkers
+- **Branded bay and product detection:** Detects `Class 0` display bays (`WIN`, `CTU`, `MB2`, `MB3`, `FULLWALL`) and `Class 1` products together, de-duplicating bays and products separately so a bay box never deletes the products inside it. Frameless `HAN` hanging strips are excluded from `Class 0` so neighbouring strips are not cropped away.
+- **Open-aisle CPU ONNX detection:** On open aisles and shared [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu) runs, the worker uses the 960px Distilled YOLO11n CPU ONNX detector (trained on exhaustively boxed SKU-110K and checkout layouts with Gaussian Soft-NMS), which costs zero detection tokens.
+- **3-class shelf-talker detection:** A parallel pass on the contrast-boosted image separates `promo_talker` (branded strips, wobblers, danglers), `printed_price_tag` (barcode/MRP labels), and `handwritten_price_tag` (marker cards), discarding non-tag boxes and de-duplicating each class separately.
 
-### Promo Verification
-Festive packs (`B1G1`, `B3G1`, `PO2`, `Rs 10 Off`, `20% Extra`, `Free Tub`) run for 3 to 6 weeks and outpace 3-to-4-week `ViT-B-16-plus-240` retraining cycles. Our Dual-Band Promo Verifier (`hul_promos`, 240 promo SKUs) composes `[Full Crop | 2x Top-28% Header | 2x Bottom-28% Footer | Studio Reference Anchors]` and extracts `{has_promo, promo_type, price_read}` in one `Gemini 3.5 Flash-Lite` call (₹0.066/crop):
-- **Five-minute onboarding:** Uploading 1 studio artwork image and 1 promo rule row reaches 84.0% (`1K`) to 90.0%-96.0% (holdout) 3-attribute promo accuracy and 88.3% exact 5-attribute + promo match without retraining.
+### **Stage 3: Clutter Filtering**
 
-### Shelf Talkers
-We repaired the leaked `toker_dataset` (`hul_talkers_golden`) through physical `outlet_code` isolation across 532 stores (`3,813` train / `477` val / `477` test shelves) spanning `promo_talker`, `printed_price_tag`, and `handwritten_price_tag`. Pairing our 960px 3-class CPU ONNX detector with batched `Gemini 3.5 Flash-Lite` OCR reaches 90.02% 2D-zone Det F2 (84.87% raw F2 vs. 49.2% baseline) in 3.05s at ₹0.211/shelf and reads rupee tags at 93% to 100% accuracy inside `<untrusted_pack_text>` tags.
+**Data insight driving design:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), 61.0% to 92.1% of annotated `Class 1` product boxes in Kirana store photos sat on surrounding store counters outside the `Class 0` Unilever bay.
 
-## Interface Contracts
+Before any crop is embedded or sent to a language model, Stage 3 removes printed fixture art and out-of-bay counter clutter:
 
-The Merchandising Cloud Run worker accepts Unilever's 11-field request (`Image_Names, Outlet_Code, Outlet_PLG, RSCode, AWP_Code, Channel, Asset_Type, Tier, Request_ID, Salesman_Code, image_string` + optional `user_input`) and replaces legacy `Earning: "0"` timeout payloads on `DYNAMIC_TASK_API` with the `v0.2` closed payout contract:
+- **Artwork and rail filter:** Shape and texture rules drop thin rail price tags, wide header banners, and smooth side-wing pillars so printed packs on the cardboard frame are not counted as real stock.
+- **Shelf-plank filter:** Groups pack bottoms that line up horizontally into physical shelf planks, dropping boxes floating in the header area and partial "shoulders" of packs sitting behind the front row.
+- **Display bay boundary gate:** Products sitting outside the detected `Class 0` Unilever display bay are discarded before Stage 4 (skipped automatically for frameless `HAN` strips and full-wall scenes), removing **61.0% of background counter clutter** in under 1 ms.
 
-```json
-{
-  "Request_ID": "REQ-GTMERCH-20261025-1904",
-  "Outlet_Code": "HUL-GT-99201",
-  "AWP_Code": "PPVWASH_WIN_04",
-  "Asset_Type": "WIN",
-  "contract_version": "v0.2",
-  "contract_status": "RETRY_PENDING",
-  "output_type": "quarantined_timeout_no_payout_mutation",
-  "awp_presence": "PENDING",
-  "earning_override": null,
-  "dlq_topic": "shelf-inference-dlq"
-}
-```
 
-When inference succeeds (`contract_status = "OK"`), the worker populates `AWP_Presence` (`"Y"`/`"N"`), calibrated `AWP_Sim_Score`, `Envision_Sim_Score`, row-level OOS coordinates, rival intrusion SKUs, and verified `Earning` tiers.
+*Figure 2: In a Kirana store photo, Stage 3 keeps products resting on shelf planks inside the Unilever display bay (39.0%) and ignores surrounding counter products and printed header art (61.0%). Stage 5 then checks Share of Shelf, brand blocks, and OOS gaps.*
 
-## Benchmark Summary
+### **Stage 4: SKU and Promotion Lookup**
 
-| Merchandising Capability | Benchmark Suite | Legacy `v0.1` Baseline | `LLD001 v0.2` Design | Verified Accuracy, Latency & Cost |
-| :--- | :--- | :--- | :--- | :--- |
-| **Display Bay Isolation** | `gtmerch_golden` (`200` test shelves) | `51.1%` F2 (greedy NMS) | 960px Dual-Class CPU ONNX | **99.0% Bay mAP50 / 94.7% Bay F2** (`80 ms` CPU, ₹0 GPU) |
-| **Clutter Pruning & In-Bay SKU** | `gtmerch_golden` (63 `AWP` templates) | 209-cls `.h5` (`44.5%` crop / `0.1%` wild) | Stage 1.5 Gate (`-61%`) + Option 2 | **98.81% Val / 97.19% Test SKU**, **97.2%-100% Purity**, **₹0.18-₹0.22** |
-| **In-Bay E2E Compliance** | `gtmerch_golden` (`Val` & `Test`) | `51.2%` single-call VLM | `shelf_merchandising_bay_e2e` | **77.70% Val / 69.81% Test Bay E2E F2** (`66.44% / 62.79%` raw) |
-| **2D Planogram & OOS Gaps** | `gtmerch_golden` (`132` required rows) | Flat crop count (`0` row logic) | 1D+Hough Plank + 63-`AWP` Graph | **95.1% Brand-Block Purity**, **94.6% OOS Void Recall** |
-| **Festive Promo Verification** | `hul_promos` (`240` promo SKUs) | `ViT-240` (`0%` Day-0, 3-4 wk retrain) | Dual-Band 2x Top/Bot Zoom | **84.0% (`1K`) to 90.0%-96.0% (holdout)**, **88.3% exact**, **₹0.066/crop** |
-| **Shelf Talkers & Price Tags** | `hul_talkers_golden` (`477` test, `532` stores) | 10-img leaked split (`49.2%` raw F2) | 3-Class CPU ONNX + Batched OCR | **90.02% Zone F2 / 84.87% Raw F2** (`3.05s` P50, **₹0.211/shelf**) |
-| **Timeout Payout Safety** | SLA Fault-Injection (`180s` SLA) | Emits `AWP_Presence: "N", Earning: "0"` | `RETRY_PENDING` + Pub/Sub DLQ | **0 false `Earning = '0'` denials** (`100%` Locust verified) |
+**Data insight driving design:** Separating the 69 price and promo suffixes (`_Rs_10`, `_Rs_5`, `_B3G1`, `_PO2`) from `base_variant` in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) lets Stage 4 match promo and regular packs against the same 2,659-SKU catalog while reading the promotional band separately.
+
+Each surviving in-bay product is cropped from the colour-true buffer and matched against the 2,659-SKU catalog:
+
+- **In-memory embedding lookup (`gemini-embedding-2`):** Crops are embedded and compared against brand, category, and pack-type centroids plus per-SKU reference images. Identical neighbouring facings are grouped so only one crop per group is looked up, and high-margin matches (68% of groups) are accepted immediately on CPU with zero LLM tokens.
+- **Contact sheets for lookalikes and sister pack sizes (`gemini-3.5-flash-lite`):** Uncertain crops are batched alongside their top-5 candidate reference images and a zoomed bottom strip showing gram/ml net weight. When the model reads a pack size, it switches to the matching sister SKU (such as `50g` vs. `100g`), which the existing 209-class classifier merged.
+- **Top-and-bottom band zoom for promotional packs:** Because offer text (`"Buy 3 Get 1"`, `"50% Extra"`, `"₹10 Off"`) sits in the top or bottom band of a pack and is unreadable at thumbnail size, the promo verifier stitches `[full crop | zoomed top band | zoomed bottom band | top-5 candidates]` so `gemini-3.5-flash-lite` reads the offer and maps it to the catalog promo SKU without retraining.
+
+### **\[Optional Read\] Stage 5: Shelf Rows, Planograms, and Payout Safety**
+
+Once in-bay products are named, Stage 5 scores layout and protects retailer payouts using the guardrails in the [End-to-End Architecture Guide](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.erkk4n45aac9) and [Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j):
+
+- **Bay-scoped vs. hanger scoring:** When `Class 0` bays are present, only in-bay products are scored so counter clutter cannot distort Share of Shelf or purity; frameless `HAN` strips fall back to full-image scoring.
+- **Shelf rows and brand-block purity:** Vertically overlapping boxes are grouped into horizontal shelf rows from top to bottom and sorted left to right. A row scores `1.0` when each brand forms one contiguous block, and each extra brand switch lowers the purity score.
+- **Out-of-Stock (OOS) gaps and `AWP_Code` rules:** Horizontal gaps wider than `1.35x` to `1.5x` the row's median pack width are flagged as OOS voids. Each of the 63 `AWP_Code` templates is represented as a rule set (fixture type, required brands, minimum HUL share, and minimum brand-block purity) that can be updated in configuration without retraining.
+- **Payout timeout quarantine (`RETRY_PENDING`):** Any request that exceeds the 180-second SLA or hits a transient error is quarantined for retry (`contract_status = "RETRY_PENDING"`) instead of recording a false zero payout.
+
+## **How We Evaluated & Results**
+
+Every pillar was evaluated on store-disjoint Golden test splits (partitioned by `outlet_id` / `outlet_code` and MD5-deduplicated in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0)). Detection is scored with **F2** (weighting recall twice as heavily as precision because a missed facing cannot be recovered downstream).
+
+Because raw `gtmerch-marketshare` boxes carried no SKU names, clear in-bay HUL crops were linked to catalog SKUs during enrichment while ambiguous rival packs stayed `"Others"`. To avoid penalizing the model for naming a real product inside an `"Others"` box, we report both **strict Exact-SKU accuracy on named boxes** and **average brand/category/pack accuracy**, plus the count of **`"Others"` boxes upgraded to specific SKUs**.
+
+### **Pillar 1: Share of Shelf (SoS) and In-Bay Layout**
+
+| **Evaluation Slice** | **Existing Baseline** | **New Pipeline (Test)** | **Change & Operational Notes** |
+| --- | --- | --- | --- |
+| **Strip Share-of-Shelf (SoS) error (`gt_hul_sessions`, 100 strips)** | Count-only (no row or strip grouping) | **2.38% SoS error** (96.9% HUL ownership) | Evaluates 800 labelled crops across 100 store strips with **100% bay-block purity** and **72.5% 5-attribute SKU accuracy**. |
+| **Strict Exact-SKU on named in-bay boxes (`gtmerch_golden`, 25 test shelves)** | 61.4% classifier / 53.2% E2E strict basepack (200 bays) | **64.3%** (68.2% to 69.8% in-bay E2E F2) | Matches the strict 5-attribute SKU (including sister pack size); uncropped single-call baseline scored 44.5% (51.2% VLM[^c1]). |
+| **Brand, category, and pack accuracy (in-bay)** | Not reported separately | **98.2% avg.** (25 shelves) / **94.8%** (3,420 crops) | High brand/category/pack accuracy shows remaining errors are almost entirely between sibling variants and pack sizes. |
+| **`"Others"` boxes upgraded to specific SKUs** | 50 catch-all classes | **574 boxes named** (63.0% of `"Others"`) | Catalog lookup names real products that raw annotations left as `"Others"`. |
+| **Row alignment, brand-block purity, and OOS gaps** | Not supported (58.0% flat count F1) | **94.4% to 95.1% purity · 95.2% row F1 · 92.6% OOS F1** | Rule-based row reconstruction and `AWP_Code` template checking in `< 5 ms` CPU. |
+
+### **Pillar 2: Promotions and Price Tags**
+
+| **Evaluation Slice** | **Existing Baseline** | **New Pipeline (Test)** | **Change & Operational Notes** |
+| --- | --- | --- | --- |
+| **Promo pack: brand + category + pack all correct (`hul_promos`, 1,000 crops)** | 75.0% fixed 240-class ViT | **84.0%** (93.7% Brand · 91.3% Category · 88.3% Pack) | **+9.0 pp** over the fixed ViT baseline (`73.0%` exact 5-attribute SKU) with zero retraining for new campaigns. |
+| **Promo offer header verification (`"50% Free"` & `"Price Off"`)** | 23.5% on `"50% Free"`; 83.5% on `"Price Off"` | **94.1% on `"50% Free"` · 95.6% on `"Price Off"`** | **40.3%** across all 9 raw `promo_type` strings because human annotations spell the same offer in multiple ways (`"Rs 10 Off"`, `"_Rs_10"`, `"10/- Off"`). |
+| **3-class shelf-talker detection (`hul_talkers_golden`, 50 test shelves)** | 64.2% mAP@50 (49.2% Talker F2) | **90.0% annotated-zone F2** (84.9% full-frame F2; 98.2% mAP@50) | **90.5% precision, 89.9% recall**, and **+84 real unlabelled rail tags** (`1.3x` coverage) in `3.05 s` per photo. |
+
+### **Pillar 3: Bay Display and Clutter Filtering**
+
+| **Evaluation Slice** | **Existing Baseline** | **New Pipeline (Test)** | **Change & Operational Notes** |
+| --- | --- | --- | --- |
+| **Display bay detection (`Class 0` Bay F2)** | 51.1% Bay F2 (57.1% recall) | **98.8% Bay F2** (99.6% recall) | Separating `Class 0` and `Class 1` NMS prevents bay boxes from erasing the products inside them. |
+| **Out-of-bay counter clutter removed** | 0% filtered (61.0% counter clutter sent to classifier) | **61.0% clutter pruned** (`< 1 ms` CPU) | Plank support and bay boundary gating drop surrounding Kirana counter items and cut downstream API calls by 80%. |
+| **Fast box-only bay detection (100 `gtmerch_golden` test shelves)** | 86.8% `Class 1` F2 (scored on 200 pre-cropped bays) | **77.3% bay-scoped F2** in `3.7 s` (`94.7%` pre-cut block purity) | Scored on 100 full store shelves (vs. 200 pre-cropped bays) and actively filters out printed wing and header pack artwork. |
+
+### **Error Modes, Confusion Matrix & Known Limitations Across the Three Pillars**
+
+Auditing the remaining test-split errors across the three merchandising pillars isolates four concrete failure modes and their operational mitigations:
+
+| **Merchandising Pillar & Error Slice** | **Observed Confusion / Error Pattern** | **Root Cause in Store Imagery** | **Pipeline Guardrail & Operational Mitigation** |
+| --- | --- | --- | --- |
+| **Pillar 1 (In-Bay SoS & Exact SKU: `98.2%` Brand/Cat/Pack vs. `64.3%` Exact-SKU)** | Same-brand sibling pack-size & sub-variant swaps (`33.9%` of in-bay boxes get Brand, Category, and Pack right but swap `50g` vs. `100g` or sister variants). | Small in-bay crop resolution (`32–48 px` width on full-bay Kirana photos) blurs 4–6 pt gram/ml text on curved jars and sachets. | `AWP_Code` compliance and Brand-Block Purity (`94.4%–95.1%`) score at the Brand/Basepack-family level (`98.2%` accurate), while low-confidence variant predictions flag `abstain_recommended = True`. |
+| **Pillar 1 (OOS Gap Detection: `92.6%` F1)** | `7.4%` residual OOS precision/recall gap between recessed dark products and true empty shelf voids. | Deep back-of-shelf shadows in unlit Kirana cabinets resemble empty gaps, while angled side-wall perspective foreshortens true gaps near bay edges. | Combines Stage 1 `L*`-channel CLAHE shadow recovery with row-adaptive median pack width (`gap >= 1.35x–1.50x` local row median width). |
+| **Pillar 2 (Promotions & Talkers: `94.1%–95.6%` Key Offers vs. `40.3%` 9-Class Raw String; `90.0%` Talker F2)** | String-label fragmentation across 9 raw `promo_type` strings (`"Rs 10 Off"`, `"_Rs_10"`, `"10/- Off"`) and `9.5%` talker false positives on unannotated shelf rails. | Human ground truth uses multiple spelling variants for identical price-off promotions and leaves ~23% of real bottom-row price tags unlabelled. | Canonicalizes promo offer strings to business campaign families (`94.1%` `"50% Free"`, `95.6%` `"Price Off"`) and scores talkers inside annotated shelf bands (`90.02%` F2, `98.2%` mAP@50). |
+| **Pillar 3 (Bay Display & Clutter Filtering: `77.3%` Full-Shelf Box F2, `61.0%` Clutter Pruned)** | Borderline hanging sachets clipped near bay frame edges (`IoA` near `0.45–0.50`) vs. printed 2D product illustrations on cardboard side wings. | Kirana merchants frequently clip sachet strips onto the outer metal rim of a bay right next to printed 2D pack graphics on the bay's cardboard header. | Stage 3 expands `Class 0` bay bounds by `±8%` width, checks local Laplacian edge variance (`>= 4.2`) to reject flat printed wing artwork, and bypasses `Class 0` cropping entirely on frameless `HAN` strips. |
+
+## **Appendix**
+
+### **Key Parameters**
+
+| **Stage** | **Component** | **Key Parameters** |
+| --- | --- | --- |
+| **Stage 1** | Shades-of-Gray white balance & `L*` CLAHE | Minkowski norm `p = 6` on non-clipped pixels `(12, 245)` at `512 px`; channel gains clamped to `[0.72, 1.38]`; CLAHE `8x8` tiles, clip limit `2.0` on `L*` only. |
+| **Stage 2** | Bay, product, and talker detectors | Bay NMS IoU `0.58`; up to `3` bay zoom crops (`3%` margin); `2x2` tiling (`12%` overlap) when `>= 45` boxes or `>= 24` small boxes; CPU ONNX `960 px` effective resolution; talker per-class NMS IoU `0.50`. |
+| **Stage 3** | Artwork, shelf-plank, and bay boundary filter | Printed wing texture threshold `< 4.2`; shelf-plank alignment band `±6.5%` of bay height; bay gate fires at `>= 22%` bay area (`±8%` margin, `IoA >= 0.45–0.50`) and skips `FULLWALL` and `HAN`. |
+| **Stage 4** | Catalog embedding lookup & promo band zoom | Top-3 brand window `0.06`; `K = 5` candidates; direct accept without LLM when margin and confidence gates pass (`68%` of groups); promo header/footer zoom bands `25%–28%` top and `20%–30%` bottom. |
+| **Stage 5** | Row clustering, OOS voids, and payout gate | Row vertical overlap `>= 0.40–0.45`; OOS gap threshold `>= 1.35x–1.50x` row median pack width; `AWP_Code` min HUL share `0.90` (`0.70` for `HAN`), min purity `0.80`; timeout quarantine at `180 s`. |
+
+### **FAQ**
+
+1. **Why are only test-split results reported?** The `gtmerch_golden` validation split has only 15 shelves (384 boxes) and was used to tune pipeline thresholds (`~95%` exact SKU on validation vs. `60%–64.3%` on test), so reporting validation scores would overstate accuracy.
+2. **Why is average brand/category/pack accuracy 98.2% while strict Exact-SKU is 64.3%?** Most remaining errors are between sibling variants and pack sizes (`50g` vs. `100g`) of the right brand, and the `98.2%` figure averages three per-attribute scores rather than requiring all five attributes to match simultaneously.
+3. **Why does fast box-only detection score 77.3% F2 vs. 86.8% for the existing YOLO `Class 1` model?** The two numbers come from different evaluation setups: the existing YOLO score was measured on 200 pre-cropped bays, whereas `77.3%` is measured on 100 full store shelves and intentionally drops printed pack illustrations on cardboard headers and side wings.
+4. **How are frameless hanging strips (`HAN`) handled?** `HAN` strips have no outer cabinet frame, so Stage 2 excludes them from `Class 0`, Stage 3 skips bay cropping so neighbouring strips stay intact, and Stage 5 applies the `HAN` template rule (`>= 0.70` HUL share).
+5. **How do we onboard a new `AWP_Code` planogram or festive promo pack?** Adding a new planogram requires only a template rule entry in the configuration index with zero model weight changes. Adding a new promo pack requires 1 to 5 reference crops and a catalog row, refreshing Cloud Run workers in under 60 seconds.
+6. **How do single-shelf experimental run costs compare with production sizing?** Unbatched experimental runs that send multiple full-frame and multi-crop VLM passes take `52–53 s` (`₹1.79–₹1.88` per photo). In production ([Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j)), using the in-process CPU ONNX detector, grouping adjacent identical facings, and sending only the 32% lookalike ties to `gemini-3.5-flash-lite` reduces latency to `2.69 s` P50 at `$0.00160` (`₹0.15`) per shelf.
+7. **Who owns the code and data assets?** Reference pipeline code is delivered under the Apache-2.0 license (see [Model Whitelisting Report](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.m11c1bw64077)), while Unilever retains exclusive ownership of its 63 `AWP_Code` templates, benchmark datasets, and brand catalog assets.
+
+
+---
+[^c1]: Anil Sener: @rgavigan@google.com not sure it is was a VLM
+    - Jigyasu Juneja: Clarified in both the Benchmark Summary table and prose: the existing Unilever production baseline is the 640px YOLOv8n + 209-class classifier chain (51.1% Bay F2 / 44.5% in-bay crop SKU accuracy), whereas 51.2% was an unscoped single-call VLM exploratory baseline tested before introducing Stage 1.5 geometric bay gating.

@@ -128,8 +128,9 @@ class ClmStandaloneClassify(EmbeddingTextMatch):
         e1, top_id = top_k[0]
         e2 = top_k[1][0] if len(top_k) > 1 else -1.0
         exps = [math.exp(max(-30.0, CLM_TEXT_INV_TEMP * (e - e1))) for e, _ in top_k]
-        z = sum(exps) or 1.0
-        p1 = round(exps[0] / z, 4)
+        dustbin = math.exp(max(-30.0, min(30.0, CLM_TEXT_INV_TEMP * (0.68 - e1))))
+        z = (sum(exps) + dustbin) or 1.0
+        p1 = round(min(0.985, exps[0] / z), 4)
 
         ctx.trace.step(
             "Standalone CLM Cross-Modal InfoNCE",
@@ -139,6 +140,7 @@ class ClmStandaloneClassify(EmbeddingTextMatch):
                 "energy": round(e1, 4),
                 "margin": round(e1 - e2, 4),
                 "clm_prob": p1,
+                "abstain_recommended": bool(e1 < 0.58 or p1 < 0.35),
                 "shortlist": [
                     {"sku_id": i, "product": self.catalog[i]["product"], "energy": round(s, 4)}
                     for s, i in scored[:8]

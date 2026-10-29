@@ -141,6 +141,20 @@ def field_votes(
     return out
 
 
+CATEGORY_CONFIDENCE_THRESHOLDS: dict[str, float] = {
+    "Foods": 0.74,
+    "HHC": 0.75,
+    "PW": 0.78,
+    "Hair_Care": 0.78,
+    "Laundry": 0.78,
+    "HFD": 0.78,
+    "Skin": 0.80,
+    "Beverages": 0.80,
+    "Oral_Care": 0.80,
+    "DMT": 0.82,
+}
+
+
 def calibrated_field_confidences(
     a: dict[str, Any],
     final_labels: dict[str, Any],
@@ -149,11 +163,12 @@ def calibrated_field_confidences(
     escalate: bool = False,
     fields: Sequence[str] = FIELDS,
 ) -> tuple[dict[str, float], float, bool]:
-    """Compute dustbin- and cosine-calibrated per-field and joint confidences in ``[0.02, 0.985]``.
+    """Compute dustbin-, cosine-, and sibling-margin-calibrated per-field and joint confidences in ``[0.02, 0.985]``.
 
     Prevents ``brand`` confidence from saturating to ``1.0`` when all 5 nearest neighbors belong to a
     large catalog brand despite low absolute cosine similarity, unreadable variant text, or Stage-B
-    ``choice == 0`` fallback.
+    ``choice == 0`` fallback, and discounts ``base_variant`` / ``product`` when sibling variants have
+    narrow top-2 cosine margin (``margin < 0.025``) or split neighbor variant votes.
     """
     b_info = b_info or {}
     votes = a.get("votes") or {}
@@ -178,10 +193,11 @@ def calibrated_field_confidences(
     b_sku_conf = float(b_info.get("sku_confidence") or b_info.get("clef_prob") or 0.0)
     b_brand_conf = float(b_info.get("brand_confidence") or b_sku_conf or 0.0)
 
-    # Variant consensus factor so brand confidence reflects fine-print readability
+    # Variant consensus & margin factors so brand and variant reflect fine-print readability
     bv_votes = (votes.get("base_variant") or {}).get("votes") or {}
     final_bv = str(final_labels.get("base_variant") or "")
     bv_support = float(bv_votes.get(final_bv, (votes.get("base_variant") or {}).get("conf") or 0.5))
+    bv_margin = float((votes.get("base_variant") or {}).get("margin") or 0.0)
 
     cal: dict[str, float] = {}
     for f in fields:
@@ -208,6 +224,10 @@ def calibrated_field_confidences(
             # Couple brand confidence with variant clarity so unreadable crops never log brand=1.0
             coherence = 0.80 + 0.20 * min(1.0, bv_support)
             c *= coherence
+        elif f in ("base_variant", "product") and "base_variant" in votes:
+            # Discount sibling-variant ambiguity when top-2 cosine margin or variant vote margin is narrow
+            sib_factor = (0.78 + 0.22 * min(1.0, bv_margin)) * (0.88 + 0.12 * min(1.0, margin / 0.025))
+            c *= sib_factor
 
         cal[f] = round(max(0.02, min(0.985, c)), 4)
 
@@ -440,6 +460,8 @@ class HybridClassify(ClmStandaloneRetrieval):
     sheet_candidates = "clm"
     min_confidence = 0.0
     abstain_on_stage_b_reject = False
+    use_category_thresholds = False
+    abstain_per_field = False
 
     architecture = (
         "2-Stage Confidence-Gated Hybrid Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & Calibrated InfoNCE Gate "
@@ -475,6 +497,8 @@ class HybridClassify(ClmStandaloneRetrieval):
             "sheet_candidates",
             "min_confidence",
             "abstain_on_stage_b_reject",
+            "use_category_thresholds",
+            "abstain_per_field",
         ):
             setattr(self, p, _env_or(cfg, p, getattr(type(self), p)))
         if self.stage_b not in STAGE_B_VARIANTS:
@@ -505,6 +529,8 @@ class HybridClassify(ClmStandaloneRetrieval):
                 "sheet_candidates",
                 "min_confidence",
                 "abstain_on_stage_b_reject",
+                "use_category_thresholds",
+                "abstain_per_field",
             )
         }
 
@@ -708,7 +734,11 @@ class HybridClassify(ClmStandaloneRetrieval):
             escalate=escalate,
             fields=active,
         )
+        pred_cat = str(merged.get("category") or "")
+        cat_tau = CATEGORY_CONFIDENCE_THRESHOLDS.get(pred_cat, 0.78)
         eff_min_conf = float(getattr(self, "min_confidence", 0.0) or 0.0)
+        if bool(getattr(self, "use_category_thresholds", False)):
+            eff_min_conf = max(eff_min_conf, cat_tau)
         env_min = os.environ.get("SHELF_BENCH_MIN_CONFIDENCE")
         if env_min:
             try:
@@ -725,14 +755,27 @@ class HybridClassify(ClmStandaloneRetrieval):
                 )
             )
         )
-        abstained_by_threshold = bool(
-            stage_b_abstained or (eff_min_conf > 0.0 and joint_conf < eff_min_conf)
-        )
+        abstained_fields: list[str] = []
+        if bool(getattr(self, "abstain_per_field", False)) and eff_min_conf > 0.0 and not stage_b_abstained:
+            for f in active:
+                if cal_conf.get(f, 0.0) < eff_min_conf:
+                    merged[f] = None
+                    abstained_fields.append(f)
+            if "base_variant" in abstained_fields and "product" in merged:
+                merged["product"] = None
+                if "product" not in abstained_fields:
+                    abstained_fields.append("product")
+            abstained_by_threshold = all(merged.get(f) is None for f in active)
+        else:
+            abstained_by_threshold = bool(
+                stage_b_abstained or (eff_min_conf > 0.0 and joint_conf < eff_min_conf)
+            )
         ctx.trace.step(
             "Hybrid decision",
             f"answered by Stage {answered_by}"
             + (f" ({a['reason']})" if escalate else "")
             + (f"; taxonomy fixed {', '.join(changed)}" if changed else "")
+            + (f"; abstained fields {', '.join(abstained_fields)}" if abstained_fields else "")
             + (f"; abstained (joint_conf={joint_conf:.2f})" if abstained_by_threshold else ""),
             info={
                 "answered_by": answered_by,
@@ -741,8 +784,10 @@ class HybridClassify(ClmStandaloneRetrieval):
                 "reason": a["reason"],
                 "confidence": cal_conf,
                 "joint_confidence": joint_conf,
+                "category_threshold": cat_tau,
                 "abstain_recommended": abstain_rec,
                 "abstained": abstained_by_threshold,
+                "abstained_fields": abstained_fields,
                 "raw_vote_share": {f: a["votes"][f]["conf"] for f in active},
                 "energy": a["energy"],
                 "margin": a["margin"],
@@ -757,9 +802,9 @@ class HybridClassify(ClmStandaloneRetrieval):
         if abstained_by_threshold:
             return None
         out: dict[str, Any] = {f: merged.get(f) for f in active}
-        if not escalate and a["sku_id"] is not None:
+        if not escalate and a["sku_id"] is not None and not abstained_fields:
             out["sku_id"] = a["sku_id"]
-        elif escalate and b_info.get("sku_id") is not None:
+        elif escalate and b_info.get("sku_id") is not None and not abstained_fields:
             out["sku_id"] = b_info["sku_id"]
         out["confidence"] = cal_conf
         out["joint_confidence"] = joint_conf

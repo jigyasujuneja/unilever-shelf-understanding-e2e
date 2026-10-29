@@ -1,170 +1,231 @@
-# Market Share Pipeline Design
+# **Market Share Pipeline Design**
 
-## Context and Problem
+## **Context**
 
-Market Share audits calculate Unilever's corporate, category, brand, container, and basepack Share-of-Shelf (SoS) across Modern Trade supermarket gondolas and General Trade Kirana counters. Field representatives upload 323,935 Market Share photos per day inside a 506,531-photo portfolio (`800,000` peak), with over 60% arriving between 17:00 and 21:00 IST.
+Field representatives upload store shelf photos from the Sales EDGE (Modern Trade) and Shikhar (General Trade) apps during daytime store operating hours (07:30 to 18:00 IST). As outlined in the [End-to-End Architecture Guide](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.erkk4n45aac9), the pipeline is sized for 500,000 store shelf photos per day (15.0M per month).
 
-Unilever's legacy Azure Kubernetes Service (AKS) stack and draft `LLD001 v0.1` lift-and-shift design chained one 640px single-class detector into nine Keras InceptionV3 crop classifiers on dedicated GPU endpoints. Auditing the customer code and running those nine weights on matched blind splits exposed four bottlenecks:
+For every visible product, the pipeline predicts five attributes (`is_hul`, `category`, `brand`, `base_variant`, and `packaging_type`) to compute category Share of Shelf (SoS) and Path-to-Purchase (P2P) Basepack Weights (`W1..W6`).
 
-1. **Compound chaining loss:** Individual variant heads scored 65.7% to 98.9% in isolated training, yet serial chaining across brand (87.06%), category variants (76.22%), and packaging (54.86%) cut end-to-end 5-attribute SKU accuracy to 42.32% on `N=5,000` (44.50% on `1K`) and held P2P basepack weight (`W1`) at 34.82%.
-2. **Incompatible tensor prep and zero Day-0 recall:** The brand classifier expected PIL RGB `[-1, 1]` `NEAREST` 299x299 inputs, whereas the variant and pack heads expected OpenCV BGR `[0, 1]` `BILINEAR` inputs plus one-hot conditioning vectors. Closed-set softmax weights scored 0.0% (0/18) on newly launched SKUs for 3 to 4 weeks and collapsed 874 competitor brands into `"Others"`.
-3. **Evening upload drops and scheduler bugs:** An upfront time check (`07:30 <= IST <= 18:00`) in the Azure Logic App returned `HTTP 200` to the mobile app and dropped uploads after 18:00 IST when AKS GPU clusters powered down. Meanwhile, the start-cluster workflow checked `dayOfWeek(...) == 10` (outside the valid `0..6` range) and booted both GPU clusters on Sundays.
-4. **Timeout losses and endpoint cost:** Synchronous `PT180S` calls with `retryPolicy: none` returned `StatusCode: 500, Recognised_Packs: ""` during evening spikes. `LLD001 v0.1` sized the inference worker pool up to 510 Cloud Run nodes alongside 11 to 14 dedicated GPU endpoints at ₹0.320 per shelf (`₹48.63 Lakhs/month` portfolio baseline).
+[Existing Model Analysis](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.ipskbbbvu50h) and [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) identified four problems with the existing nine-model Market Share chain and its training data:
 
-![Figure 1: Legacy 14-Model Stack vs. Unified 4-Stage Production Spine](images/fig_pipeline_design_marketshare_merch.png)
+- **Chained classifiers compound errors (42.32% 5-attribute SKU):** Even when given a 100% Oracle Brand, the downstream variant and pack classifiers drop 5-attribute accuracy to 52.00% (`29.60%` of crops get Brand, Category, and Variant right and then fail on the 46-folder `<Category>__<Pack>` classifier).
+- **42.2% of catalog SKUs have zero training crops:** Out of 2,659 Unilever SKUs, 1,121 have no training crops and 356 have only 1 to 2 crops, causing closed-set classifiers to score `0.0%` on unseen SKUs and `27.9%` on rare SKUs.
+- **Competitor brands are pooled into "Others":** All 59 classes of the existing brand model map to `is_hul = True`, leaving 874 rival brands without brand or variant tracking.
+- **Overlapping aisle photos double-count facings:** Multi-photo store visits (2 to 5 overlapping shots per aisle) count the same shelf stretch multiple times when summed without spatial deduplication.
 
-*Figure 1: Legacy 14-model chain (42.32% SKU accuracy, ₹0.320/shelf) vs. unified 4-stage `LLD001 v0.2` spine (82.3% to 84.0% SKU accuracy, ₹0.120/shelf).*
+To replace that chain, we evaluated three model families on the store-disjoint splits built in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0):
 
-## Goals and Non-Goals
+- **Closed-set fine-tuned vision backbones (DINOv2/v3 and MaxViT):** Single-backbone classifiers trained on the 1,538 classes present in the training split.
+- **Pure embedding retrieval (Stage 2A standalone):** Nearest-neighbor lookup using `gemini-embedding-2` and a learned 2.4 MB Residual InfoNCE[^c1] adapter against our 2,659-SKU reference gallery, making zero LLM calls.
+- **Two-stage hybrid retrieval and visual tie-breaking (Stage 2A + Stage 2B):** Fast in-memory `gemini-embedding-2` matching for clear crops (68% direct match), followed by a batched `gemini-3.5-flash-lite` contact-sheet tie-breaker for the 32% lookalike sister variants and size twins.
 
-### Goals
-- **SKU and Share-of-Shelf accuracy:** Exceed 80% 5-attribute SKU accuracy on `N=5,000` blind crops (achieved 82.30% on `test_5k`, 83.50% Val / 84.00% Test), hold visit SoS MAE at or below 2.0% (achieved 1.25% to 2.00%), and raise P2P basepack `W1` from 34.82% to 73.68% (2.12x).
-- **Day-0 launch onboarding:** Index new basepacks in under 60 seconds from 1 studio packshot and 1 catalog row at 94.4% (17/18) Day-0 accuracy.
-- **Evening surge resilience:** Replace the `07:30-18:00 IST` drop window with asynchronous Cloud Pub/Sub buffering (`<150 ms` ack) and sustain `40 images/sec` peaks at 2.69s P50 / 6.40s P95 latency.
-- **Unit economics:** Cut Market Share unit cost from ₹0.320 to ₹0.120 per 35-pack shelf (`USD 0.00139` Priority PayGo; ₹0.045/shelf on Option 1 Embedding-Only with `0` generative VLM calls) and retire dedicated GPU endpoints.
+### **Goals and Non-Goals**
 
-### Non-Goals
-- **Mobile app payload changes:** `Sales EDGE` and `Shikhar` send their existing JSON request schemas to the ingestion API without mobile client updates.
-- **Network perimeter or DDL changes:** Shared VPC `ul-fs-p-plvpc-01`, Cloud Armor WAF, Cloud SQL MySQL 8.4 table schemas, and downstream P2P scoring scripts remain unchanged.
+- **Goals:** Lift held-out 5,000-crop 5-attribute SKU accuracy from `42.32%` to `> 82%` and P2P Basepack Weight (`W1`) from `34.82%` to `> 73%`; recognize all 2,659 Unilever SKUs and 874 competitor brands (including Day-0 launches in `< 60 s` without retraining); and deduplicate overlapping multi-photo store visits (`<= 2.25%` SoS error).
+- **Non-Goals:** Changing downstream P2P Basepack Weight formulas (`W1..W6`) or Cloud SQL reporting schemas.
 
-## Customer LLD Baseline
+## **Key Findings**
 
-Each Azure legacy artifact and `LLD001 v0.1` component maps directly to its `LLD001 v0.2` replacement:
+All results below are reported on **held-out test splits** partitioned by store outlet and MD5 image digest in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0):
 
-| Azure Legacy Asset | `LLD001 v0.1` Draft | Audited `v0.1` / Legacy Defect | `LLD001 v0.2` Production Design |
-| :--- | :--- | :--- | :--- |
-| **`marketshare-endpoint-mt-prod-aks2.json`** | Sync HTTP to MT/GT Cloud Run | Drops post-`18:00 IST` uploads after `HTTP 200`; static token; `retryPolicy: none` on `PT180S`. | Ingestion router publishes to **Cloud Pub/Sub** (`24x7` queue, `<150 ms` ack); Secret Manager + Workload Identity. |
-| **`marketsharestartcluster` & `stopcluster.json`** | Scheduled Vertex GPU scaling | `dayOfWeek == 10` bug starts clusters Sundays; `18:00 IST` stop kills evening uploads. | **Retired.** Serverless MT/GT Cloud Run (`min 4, max 80`) + Vertex PayGo scale 24x7 (`₹0` overnight idle). |
-| **`marketshare_yolo.onnx` + 9 `.h5` Heads** | Custom Vertex GPU Endpoints (`IST0001092`) | 42.32% SKU accuracy; 3 conflicting RGB/BGR resizers; EOL Python 3.8-3.10 + `azure-cli`. | **Retired (`IST0001092` closed).** Python 3.12 runs 960px CPU ONNX (`80 ms`) + `gemini-embedding-2` + `Flash-Lite` via PSC. |
-| **`Outlet_Cluster_Segment` & `ROI_Pipeline.json`** | Cloud Composer + Cloud SQL MySQL | `Set variable2` outside `ifTrueActivities` logs `"Moved"` on empty runs; `'Model_Output'` dropped. | Composer DAG fixes empty-folder check and loads 7-col `cluster_mapping` (`10K` batch) + 12-col `Past_ROI_Data` (`2K` batch). |
+- **1. Two-stage hybrid retrieval nearly doubles 5,000-crop test accuracy (42.32% to 82.30%):** On the 5,000-crop held-out test set (892 stores), the hybrid pipeline reaches **82.30% exact 5-attribute SKU match** (`96.1%` Brand, `93.5%` Category, `91.7%` Pack, `89.3%` Variant) in `0.82 s`. On the 1,000-crop test set, single-pass zoom scores **84.0%** (`83.5%` Val) and the full hybrid production configuration reaches **95.20%**.
+- **2. Closed-set fine-tuned classifiers fail on rare and unseen SKUs:** Stratifying test crops by training sample count shows that DINOv3 SFT scores `90.9%` on head SKUs (`16+` training crops) but drops to `27.9%` on rare SKUs (`1 to 2` crops) and **0.0%** on the 1,121 catalog SKUs with zero training crops. The gallery-backed hybrid scores **79.1%** on 1 to 2 crop SKUs and **94.4% (17/18)** on unseen Day-0 launches.
+- **3. Catalog pack lookup plus crown zoom fixes packaging (54.86% to 91.7%–94.0%):** Replacing the standalone 46-folder `<Category>__<Pack>` classifier with a lookup in the 2,659-SKU catalog lifts the existing classifier chain from `42.32%` to `71.92%` (`+29.60 pp`). Pairing catalog lookup with top-cap crown zoom reaches **93.3% to 94.0%** pack accuracy on 1,000 test crops (`91.7%` on 5,000 crops).
+- **4. An open-set competitor threshold cuts False Unilever attribution to 0.4%–1.0%:** Routing crops with intermediate similarity (`0.45` to `0.72`) to an open-set competitor prediction (`is_hul = False`) reaches **98.4% ownership accuracy** (`0.4%` False Unilever) and upgrades **66.4% of vague "Others" labels** on Kirana shelves into exact competitor SKUs.
+- **5. Full-shelf calibration and session overlap deduplication hold Share-of-Shelf error to 0.93%–2.25%:** On 200 Modern Trade shelves, category Share-of-Shelf error drops to **0.93%** (`2.28%` facing error), lifting P2P Basepack Weight (`W1`) from **34.82% to 73.68%**. Across 2 to 5 overlapping aisle photos per store visit, spatial and embedding deduplication holds visit SoS error to **1.00% to 2.25%**.
 
-### Legacy Model Audit
 
-Cloud Run Job `shelf-bench-legacy-audit-n2xn2` evaluated all 9 Market Share `.h5` weights (`2,308.49 MB` / `2.31 GB`, `3,053` cumulative classes across 9 `n1-standard-4` endpoints) on matched `N=5,000`, `N=1,000`, and Oracle Brand splits:
+*Figure 1: Four-stage Market Share pipeline from dual-buffer image preparation and 960px Distilled YOLO11n CPU ONNX detection (Stage 1) to in-memory vector retrieval (Stage 2A), visual tie-breaking (Stage 2B), and category Share-of-Shelf scoring (Stage 3).*
 
-| Legacy `.h5` Model (`gs://sos-datasets/legacy-models/`) | Input Prep & Binary Size | Classes | Isolated Var (Oracle 1K) | Chained Var (5K Silo / Routed) | Chained 5-Attr SKU (5K Silo / Routed) | Option 2 5-Attr SKU (5K) |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **`marketshare_brand.h5` (Stage 1)** | RGB `[-1, 1]` `NEAREST` (`274.10 MB`) | 941 | 100.0% (`88.50%` 1K) | `87.06%` Brand (`86.30%` Cat) | `12.94%` Stage-1 loss (`647` crops) | **96.1% Brand** (+9.0 pts) |
-| **`p5_variant.h5` (HFD/Foods/Bev)** | BGR `[0, 1]` + 1-hot (`254.30 MB`; `1,241 / 1,265`) | 291 | 98.4% | `94.0%` (`92.25%`) | `50.9%` (`51.38%`) | **89.1%** (+38.2 pts) |
-| **`nonhul_gen_variant.h5` (Rival Gen)** | BGR `[0, 1]` + 1-hot (`254.83 MB`; `1,363 / 1,320`) | 595 | 89.4% | `71.5%` (`73.86%`) | `44.0%` (`45.08%`) | **76.7%** (+32.7 pts) |
-| **`nonhul_p6_variant.h5` (Rival P6)** | BGR `[0, 1]` + `61`-D 1-hot (`254.45 MB`; `1,036 / 1,012`) | 367 | 69.9% | `58.3%` (`59.68%`) | `29.1%` (`26.58%`) | **77.0%** (+47.9 pts) |
-| **`skin_variant.h5` (Skin + Hair)** | BGR `[0, 1]` + 1-hot (`254.52 MB`; `525 / 534`) | 438 | 84.1% | `71.0%` (`69.85%`) | `31.8%` (`33.90%`) | **91.6%** (+59.8 pts) |
-| **`wash_variant.h5` (Laundry/HHC)** | BGR `[0, 1]` + `21`-D 1-hot (`254.13 MB`; `497 / 522`) | 173 | 98.9% | `81.9%` (`77.97%`) | `52.7%` (`44.44%`) | **81.9%** (+29.2 pts) |
-| **`gen_variant.h5` (PW/Hair/Deo)** | BGR `[0, 1]` + 1-hot (`254.08 MB`; `177 / 185`) | 145 | 65.7% | `88.7%` (`84.86%`) | `57.1%` (`48.65%`) | **80.8%** (+23.7 pts) |
-| **`oral_variant.h5` (Oral Care)** | BGR `[0, 1]` + 1-hot (`254.15 MB`; `161 / 162`) | 57 | 85.7% | `79.5%` (`79.01%`) | `32.9%` (`38.89%`) | **83.2%** (+50.3 pts) |
-| **`marketshare_packtype.h5` (Stage 3)** | BGR `[0, 1]` + `10`-D Cat (`253.93 MB`) | 46 | `60.20%` Pack (1K) | `54.86%` Pack | **`29.60%` Stage-4 loss (`1,480`)** | **91.7% Pack** (+36.8 pts) |
-| **9-Model Compound Total** | **Serial 3-step chain (`2.31 GB` total)** | **3,053 -> 2,659** | **`52.00%` Ceiling (1K)** | **`76.22%` Variant** | **`42.32%` (`2,116/5,000`; `44.50%` 1K)** | **`82.30%` (`83.20%` remap / `84.00%` size-switch)** |
+## **How the Pipeline Works**
 
-Even with 100% Oracle Brand labels, the `.h5` chain hits a 52.00% ceiling because 1,480 of 5,000 crops (29.60%) pass Variant only to fail at `marketshare_packtype.h5` (21.81% on sachets, 15.35% on wrappers, and 0% on `PW__Bar`, `Roll_On`, and `Spray`). Bypassing that pack classifier via our 2,659-SKU catalog lookup lifts legacy `test_5k` accuracy from 42.32% to 71.92%; Option 2 then closes the -21.92 pp competitor variant gap (`65.16%` Rival vs. `87.08%` Unilever) and raises `W1` from 34.82% to 73.68%.
+### **Stage 1: Two Image Buffers, 960px Detection, and Twin Grouping**
 
-## Target Architecture
+**Data insight driving design:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), 66.1% of raw brand cutouts were under 64px, 35.5% had motion blur, and full-shelf annotations boxed only target stretches (~40% of visible packs).
 
-`LLD001 v0.2` replaces all nine `.h5` classifiers and the 640px detector with a 4-stage catalog funnel inside the Modern Trade and General Trade Cloud Run CPU workers (`4 vCPU, 8 GiB RAM, min 4 / max 80`). Workers call two managed Vertex AI APIs over Private Service Connect (`gfr-fs-p-psc-subnet-01`).
+Each store photo is normalized and split into product boxes on a `4 vCPU / 8 GiB` Cloud Run worker in `92 ms` (shared with [Merchandising Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.b5xo3ahiv7af)):
 
-![Figure 2: Production 4-Stage Serverless Architecture on GCP](images/architecture.png)
+- **Two image buffers and cylindrical tube stretch (12 ms):** Shades-of-Gray white balance corrects warm store lighting and builds two copies in memory: a contrast-boosted copy (`L*`-channel CLAHE) so the detector finds dark shelf edges, and an unsharpened colour-true RGB copy so `gemini-embedding-2` distinguishes dark blue *Clinic Plus* sachets from black *Sunsilk* sachets (`+6.0 pp`), plus a horizontal unwarp on narrow tubes so curved edge text stays readable.
+- **Distilling 960px YOLO11n on SKU-110K instead of partially boxed shelves (80 ms):** Fine-tuning YOLO on partially boxed store shelves penalizes real unboxed products as background. Instead, we distill a 960px YOLO11n CPU ONNX student from a 1280px YOLOv12s teacher pre-trained on exhaustively boxed SKU-110K (11,762 shelves, 1.73M boxes) and checkout layouts (800 images).
+- **Shelf-plank filter and neighbouring twin grouping:** Fitting horizontal shelf lines across box bottoms rejects 74% of floating background noise. Along each shelf row, adjacent identical facings are grouped into a single representative crop, shrinking `35` facings to **~11 unique crops per shelf** before any API call is made.
 
-*Figure 2: Event-driven GCP architecture connecting CMEK Cloud Storage, Cloud Pub/Sub, Cloud Run CPU spatial detection, `<25 MB` RAM catalog fast-gating, and 32% fine-print zoom verification.*
 
-```mermaid
-flowchart TB
-    A["1. Ingestion API + Cloud Pub/Sub Queue<br/>323,935 MS Shelves/Day (<150 ms HTTP 202)"] --> B["2. Stage 0 & 1: Dual-Buffer + 960px CPU ONNX<br/>80 ms CPU | Plank Support | 35 Packs -> ~11 Medoids"]
-    B --> C["3. Stage 2A: gemini-embedding-2 + 2.4 MB Adapter<br/><25 MB In-RAM Catalog (2,659 SKUs, 10,082 Anchors)"]
-    C -->|"68% Clear Margin (0 VLM Tokens)"| E["5. Stage 3: Task Callback API + Cloud SQL MySQL<br/>Row Smoothing + Panorama Dedup | 874 Rivals | W1 = 73.68%"]
-    C -->|"32% Lookalike Ties (~3.5 Groups/Shelf)"| D["4. Stage 2B: Gemini 3.5 Flash-Lite 3-Band Zoom<br/>88.4% Prefix Cache + <1 ms Pack-Size Switch"]
-    D --> E
-```
+| **Detector Configuration** | **Input Resolution** | **Pre-Training Corpus** | **Shelf mAP@50** | **Mean Crops / Shelf** | **Cloud Run 4-vCPU Latency** |
+| --- | --- | --- | --- | --- | --- |
+| **Existing YOLOv8n** | 640x640 | Internal partial shelf boxes | 90.2% | 46.8 (high false positives) | 380 ms |
+| **YOLOv12s Teacher** | 1280x1280 | SKU-110K (11,762 images, 1.73M boxes) + checkout layouts | 99.3% | 35.0 | 1.85 s (offline teacher) |
+| **Distilled YOLO11n Student** | 960x960 (ONNX FP32) | Distilled from YOLOv12s on SKU-110K + checkout layouts | 99.1% | 35.0 (~11 unique crops) | 80 ms (production worker) |
 
-### Stage 0 Photometry
+### **Stage 2A: In-Memory Embedding Lookup**
 
-Kirana photos mix tungsten bulbs, back-shelf shadows, and foil glare. Applying contrast sharpening globally helps edge detection (+0.8 pts on micro-text) yet shifts pack hue and drops color-sensitive embedding accuracy by 6.0 percentage points (`Pond's` blue vs. violet tubs). Stage 0 isolates the two paths in 12 ms on CPU (Gate `G14`):
-- **Minkowski Shades-of-Gray white balance (`p = 6`):** Neutralizes warm tungsten and fluorescent color casts once per shelf photo.
-- **Buffer A (color-true linear RGB):** Feeds Stage-2A embeddings so brand hues remain untouched.
-- **Buffer B (luminance L* CLAHE contrast):** Feeds Stage-1 box edge detection and Stage-2B bottom gram-weight zoom crops.
+**Data insight driving design:** Because 781 raw variant folders omitted pack types and 42.2% of catalog SKUs lacked training crops ([Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0)), we linked all silos by MD5 byte-hash into a 2,659-SKU master catalog where every class has 1 to 4 clean reference packshots (`10,082` total).
 
-### Stage 1 Pack Detection
+The ~11 unique crops per shelf are embedded in one batched `gemini-embedding-2` call (`180 ms`) and matched against this in-RAM gallery (`< 25 MB`):
 
-Stage 1 executes inside the Cloud Run worker container on CPU with ₹0 GPU spend:
-1. **Distilled 960px dual-class CPU ONNX (`yolo11n-distilled-onnx`):** Runs in 80 ms on 4 vCPUs and reaches 96.2% mAP50 on `Class 1` packs and 99.0% mAP50 on `Class 0` display bays (100.0% recall on `gt_hul_sessions`).
-2. **Aspect-aware Gaussian Soft-NMS (`sigma = 0.55`):** Smoothly decays overlapping scores instead of deleting touching soap bars and hanging sachet strips.
-3. **Sub-window refinement and 2x2 tiling:** Splits merged multi-pack boxes (68.99% Det F2 inside annotated pockets on `ms_json_golden`) and tiles gondolas exceeding 65 detections (up to 189 packs per photo).
-4. **Shelf-plank support:** Fits horizontal plank lines across bottom box edges (`y_max`) to reject floating 2D header signs, posters, and price rails.
+- **Multi-angle reference gallery and Residual InfoNCE[^c1] adapter:** Each of the 2,659 Unilever SKUs and 874 competitor brands is represented by up to 3 angle centroids in 768-D space, refined by a lightweight 2.4 MB Residual InfoNCE adapter and 3-zone colour reranking.
+- **Hubness correction across product families:** Generic white bottles tend to appear in the top-5 list of many unrelated queries. Cross-Domain Similarity Local Scaling (CSLS) subtracts each gallery vector's average neighbourhood score while masking out same-SKU reference twins so single-pack brands are not penalized.
+- **Direct match without an LLM call (68% of groups, < 1 ms):** A single matrix multiply in worker RAM scores all 11 crops against all 10,082 gallery vectors in `0.12 ms`. Confident, high-margin matches (68% of product groups) are accepted immediately with zero LLM tokens.
 
-### Stage 2A Catalog Matching
 
-Row-adjacent twin grouping clusters touching boxes on the same plank when aspect ratio and color histogram (`>= 0.94`) match: 35 shelf facings compress into ~11 medoid groups (3.2x), and cloud API calls drop by 68% to 75%. Each medoid then runs through Stage 2A:
-1. **Multimodal embedding and residual adapter:** Encodes Buffer A via Vertex AI `gemini-embedding-2` (`outputDimensionality=768` Matryoshka slice from `3,072-D` native) and applies a 2.4 MB residual InfoNCE MLP (`norm(q + 0.35 * W2 * GELU(W1 * q))`) trained strictly on gallery anchors.
-2. **In-memory 2,659-SKU gallery (`<25 MB` RAM, ₹0 Vector DB):** Scores CSLS hubness-reduced cosine similarity against 10,082 anchors in `<1 ms` inside container RAM.
-3. **Container-shape priors (`epsilon = 0.01`):** Weights visual similarity by aspect ratio (`h/w`), neck taper, and plank-relative height to separate bottles, jars, and sachets.
-4. **Margin fast-exit (68% of groups):** When top-2 probability margin (`P1 - P2 >= 0.14`) and Z-score (`Z >= 1.65`) clear threshold, Stage 2A emits all 5 attributes with 0 generative VLM tokens. Standalone Stage 2A (Option 1 Embedding-Only) reaches 80.9% exact SKU / 90.1% 3-attribute accuracy in 0.90s P50 at ₹0.045/shelf.
+*Figure 2: Offline reference gallery construction (< 25 MB in-worker RAM) and online four-step vector lookup resolving 68% of product groups without an LLM call.*
 
-![Figure 3: Sixty-Second Day-0 New Product Onboarding](images/onboarding.png)
+### **Stage 2B: Contact Sheets for Lookalikes (32% Ties)**
 
-*Figure 3: Adding 1 studio packshot and 1 catalog row updates the `<25 MB` RAM index in under 60 seconds at 94.4% (17/18) blind Day-0 accuracy.*
+**Data insight driving design:** Error trace analysis showed `gemini-embedding-2` Top-5 Recall is already `93.3%`, meaning `63.2%` of Stage 2A misses already contain the true SKU in the top-5 shortlist but need fine-print net-weight or cap-crown disambiguation.
 
-### Stage 2B Zoom Verification
+For the remaining 32% of groups (~3.5 lookalike ties per shelf), Stage 2B sends one batched contact sheet to `gemini-3.5-flash-lite` (`88.4%` context prefix cache hit rate):
 
-The remaining 32% (~3.5 groups per shelf) are lookalike ties (`50g` vs. `100g` sister sizes, `Lemon` vs. `Jasmine` sub-banners, or curved tubes). Stage 2B batches up to 8 uncertain groups per shelf into one `Gemini 3.5 Flash-Lite` call (`2.69s` P50 / `6.40s` P95 total shelf latency):
-1. **Three-band zoom sheet and tube unwarping:** Builds `[Full Crop | 2x Bottom-30% Weight Band | 2.5x Reference-Variance Band | Top-22% Cap Crown]`. Squeeze tubes (`h/w >= 1.75`) receive 1.15x horizontal foreshortening correction, which raises tube SKU accuracy from 77.0% to 89.0%.
-2. **Prefix context caching (88.4% hit rate):** Places invariant catalog rubrics first so repeated prefixes bill at 90% off (`USD 0.054` vs. `USD 0.54 / 1M` Priority tokens).
-3. **Pre-choice evidence decoding and logprob fusion:** Decodes `pack_size_read`, `distinctive_cue`, and `brand_read` before `choice` (+8.9 pts over choice-first) and fuses VLM logprobs (0.62) with Stage-2A similarity (0.38) when top-2 token margin falls below `0.35`.
-4. **Deterministic pack-size switch (`<1 ms`):** Matches parsed `g`/`ml` stamps against shortlist sister SKUs (83.50% Val / 84.00% Test on holdout evaluation, Paired McNemar `p = 0.006`, 0 cross-brand errors), guarded by a `0.045` cosine veto and open-set competitor floor (1.00% False HUL Rate).
+- **Four-panel zoom strip and candidate differences:** Each tied crop is paired with a zoomed bottom weight band, a saliency-diff band, and a top cap-crown strip alongside the top-5 candidate names and how they differ (`50g` vs. `100g`, `SPF 30` vs. `SPF 50`, `Tub` vs. `Jar`).
+- **Pre-choice text reading and catalog pack lookup:** The model reads visible brand, variant words, and gram/ml weight inside isolated `<untrusted_pack_text>` tags before picking the winning candidate ID, which is combined with Stage 2A scores and mapped deterministically to its catalog pack shape.
+- **Open-set competitor guard:** When a crop does not match a Unilever SKU with high confidence, intermediate embedding similarity routes it to a named or open-set competitor (`is_hul = False`) while low similarity abstains as background clutter.
 
-### Stage 3 Shelf Aggregation
+## **How We Evaluated & Results**
 
-Stage 3 converts verified medoids into visit-level Share-of-Shelf and downstream database rows:
-- **Plank-row neighbor smoothing (+2.5 pts):** Enforces spatial continuity along shelf planks (98.2% category accuracy; 1.25% single-shelf SoS MAE; 2.00% multi-shot visit SoS MAE).
-- **Panorama overlap deduplication:** Detects overlapping left-to-right aisle shots (`NCC >= 0.86`) in multi-image `Image_Names` uploads so boundary facings count once (`<0.5%` visit error).
-- **12-column `Past_ROI_Data` export:** Writes exact basepack codes (`0` `'Model_Output'` drops) into Cloud SQL MySQL, raises usable shelf facings by +170.4% (`2,223` to `6,012`), and lifts P2P `W1` from 34.82% to 73.68%.
+Every benchmark dataset in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) is split by store outlet and MD5 file digest so zero store shelves or duplicate crops leak between training, validation, and test sets.
 
-## Interface Contracts
+On partially boxed store shelves, evaluation scores detections inside human-annotated shelf stretches while reporting valid extra detections outside those stretches separately.
 
-The Modern Trade and General Trade Cloud Run workers accept Unilever's inbound request schema (`Image_Names`, `Outlet_Code`, `RSCode`, `Request_ID`, `Salesman_Code`, plus optional `psa_category`) and emit the `DYNAMIC_TASK_API` callback with `v0.2` timeout quarantine fields:
+### **Market Share Use-Case & Task Summary**
 
-```json
-{
-  "Request_ID": "REQ-MT-20261025-88412",
-  "Outlet_Code": "HUL-MT-40912",
-  "RSCode": "RS-WEST-104",
-  "Salesman_Code": "SM-7721",
-  "StatusCode": 200,
-  "contract_version": "v0.2",
-  "contract_status": "OK",
-  "catalog_sha256": "b2dc368a0bf972a6",
-  "Recognised_Packs": [
-    {
-      "image_name": "gondola_left_01.jpg",
-      "sku_id": 412,
-      "is_hul": true,
-      "category": "Hair_Care",
-      "packaging_type": "Bottle",
-      "legacy_46_pack_class": "Hair_Care__Bottle",
-      "brand": "Dove",
-      "base_variant": "Dove__Hair_Fall_Rescue",
-      "facing_count": 4,
-      "panorama_deduped": true
-    }
-  ]
-}
-```
 
-## Trade-Offs Considered
+| **Market Share Task** | **Test Dataset & Scope** | **Existing Baseline** | **Test Result & Business Outcome** |
+| --- | --- | --- | --- |
+| **1. Full-Shelf Market Share (Modern Trade & Kirana)** | 200 Modern Trade & 151 General Trade full store shelves | 34.82% P2P Basepack W1; rival packs pooled into "Others" | **Modern Trade:** 0.93% SoS area error (2.28% facing error, 83.9% Brand, 4.1 s/photo). **Kirana:** 68.3% row F2, upgrades 66.4% of vague "Others" into exact SKUs, and lifts **P2P Basepack W1 from 34.82% to 73.68%**. |
+| **2. Multi-Photo Store Visit Deduplication** | 100 to 150 store visits (2 to 5 overlapping aisle photos/visit) | Double-counts overlapping aisle facings across adjacent photos | **1.00% to 2.25% visit SoS error** (96.5% client-parity F2, 75.5% strict SKU F2, 0.0% False Unilever attribution, 2.9 s/visit). |
+| **3. Single-Crop SKU Classification at Scale (5,000 Crops)** | 5,000 held-out test crops across 892 stores | 42.32% exact 5-attribute SKU (87.1% Brand, 54.9% Pack) | **82.30% exact 5-attribute SKU** (96.1% Brand, 93.5% Category, 91.7% Pack, 89.3% Variant) in 0.82 s (+40.0 pp, p < 10^-6). |
+| **4. High-Precision Cap & Fine-Print Zoom** | 1,000 held-out test crops (4-panel zoom + crown strip) | 44.50% (52.00% with 100% Oracle Brand) | **84.0% Test** single-pass zoom (83.5% Val; 94.0% Pack, 96.5% Brand, 0.6% False Unilever) and **95.20%** on the locked hybrid production configuration. |
+| **5. Zero-LLM & Fast-Skip Embedding Retrieval** | 5,000 held-out crops & 18 unseen Day-0 product launches | 0.0% on 1,121 unseen catalog SKUs; closed-set SFT fails on new launches | **81.2% with 50% LLM skip** (0.47 s) and **78.9% to 80.9% with zero LLM calls**; **94.4% (17/18) on unseen Day-0 launches in < 60 s**. |
+| **6. Lookalike Sister Variant Disambiguation** | 1,000 lookalike test crops across 1,922 sister variants | 44.50% on 9-model classifier chain | **83.5% Test** (85.0% Val) across lookalike sister variants and gram/ml size twins in 0.56 s. |
+| **7. Brand & Competitor Attribution** | 1,000 test crops spanning Unilever & 874 rival brands | 87.1% Brand; rivals grouped into "Others" | **95.9% exact Brand, 98.4% Unilever/rival ownership, 0.4% False Unilever** (94.4% Brand and 97.8% ownership in zero-LLM mode). |
+| **8. 3D Packaging Shape Classification** | 1,000 & 5,000 test crops across 18 canonical container shapes | 54.86% on standalone pack-type classifier | **88.9% to 89.5%** standalone shape recognition; **93.3% to 94.0% (1K) and 91.7% (5K)** when combined with catalog lookup and top-cap crown zoom. |
 
-| Alternative Evaluated | Sandbox Result | Reason Rejected as Primary Default |
-| :--- | :--- | :--- |
-| **Option 1: Pure `gemini-embedding-2` (Embedding-Only)** | **80.9%** 5-Attr (`1K`), `0.90s` P50, `₹0.045/shelf` | Trails by `-2.7 pp` on identical-artwork `50g` vs. `100g` stamps; retained as `>85%` quota spillover brake (`0` generative VLM calls). |
-| **Option 3: LoRA SFT (Rank-4 Adapter)** | **85.0% Val / 82.1% Test** (`hul_variants`), `₹0.125/shelf` | Wider `2.9 pp` val-to-test gap vs. `0.5 pp` on Option 2 and needs periodic SFT refreshes; kept as Tier-2 challenger. |
-| **Closed-Set `MaxViT-Tiny` / `V-JEPA 2`** | `86.77%` (`hul_variants`) / `84.50%` (`hul_golden` 1K) | Misses 737 catalog SKUs on `MaxViT`, scores **0.0% on Day-0 launches**, and leaves GPUs 83% idle off-peak. |
-| **Full-Shelf Single-Call VLM** | `45.6%-46.3%` E2E on `ms_json_golden`, `₹1.41-₹2.15/shelf` | Attention dilution across 35 to 120 small packs cuts accuracy below 47% at **11.7x** higher shelf cost. |
+## **Matched Silo Audit**
 
-## Runtime Guardrails
+Comparing the existing nine-model classifier chain ([Existing Model Analysis](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.ipskbbbvu50h)) against the four-stage funnel on the same 5,000 held-out crops (892 stores) shows where the **+40.0 pp** accuracy gain comes from:
 
-![Figure 4: Runtime Sequence with Evening Surge Buffering and Fail-Open Payout Guardrail](images/sequence.png)
 
-*Figure 4: End-to-end ingestion, Cloud Pub/Sub, Cloud Run worker, and callback sequence buffering 17:00 to 21:00 IST bursts (`<150 ms` ack) and routing timeouts into `RETRY_PENDING`.*
+| **Cohort / Container Slice** | **Sample Size (N)** | **Existing v0.1 Accuracy** | **Target v0.2 Accuracy** | **Absolute Lift (Δ pp)** | **Primary Technical Driver** |
+| --- | --- | --- | --- | --- | --- |
+| **Skin & Hair Care Silo** | 1,140 | 31.8% | 91.6% | +59.8 pp | Unified 2,659-SKU gallery + top-cap crown twin-pack tie-breaking |
+| **Oral Care Silo** | 680 | 32.9% | 83.2% | +50.3 pp | Eliminates cross-silo misrouting on multi-brand family packs |
+| **Rival P6 Silo** | 1,420 | 29.1% | 77.0% | +47.9 pp | 874 named competitor brands + 3-tier open-set competitor guard |
+| **P5 Foods & HFD Silo** | 890 | 50.9% | 89.1% | +38.2 pp | Deterministic catalog pack-shape lookup + bottom weight-band OCR |
+| **Sachet & Wrapper Packs** | 910 | 18.4% | 91.8% | +73.4 pp | Stage 1 Dual-Buffer LAB CLAHE glare cleanup + 960px Distilled YOLO11n |
+| **Pump & Tube Containers** | 640 | 28.6% | 90.4% | +61.8 pp | Stage 1 cylindrical unwarp + K=3 multi-angle centroids |
+| **Total Matched 5K Benchmark** | **5,000** | **42.32%** | **82.30% to 84.00%** | **+40.0 pp** | **Paired McNemar p < 10^-6 (95.20% on 1,000-crop benchmark)** |
 
-| Failure Mode | Legacy `v0.1` Behavior | `LLD001 v0.2` Deterministic Guardrail |
-| :--- | :--- | :--- |
-| **Post-18:00 IST Upload Burst** | Returns `HTTP 200` and drops payload | Cloud Pub/Sub buffers uploads (7-day retention) into Cloud Run workers (`min 4 / max 80` containers). |
-| **Timeout (`> PT180S`) or `429/5xx`** | Emits `StatusCode: 500, Recognised_Packs: ""` (`retryPolicy: none`) | Routes message to `shelf-inference-dlq` with `contract_status = "RETRY_PENDING"` (`0` lost visits). |
-| **Evening Vertex Quota > 85%** | Unhandled queueing / HTTP `429` drops | Auto-sheds Stage-2B ties to Option 1 (`gemini-embedding-2` fast-match, `0` generative VLM calls, 80.9% SKU, 0.90s) until quota drops below 75%. |
-| **Adversarial Shelf Sticker Text** | Unstructured string concatenation | Isolates OCR inside `<untrusted_pack_text>` XML tags with `enum`-constrained JSON schema decoding (`1..K` or `0`). |
+## **Accuracy by Category, Shape & Ownership**
+
+### **1. Store Categories**
+
+In Unilever's P2P scoring engine, each category blends six empirical reliability weights (`W1 = Basepack [W4 * W5 / 100]`, `W2 = SubCategory`, `W3 = Brand`, `W4 = Variant`, `W5 = Size`, `W6 = PackType`):
+
+
+| **Store Category** | **Sample Size (N)** | **Live P2P W1 (W6 Pack)** | **Existing 9-Model SKU (Strict / Canon)** | **New v0.2 Hybrid SKU (5K)** | **New v0.2 Brand (W3)** | **New v0.2 Category** | **Net SKU Lift (Δ pp)** |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **Foods** | **630** | **70.55% (78.00%)** | **48.3% (52.22%)** | **90.0%** | **97.1%** | **99.7%** | **+41.7 pp** |
+| **Skin** | **772** | **54.58% (65.00%)** | **39.9% (38.60%)** | **85.9%** | **96.9%** | **93.8%** | **+46.0 pp** |
+| **Hair_Care** | **385** | **56.51% (84.00%)** | **42.3% (45.97%)** | **85.7% (89.9% 1K)** | **99.0%** | **99.2%** | **+43.4 pp** |
+| **Beverages** | **569** | **54.00% (75.00%)** | **38.7% (41.48%)** | **80.5%** | **95.4%** | **98.6%** | **+41.8 pp** |
+| **HHC (Household Care)** | **513** | **62.90% (84.00%)** | **33.7% (30.21%)** | **80.5%** | **96.9%** | **93.0%** | **+46.8 pp** |
+| **PW (Personal Wash)** | **441** | **38.03% (81.00%)** | **56.7% (50.57%)** | **80.3% (87.5% 1K)** | **95.2%** | **93.7%** | **+23.6 pp** |
+| **HFD (Health Food Drinks)** | **651** | **43.32% (91.00%)** | **36.3% (37.17%)** | **80.0%** | **98.0%** | **98.5%** | **+43.7 pp** |
+| **Oral_Care** | **421** | **31.85% (80.00%)** | **37.1% (32.78%)** | **80.0%** | **94.3%** | **97.4%** | **+42.9 pp** |
+| **Laundry** | **527** | **35.59% (84.00%)** | **52.0% (54.65%)** | **78.4%** | **93.7%** | **97.0%** | **+26.4 pp** |
+| **DMT (Deodorants)** | **91** | **58.13% (84.00%)** | **35.2% (29.67%)** | **63.7%** | **83.5%** | **83.5%** | **+28.5 pp** ***(Can/Spray)*** |
+
+### **2. Container Shapes**
+
+Decoupling the 18 physical container shapes from store aisles in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) lifts accuracy across every container form factor:
+
+
+| **Container Shape** | **Sample Size (N)** | **Existing Pack Model** | **New v0.2 Pack** | **Existing 5-Attr SKU** | **New v0.2 5-Attr SKU** | **Net SKU Lift (Δ pp)** |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Bottle** | **1,198** | **63.94%** | **93.7%** | **49.3%** | **85.3%** | **+36.0 pp** |
+| **Pouch** | **747** | **65.86%** | **94.8%** | **51.3%** | **84.7%** | **+33.4 pp** |
+| **Jar** | **599** | **59.60%** | **90.7%** | **43.9%** | **85.0%** | **+41.1 pp** |
+| **Tube** | **513** | **55.56%** | **98.1%** | **35.3%** | **76.8% (89.0% unwarp)** | **+41.5 pp** |
+| **Bar** | **408** | **81.13%** | **81.9%** | **65.2%** | **70.8%** | **+5.6 pp** |
+| **Carton** | **375** | **42.93%** | **92.8%** | **31.5%** | **73.3%** | **+41.8 pp** |
+| **Sachet** | **353** | **21.81%** | **94.3%** | **19.8%** | **94.3%** | **+74.5 pp** |
+| **Wrapper** | **228** | **15.35%** | **97.4%** | **14.5%** | **86.4%** | **+71.9 pp** |
+| **Can** | **152** | **60.53%** | **89.5%** | **44.7%** | **88.2%** | **+43.5 pp** |
+| **Tub** | **144** | **25.69%** | **81.9%** | **23.6%** | **80.6%** | **+57.0 pp** |
+| **Tetrapack** | **89** | **79.78%** | **83.1%** | **78.7%** | **82.0%** | **+3.3 pp** |
+| **Tin** | **67** | **58.21%** | **98.5%** | **58.2%** | **95.5%** | **+37.3 pp** |
+| **Roll_On** | **45** | **0.00%** | **71.1%** | **0.0%** | **66.7%** | **+66.7 pp** |
+| **Pump** | **41** | **0.00%** | **95.1%** | **0.0%** | **95.1%** | **+95.1 pp** |
+| **Spray (Aerosol Alias)** | 41 | 0.00% | 14.6% (97.6% Can/Spray) | 0.0% | 14.6% (85.4% Can/Spray) | Aerosol Spray/Can alias |
+
+- **Why Bar (70.8%) and Tube (76.8% to 89.0% unwarp) account for most remaining errors:** Sideways soap bars and curved tubes suffer when flash glare obscures sub-8px variant print; even on those ties, Brand stays at 93.7% to 99.0%, `is_hul` stays at 98.6% to 99.0%, and single-shelf Share-of-Shelf error holds at 1.25%.
+
+### **3. Ownership and Long-Tail Cohorts**
+
+
+| **Cohort Slice** | **Scope** | **Existing Classifier / Closed-Set** | **New v0.2 Hybrid** | **Operational Impact** |
+| --- | --- | --- | --- | --- |
+| **Unilever (is_hul = True)** | N = 2,523 (5,000-crop split) | 48.51% SKU (87.08% Var, 94.45% Brand) | 88.8% SKU / 98.1% Brand / 98.4% is_hul | Drives W1 = 73.68% Basepack P2P weight (2.12x existing). |
+| **Competitor (is_hul = False)** | N = 2,477 (5,000-crop split) | 36.01% SKU (65.16% Var, "Others") | 75.7% SKU / 94.1% Brand / 98.8% is_hul | Tracks Share-of-Shelf across 874 named rivals (0.4% to 1.0% False Unilever). |
+| **Rare Long-Tail (1 to 2 Crops)** | 356 rare SKUs | 27.9% vision SFT (0.0% missing train) | 79.1% Exact SKU (+51.2 pp) | Studio packshot anchor matching works from 1 reference image. |
+| **Day-0 Product Launches** | **18 unseen new SKUs** | **0.0% (0 / 18) across closed-set models** | **94.4% (17 / 18) in < 60 s** | **Eliminates multi-endpoint retraining lag on new launches.** |
+
+### **3.3 Error Taxonomy, Confusion Matrix & Confidence-Abstention Calibration**
+
+Auditing the 180 crops where at least one of the 5 attributes missed on the 1,000-crop `hul_golden` test run (`820 / 1,000` all-5-correct) shows that **`82.2%` (`148 / 180`) of all SKU-level errors still predict the exact `Brand` correctly**, and **`75.6%` (`136 / 180`) predict both `Brand` and `Category` correctly**:
+
+| **Error Bucket (Mutually Exclusive across 180 Errors in 1,000 Crops)** | **Error Count (% of Errors / % of Total Crops)** | **Primary Root Cause & Representative Examples** | **Pipeline Mitigation & Downstream Cross-Sell Guardrail** |
+| --- | --- | --- | --- |
+| **1. Same-Brand & Same-Pack Sibling Variant Confusion** (`Brand`, `Category`, `Pack` all 100% correct) | **96 (`53.3%` / `9.6%`)** | Near-identical sister artwork (`cosine = 0.92–0.97`, top-2 margin `< 0.025`) where only a `< 6 px` sub-banner differs (*Lakme Sunscreen SPF 50* vs. *SPF 24*, *Nivea Honey* vs. *Turmeric*). | Sibling-margin factor discounts `confidence["base_variant"]` while keeping `confidence["brand"] >= 0.90`; hierarchical fallback retains `Brand + Category + Pack` and abstains only on `base_variant`. |
+| **2. Same-Brand Container Format + Variant Shift** (`Brand` & `Category` 100% correct) | **40 (`22.2%` / `4.0%`)** | Same-brand SKU sold in both rigid and flexible formats (*Comfort Pink Lily Bottle* vs. *Pouch*, *Funfoods Mayonnaise Bottle* vs. *Poly Pouch*, *Boost Tetrapack* vs. *Bottle*). | Top-22% Crown/Nozzle/Crimp strip + 16-class Lidstone 3D container geometry prior (`Bottle -> Tube: 10`, `Bar -> Pouch: 6`, `Bottle -> Pouch: 5`, `Jar -> Bottle: 5` remaining off-diagonal). |
+| **3. Multi-Category Brand Boundary Split** (`Brand` 100% correct, `Category` split) | **12 (`6.7%` / `1.2%`)** | Cross-category master brands (*Dove*, *Vaseline*, *Pears*) spanning `Skin`, `PW`, and `Hair_Care` (`Skin -> PW: 3`, `PW -> HHC: 3`). | Stage 3 `sku_meta_by_bv` lookup resolves `(brand, base_variant)` to its SKU-specific category before falling back to brand-level category priors. |
+| **4. Within-Category Cross-Brand Mismatch** (`Category` correct, `Brand` wrong) | **17 (`9.4%` / `1.7%`)** | Heavily angled or specular-glare `Oral_Care` tubes and `PW` soap bars where logo text is occluded. | Discounted by open-set InfoNCE dustbin (`tau_0 = 0.62`) and cosine clarity (`[0.42, 0.96]`); filtered when `joint_confidence < 0.80`. |
+| **5. Severe Blur / Occlusion / Stage-B Rejects** (`choice == 0`) | **15 (`8.3%` / `1.5%`)** | Motion-blurred or back-row dark cutouts (`< 38 px`) where Stage-B VLM reports `choice = 0` ("none match / unreadable"). | Capped at `joint_confidence <= 0.36` with `abstain_recommended = True`; automatically returns `None` when `abstain_on_stage_b_reject = True`. |
+
+Across business categories (`Skin`, `Foods`, `HFD`, `Laundry`, `Beverages`, `PW`, `Oral_Care`, `HHC`, `Hair_Care`), mean Stage-A cosine similarity stays within a narrow `0.922–0.941` band; difficulty is driven primarily by **3D container geometry** (curved `Jar` `72.6%`, `Bar` `75.6%`, and `Carton` `75.7%` variant accuracy vs. flat `Wrapper` `88.6%`, `Sachet` `93.3%`, and `Can` `94.1%`). Combining the open-set InfoNCE dustbin (`0.62`), cosine clarity (`[0.08, 0.985]`), and sibling-variant margin calibration eliminates `1.0` confidence saturation (`84.1% -> 0.0%`) and provides a smooth coverage-vs-precision operating curve across global ($\tau$) or category-conditioned ($\tau_{\text{cat}}$) thresholds:
+
+| **Confidence Threshold ($\tau$)** | **Returned Coverage** | **Brand Precision** | **Pack Type Precision** | **Base Variant Precision** | **Variant Hallucinations Removed** | **Recommended Operating Mode** |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Unfiltered ($\tau = 0.00$)** | `100.0%` (`1,000`) | `96.8%` | `93.4%` | `82.0%` | `0 / 180` (`0.0%`) | Closed-set benchmark evaluation (no abstention). |
+| **Stage-B Reject Gate ($\tau = 0.40$)** | `98.8%` (`988`) | `97.4%` | `94.0%` | `82.8%` | `12 / 180` (`100%` of `choice=0`) | Drops all unreadable / Stage-B rejected crops (`choice = 0`). |
+| **Category-Conditioned ($\tau_{\text{cat}} \in [0.74, 0.80]$)** | `81.4%` (`814`) | `98.8%` | `95.3%` | `87.8%` | `81 / 180` (`45.0%` removed) | Uses $\tau = 0.74–0.75$ for high-clarity `Foods`/`HHC` and $\tau = 0.80$ for `Skin`/`Oral_Care`. |
+| **Balanced Global Gate ($\tau = 0.78$)** | `77.6%` (`776`) | `98.8%` | `95.5%` | `88.0%` | `87 / 180` (`48.3%` removed) | Default production gate for store-level analytics. |
+| **High-Precision Cross-Sell ($\tau = 0.82$)** | `72.2%` (`722`) | `99.3%` | `96.1%` | `89.2%` | `102 / 180` (`56.7%` removed) | Recommended for cross-sell recommendations across HUL and non-HUL SKUs. |
+| **Strict SKU Audit ($\tau = 0.85$)** | `65.5%` (`655`) | `99.4%` | `96.8%` | `90.7%` | `119 / 180` (`66.1%` removed) | High-purity SKU variant audit (or pair with per-field abstention to keep `98.8%` Brand at `92%+` coverage). |
+
+## **\[Optional Read\] Deploying on Google Cloud & Day-0 SKU Onboarding**
+
+Stage 3 computes 10-category Share-of-Shelf and P2P Basepack Weights (`W1..W6`) with Rogan-Gladen prevalence adjustment and the production guardrails sized in [Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j) and [Model Whitelisting Report](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.m11c1bw64077):
+
+- **Zero-training SKU onboarding (< 60 s hot-reload):** Adding a newly launched SKU or promotional wrapper requires only 3 to 5 reference packshots and a catalog row; updating the `< 25 MB` gallery artifact on Cloud Storage refreshes all running Cloud Run workers in under 60 seconds.
+- **180 s SLA timeout protection (`RETRY_PENDING`) & 4-stage rollout:** Shelf text is isolated inside `<untrusted_pack_text>` tags, and any request exceeding the 180-second callback deadline emits `contract_status = "RETRY_PENDING"` via the dead-letter queue instead of a false zero share payout. Rollout progresses from Stage 1 shadow to Stage 4 cutover as detailed in the [End-to-End Architecture Guide](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.erkk4n45aac9).
+
+
+*Figure 3: Zero-training Day-0 SKU onboarding workflow: adding 3 to 5 reference packshots updates the in-memory vector gallery across Cloud Run workers in under 60 seconds.*
+
+
+*Figure 4: Production topology connecting mobile uploads, Cloud Pub/Sub buffering, stateless Cloud Run CPU workers, Private Service Connect Vertex AI endpoints, and automated timeout quarantine.*
+
+## **Appendix**
+
+### **Key Parameters**
+
+| **Stage** | **Component** | **Key Parameters** |
+| --- | --- | --- |
+| **Stage 1** | Dual-buffer lighting & cylindrical unwarp | Shades-of-Gray `p = 6`; `L*`-channel CLAHE (`8x8` tiles, clip limit `2.0`); `1.15x` horizontal unwarp when width/height `< 0.48`. |
+| **Stage 1** | 960px Distilled YOLO11n & row twin grouping | `960x960` FP32 ONNX (`80 ms` on 4 vCPU); RANSAC horizontal plank filter; twin grouping at 3-zone CIELAB `>= 0.985`, `dHash <= 6`, `16x16` layout cosine `>= 0.965` (`35` facings -> `~11` unique crops). |
+| **Stage 2A** | In-RAM gallery & confidence split | `2,659` Unilever SKUs + `874` rival brands (`10,082` vectors, `768-D`, `< 25 MB` RAM); `K = 3` angle centroids; 2.4 MB Residual InfoNCE adapter; CSLS hubness masking (`k = 10`); direct accept at `top1 >= 0.78` and `margin >= 0.04` (`68%` of groups). |
+| **Stage 2B** | Contact sheet tie-breaker & competitor guard | 4-panel strip (`[Full | 2x Bottom Weight | 2.5x Saliency-Diff | Top Cap Crown]`); `K = 5` candidates (`88.4%` prefix cache hit); open-set guard commits SKU at `s1 >= 0.72`, rival at `0.45 <= s1 < 0.72`, background at `< 0.45`. |
+| **Stage 3** | SoS prevalence calibration & session deduplication | Rogan-Gladen sensitivity/specificity adjustment; multi-photo session overlap suppression (`2–5` photos/visit); timeout quarantine at `180 s` (`RETRY_PENDING`). |
+
+### **FAQ**
+
+1. **Why use a two-stage hybrid instead of a fine-tuned DINOv3 or MaxViT classifier?** Fine-tuned classifiers work well on head SKUs (`90.9%` on `16+` training crops) but score `27.9%` on rare SKUs (`1–2` crops) and `0.0%` on the 1,121 catalog SKUs with zero training crops, and require full retraining for every new product launch.
+2. **Why is 1,000-crop accuracy 95.2% (84.0% single-pass) while 5,000-crop accuracy is 82.3%?** The 5,000-crop benchmark spans a broader long tail of 892 stores and includes more low-resolution Kirana cutouts (`< 48 px`), sideways soap bars, and rival packs (`75.7%` competitor SKU vs. `88.8%` Unilever SKU).
+3. **Why did looking up pack type in the catalog add +29.60 pp to the existing chain?** In the existing chain, `29.60%` of crops got Brand, Category, and Variant right and then failed on the standalone 46-folder `<Category>__<Pack>` classifier, which conflated store aisles with container shapes.
+4. **How are overlapping aisle photos in a single store visit deduplicated?** Stage 3 aligns adjacent photos in the same session using box geometry and embedding similarity along each shelf row so overlapping facings in the seam region are counted once (`1.00%–2.25%` visit SoS error).
+5. **Who owns the code and catalog assets?** All pipeline modules and deployment templates are delivered under the Apache-2.0 license (see [Model Whitelisting Report](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.m11c1bw64077)), while Unilever retains exclusive ownership of its 2,659-SKU catalog, benchmark annotations, and P2P scoring rules.
+
+
+---
+[^c1]: Anil Sener: @jjuneja@google.com What is the best link to describe this algorithm.
+    - Jigyasu Juneja: Linked directly in the table. It combines two papers: (1) Residual Feature Adapter: Gao et al., 'CLIP-Adapter: Better Vision-Language Models with Feature Adapters' (https://arxiv.org/abs/2110.04544), and (2) InfoNCE Contrastive Loss: Oord et al., 'Representation Learning with Contrastive Predictive Coding' (https://arxiv.org/abs/1807.03748) / Supervised Contrastive Learning (https://arxiv.org/abs/2004.11362). It is a 2.4 MB matrix applying v' = Norm(v + alpha * W2 * GELU(W1 * v)) on 768-D gemini-embedding-2 vectors.
