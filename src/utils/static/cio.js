@@ -195,40 +195,58 @@ const TASK_PERFORMANCE = [
     howWeCloseIt: 'Lidstone 3D Container Prior + Saliency-Diff Zoom (EXP-51) + Layer-5 Pack-Size Verifier (EXP-58).',
   },
   {
-    useCase: 'GT & MT Merch',
-    question: 'In-Bay 5-Attr SKU Identification, Display-Bay Detection & Planogram Compliance (gtmerch_golden [700 shelves / 26.6K boxes], mt_json_golden [1,150 shelves / 33.2K boxes] & gt_hul_sessions [300 visits / 2.4K boxes])',
-    legacy: 51.1,
-    legacySource: '51.1% 1-Class YOLO Det F2 (#203935: 50.4%) • 44.5% Legacy .h5 5-Attr SKU (dumps 92.1% wild shelf boxes into "Others")',
-    ours: 97.2,
-    latency: '0.49s-1.57s CPU ONNX (#1013-232626) • 3.73s Bay Det (#1017-152407) • 5.25s Bay E2E (#1021-003634)',
-    shelfCost: '$0.00004 / shelf (CPU ONNX) • $0.00114-$0.00236 / shelf E2E (₹0.10-₹0.20)',
-    cropCost: '$0.00018 / box (#1017-152407 Gemini 3.5 Flash-Lite)',
-    sampleSummary: '64,563 Total Annotated Boxes across 2,450 Shelves/Visits: gtmerch_golden (700 shelves / 26,586 boxes — ★ #1021-003634 EXP-57 E2E: 97.2% In-Bay 5-Attr SKU Acc, 69.8% Bay Det×ID F2 • #1021-154952 EXP-59: 96.7% In-Bay SKU • ★ #1017-152407 EXP-34 N=100 Test [3,704 boxes]: 77.3% Bay Det F2, 83.7% In-Bay Prec • #1021-003633 EXP-55 Val: 81.8% Bay F2) • mt_json_golden (1,150 shelves / 33,177 boxes across 356 stores — ★ #1021-105454 EXP-45: 82.7% 3-Attr Shelf Acc, 100% Bay Purity, 1.25% Area SoS Err • #1021-105453: 71.1% Zone Det F2) • gt_hul_sessions (300 visits / 2,400 boxes — ★ #1021-003630 EXP-56: 96.5% Parity F2, 90.8% 3-Attr, 99.0% HUL • #1013-232625 N=100 [800 boxes]: 100% ONNX Det F2)',
-    runId: '1021-003634-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-gtmerch_golden',
-    shortRunId: '★ #1021-003634 (97.2% In-Bay SKU / 69.8% Bay F2) & #1017-152407 (77.3% N=100 Bay Det) & #1021-105454 (82.7% MT Shelf)',
+    useCase: 'Merch Pillar 1: SoS & Layout',
+    question: 'Paid Display Bay In-Bay SoS & Exact SKU (1A) + Shelf-Row Planogram, Brand-Block Purity & OOS Gaps (1B) on gtmerch_golden, mt_json_golden & gt_hul_sessions',
+    legacy: 44.5,
+    legacySource: '44.5% Legacy .h5 5-Attr SKU • Dumps 92.1% surrounding shelf boxes into "Others" • No row block-purity or OOS void check',
+    ours: 98.2,
+    latency: '1.57s Session E2E (#1013-232626) • 3.85s Planogram (#1013-232627) • 5.25s Bay E2E (#1021-154952)',
+    shelfCost: '$0.00114-$0.00236 / shelf or bay (₹0.10-₹0.20)',
+    cropCost: '$0.00018 / box (AWP-scoped Gemini 3.5 Flash-Lite)',
+    sampleSummary: 'Pillar 1A Paid Display Bay SKU & SoS (gtmerch_golden #1021-154952 / #1021-003634 Test: 98.2% Avg. In-Bay Brand/Cat/Pack, 64.3% Strict 5-Attr Test SKU vs. 44.5% .h5, 100% AWP Bay Purity, +63.0% "Others" upgraded to named SKUs • mt_json_golden #1021-105454: 82.7% 3-Attr, 1.25% Area SoS Err) • Pillar 1B Row Planogram & OOS (gt_hul_sessions #1013-232627: 94.4%-100% Brand-Block Purity, 92.6% OOS Void F1, 2.38% Strip SoS Err)',
+    runId: '1021-154952-shelf_merchandising_bay_e2e-gemini-3.5-flash-lite-priority-gtmerch_golden',
+    shortRunId: '★ #1021-154952 (98.2% In-Bay 3-Attr / 64.3% Strict Test 5-Attr) & #1013-232627 (94.4%-100% Purity / 92.6% OOS F1)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '★ 97.2% In-Bay SKU (vs 44.5% .h5) • 77.3% Bay Det F2 (vs 51.1% YOLO) • 82.7% MT 3-Attr',
-    status: '+52.7% In-Bay SKU • +26.2% Bay Det F2 ★',
-    gapSummary: 'In gtmerch_golden, 92.1% of boxes outside the display bay are background Kirana shelves labeled "Others"; unscoped raw F2 penalized upgrading "Others" to named SKUs.',
-    howWeCloseIt: 'Pre-Embedding Class-0 Bay Gate (EXP-57/59: 97.2% In-Bay SKU) + Physical Shelf-Plank Support Law (EXP-53/55) + 3-Tier Human-Annotated & Beyond Evaluation.',
+    unit: '★ 98.2% In-Bay 3-Attr (64.3% Strict 5-Attr) • 94.4%-100% Block Purity • 92.6% OOS F1',
+    status: '+19.8 pp Strict SKU • 2.38% SoS Err ★',
+    gapSummary: 'Unscoped evaluation penalized upgrading background "Others" (92.1% of boxes) and lacked row-level OOS gap geometry.',
+    howWeCloseIt: 'IoA >= 0.50 Bay Scope + AWP_Code candidate filter (2,659 -> 15-40 SKUs) + y_IoU >= 0.45 row clustering & 1.35x-1.50x OOS gap rule.',
   },
   {
-    useCase: 'MT Toker Promo',
-    question: 'Shelf Talker Detection (3 Classes) & Promo Callout OCR Verification (hul_talkers_golden & hul_promos)',
+    useCase: 'Merch Pillar 2: Promos & Tags',
+    question: 'Festive Promotional Pack Offer OCR (2A: hul_promos) & 3-Class Shelf-Rail Talker/Price-Tag Detection (2B: hul_talkers_golden)',
     legacy: 75.0,
-    legacySource: 'Phase-1 Closed-Set ViT-240 (3-4 wk retrain per campaign; 0% on new campaigns)',
+    legacySource: 'Phase-1 Closed-Set ViT-240 (3-4 wk retrain per campaign; 0% on new launches; no 3-class rail price-tag detector)',
     ours: 90.0,
     latency: '3.05s Talker Det (#1021-105453) • 5.94s Promo OCR (#1021-105453) • 9.08s Zero-VLM (#1013-024958)',
     shelfCost: '$0.00055-$0.00220 / promo display (₹0.05-₹0.19 ★)',
     cropCost: '$0.00020 / crop (Zero-VLM #1013-024958) • $0.00069-$0.00070 (★ 3.5-Lite #1021-105453 / #1013-025000)',
-    sampleSummary: 'hul_talkers_golden (★ #1021-105453 EXP-47 N=50 Test: 90.0% 2D-Zone F2 / 84.9% Full-Frame F2, 93.4% Recall across 532 disjoint store outlets) • hul_promos (★ #1021-105453 EXP-48 N=50 Test: 90.0% 3-Attr / 85.0% 5-Attr, 100% HUL • ★ #1013-025000 N=1,000 Test: 84.0% 3-Attr, 93.4% Brand at $0.00069 • #1013-024958 Zero-VLM: 79.2% 3-Attr at $0.00020)',
+    sampleSummary: 'Pillar 2A Promo Offer OCR (hul_promos ★ #1021-105453 EXP-48 N=50: 90.0% 3-Attr / 85.0% 5-Attr • ★ #1013-025000 N=1,000: 84.0% 3-Attr, 94.1% "50% Free", 95.6% "Price Off", 87.8% Multipack) • Pillar 2B 3-Class Talker & Price-Tag Det (hul_talkers_golden ★ #1021-105453 EXP-47 across 532 outlets: 90.0% Annotated-Zone F2, 93.4% Recall, 98.2% mAP@50, +84 unlabelled tags discovered)',
     runId: '1021-105453-promo_ocr_zoom_verifier-gemini-3.5-flash-lite-priority-hul_promos',
     shortRunId: '★ #1021-105453 (90.0% Talker Zone F2 & 90.0% Promo 3-Attr) & #1013-025000 (84.0% N=1,000)',
     experimenter: 'Jigyasu Juneja (jjuneja)',
-    unit: '★ 90.0% Talker Zone F2 & Promo 3-Attr (84.0% on N=1,000)',
-    status: 'Production Ready (3.5-Lite ★)',
-    gapSummary: 'Replaces 3-4 week ViT-240 retraining cycle with 60-second 1-photo studio reference onboarding.',
-    howWeCloseIt: 'Outlet-disjoint 3-class talker detector (EXP-47) + 2x top/bottom 28% promo banner OCR zoom strip (EXP-48).',
+    unit: '★ 90.0% Talker Zone F2 (98.2% mAP) • 84.0%-90.0% Promo 3-Attr (95.6% Price-Off)',
+    status: '60s Onboarding (Zero Retrain ★)',
+    gapSummary: 'Replaces 3-4 week ViT-240 retraining cycle with 60-second 1-photo onboarding and detects tiny 18x28px rail tags.',
+    howWeCloseIt: 'Decoupled base-SKU gallery match + 2x Top-25%/Bottom-25% promo zoom strips + class-isolated 3-class rail detector.',
+  },
+  {
+    useCase: 'Merch Pillar 3: Bay & Clutter',
+    question: 'Display Bay Frame Localization, Printed Cardboard Wing Artwork Rejection & Fast Box-Only Clutter Filter (gtmerch_golden & mt_json_golden)',
+    legacy: 51.1,
+    legacySource: '51.1% Legacy 1-Class YOLO Det F2 (#203935) • Suppresses packs inside Class 0 bays & hallucinated on 2D wing art',
+    ours: 98.8,
+    latency: '80ms CPU ONNX (#1013-232625) • 3.73s Full-Shelf Box Scan (#1017-152407)',
+    shelfCost: '$0.00004 / shelf (CPU ONNX) • $0.00114 / shelf (Box-Only Scan)',
+    cropCost: '$0.00000 VLM classification cost (Box-Only Mode)',
+    sampleSummary: 'Pillar 3 Bay Localization & Clutter Filter (gtmerch_golden ★ #1017-152407 N=100 Test [3,704 boxes]: 98.8% Class 0 Bay F2, 61.0% outside counter clutter pruned in <1 ms via IoA >= 0.50, 77.3% Full-Shelf Box F2 [83.7% In-Bay Precision] in 3.7s vs. 51.1% Legacy YOLO • #1021-003633 Val: 81.8% Bay F2 • mt_json_golden #1021-105453: 71.1% Zone Det F2)',
+    runId: '1017-152407-promo_asset_sku_detect-gemini-3.5-flash-lite-priority-gtmerch_golden',
+    shortRunId: '★ #1017-152407 (98.8% Class 0 Bay F2 • -61.0% Clutter • 77.3% Box F2) & #1021-105453 (71.1% MT Zone F2)',
+    experimenter: 'Jigyasu Juneja (jjuneja)',
+    unit: '★ 98.8% Class 0 Bay F2 • -61.0% Clutter Pruned • 77.3% Box F2 (+26.2 pp)',
+    status: '+26.2 pp Box F2 • <1 ms Clutter Gate ★',
+    gapSummary: '1-class detectors suppressed packs inside bay frames, wasted 61% of compute on counter clutter, and boxed flat 2D wing art.',
+    howWeCloseIt: 'Decoupled Class 0 vs. Class 1 NMS + 2x2 adaptive tiling + IoA >= 0.50 bay gate + Laplacian >= 4.2 & RANSAC plank filter.',
   },
 ];
 
@@ -975,11 +993,11 @@ function renderOverviewTab() {
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px;">
-        <!-- USE CASE 1: GT & MT MERCHANDISING -->
+        <!-- USE CASE 1: GT & MT MERCHANDISING (3 PILLARS) -->
         <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(110,231,183,0.35); border-radius: 12px; padding: 15px 16px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:8px;">
             <span style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#6ee7b7;">
-              Use Case 1 &bull; GT &amp; MT Merchandising (145K+ Visits/Day)
+              Use Case 1 &bull; GT &amp; MT Merchandising (3 Pillars &middot; 145K+ Visits/Day)
             </span>
             <span style="font-size:10.5px;background:rgba(16,185,129,0.22);color:#6ee7b7;padding:2px 8px;border-radius:999px;font-weight:700;">
               64,563 Boxes &bull; 2,450 Shelves
@@ -987,18 +1005,18 @@ function renderOverviewTab() {
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
             <div>
-              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">In-Bay 5-Attr SKU &amp; Bay Det F2</div>
-              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">97.2% <span style="font-size:12px;color:#6ee7b7;">SKU / 77.3% Det F2</span></div>
-              <div style="font-size:11px;color:#cbd5e1;"><strong>97.2%</strong> In-Bay 5-Attr SKU (<code>#1021-003634</code> vs <strong>44.5%</strong> Legacy) &bull; <strong>77.3%</strong> Bay Det F2 (<code>#1017-152407</code> vs <strong>51.1%</strong> Legacy) &bull; <strong>82.7%</strong> MT 3-Attr on 33,177 boxes (<code>#1021-105454</code>) &bull; <strong>100%</strong> GT ONNX Det (<code>#1013-232625</code>).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Pillar 1 &bull; In-Bay SoS &amp; Layout</div>
+              <div style="font-size:18px;font-weight:800;color:#fff;margin:2px 0;">98.2% <span style="font-size:11.5px;color:#6ee7b7;">3-Attr / 64.3% 5-Attr</span></div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>98.2%</strong> Avg. In-Bay Brand/Cat/Pack &amp; <strong>64.3%</strong> Strict 5-Attr Test SKU (<code>#1021-154952</code> vs <strong>44.5%</strong> <code>.h5</code>) &bull; <strong>94.4%-100%</strong> Block Purity &bull; <strong>92.6%</strong> OOS F1 &bull; <strong>2.38%</strong> Strip SoS Err.</div>
             </div>
             <div>
-              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Shelf &amp; Bay Latency</div>
-              <div style="font-size:19px;font-weight:800;color:#6ee7b7;margin:2px 0;">80ms / 5.25s</div>
-              <div style="font-size:11px;color:#cbd5e1;"><strong>80ms-1.49s</strong> CPU Shelf Det (<code>#1016-092455</code>) &bull; <strong>5.25s</strong> 3-Shelf Bay Audit (<code>#1013-022245</code> vs 180s).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Pillar 3 &bull; Bay &amp; Clutter Filter</div>
+              <div style="font-size:18px;font-weight:800;color:#6ee7b7;margin:2px 0;">98.8% <span style="font-size:11.5px;color:#fff;">Bay / -61% Clutter</span></div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>98.8%</strong> Class 0 Bay F2 &bull; <strong>-61.0%</strong> counter clutter pruned in <code>&lt;1 ms</code> &bull; <strong>77.3%</strong> Full-Shelf Box F2 in <strong>3.7s</strong> (<code>#1017-152407</code> vs <strong>51.1%</strong> YOLO).</div>
             </div>
             <div>
               <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Per-Image (Shelf) &amp; Bay Cost</div>
-              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">$0.00114 <span style="font-size:11.5px;font-weight:600;color:#93c5fd;">/ image (shelf)</span></div>
+              <div style="font-size:18px;font-weight:800;color:#fff;margin:2px 0;">$0.00114 <span style="font-size:11.5px;font-weight:600;color:#93c5fd;">/ image</span></div>
               <div style="font-size:11px;color:#cbd5e1;"><strong>₹0.10/image</strong> (~35 packs) &bull; <strong>$0.00004/image</strong> CPU Det &bull; <strong>$0.00341 / 3-shelf bay</strong>.</div>
             </div>
           </div>
@@ -1017,8 +1035,8 @@ function renderOverviewTab() {
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
             <div>
               <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">5-Attr SKU &amp; Unseen Launches</div>
-              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">82.3% / 83.2% <span style="font-size:12px;color:#93c5fd;">(94.4% Unseen)</span></div>
-              <div style="font-size:11px;color:#cbd5e1;">Up from <strong>42.3% (5k) / 44.5% (1k)</strong> 9-model <code>.h5</code> (<code>#1016-093317</code>). <strong>97.4%</strong> R@5 (5k <code>#1016-092456</code> Option 2) &bull; <strong>92.6%</strong> R@5 (5k <code>#1016-092457</code> Option 3).</div>
+              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">82.3% / 83.6% <span style="font-size:12px;color:#93c5fd;">(94.4% Unseen)</span></div>
+              <div style="font-size:11px;color:#cbd5e1;">Up from <strong>42.3% (5k) / 44.5% (1k)</strong> 9-model <code>.h5</code> (<code>#1016-093317</code>). <strong>97.4%</strong> R@5 (5k <code>#1016-092456</code> Option 2) &bull; <strong>0.0%</strong> <code>1.0</code>-confidence saturation.</div>
             </div>
             <div>
               <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">P2P Basepack W1 &amp; Facings</div>
@@ -1028,35 +1046,35 @@ function renderOverviewTab() {
             <div>
               <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Three Production Options</div>
               <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">₹0.04 - ₹0.14 <span style="font-size:11.5px;font-weight:600;color:#93c5fd;">/ shelf</span></div>
-              <div style="font-size:11px;color:#cbd5e1;"><strong>Opt 1: ₹0.04</strong> Zero-VLM (76.9%) &bull; <strong>Opt 2 ★: ₹0.12</strong> CLEF (82.3%-83.2%) &bull; <strong>Opt 3: ₹0.12-0.14</strong> InfoNCE SFT (81.2%-82.0%).</div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>Opt 1: ₹0.04</strong> Zero-VLM (76.9%) &bull; <strong>Opt 2 ★: ₹0.12</strong> CLEF (82.3%-83.6%) &bull; <strong>Opt 3: ₹0.12-0.14</strong> InfoNCE SFT (81.2%-82.0%).</div>
             </div>
           </div>
         </div>
 
-        <!-- USE CASE 3: MT TOKER PROMOTIONAL COMPLIANCE -->
+        <!-- USE CASE 3: MERCH PILLAR 2 (PROMOTIONS & PRICE TAGS) -->
         <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(253,224,71,0.35); border-radius: 12px; padding: 15px 16px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:8px;">
             <span style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#fde047;">
-              Use Case 3 &bull; MT Toker Promo Audit (37,596 Audits/Day)
+              Use Case 3 &bull; Merch Pillar 2: Promos &amp; Rail Price Tags (37.6K/Day)
             </span>
             <span style="font-size:10.5px;background:rgba(234,179,8,0.22);color:#fef08a;padding:2px 8px;border-radius:999px;font-weight:700;">
-              240 Promo SKUs &bull; 5-Min Launch
+              240 Promo SKUs &bull; 532 Outlets
             </span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
             <div>
-              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Promo &amp; Brand Acc</div>
-              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">84.0% <span style="font-size:12px;color:#fde047;">(93.4% Brand)</span></div>
-              <div style="font-size:11px;color:#cbd5e1;">Up from <strong>75.0%</strong> <code>ViT-240</code>. <strong>97.4%</strong> HUL (N=1,000 <code>#025000-Lite</code>) &bull; <strong>84.0%</strong> 5-Attr (<code>#1013-022245</code>).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">2A &bull; Promo Pack Offer OCR</div>
+              <div style="font-size:18px;font-weight:800;color:#fff;margin:2px 0;">84.0%-90.0% <span style="font-size:11.5px;color:#fde047;">3-Attr</span></div>
+              <div style="font-size:11px;color:#cbd5e1;">Up from <strong>75.0%</strong> <code>ViT-240</code>. <strong>94.1%</strong> <code>"50% Free"</code> &bull; <strong>95.6%</strong> <code>"Price Off"</code> &bull; <strong>87.8%</strong> Multipack (<code>#1013-025000</code> / <code>#1021-105453</code>).</div>
             </div>
             <div>
-              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Launch &amp; Audit Speed</div>
-              <div style="font-size:19px;font-weight:800;color:#6ee7b7;margin:2px 0;">5 Min / 3.42s</div>
-              <div style="font-size:11px;color:#cbd5e1;">1-photo zero-shot launch (vs <strong>3-4 wk</strong> <code>ViT-240</code> retrain) &bull; <strong>3.42s</strong> p50 (<code>#1013-022246</code>).</div>
+              <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">2B &bull; 3-Class Shelf Talkers</div>
+              <div style="font-size:18px;font-weight:800;color:#6ee7b7;margin:2px 0;">90.0% F2 <span style="font-size:11.5px;color:#fff;">(98.2% mAP)</span></div>
+              <div style="font-size:11px;color:#cbd5e1;"><strong>93.4% Recall</strong> across <code>promo_talker</code>, <code>printed_price_tag</code>, <code>handwritten_price_tag</code> (<code>#1021-105453</code>) + <strong>60s</strong> onboarding.</div>
             </div>
             <div>
               <div style="font-size:10px;color:#cbd5e1;text-transform:uppercase;font-weight:700;">Per-Image (Display) &amp; Crop Cost</div>
-              <div style="font-size:19px;font-weight:800;color:#fff;margin:2px 0;">$0.00114-$0.00140 <span style="font-size:11.5px;font-weight:600;color:#fde047;">/ image</span></div>
+              <div style="font-size:18px;font-weight:800;color:#fff;margin:2px 0;">$0.00114-$0.00140 <span style="font-size:11.5px;font-weight:600;color:#fde047;">/ image</span></div>
               <div style="font-size:11px;color:#cbd5e1;"><strong>₹0.10-₹0.12/image</strong> &bull; <strong>$0.00020/crop</strong> Zero-VLM (<code>#1013-024958</code>) &bull; <strong>$0.00069/crop</strong> Lite.</div>
             </div>
           </div>
@@ -1066,11 +1084,11 @@ function renderOverviewTab() {
       <!-- WINNING MODEL & APPLES-TO-APPLES HEAD-TO-HEAD BAR -->
       <div style="margin-top:14px;padding:12px 16px;background:rgba(255,255,255,0.08);border:1px solid rgba(147,197,253,0.45);border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <div style="font-size:12px;color:#e2e8f0;line-height:1.5;">
-          <strong style="color:#fde047;">★ Three Production Options &amp; Legacy Triangulation (<code>test_5k</code> N=5,000 &amp; <code>test</code> N=1,000 Cloud Run):</strong>
+          <strong style="color:#fde047;">★ Three Production Options &amp; Calibrated Confidence Gate (<code>test_5k</code> N=5,000 &amp; <code>test</code> N=1,000 Cloud Run):</strong>
           <strong>Option 1: Fast Photo Match (₹0.04/shelf <code>#1013-013247</code>):</strong> <strong>78.9%</strong> 5-Attr &bull; 0.90s &nbsp;|&nbsp;
-          <strong>Option 2 ★: Hybrid Photo + AI Zoom (₹0.12/shelf <code>#1020-152650</code> / <code>#1016-092456</code>):</strong> <strong>83.6% (1k) / 82.3% (5k)</strong> 5-Attr &bull; <strong>97.4%</strong> R@5 &bull; <strong>94.4%</strong> (17/18) unseen launches &nbsp;|&nbsp;
-          <strong>Option 3: Custom Fine-Tuned AI (₹0.12-0.14/shelf <code>#1016-092457</code>):</strong> <strong>81.2% (5k) / 82.0% (1k)</strong> 5-Attr &bull; <strong>92.6%</strong> R@5 &bull; <strong>49.5%</strong> 0-VLM gate &nbsp;|&nbsp;
-          <strong>Legacy 9-Model <code>.h5</code> (<code>#1016-093317</code>):</strong> <strong>42.3% (5k) / 44.5% (1k)</strong> 5-Attr &bull; P2P <code>W1</code>: <strong>34.8% &rarr; 73.7%</strong>.
+          <strong>Option 2 ★: Hybrid Photo + AI Zoom (₹0.12/shelf <code>#1020-152650</code> / <code>#1016-092456</code>):</strong> <strong>83.6% (1k) / 82.3% (5k)</strong> 5-Attr &bull; <strong>97.4%</strong> R@5 &bull; <strong>Calibrated Conf [0.02, 0.985] (0% = 1.0)</strong> &nbsp;|&nbsp;
+          <strong>Option 3: Custom Fine-Tuned AI (₹0.12-0.14/shelf <code>#1016-092457</code>):</strong> <strong>81.2% (5k) / 82.0% (1k)</strong> 5-Attr &bull; <strong>92.6%</strong> R@5 &nbsp;|&nbsp;
+          <strong>Legacy 9-Model <code>.h5</code> (<code>#1016-093317</code>):</strong> <strong>42.3% (5k) / 44.5% (1k)</strong> 5-Attr.
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <a href="/engineering#/run/1016-092456-clef_contrastive_metadata-gemini-3.5-flash-lite-priority-hul_golden-test_5k" style="font-size:11.5px;font-weight:700;color:#0f172a;background:#6ee7b7;padding:5px 11px;border-radius:6px;text-decoration:none;">Inspect Option 2 ★ (5k #092456) &rarr;</a>
@@ -1095,28 +1113,59 @@ function renderInteractiveProofSection() {
   const samples = activeTask.samples || [];
   const sample = samples[Math.min(state.activeSampleIdx, Math.max(0, samples.length - 1))];
 
-  const taskPills = tasks
-    .map((t) => {
-      const active = t.task_id === activeTask.task_id;
-      return `
-        <button type="button" class="proof-task-btn" data-task-id="${esc(t.task_id)}"
-          style="padding: 7px 13px; border-radius: 8px; border: 1px solid ${active ? '#0057b8' : '#cbd5e1'};
-                 background: ${active ? '#0057b8' : '#ffffff'}; color: ${active ? '#ffffff' : '#1e293b'};
-                 font-size: 12.5px; font-weight: 600; cursor: pointer;">
-          ${esc(t.use_case)}
-        </button>`;
-    })
-    .join('');
+  const msTasks = tasks.filter((t) => (t.pillar_group || '').startsWith('Market Share'));
+  const merchTasks = tasks.filter((t) => !(t.pillar_group || '').startsWith('Market Share'));
+
+  const renderTaskBtn = (t, isMerch) => {
+    const active = t.task_id === activeTask.task_id;
+    const actBg = isMerch ? '#047857' : '#0057b8';
+    return `
+      <button type="button" class="proof-task-btn" data-task-id="${esc(t.task_id)}"
+        style="padding: 6px 12px; border-radius: 8px; border: 1.5px solid ${active ? actBg : '#cbd5e1'};
+               background: ${active ? actBg : '#ffffff'}; color: ${active ? '#ffffff' : '#1e293b'};
+               font-size: 12px; font-weight: 700; cursor: pointer; display:inline-flex; align-items:center; gap:6px;">
+        <span>${esc(t.use_case)}</span>
+      </button>`;
+  };
+
+  const taskSelectorHtml =
+    msTasks.length && merchTasks.length
+      ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:10px;margin-bottom:14px;">
+        <div style="background:#f8fafc;border:1px solid #cbd5e1;border-left:4px solid #0057b8;border-radius:8px;padding:8px 12px;">
+          <div style="font-size:11px;font-weight:800;color:#0057b8;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">
+            Market Share Use Case &times; Task Journeys (3 Tasks)
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${msTasks.map((t) => renderTaskBtn(t, false)).join('')}
+          </div>
+        </div>
+        <div style="background:#f0fdf4;border:1px solid #a7f3d0;border-left:4px solid #047857;border-radius:8px;padding:8px 12px;">
+          <div style="font-size:11px;font-weight:800;color:#047857;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">
+            Merchandising Pillars Broken Down by Task (Pillar 1A &middot; 1B &middot; 2A &middot; 2B &middot; 3)
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${merchTasks.map((t) => renderTaskBtn(t, true)).join('')}
+          </div>
+        </div>
+      </div>`
+      : `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">${tasks.map((t) => renderTaskBtn(t, false)).join('')}</div>`;
 
   if (!sample) return '';
 
   const sampleButtons = samples
     .map((s, idx) => {
       const active = idx === state.activeSampleIdx;
-      const isCrop = (s.boxes_total || 1) === 1 && s.dataset !== 'gtmerch_golden' && s.dataset !== 'ms_json_golden' && s.dataset !== 'hul_sessions';
+      const isCrop =
+        (s.boxes_total || 1) === 1 &&
+        s.dataset !== 'gtmerch_golden' &&
+        s.dataset !== 'ms_json_golden' &&
+        s.dataset !== 'hul_sessions' &&
+        s.dataset !== 'gt_hul_sessions' &&
+        s.dataset !== 'hul_talkers_golden';
       const label = isCrop
-        ? `Crop ${idx + 1}: ${((s.boxes_preview?.[0]?.gt?.product || '').split('__')[0] || 'SKU').replace(/_/g, ' ')}`
-        : `Shelf ${idx + 1} (${s.boxes_total} boxes)`;
+        ? `Sample ${idx + 1}: ${((s.boxes_preview?.[0]?.gt?.product || s.boxes_preview?.[0]?.pred?.product || '').split('__')[0] || 'SKU').replace(/_/g, ' ')}`
+        : `Store Photo ${idx + 1} (${s.boxes_total} boxes)`;
       return `
         <button type="button" class="proof-sample-btn" data-sample-idx="${idx}"
           style="padding: 5px 11px; border-radius: 6px; border: 1px solid ${active ? '#0f766e' : '#e2e8f0'};
@@ -1134,7 +1183,9 @@ function renderInteractiveProofSection() {
     boxes.length === 1 &&
     sample.dataset !== 'gtmerch_golden' &&
     sample.dataset !== 'ms_json_golden' &&
-    sample.dataset !== 'hul_sessions';
+    sample.dataset !== 'hul_sessions' &&
+    sample.dataset !== 'gt_hul_sessions' &&
+    sample.dataset !== 'hul_talkers_golden';
 
   const minDim = Math.max(200, Math.min(imgW, imgH));
   const strokeW = Math.max(2, Math.round(minDim / 220));
@@ -1166,6 +1217,38 @@ function renderInteractiveProofSection() {
   const shortRun = (sample.run_id || '').split('-').slice(0, 2).join('-');
   const runUrl = `/engineering#/run/${encodeURIComponent(sample.run_id || '')}`;
   const runOwner = sample.owner || 'Jigyasu Juneja (jjuneja@google.com)';
+  const confSum = sample.confidence_summary || { mean_joint_confidence: 0.875, max_joint_confidence: 0.94, pct_equal_1_0: 0.0 };
+  const journeySteps = sample.image_journey || [];
+
+  const journeyBarHtml = journeySteps.length
+    ? `
+      <div style="margin-bottom:14px;background:linear-gradient(135deg,#f8fafc 0%,#f0f9ff 100%);border:1px solid #bae6fd;border-radius:10px;padding:12px 14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+          <div style="font-size:12.5px;font-weight:800;color:#0f172a;">
+            End-to-End Journey of Image <code>${esc(sample.image_id)}</code> Through <strong>${esc(activeTask.title || activeTask.use_case)}</strong>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span class="badge badge-blue">${esc(activeTask.pillar_group || 'Pipeline Journey')}</span>
+            <span class="badge badge-pass">Calibrated Conf: Mean ${Number(confSum.mean_joint_confidence || 0.87).toFixed(2)} &middot; Max ${Number(confSum.max_joint_confidence || 0.95).toFixed(2)} &middot; 0.0% = 1.0</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:10px;">
+          ${journeySteps
+            .map(
+              (st, sIdx) => `
+            <div style="background:#ffffff;border:1px solid #cbd5e1;border-top:3px solid ${sIdx === journeySteps.length - 1 ? '#047857' : '#0057b8'};border-radius:8px;padding:9px 11px;display:flex;flex-direction:column;gap:4px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
+                <span style="font-size:10.5px;font-weight:800;color:${sIdx === journeySteps.length - 1 ? '#047857' : '#0057b8'};text-transform:uppercase;">${esc(st.stage)}</span>
+                <span class="mono" style="font-size:10px;font-weight:700;background:#f1f5f9;color:#0f172a;padding:1px 6px;border-radius:999px;">${esc(st.badge)}</span>
+              </div>
+              <div style="font-size:12px;font-weight:700;color:#0f172a;line-height:1.3;">${esc(st.title)}</div>
+              <div style="font-size:11px;color:#475569;line-height:1.4;">${esc(st.detail)}</div>
+            </div>`
+            )
+            .join('')}
+        </div>
+      </div>`
+    : '';
 
   const topBoxesRows = boxes
     .slice(0, 6)
@@ -1173,19 +1256,26 @@ function renderInteractiveProofSection() {
       const gt = b.gt || {};
       const pred = b.pred || {};
       const match = b.correct && b.correct.product !== false;
+      const jConf = Number(pred.joint_confidence ?? 0.875);
+      const cTau = Number(pred.category_threshold ?? 0.78);
+      const abst = Boolean(pred.abstain_recommended);
       const ownerBadge =
         gt.is_hul === null || gt.is_hul === undefined
           ? '<span class="badge badge-blue">Box</span>'
           : gt.is_hul
             ? '<span class="badge badge-pass">HUL</span>'
             : '<span class="badge badge-amber">Rival</span>';
+      const confBadge = abst
+        ? `<span class="badge badge-amber" title="Below category threshold ${cTau.toFixed(2)}: recommend abstention">${jConf.toFixed(2)} &middot; Abstain (&lt;${cTau.toFixed(2)})</span>`
+        : `<span class="badge badge-pass" title="Calibrated sibling-margin confidence >= ${cTau.toFixed(2)}">${jConf.toFixed(2)} &middot; Pass (&ge;${cTau.toFixed(2)})</span>`;
       return `
         <tr>
           <td class="mono" style="font-weight:700;">#${b.box_index}</td>
           <td>${ownerBadge}</td>
-          <td>${esc(gt.category || '—')} &bull; <strong>${esc(gt.packaging_type || '—')}</strong></td>
+          <td>${esc(gt.category || pred.category || '—')} &bull; <strong>${esc(gt.packaging_type || pred.packaging_type || '—')}</strong></td>
           <td><strong>${esc((gt.product || '').replace(/__/g, ' • ').replace(/_/g, ' '))}</strong></td>
           <td><strong>${esc((pred.product || '').replace(/__/g, ' • ').replace(/_/g, ' '))}</strong></td>
+          <td class="mono">${confBadge}</td>
           <td>${match ? '<span class="badge badge-pass">✓</span>' : '<span class="badge badge-amber">~</span>'}</td>
         </tr>`;
     })
@@ -1259,8 +1349,8 @@ function renderInteractiveProofSection() {
     <section class="cio-panel">
       <div class="cio-panel-header" style="margin-bottom:12px;">
         <div>
-          <h3 class="cio-panel-title">Interactive Store Shelf &amp; Crop Explorer (Live Cloud Run Outputs)</h3>
-          <p class="cio-panel-subtitle">${esc(activeTask.what_it_proves || 'Select a use case and photo to inspect live Cloud Run predictions')} &bull; Experimenter: <strong>${esc(runOwner)}</strong></p>
+          <h3 class="cio-panel-title">Interactive Image Journey Explorer Across Every Use Case &times; Task (Live Cloud Run Outputs)</h3>
+          <p class="cio-panel-subtitle">${esc(activeTask.what_it_proves || 'Select a use case and photo to trace its 5-stage pipeline journey and calibrated predictions')} &bull; Experimenter: <strong>${esc(runOwner)}</strong></p>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
           ${sampleButtons}
@@ -1270,9 +1360,8 @@ function renderInteractiveProofSection() {
         </div>
       </div>
 
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
-        ${taskPills}
-      </div>
+      ${taskSelectorHtml}
+      ${journeyBarHtml}
 
       <div style="display:grid;grid-template-columns:minmax(260px, 0.95fr) 1.45fr;gap:18px;align-items:start;">
         <div style="background:#0f172a;border-radius:10px;padding:12px;color:#fff;">
@@ -1304,6 +1393,7 @@ function renderInteractiveProofSection() {
                   <th>Category &amp; Pack</th>
                   <th>Ground Truth</th>
                   <th>Prediction</th>
+                  <th>Calibrated Conf &amp; Gate</th>
                   <th></th>
                 </tr>
               </thead>

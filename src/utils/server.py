@@ -55,7 +55,7 @@ _JPEG_DISK_CACHE = Path("/tmp/shelf_bench_jpeg_cache")
 
 def _store_cache_entry(key: str, val: Any) -> tuple[float, Any, bytes, bytes]:
     raw_b = json.dumps(val).encode("utf-8")
-    gz_b = gzip.compress(raw_b, compresslevel=5) if len(raw_b) > 1024 else b""
+    gz_b = gzip.compress(raw_b, compresslevel=1) if len(raw_b) > 1024 else b""
     entry = (time.monotonic(), val, raw_b, gz_b)
     _API_CACHE[key] = entry
     return entry
