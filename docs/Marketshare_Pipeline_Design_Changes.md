@@ -202,6 +202,24 @@ Stage 3 computes 10-category Share-of-Shelf and P2P Basepack Weights (`W1..W6`) 
 
 *Figure 3: Zero-training Day-0 SKU onboarding workflow: adding 3 to 5 reference packshots updates the in-memory vector gallery across Cloud Run workers in under 60 seconds.*
 
+### **New Variant Vector DB Enrichment Process**
+
+- **Step 1 (Cold-Start Enrichment for New/Rare Variants):** When a new variant or promo pack launches with only 1–3 photos, our enricher automatically generates: (a) `2x` Lanczos high-res zoom strips of the Top-25% Brand Header, Middle-30% Variant Ribbon, and Bottom-30% Net-Weight Band, (b) synthetic store-lighting and perspective views to ensure single-photo variants maintain calibrated thresholds, and (c) a fused multimodal vector (`0.85 * visual + 0.15 * structured catalog text`).
+- **Step 2 (Daytime Active-Learning Harvest):** During daytime store runs, whenever a real store crop is verified with high confidence (Stage-2B VLM probability `>= 0.95`), passes our Optical Quality Gate (`>= 96 px`, sharp text edges, zero glare), and represents a novel angle or lighting condition (`0.78 <= cosine <= 0.90` vs. existing medoids), it is logged to a daily staging table.
+- **Step 3 (Nightly Medoid Re-Clustering & QC Gate):** A scheduled nightly Cloud Run job ingests any newly added brand or promo SKUs along with harvested store crops, recomputes the `K = 8` medoids and hard-negative diff pairs per variant, runs automated QC (ensuring leave-one-out validation accuracy for that variant improves), and publishes a versioned daily catalog snapshot (`catalog_YYYY_MM_DD`).
+- **Step 4 (Work-Hours Serving):** At the start of the workday, Cloud Run workers (or our stoppable Cloud SQL / AlloyDB instance) load the latest validated daily catalog snapshot. This provides continuous improvement with zero daytime latency impact and ensures an instant rollback if an incorrect label enters the system.
+- **Why we cluster all 381k–511k training crops into `K = 4 to 8` medoids instead of dumping raw crops into the live vector lookup (and how we use all of them):** We use all 381k–511k training records in the daily offline gallery build to compute `K = 4 to 8` cluster centroids and hard-negative boundaries rather than placing 511k raw crops directly into the live k-NN index:
+  1. **Pose and lighting medoid clustering (`K = 4 to 8`):** Each variant's crops are clustered into `K = 4 to 8` pose and lighting groups. Clean embeddings within each cluster are averaged to reduce sensor noise, while the sharpest high-resolution crop (`>= 96 px`, high edge sharpness, low glare) is selected as the visual reference image for that cluster.
+  2. **Intra-class variance and sister-variant diff mining:** Across all 381k+ crops, the offline build computes each variant's intra-class variance and identifies its top confused "sister variants", automatically generating the catalog diff headers (`[DIFF vs #1: Variant | Pack | Size]`) used by Stage 2B.
+
+### **Embedding Refinement for Specific Products / Classes**
+
+Because Stage 2A uses a non-parametric reference gallery rather than fixed classifier weights, improving a specific product or class does not require retraining a model and takes under 60 seconds:
+
+- **1. Curate the reference views for that SKU:** Replace blurry, glare-heavy, or occluded reference cutouts for that class with 3 to 5 clean, representative angles (front-facing, slight side angle, and real shelf lighting) and remove any mislabeled reference crop.
+- **2. Re-embed only the updated SKU (`< 60 s`):** Recompute the `gemini-embedding-2` vectors, the mean SKU centroid, and the inner-80% CIELAB colour descriptor for that SKU in the gallery cache.
+- **3. Class-specific margin / hard-negative routing:** If a product has a near-identical sister variant (for example, two variants that differ only in small text), we mark them as a linked sister pair in the catalog metadata so Stage 2A never auto-accepts them on embedding similarity alone and always routes them to Stage 2B zoom verification (or abstains if the text band is unreadable).
+
 
 *Figure 4: Production topology connecting mobile uploads, Cloud Pub/Sub buffering, stateless Cloud Run CPU workers, Private Service Connect Vertex AI endpoints, and automated timeout quarantine.*
 

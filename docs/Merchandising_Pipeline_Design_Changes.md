@@ -41,56 +41,55 @@ All figures below come from **test-split runs** on store-disjoint splits built i
 
 ## **How the Pipeline Works**
 
-### **Stage 1: Two Image Buffers for Lighting**
+### **Shared Stage 1: Dual Image Buffers for Store Lighting (12 ms CPU)**
 
-**Data insight driving design:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), Kirana photos mixed dark rack interiors, warm tungsten bulbs, and flash glare on foil sachets. Boosting contrast helped box detection but shifted brand colours (dark navy Vaseline turned purple, yellow Vim washed out).
+**Data insight driving design:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), Kirana photos mixed dark rack interiors, warm tungsten bulbs, and specular flash glare on foil sachets. Boosting global contrast improved box detection recall but shifted brand colours (turning dark navy Vaseline purple and washing out yellow Vim).
 
-Stage 1 therefore builds two copies of each photo in memory (12 ms):
+Stage 1 therefore builds two aligned copies of each photo in memory (`12 ms` CPU) that feed all three merchandising pillars:
 
-- **Colour-true copy:** Shades-of-Gray white balance corrects the store's light colour on non-clipped pixels so brand colours stay accurate when Stage 4 crops each product.
-- **Contrast-boosted copy:** Local contrast enhancement (`CLAHE`) is applied to lightness (`L*`) only, leaving colour channels (`a*`, `b*`) untouched so dark back-row sachets and faint shelf-rail tags stay visible to the detector.
+- **Colour-true buffer (for Pillar 1 & Pillar 2 SKU/promo crops):** Shades-of-Gray white balance (`p = 6` on non-clipped pixels) corrects the store's ambient light colour so brand colours remain true when Stage 4 crops each product.
+- **Contrast-boosted buffer (for Pillar 2 & Pillar 3 detection):** Local contrast enhancement (`CLAHE`) is applied to lightness (`L*`) only, leaving colour channels (`a*`, `b*`) untouched so dark back-row sachets and faint shelf-rail price tags remain visible to detectors.
 
-### **Stage 2: Bay, Product, and Talker Detection**
+### **Pillar 1: Share of Shelf (SoS) and In-Bay Layout (Stages 4 & 5)**
 
-**Data insight driving design:** Raw `gtmerch` annotations had 49 train-to-test leaked shelves (fixed by store-level splitting in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0)) and boxed only target stretches of open aisles, meaning a detector trained directly on partial store boxes learns to suppress valid unboxed packs.
+**Task and use case:** Audit paid Unilever display bays (`WIN`, `CTU`, `MB2`, `MB3`, `FULLWALL`) and frameless hanging strips (`HAN`) against Unilever's 63 `AWP_Code` planograms by naming every in-bay product (`is_hul`, `category`, `brand`, `base_variant`, `packaging_type`), computing in-bay Share of Shelf, and verifying contiguous brand blocks and Out-of-Stock (OOS) voids.
 
-Stage 2 supports two detection paths plus a parallel talker pass:
+**Data insight driving design:** In [Existing Model Analysis](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.ipskbbbvu50h), 36% of the existing 209 classifier classes merged 2 to 4 pack sizes into one label (`100ml_200ml`), 24% were `"90__O__<Brand>"` catch-alls, and summing flat SKU counts passed bays where brands were scattered across rows or separated by empty OOS gaps.
 
-- **Branded bay and product detection:** Detects `Class 0` display bays (`WIN`, `CTU`, `MB2`, `MB3`, `FULLWALL`) and `Class 1` products together, de-duplicating bays and products separately so a bay box never deletes the products inside it. Frameless `HAN` hanging strips are excluded from `Class 0` so neighbouring strips are not cropped away.
-- **Open-aisle CPU ONNX detection:** On open aisles and shared [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu) runs, the worker uses the 960px Distilled YOLO11n CPU ONNX detector (trained on exhaustively boxed SKU-110K and checkout layouts with Gaussian Soft-NMS), which costs zero detection tokens.
-- **3-class shelf-talker detection:** A parallel pass on the contrast-boosted image separates `promo_talker` (branded strips, wobblers, danglers), `printed_price_tag` (barcode/MRP labels), and `handwritten_price_tag` (marker cards), discarding non-tag boxes and de-duplicating each class separately.
+**How the solution works:**
 
-### **Stage 3: Clutter Filtering**
+- **Program-scoped embedding lookup (`Stage 4A`, `gemini-embedding-2`):** Surviving in-bay crops from the colour-true buffer are matched against the 2,659-SKU catalog (narrowed to the active `AWP_Code` program's 15–40 eligible SKUs plus hard-negative sister packs). Identical neighbouring facings are grouped so only one medoid crop per group is embedded, and high-margin matches (`68%` of groups) are accepted immediately on CPU in `< 1 ms` with zero LLM tokens.
+- **Contact sheets for lookalikes and sister pack sizes (`Stage 4B`, `gemini-3.5-flash-lite`):** Uncertain crops (`32%` of groups) are stitched alongside their top-5 candidate reference packshots and a `2x` zoomed bottom net-weight strip (`50g` vs. `100g`), allowing `gemini-3.5-flash-lite` to switch to the matching sister SKU and flagging `abstain_recommended = True` when fine print is unreadable.
+- **2D shelf-row clustering and brand-block purity (`Stage 5A`):** Vertically overlapping in-bay boxes (`y_IoU >= 0.40–0.45`) are grouped into horizontal shelf rows from top to bottom and sorted left to right (`95.2%` row F1). Each row scores `1.0` when every brand sits in one contiguous block (`1 - (switches - (B - 1)) / N`) and is aligned against the target `AWP_Code` sequence via normalized Levenshtein similarity.
+- **Row-adaptive OOS gap detection and `AWP_Code` rules (`Stage 5B`):** Horizontal gaps between adjacent packs wider than `1.35x` to `1.50x` the row's median pack width are flagged as empty OOS voids (`92.6%` F1). All 63 `AWP_Code` templates are stored as declarative JSON/SQL rules (fixture type, required brands, `>= 0.90` HUL share for bays or `>= 0.70` for `HAN`, and `>= 0.80` purity), with a `180 s` SLA timeout quarantine (`contract_status = "RETRY_PENDING"`) so transient timeouts never record a false zero payout.
 
-**Data insight driving design:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), 61.0% to 92.1% of annotated `Class 1` product boxes in Kirana store photos sat on surrounding store counters outside the `Class 0` Unilever bay.
+### **Pillar 2: Promotions and Price Tags (Stages 2 & 4)**
 
-Before any crop is embedded or sent to a language model, Stage 3 removes printed fixture art and out-of-bay counter clutter:
+**Task and use case:** Read on-pack promotional offers (such as `"50% Extra"`, `"Buy 3 Get 1"`, or `"₹10 Off"`) on product cutouts without retraining for new campaigns, and localize three classes of shelf-rail tags (`promo_talker`, `printed_price_tag`, `handwritten_price_tag`) on full shelf photos.
 
-- **Artwork and rail filter:** Shape and texture rules drop thin rail price tags, wide header banners, and smooth side-wing pillars so printed packs on the cardboard frame are not counted as real stock.
-- **Shelf-plank filter:** Groups pack bottoms that line up horizontally into physical shelf planks, dropping boxes floating in the header area and partial "shoulders" of packs sitting behind the front row.
-- **Display bay boundary gate:** Products sitting outside the detected `Class 0` Unilever display bay are discarded before Stage 4 (skipped automatically for frameless `HAN` strips and full-wall scenes), removing **61.0% of background counter clutter** in under 1 ms.
+**Data insight driving design:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), baking 69 promo suffixes (`_Rs_10`, `_B3G1`, `_PO2`) into fixed classifier folder names caused `23.5%` recall on `"50% Free"` packs and forced full model retraining for every new campaign, while small shelf-rail price tags (`< 25 px` tall) were erased by overlapping product boxes during standard NMS.
+
+**How the solution works:**
+
+- **Decoupled base-variant and promo-suffix catalog (`Stage 4A`):** Separating the 69 price and promo suffixes from `base_variant` lets Stage 4 match promotional and regular packs against the same 2,659-SKU gallery while onboarding new festive wrappers in `< 60 s` from 1 to 5 reference crops.
+- **Top-and-bottom band zoom for promotional packs (`Stage 4B`):** Because offer banners sit in the top `25%–28%` header or bottom `20%–30%` band of a pack and blur at thumbnail resolution, the promo verifier stitches `[full crop | 2x zoomed top band | 2x zoomed bottom band | top-5 candidates]` so `gemini-3.5-flash-lite` reads the exact offer text and maps it to the canonical campaign family (`"50% Free"`, `"Price Off"`).
+- **Parallel 3-class shelf-talker detection (`Stage 2 Talker Pass`):** A parallel pass on the contrast-boosted image separates `promo_talker` (branded strips, wobblers, danglers), `printed_price_tag` (barcode/MRP labels), and `handwritten_price_tag` (marker cards), discarding non-tag boxes and applying class-isolated NMS (`IoU = 0.50`) so product boxes never suppress adjacent rail tags.
+
+### **Pillar 3: Bay Display and Clutter Filtering (Stages 2 & 3)**
+
+**Task and use case:** Localize the paid Unilever display fixture (`Class 0`: window bays `WIN`, countertop units `CTU`, multi-bay units `MB2`/`MB3`, and `FULLWALL` displays, while keeping frameless `HAN` hanging strips separate), prune surrounding Kirana counter stock and printed cardboard artwork before SKU lookup, and support fast `3.7 s` box-only bay audits.
+
+**Data insight driving design:** In [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0), `61.0%` to `92.1%` of annotated `Class 1` product boxes in Kirana store photos sat on surrounding store counters outside the `Class 0` Unilever bay, cross-class NMS allowed the outer bay box to delete the products inside it (`51.1%` Bay F2), and detectors frequently mistook flat 2D pack graphics printed on cardboard side wings for real stock.
+
+**How the solution works:**
+
+- **Class-decoupled bay and pack detection (`Stage 2`):** Detects `Class 0` display bays and `Class 1` products together while de-duplicating bays (`IoU = 0.58`) and products separately so a bay box never deletes the products inside it (`98.8%` Bay F2). Dense shelves (`>= 45` boxes or `>= 24` small boxes) trigger `2x2` overlapping tiles (`12%` overlap) plus up to `3` bay zoom crops (`3%` margin), while open aisles share the zero-token 960px Distilled `YOLO11n` CPU ONNX detector from [Market Share Pipeline Design](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.bpg2xuy2veu).
+- **Printed cardboard artwork and rail filter (`Stage 3A`):** Shape rules and a local Laplacian texture gate (`>= 4.2`) reject flat 2D pack illustrations printed on cardboard headers and side wings so fixture artwork is never counted as physical inventory.
+- **Physical shelf-plank alignment filter (`Stage 3B`):** Groups pack bottoms (`y_max`) that line up horizontally (`±6.5%` of bay height) into physical shelf planks, dropping floating header detections and partial "shoulders" of packs sitting behind the front row.
+- **Display bay boundary gate (`Stage 3C`, `IoA >= 0.50`):** Products whose Intersection-over-Area inside the detected `Class 0` Unilever bay (expanded by `±8%` width for edge-clipped sachets) is below `0.45–0.50` are discarded in `< 1 ms` CPU before Stage 4, removing **61.0% of background counter clutter** (and automatically bypassing `Class 0` cropping for frameless `HAN` hanging strips and `FULLWALL` scenes).
 
 
 *Figure 2: In a Kirana store photo, Stage 3 keeps products resting on shelf planks inside the Unilever display bay (39.0%) and ignores surrounding counter products and printed header art (61.0%). Stage 5 then checks Share of Shelf, brand blocks, and OOS gaps.*
-
-### **Stage 4: SKU and Promotion Lookup**
-
-**Data insight driving design:** Separating the 69 price and promo suffixes (`_Rs_10`, `_Rs_5`, `_B3G1`, `_PO2`) from `base_variant` in [Data Analysis and Enrichment](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.0) lets Stage 4 match promo and regular packs against the same 2,659-SKU catalog while reading the promotional band separately.
-
-Each surviving in-bay product is cropped from the colour-true buffer and matched against the 2,659-SKU catalog:
-
-- **In-memory embedding lookup (`gemini-embedding-2`):** Crops are embedded and compared against brand, category, and pack-type centroids plus per-SKU reference images. Identical neighbouring facings are grouped so only one crop per group is looked up, and high-margin matches (68% of groups) are accepted immediately on CPU with zero LLM tokens.
-- **Contact sheets for lookalikes and sister pack sizes (`gemini-3.5-flash-lite`):** Uncertain crops are batched alongside their top-5 candidate reference images and a zoomed bottom strip showing gram/ml net weight. When the model reads a pack size, it switches to the matching sister SKU (such as `50g` vs. `100g`), which the existing 209-class classifier merged.
-- **Top-and-bottom band zoom for promotional packs:** Because offer text (`"Buy 3 Get 1"`, `"50% Extra"`, `"₹10 Off"`) sits in the top or bottom band of a pack and is unreadable at thumbnail size, the promo verifier stitches `[full crop | zoomed top band | zoomed bottom band | top-5 candidates]` so `gemini-3.5-flash-lite` reads the offer and maps it to the catalog promo SKU without retraining.
-
-### **\[Optional Read\] Stage 5: Shelf Rows, Planograms, and Payout Safety**
-
-Once in-bay products are named, Stage 5 scores layout and protects retailer payouts using the guardrails in the [End-to-End Architecture Guide](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.erkk4n45aac9) and [Cost Breakdown & Sizing](https://docs.google.com/document/d/1rzwQ5RTFXgOUjpkvybYoNdFvjWbtrx74vE79S7p4o_A/edit?tab=t.rnj5urhvxc2j):
-
-- **Bay-scoped vs. hanger scoring:** When `Class 0` bays are present, only in-bay products are scored so counter clutter cannot distort Share of Shelf or purity; frameless `HAN` strips fall back to full-image scoring.
-- **Shelf rows and brand-block purity:** Vertically overlapping boxes are grouped into horizontal shelf rows from top to bottom and sorted left to right. A row scores `1.0` when each brand forms one contiguous block, and each extra brand switch lowers the purity score.
-- **Out-of-Stock (OOS) gaps and `AWP_Code` rules:** Horizontal gaps wider than `1.35x` to `1.5x` the row's median pack width are flagged as OOS voids. Each of the 63 `AWP_Code` templates is represented as a rule set (fixture type, required brands, minimum HUL share, and minimum brand-block purity) that can be updated in configuration without retraining.
-- **Payout timeout quarantine (`RETRY_PENDING`):** Any request that exceeds the 180-second SLA or hits a transient error is quarantined for retry (`contract_status = "RETRY_PENDING"`) instead of recording a false zero payout.
 
 ## **How We Evaluated & Results**
 
