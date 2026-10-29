@@ -292,3 +292,105 @@ def test_normalize_hul_golden_variant_fuzzy_token_match():
         catalog_variants_by_brand=variants_by_brand,
     )
     assert snapped == "Daily_Shine_Shampoo"
+
+
+def test_calibrated_confidence_eliminates_unit_saturation_and_tags_fallbacks(monkeypatch):
+    from approaches.market_share.classification.hybrid_classify import calibrated_field_confidences
+    from approaches.market_share.retrieval.clef_standalone import _resolve_and_calibrate_clef
+    from utils.openjev import calibrated_shortlist_confidence, resolve_jev_choice
+
+    # 1. Even when all top-5 neighbors share the same brand, calibrated confidence never saturates to 1.0
+    #    and discounts brand confidence when base_variant consensus is split or Stage B falls back on choice=0
+    cands_same_brand = [
+        (0.76, {**LUX_BAR, "base_variant": "Var_A", "product": "Lux__Var_A"}),
+        (0.75, {**LUX_BAR, "base_variant": "Var_B", "product": "Lux__Var_B"}),
+        (0.74, {**LUX_BAR, "base_variant": "Var_C", "product": "Lux__Var_C"}),
+    ]
+    votes = field_votes(cands_same_brand, inv_temp=80.0, k=3)
+    assert votes["brand"]["conf"] == 1.0  # raw neighbor vote share is 1.0
+    stage_a_dict = {"votes": votes, "energy": 0.76, "margin": 0.01}
+    cal_a, joint_a, abstain_a = calibrated_field_confidences(
+        stage_a_dict,
+        cands_same_brand[0][1],
+        escalate=False,
+    )
+    assert all(0.02 <= v <= 0.985 for v in cal_a.values())
+    assert cal_a["brand"] < 0.85  # discounted by variant split + moderate cosine energy
+    assert 0.02 <= joint_a < 0.80 and abstain_a is False
+
+    # When Stage B returns choice=0 ("none match / unreadable"), fallback is explicitly low-confidence
+    cal_fb, joint_fb, abstain_fb = calibrated_field_confidences(
+        stage_a_dict,
+        cands_same_brand[0][1],
+        b_info={"choice": 0, "clef_prob": 0.22, "abstain_recommended": True},
+        escalate=True,
+    )
+    assert all(v <= 0.36 for v in cal_fb.values())
+    assert joint_fb <= 0.36 and abstain_fb is True
+
+    # 2. CLEF and OpenJEV without logprobs (slot=None) never return 1.0, and tag choice=0 fallbacks <= 0.34
+    top = [(0.82, 101, "a.jpg"), (0.76, 102, "b.jpg"), (0.71, 103, "c.jpg")]
+    cat = {
+        101: {"brand": "Dove", "base_variant": "Daily_Shine"},
+        102: {"brand": "Dove", "base_variant": "Intense_Repair"},
+        103: {"brand": "Sunsilk", "base_variant": "Black_Shine"},
+    }
+    ans_ok, mode_ok, meta_ok = _resolve_and_calibrate_clef(1, None, top, catalog=cat)
+    assert ans_ok == 101 and mode_ok == "panel_1"
+    assert 0.45 <= meta_ok["clef_prob"] <= 0.985
+    assert meta_ok["brand_confidence"] >= meta_ok["sku_confidence"]
+    assert meta_ok["abstain_recommended"] is False
+
+    ans_fb, mode_fb, meta_fb = _resolve_and_calibrate_clef(0, None, top, allow_abstain=False, catalog=cat)
+    assert ans_fb == 101
+    assert meta_fb["clef_prob"] <= 0.34 and meta_fb["abstain_recommended"] is True
+
+    # 3. resolve_jev_choice with slot=None and SHELF_BENCH_MIN_CONFIDENCE abstention
+    jev_ans, jev_conf, jev_meta = resolve_jev_choice(1, None, top, catalog=cat)
+    assert jev_ans == 101 and 0.45 <= jev_conf <= 0.985
+    jev_fb_ans, jev_fb_conf, jev_fb_meta = resolve_jev_choice(0, None, top, catalog=cat)
+    assert jev_fb_ans == 101 and jev_fb_conf <= 0.34 and jev_fb_meta["abstain_recommended"] is True
+
+    monkeypatch.setenv("SHELF_BENCH_MIN_CONFIDENCE", "0.50")
+    jev_abs_ans, _, jev_abs_meta = resolve_jev_choice(0, None, top, catalog=cat)
+    assert jev_abs_ans is None and "abstain" in jev_abs_meta["mode"]
+    clef_abs_ans, clef_abs_mode, _ = _resolve_and_calibrate_clef(0, None, top, allow_abstain=False, catalog=cat)
+    assert clef_abs_ans is None and "abstain_low_confidence" in clef_abs_mode
+    assert calibrated_shortlist_confidence(1, [])["sku_confidence"] == 0.0
+
+
+def test_hybrid_abstains_on_unreadable_stage_b_reject_when_configured(
+    hul_root, colour_embeddings, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("SHELF_BENCH_HYBRID_MIN_ENERGY", "0.85")
+    monkeypatch.setenv("SHELF_BENCH_HYBRID_ABSTAIN_ON_STAGE_B_REJECT", "1")
+
+    def llm_reject(image, prompt, **kw):
+        # Stage B inspects the contact sheet and reports choice=0 (unreadable / none match)
+        return LLMResult({"pack_size": "", "choice": 0}, usage(), 0.01)
+
+    s = runner.run(
+        "hybrid_classify",
+        "gemini-t",
+        "test",
+        0,
+        0,
+        1,
+        "t",
+        results_dir=tmp_path,
+        llm=llm_reject,
+        log=lambda *_: None,
+    )
+    _, rows = runner.load_run(s["run_id"], tmp_path)
+    by_id = {r["image_id"]: r for r in rows}
+    # red.jpg passed Stage A gate with high confidence and has calibrated confidence in (0, 0.985]
+    red_pred = by_id["red.jpg"]["labels"][0]["pred"]
+    assert red_pred is not None and red_pred["sku_id"] == 1
+    assert 0.5 < red_pred["joint_confidence"] <= 0.985
+    assert all(v < 1.0 for v in red_pred["confidence"].values())
+    # purple.jpg escalated to Stage B, which returned choice=0 -> abstained cleanly (pred is None)
+    assert by_id["purple.jpg"]["labels"][0]["pred"] is None
+    purple_dec = next(st["info"] for st in by_id["purple.jpg"]["steps"] if st["name"] == "Hybrid decision")
+    assert purple_dec["abstained"] is True and purple_dec["abstain_recommended"] is True
+    assert purple_dec["joint_confidence"] <= 0.36
+

@@ -183,18 +183,30 @@ class CoarseJevGemini(DjevClassify):
             n_options=len(cands) + 1,
         )
         slot = slots[0] if slots else None
-        conf = float(slot["confidence"]) if slot else 1.0
         p = cands.get(sku)
+        valid_pick = p is not None
+        cos_by_id = {cid: cos for cos, cid in ranked}
+        chosen_cos = cos_by_id.get(sku if isinstance(sku, int) else top_id, s1)
+        cos_clarity = max(0.08, min(0.985, (chosen_cos - 0.42) / 0.54))
+        if slot is not None:
+            conf = round(min(0.985, float(slot["confidence"])), 4)
+        elif valid_pick:
+            conf = round(max(0.45, min(0.96, 0.50 * brand_conf + 0.45 * cos_clarity)), 4)
+        else:
+            conf = round(max(0.05, min(0.32, 0.35 * cos_clarity)), 4)
         if (p is None or conf < self.min_jev_confidence) and top_id in cands:
             sku, p = top_id, cands[top_id]
+            if not valid_pick:
+                conf = round(max(0.05, min(0.32, 0.35 * cos_clarity)), 4)
         step_info = {
             **candidates_info(top_brand, size, cands),
             "category": top_cat,
             "category_confidence": cat_conf,
             "brand_confidence": brand_conf,
+            "jev_confidence": conf,
+            "abstain_recommended": bool(not valid_pick or conf < self.min_jev_confidence),
         }
         if slot:
-            step_info["jev_confidence"] = conf
             step_info["jev_probabilities"] = {
                 str(k): round(v, 4) for k, v in (slot.get("probabilities") or {}).items()
             }

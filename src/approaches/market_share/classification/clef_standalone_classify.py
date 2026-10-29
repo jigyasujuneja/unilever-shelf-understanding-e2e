@@ -125,12 +125,15 @@ class ClefStandaloneClassify(Approach):
         data = res.data if isinstance(res.data, dict) else {}
         raw_sku = data.get("sku_id")
         slots = clef_logprob_select(res.meta.get("logprobs"), set(cands.keys()), n_slots=1)
+        valid_vlm_pick = bool(
+            (slots and slots[0]["choice"] in cands)
+            or (isinstance(raw_sku, int) and raw_sku in cands)
+        )
         picked = (
             slots[0]["choice"]
             if slots and slots[0]["choice"] in cands
             else (int(raw_sku) if isinstance(raw_sku, int) and raw_sku in cands else top_id)
         )
-        prob = slots[0]["top1_prob"] if slots else 1.0
         size_read = str(data.get("pack_size") or "")
         cand_set = set(cand_ids)
         ranked_cands = [(s, i) for s, i in ranked if i in cand_set]
@@ -139,12 +142,32 @@ class ClefStandaloneClassify(Approach):
         )
         if verified_sku is not None and verified_sku in cands:
             picked = verified_sku
+
+        from utils.openjev import calibrated_shortlist_confidence
+
+        top_triplets = [(s, i, "") for s, i in ranked_cands]
+        picked_rank = next((idx + 1 for idx, (_, cid) in enumerate(ranked_cands) if cid == picked), 1)
+        cal = calibrated_shortlist_confidence(
+            picked_rank if valid_vlm_pick else 0,
+            top_triplets,
+            slot={"confidence": float(slots[0]["top1_prob"])} if slots else None,
+            catalog=self.catalog,
+            pack_size_verified=size_overridden,
+        )
+        prob = (
+            round(min(0.985, float(slots[0]["top1_prob"])), 4)
+            if (slots and valid_vlm_pick)
+            else cal["sku_confidence"]
+        )
         ctx.trace.step(
             "Standalone CLEF 3-Panel Zoom-Canvas",
             f"id {picked}: {cands[picked]['product']} (P_token={prob:.2f}, size_read={size_read!r}, layer5_verified={size_overridden})",
             info={
                 "sku_id": picked,
                 "clef_prob": prob,
+                "sku_confidence": cal["sku_confidence"],
+                "brand_confidence": cal["brand_confidence"],
+                "abstain_recommended": bool(not valid_vlm_pick or prob < 0.38),
                 "size_read": size_read,
                 "layer5_pack_size_verified": size_overridden,
                 "candidates": len(cands),

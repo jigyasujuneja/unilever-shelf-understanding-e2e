@@ -825,9 +825,12 @@ class SftClmClefCascade(OutletScopedClmJev):
         from collections import defaultdict
 
         top = ranked[:K]
-        if not top or not getattr(self, "catalog", None):
-            return {"brand": 1.0, "category": 1.0, "packaging_type": 1.0, "base_variant": 1.0}
+        if not top:
+            return {"brand": 0.0, "category": 0.0, "packaging_type": 0.0, "base_variant": 0.0}
         s1 = top[0][0]
+        if not getattr(self, "catalog", None):
+            c = round(max(0.05, min(0.96, s1)), 4)
+            return {"brand": c, "category": c, "packaging_type": c, "base_variant": c}
         weights = [math.exp(max(-30.0, self.vote_inv_temp * (s - s1))) for s, _, _ in top]
         z = sum(weights) or 1.0
         top_meta = self.catalog.get(top[0][1]) or {}
@@ -843,10 +846,19 @@ class SftClmClefCascade(OutletScopedClmJev):
         return shares
 
     def _stage_a_gate(self, ranked: list[tuple[float, int, str]]) -> tuple[bool, dict]:
+        import math
+
         base_conf, meta = super()._stage_a_gate(ranked)
         if not ranked:
             return False, meta
         shares = self._attribute_vote_shares(ranked)
+        s1 = ranked[0][0]
+        dustbin_scale = 1.0 / (1.0 + math.exp(max(-20.0, min(20.0, 28.0 * (0.62 - s1)))))
+        cos_clarity = max(0.08, min(0.985, (s1 - 0.42) / 0.54))
+        cal_shares = {
+            k: round(max(0.02, min(0.985, 0.60 * v * dustbin_scale + 0.40 * cos_clarity)), 4)
+            for k, v in shares.items()
+        }
         attr_conf = (
             shares.get("brand", 0.0) >= self.tau_brand
             and shares.get("category", 0.0) >= self.tau_category
@@ -857,6 +869,7 @@ class SftClmClefCascade(OutletScopedClmJev):
         return confident, {
             **meta,
             "attr_vote_shares": shares,
+            "calibrated_attr_confidences": cal_shares,
             "attr_gate_passed": attr_conf,
         }
 

@@ -141,6 +141,86 @@ def field_votes(
     return out
 
 
+def calibrated_field_confidences(
+    a: dict[str, Any],
+    final_labels: dict[str, Any],
+    b_info: dict[str, Any] | None = None,
+    *,
+    escalate: bool = False,
+    fields: Sequence[str] = FIELDS,
+) -> tuple[dict[str, float], float, bool]:
+    """Compute dustbin- and cosine-calibrated per-field and joint confidences in ``[0.02, 0.985]``.
+
+    Prevents ``brand`` confidence from saturating to ``1.0`` when all 5 nearest neighbors belong to a
+    large catalog brand despite low absolute cosine similarity, unreadable variant text, or Stage-B
+    ``choice == 0`` fallback.
+    """
+    b_info = b_info or {}
+    votes = a.get("votes") or {}
+    e1 = float(a.get("energy") or 0.0)
+    margin = max(0.0, float(a.get("margin") or 0.0))
+
+    # Open-set dustbin discount + absolute cosine visual clarity in [0.08, 0.985]
+    dustbin_ratio = math.exp(max(-20.0, min(20.0, 28.0 * (0.62 - e1))))
+    open_set_scale = 1.0 / (1.0 + dustbin_ratio)
+    cos_clarity = max(0.08, min(0.985, (e1 - 0.42) / 0.54))
+    margin_bonus = min(0.06, margin * 0.9)
+
+    b_choice = b_info.get("choice")
+    b_is_fallback = bool(
+        escalate
+        and (
+            b_choice == 0
+            or b_info.get("abstain_recommended")
+            or str(b_info.get("guard_mode") or "").startswith(("tier2_", "tier3_"))
+        )
+    )
+    b_sku_conf = float(b_info.get("sku_confidence") or b_info.get("clef_prob") or 0.0)
+    b_brand_conf = float(b_info.get("brand_confidence") or b_sku_conf or 0.0)
+
+    # Variant consensus factor so brand confidence reflects fine-print readability
+    bv_votes = (votes.get("base_variant") or {}).get("votes") or {}
+    final_bv = str(final_labels.get("base_variant") or "")
+    bv_support = float(bv_votes.get(final_bv, (votes.get("base_variant") or {}).get("conf") or 0.5))
+
+    cal: dict[str, float] = {}
+    for f in fields:
+        f_votes = (votes.get(f) or {}).get("votes") or {}
+        final_val = str(final_labels.get(f) or "")
+        raw_share = float(f_votes.get(final_val, (votes.get(f) or {}).get("conf") or 0.0))
+        discounted_share = raw_share * open_set_scale
+        stage_a_c = 0.58 * discounted_share + 0.36 * cos_clarity + margin_bonus
+
+        if escalate:
+            if b_is_fallback:
+                # Stage B reported choice == 0 ("none match / unreadable"): cap strictly <= 0.36
+                c = min(0.36, 0.42 * stage_a_c)
+            elif b_sku_conf > 0.0:
+                b_ref = b_brand_conf if f in ("brand", "category") else b_sku_conf
+                c = 0.55 * b_ref + 0.45 * max(stage_a_c, 0.50 * cos_clarity)
+            else:
+                # SFT Stage B without contact-sheet slot probabilities
+                c = 0.50 * max(0.35, discounted_share) + 0.44 * cos_clarity + margin_bonus
+        else:
+            c = stage_a_c
+
+        if f == "brand" and "base_variant" in votes:
+            # Couple brand confidence with variant clarity so unreadable crops never log brand=1.0
+            coherence = 0.80 + 0.20 * min(1.0, bv_support)
+            c *= coherence
+
+        cal[f] = round(max(0.02, min(0.985, c)), 4)
+
+    if cal:
+        min_f = min(cal.values())
+        mean_f = sum(cal.values()) / len(cal)
+        joint = round(max(0.02, min(0.985, 0.65 * min_f + 0.35 * mean_f)), 4)
+    else:
+        joint = 0.0
+    abstain_rec = bool(b_is_fallback or joint < 0.38 or e1 < 0.52)
+    return cal, joint, abstain_rec
+
+
 def gate(
     votes: dict[str, dict[str, Any]],
     top_energy: float,
@@ -358,6 +438,8 @@ class HybridClassify(ClmStandaloneRetrieval):
     gallery = "gallery"  # "gallery" (rpc.json refs) | "gallery+train" (adds the train split crops)
     gallery_exclude = ""  # JSON list of gallery URIs to drop (local path or gs:// URI)
     sheet_candidates = "clm"
+    min_confidence = 0.0
+    abstain_on_stage_b_reject = False
 
     architecture = (
         "2-Stage Confidence-Gated Hybrid Cascade on Vertex AI: Stage 1 Disjoint Gallery kNN & Calibrated InfoNCE Gate "
@@ -391,6 +473,8 @@ class HybridClassify(ClmStandaloneRetrieval):
             "gallery",
             "gallery_exclude",
             "sheet_candidates",
+            "min_confidence",
+            "abstain_on_stage_b_reject",
         ):
             setattr(self, p, _env_or(cfg, p, getattr(type(self), p)))
         if self.stage_b not in STAGE_B_VARIANTS:
@@ -419,6 +503,8 @@ class HybridClassify(ClmStandaloneRetrieval):
                 "gallery",
                 "gallery_exclude",
                 "sheet_candidates",
+                "min_confidence",
+                "abstain_on_stage_b_reject",
             )
         }
 
@@ -615,32 +701,69 @@ class HybridClassify(ClmStandaloneRetrieval):
             if not escalate
             else ("B" if self.merge == "all" or len(a["unsure"]) >= len(active) else "A+B")
         )
+        cal_conf, joint_conf, abstain_rec = calibrated_field_confidences(
+            a,
+            merged,
+            b_info,
+            escalate=escalate,
+            fields=active,
+        )
+        eff_min_conf = float(getattr(self, "min_confidence", 0.0) or 0.0)
+        env_min = os.environ.get("SHELF_BENCH_MIN_CONFIDENCE")
+        if env_min:
+            try:
+                eff_min_conf = max(eff_min_conf, float(env_min))
+            except ValueError:
+                pass
+        stage_b_abstained = bool(
+            escalate
+            and (
+                str(b_info.get("mode") or "").startswith("abstain")
+                or (
+                    bool(getattr(self, "abstain_on_stage_b_reject", False))
+                    and (b_info.get("choice") == 0 or b_info.get("abstain_recommended"))
+                )
+            )
+        )
+        abstained_by_threshold = bool(
+            stage_b_abstained or (eff_min_conf > 0.0 and joint_conf < eff_min_conf)
+        )
         ctx.trace.step(
             "Hybrid decision",
             f"answered by Stage {answered_by}"
             + (f" ({a['reason']})" if escalate else "")
-            + (f"; taxonomy fixed {', '.join(changed)}" if changed else ""),
+            + (f"; taxonomy fixed {', '.join(changed)}" if changed else "")
+            + (f"; abstained (joint_conf={joint_conf:.2f})" if abstained_by_threshold else ""),
             info={
                 "answered_by": answered_by,
                 "escalated": escalate,
                 "unsure": a["unsure"],
                 "reason": a["reason"],
-                "confidence": {f: a["votes"][f]["conf"] for f in active},
+                "confidence": cal_conf,
+                "joint_confidence": joint_conf,
+                "abstain_recommended": abstain_rec,
+                "abstained": abstained_by_threshold,
+                "raw_vote_share": {f: a["votes"][f]["conf"] for f in active},
                 "energy": a["energy"],
                 "margin": a["margin"],
                 "stage_a": {f: stage_a_labels.get(f) for f in active},
                 "stage_b": b_labels or None,
                 "pre_taxonomy": {f: pre_taxonomy.get(f) for f in active},
                 "taxonomy_changed": changed,
-                "final": {f: merged.get(f) for f in active},
+                "final": None if abstained_by_threshold else {f: merged.get(f) for f in active},
                 "params": self.params,
             },
         )
-        out = {f: merged.get(f) for f in active}
+        if abstained_by_threshold:
+            return None
+        out: dict[str, Any] = {f: merged.get(f) for f in active}
         if not escalate and a["sku_id"] is not None:
             out["sku_id"] = a["sku_id"]
         elif escalate and b_info.get("sku_id") is not None:
             out["sku_id"] = b_info["sku_id"]
+        out["confidence"] = cal_conf
+        out["joint_confidence"] = joint_conf
+        out["abstain_recommended"] = abstain_rec
         return out if any(out.get(f) for f in active) else None
 
     # ---- run summary -------------------------------------------------------------------------

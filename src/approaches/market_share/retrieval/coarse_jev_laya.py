@@ -179,13 +179,15 @@ class CoarseJevLaya(JevLayaHybrid):
             crop_data = [self._rank_crop(crops[0], ctx)]
 
         ids: list[int | None] = [None] * len(boxes)
-        confidences: list[float] = [1.0] * len(boxes)
+        confidences: list[float] = [0.0] * len(boxes)
         vecs: list[list[float]] = []
         shortlists: list[set[int]] = []
         top_ids: list[int | None] = []
         restored_crops: list[Image.Image] = []
         ranked_lists: list[list[tuple[float, int, str]]] = []
         uncertain: list[int] = []
+
+        from utils.openjev import calibrated_shortlist_confidence
 
         for idx, (ranked, q, restored) in enumerate(crop_data):
             vecs.append(q)
@@ -201,16 +203,19 @@ class CoarseJevLaya(JevLayaHybrid):
             margin = s1 - s2
             top_ids.append(pid)
             confident, gate_meta = self._stage_a_gate(ranked)
+            cal = calibrated_shortlist_confidence(1, ranked[:K], catalog=getattr(self, "catalog", None))
             info = {
                 "box_index": idx,
                 "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in ranked[:K]],
                 "thresholds": {"min_cosine": self.min_cosine, "min_margin": gate_meta["required_margin"]},
                 "fast_gated_boxes": 1 if confident else 0,
+                "sku_confidence": cal["sku_confidence"],
+                "brand_confidence": cal["brand_confidence"],
                 **gate_meta,
             }
             if confident:
                 ids[idx] = pid
-                confidences[idx] = 1.0
+                confidences[idx] = max(0.75, cal["sku_confidence"])
                 ctx.trace.step(
                     "Stage A Coarse JEV tier",
                     f"box {idx + 1}: #{pid} accepted (cos {s1:.3f}, margin {margin:.3f}, "

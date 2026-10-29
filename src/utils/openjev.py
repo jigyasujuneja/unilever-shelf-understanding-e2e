@@ -160,6 +160,101 @@ def extract_slot_distributions(
     return slots
 
 
+def calibrated_shortlist_confidence(
+    choice: int | None,
+    top: list[tuple[float, int, str]],
+    slot: dict[str, Any] | None = None,
+    *,
+    inv_temp: float = 28.0,
+    open_set_threshold: float = 0.68,
+    catalog: dict[int, dict[str, Any]] | None = None,
+    vetoed: bool = False,
+    pack_size_verified: bool = False,
+) -> dict[str, float]:
+    """Compute dustbin-calibrated SKU and Brand confidence in ``[0.01, 0.99]`` (never hardcoded ``1.0``).
+
+    Combines temperature-scaled InfoNCE shortlist probabilities (with an open-set dustbin at
+    ``open_set_threshold``), an absolute cosine clarity factor, and (when available) VLM token
+    slot entropy confidence. Explicitly penalizes forced ``choice == 0`` fallbacks and energy-veto
+    disagreements so downstream confidence thresholding can reliably filter low-evidence predictions.
+    """
+    if not top:
+        return {
+            "sku_confidence": 0.0,
+            "brand_confidence": 0.0,
+            "clm_top1_prob": 0.0,
+            "c1_confidence": 0.0,
+        }
+    s1 = float(top[0][0])
+    s2 = float(top[1][0]) if len(top) > 1 else max(0.0, s1 - 0.08)
+    margin = max(0.0, s1 - s2)
+    exps = [math.exp(max(-30.0, min(30.0, inv_temp * (float(s) - s1)))) for s, _, _ in top]
+    dustbin = math.exp(max(-30.0, min(30.0, inv_temp * (open_set_threshold - s1))))
+    z = (sum(exps) + dustbin) or 1.0
+    probs = [e / z for e in exps]
+    p_clm1 = probs[0]
+    c1_conf = min(0.985, jev_entropy_confidence(probs + [dustbin / z], n_options=len(top) + 1))
+
+    choice_int = choice if (isinstance(choice, int) and 1 <= choice <= len(top)) else None
+    is_valid_panel = choice_int is not None
+    chosen_idx = (choice_int - 1) if choice_int is not None else 0
+    s_chosen = float(top[chosen_idx][0])
+    p_chosen = probs[chosen_idx]
+
+    # Absolute visual clarity factor in [0.08, 0.985] based on cosine similarity and top-2 margin
+    cos_clarity = max(0.08, min(0.985, (s_chosen - 0.42) / 0.54))
+    margin_bonus = min(0.08, margin * 1.2)
+
+    if choice_int is not None:
+        base_sku = 0.52 * p_chosen + 0.40 * cos_clarity + margin_bonus
+        if choice_int > 1:
+            drop = max(0.0, s1 - s_chosen)
+            # When VLM selects panel k > 1, weight by visual proximity to rank-1
+            base_sku = (0.38 * p_chosen + 0.52 * cos_clarity + 0.05) * max(0.45, 1.0 - 2.5 * drop)
+        if slot is not None and "confidence" in slot:
+            slot_c = max(0.05, min(0.985, float(slot["confidence"])))
+            base_sku = 0.55 * slot_c + 0.45 * base_sku
+        if vetoed:
+            base_sku = min(0.46, base_sku * 0.62)
+        elif pack_size_verified:
+            base_sku = min(0.985, base_sku + 0.06)
+        sku_conf = round(max(0.05, min(0.985, base_sku)), 4)
+    else:
+        # Forced fallback on choice == 0 ("none match / unreadable") or unparsed response:
+        # Cap strictly <= 0.34 so any standard confidence threshold filters it out.
+        sku_conf = round(max(0.02, min(0.34, 0.38 * p_clm1 * cos_clarity)), 4)
+
+    # Brand-level probability mass across the shortlist (discounted by open-set dustbin & clarity)
+    chosen_pid = int(top[chosen_idx][1])
+    if catalog and chosen_pid in catalog:
+        chosen_brand = str((catalog.get(chosen_pid) or {}).get("brand") or "").strip().lower()
+        if chosen_brand:
+            brand_mass = sum(
+                p
+                for p, (_, pid, _) in zip(probs, top, strict=True)
+                if str((catalog.get(int(pid)) or {}).get("brand") or "").strip().lower() == chosen_brand
+            )
+        else:
+            brand_mass = p_chosen
+    else:
+        brand_mass = max(p_chosen, min(0.96, p_clm1 * 1.15))
+
+    if is_valid_panel:
+        brand_conf = round(
+            max(sku_conf, min(0.985, (0.60 * brand_mass + 0.40 * cos_clarity) * (0.72 if vetoed else 1.0))),
+            4,
+        )
+    else:
+        brand_conf = round(max(sku_conf, min(0.38, 0.45 * brand_mass * cos_clarity)), 4)
+
+    return {
+        "sku_confidence": sku_conf,
+        "brand_confidence": brand_conf,
+        "clm_top1_prob": round(p_clm1, 4),
+        "c1_confidence": round(c1_conf, 4),
+    }
+
+
 def resolve_jev_choice(
     raw_choice: int | None,
     slot: dict[str, Any] | None,
@@ -171,6 +266,7 @@ def resolve_jev_choice(
     cosine_temp: float = 0.04,
     allow_abstain: bool = False,
     max_energy_drop: float = 0.045,
+    catalog: dict[int, dict[str, Any]] | None = None,
 ) -> tuple[int | None, float, dict[str, Any]]:
     """Resolve a 1-indexed panel choice using ``djev`` entropy calibration + visual fusion + energy veto.
 
@@ -181,45 +277,100 @@ def resolve_jev_choice(
       a candidate ``k > 1`` whose visual/CLM similarity ``s_k`` drops more than ``max_energy_drop``
       below the CLM rank-1 score ``s_1`` (unless VLM slot confidence ``>= 0.90``), vetoes the VLM
       override and keeps ``top[0][1]``.
+    - Always computes dustbin-calibrated ``calibrated_confidence`` and ``brand_confidence`` in
+      ``[0.01, 0.985]`` (never hardcoded ``1.0``), and honors ``$SHELF_BENCH_MIN_CONFIDENCE`` for
+      confidence-threshold abstention.
     """
     k_len = len(top)
     if not top:
-        return None, 0.0, {"mode": "empty_shortlist"}
+        return None, 0.0, {"mode": "empty_shortlist", "calibrated_confidence": 0.0, "brand_confidence": 0.0}
 
     s1 = float(top[0][0])
     closed_set_floor = 0.45
+    env_min_conf = float(os.environ.get("SHELF_BENCH_MIN_CONFIDENCE") or 0.0)
 
-    def _apply_energy_veto(chosen_k: int, conf_val: float, meta_d: dict[str, Any]) -> tuple[int | None, float, dict[str, Any]]:
+    def _apply_energy_veto(
+        chosen_k: int, conf_val: float, meta_d: dict[str, Any]
+    ) -> tuple[int | None, float, dict[str, Any]]:
         if chosen_k <= 1 or chosen_k > k_len:
-            return top[0][1], conf_val, meta_d
+            cal = calibrated_shortlist_confidence(1, top, slot, catalog=catalog, vetoed=False)
+            eff_conf = cal["sku_confidence"] if slot is None else conf_val
+            out_meta = {
+                **meta_d,
+                "calibrated_confidence": cal["sku_confidence"],
+                "brand_confidence": cal["brand_confidence"],
+                "abstain_recommended": False,
+            }
+            if slot is None:
+                out_meta["jev_confidence"] = eff_conf
+                out_meta["c1_confidence"] = cal["c1_confidence"]
+            if env_min_conf > 0.0 and cal["sku_confidence"] < env_min_conf:
+                return None, eff_conf, {**out_meta, "mode": "confidence_threshold_abstain"}
+            return top[0][1], eff_conf, out_meta
         sk = float(top[chosen_k - 1][0])
         effective_max_drop = 0.008 if (slot is None and s1 >= 0.885) else max_energy_drop
         if (s1 - sk) > effective_max_drop and (slot is None or conf_val < 0.90):
-            return (
-                top[0][1],
-                conf_val,
-                {
-                    **meta_d,
-                    "mode": f"{meta_d.get('mode', 'jev')}_energy_veto_top1",
-                    "vetoed_panel": chosen_k,
-                    "energy_drop": round(s1 - sk, 4),
-                },
-            )
-        return top[chosen_k - 1][1], conf_val, meta_d
+            cal_v = calibrated_shortlist_confidence(chosen_k, top, slot, catalog=catalog, vetoed=True)
+            eff_conf = cal_v["sku_confidence"] if slot is None else conf_val
+            out_meta = {
+                **meta_d,
+                "mode": f"{meta_d.get('mode', 'jev')}_energy_veto_top1",
+                "vetoed_panel": chosen_k,
+                "energy_drop": round(s1 - sk, 4),
+                "calibrated_confidence": cal_v["sku_confidence"],
+                "brand_confidence": cal_v["brand_confidence"],
+                "abstain_recommended": cal_v["sku_confidence"] < 0.35,
+            }
+            if slot is None:
+                out_meta["jev_confidence"] = eff_conf
+                out_meta["c1_confidence"] = cal_v["c1_confidence"]
+            if env_min_conf > 0.0 and cal_v["sku_confidence"] < env_min_conf:
+                return None, eff_conf, {**out_meta, "mode": "confidence_threshold_abstain"}
+            return top[0][1], eff_conf, out_meta
+
+        cal_ok = calibrated_shortlist_confidence(chosen_k, top, slot, catalog=catalog, vetoed=False)
+        eff_conf = cal_ok["sku_confidence"] if slot is None else conf_val
+        out_meta = {
+            **meta_d,
+            "calibrated_confidence": cal_ok["sku_confidence"],
+            "brand_confidence": cal_ok["brand_confidence"],
+            "abstain_recommended": False,
+        }
+        if slot is None:
+            out_meta["jev_confidence"] = eff_conf
+            out_meta["c1_confidence"] = cal_ok["c1_confidence"]
+        if env_min_conf > 0.0 and cal_ok["sku_confidence"] < env_min_conf:
+            return None, eff_conf, {**out_meta, "mode": "confidence_threshold_abstain"}
+        return top[chosen_k - 1][1], eff_conf, out_meta
 
     if slot is None:
         if isinstance(raw_choice, int) and 1 <= raw_choice <= k_len:
-            return _apply_energy_veto(raw_choice, 1.0, {"mode": "greedy", "choice": raw_choice})
+            cal_g = calibrated_shortlist_confidence(raw_choice, top, None, catalog=catalog)
+            return _apply_energy_veto(
+                raw_choice,
+                cal_g["sku_confidence"],
+                {"mode": "greedy", "choice": raw_choice},
+            )
+        cal_fb = calibrated_shortlist_confidence(0, top, None, catalog=catalog)
+        fb_meta = {
+            "calibrated_confidence": cal_fb["sku_confidence"],
+            "brand_confidence": cal_fb["brand_confidence"],
+            "jev_confidence": cal_fb["sku_confidence"],
+            "c1_confidence": cal_fb["c1_confidence"],
+            "abstain_recommended": True,
+        }
         if raw_choice == 0:
-            if not allow_abstain and s1 >= closed_set_floor:
-                return top[0][1], round(s1, 4), {"mode": "closed_set_top1_fallback", "choice": 0}
-            return None, 1.0, {"mode": "greedy_abstain", "choice": 0}
-        if s1 >= fallback_cosine or (not allow_abstain and s1 >= closed_set_floor):
-            return top[0][1], round(s1, 4), {"mode": "cosine_fallback"}
-        return None, 0.0, {"mode": "unparsed_abstain"}
+            if not allow_abstain and s1 >= closed_set_floor and (env_min_conf <= 0.0 or cal_fb["sku_confidence"] >= env_min_conf):
+                return top[0][1], cal_fb["sku_confidence"], {**fb_meta, "mode": "closed_set_top1_fallback", "choice": 0}
+            return None, cal_fb["sku_confidence"], {**fb_meta, "mode": "greedy_abstain", "choice": 0}
+        if (s1 >= fallback_cosine or (not allow_abstain and s1 >= closed_set_floor)) and (
+            env_min_conf <= 0.0 or cal_fb["sku_confidence"] >= env_min_conf
+        ):
+            return top[0][1], cal_fb["sku_confidence"], {**fb_meta, "mode": "cosine_fallback"}
+        return None, 0.0, {**fb_meta, "mode": "unparsed_abstain"}
 
-    conf = float(slot.get("confidence", 1.0))
-    probs: dict[int, float] = {int(k): float(v) for k, v in (slot.get("probabilities") or {}).items()}
+    conf = float(slot.get("confidence", 0.5))
+    probs: dict[int, float] = {int(k): float(v) for k, v in (slot.get("probabilities") or slot.get("probs") or {}).items()}
     max_cos = max(s for s, _, _ in top)
     vis_unnorm = {
         idx + 1: math.exp((cos - max_cos) / max(1e-4, cosine_temp))
@@ -229,11 +380,14 @@ def resolve_jev_choice(
     vis_probs = {k: v / vis_denom for k, v in vis_unnorm.items()}
     c1_conf = jev_entropy_confidence(list(vis_probs.values()), n_options=max(2, k_len))
     w2_poe = round(conf / max(1e-6, c1_conf + conf), 4)
+    cal_slot = calibrated_shortlist_confidence(raw_choice, top, slot, catalog=catalog)
 
     meta: dict[str, Any] = {
         "jev_confidence": conf,
         "c1_confidence": c1_conf,
         "c2_confidence": conf,
+        "calibrated_confidence": cal_slot["sku_confidence"],
+        "brand_confidence": cal_slot["brand_confidence"],
         "poe_weight_w2": w2_poe,
         "jev_probabilities": {str(k): round(v, 4) for k, v in probs.items()},
         "jev_top2_margin": slot.get("top2_margin"),
@@ -244,9 +398,13 @@ def resolve_jev_choice(
         if isinstance(raw_choice, int) and 1 <= raw_choice <= k_len:
             return _apply_energy_veto(raw_choice, conf, {**meta, "mode": "jev_confident"})
         if raw_choice == 0:
-            if not allow_abstain and s1 >= closed_set_floor:
-                return top[0][1], conf, {**meta, "mode": "closed_set_top1_fallback", "choice": 0}
-            return None, conf, {**meta, "mode": "jev_confident_abstain"}
+            if not allow_abstain and s1 >= closed_set_floor and (env_min_conf <= 0.0 or cal_slot["sku_confidence"] >= env_min_conf):
+                return (
+                    top[0][1],
+                    conf,
+                    {**meta, "mode": "closed_set_top1_fallback", "choice": 0, "abstain_recommended": True},
+                )
+            return None, conf, {**meta, "mode": "jev_confident_abstain", "abstain_recommended": True}
 
     # Continuous Entropy-Weighted Bayesian Product-of-Experts (PoE) fusion:
     # log P_joint(k) = w2 * log P_2(k) + (1 - w2) * log P_1(k)
@@ -261,9 +419,13 @@ def resolve_jev_choice(
     best_k = max(fused_scores, key=lambda k: fused_scores[k])
     best_jev_p = probs.get(best_k, 0.0)
     if (raw_choice == 0 or p_abstain > best_jev_p) and s1 < fallback_cosine:
-        if not allow_abstain and s1 >= closed_set_floor:
-            return top[0][1], conf, {**meta, "mode": "closed_set_top1_fallback"}
-        return None, conf, {**meta, "mode": "jev_fused_abstain"}
+        if not allow_abstain and s1 >= closed_set_floor and (env_min_conf <= 0.0 or cal_slot["sku_confidence"] >= env_min_conf):
+            return (
+                top[0][1],
+                conf,
+                {**meta, "mode": "closed_set_top1_fallback", "abstain_recommended": True},
+            )
+        return None, conf, {**meta, "mode": "jev_fused_abstain", "abstain_recommended": True}
 
     return _apply_energy_veto(
         best_k,
@@ -433,6 +595,13 @@ def coarse_jev_triage(
         brand_mass[brand] = brand_mass.get(brand, 0.0) + w
         sku_mass[pid] = w
 
+    # Include an open-set dustbin mass so homogeneous neighbor slices never collapse entropy to 0
+    total_w = sum(sku_mass.values()) or 1.0
+    dustbin_w = max(0.015 * total_w, math.exp((0.52 - max_cos) / max(1e-4, temp)))
+    cat_mass["__open_set__"] = dustbin_w
+    brand_mass["__open_set__"] = dustbin_w
+    sku_mass[-1] = dustbin_w
+
     all_cats = {str(p.get("category") or "unknown") for p in catalog.values()}
     all_brands = {str(p.get("brand") or p.get("category") or "unknown") for p in catalog.values()}
 
@@ -445,9 +614,14 @@ def coarse_jev_triage(
     top_cat = str(top_p.get("category") or "unknown")
     top_brand = str(top_p.get("brand") or top_cat)
 
-    cat_conf = jev_entropy_confidence(cat_mass, n_options=max(2, len(all_cats)))
-    brand_conf = jev_entropy_confidence(brand_mass, n_options=max(2, len(all_brands)))
-    sku_conf = jev_entropy_confidence(sku_mass, n_options=len(top_slice))
+    cos_clarity = max(0.08, min(0.985, (top_score - 0.42) / 0.54))
+    raw_cat_conf = jev_entropy_confidence(cat_mass, n_options=max(2, len(all_cats) + 1))
+    raw_brand_conf = jev_entropy_confidence(brand_mass, n_options=max(2, len(all_brands) + 1))
+    raw_sku_conf = jev_entropy_confidence(sku_mass, n_options=len(top_slice) + 1)
+
+    cat_conf = round(max(0.05, min(0.985, 0.65 * raw_cat_conf + 0.35 * cos_clarity)), 4)
+    brand_conf = round(max(0.05, min(0.985, 0.65 * raw_brand_conf + 0.35 * cos_clarity)), 4)
+    sku_conf = round(max(0.03, min(0.985, 0.65 * raw_sku_conf + 0.35 * cos_clarity)), 4)
 
     cos_by_id = {pid: cos for cos, pid in ranked}
     brand_ids = [
@@ -458,7 +632,8 @@ def coarse_jev_triage(
     if len(brand_ids) >= 2:
         intra_brand_margin = cos_by_id[brand_ids[0]] - cos_by_id[brand_ids[1]]
     else:
-        intra_brand_margin = 1.0
+        # Single-SKU brand: use margin against the runner-up neighbor (capped < 1.0)
+        intra_brand_margin = max(SISTER_MARGIN_DEFAULT := 0.05, min(0.98, margin))
 
     brand_candidates = {pid: catalog[pid] for pid in brand_ids}
     return {
