@@ -130,8 +130,11 @@ def clef_logprob_select(
                     raw_lps[c_int] = lp
         max_lp = max(raw_lps.values())
         unnorm = {k: math.exp(lp - max_lp) for k, lp in raw_lps.items()}
-        z = sum(unnorm.values()) or 1.0
-        probs = {k: round(v / z, 4) for k, v in unnorm.items()}
+        # Lidstone open-set smoothing so single-token greedy top lists never saturate to 1.0000
+        n_opts = max(2, len(valid_options))
+        eps = 0.015 / n_opts
+        z = (sum(unnorm.values()) + 0.015) or 1.0
+        probs = {k: round(min(0.985, (v + eps) / z), 4) for k, v in unnorm.items()}
         best_opt = max(probs, key=lambda k: probs[k])
         slots.append({"choice": best_opt, "top1_prob": probs[best_opt], "probs": probs})
     return slots[-n_slots:] if len(slots) >= n_slots else slots
@@ -331,6 +334,62 @@ def resolve_clef_choice(
     return ans_id, mode
 
 
+def _resolve_and_calibrate_clef(
+    choice: int | None,
+    slot: dict[str, Any] | None,
+    top: list[tuple[float, int, str]],
+    *,
+    allow_abstain: bool = False,
+    extracted_pack_size: str | None = None,
+    catalog: dict[int, dict[str, Any]] | None = None,
+) -> tuple[int | None, str, dict[str, Any]]:
+    """Resolve CLEF panel choice and compute dustbin-calibrated SKU and brand confidences."""
+    import os
+
+    from utils.openjev import calibrated_shortlist_confidence
+
+    token_prob = float(slot["top1_prob"]) if slot and "top1_prob" in slot else 0.95
+    ans, guard_mode = resolve_clef_choice(
+        choice,
+        token_prob,
+        top,
+        allow_abstain=allow_abstain,
+        extracted_pack_size=extracted_pack_size,
+        catalog=catalog,
+    )
+    vetoed = guard_mode.startswith("energy_veto")
+    pack_verified = "layer5_pack_size_verified" in guard_mode
+    cal = calibrated_shortlist_confidence(
+        choice,
+        top,
+        slot={"confidence": float(slot["top1_prob"])} if slot and "top1_prob" in slot else None,
+        catalog=catalog,
+        vetoed=vetoed,
+        pack_size_verified=pack_verified,
+    )
+    sku_conf = cal["sku_confidence"]
+    brand_conf = cal["brand_confidence"]
+    clef_prob = float(slot["top1_prob"]) if slot and "top1_prob" in slot else sku_conf
+    is_fallback = not (isinstance(choice, int) and 1 <= choice <= len(top))
+    if is_fallback:
+        clef_prob = sku_conf
+    env_min = os.environ.get("SHELF_BENCH_MIN_CONFIDENCE")
+    if env_min:
+        try:
+            min_c = float(env_min)
+            if ans is not None and clef_prob < min_c:
+                ans = None
+                guard_mode = f"{guard_mode}+abstain_low_confidence"
+        except ValueError:
+            pass
+    return ans, guard_mode, {
+        "clef_prob": round(min(0.985, clef_prob), 4),
+        "sku_confidence": sku_conf,
+        "brand_confidence": brand_conf,
+        "abstain_recommended": bool(is_fallback or clef_prob < 0.38),
+    }
+
+
 @register
 class ClefStandaloneRetrieval(EmbeddingRetrieval):
     """Standalone System-2 CLEF Retrieval (CLEF Zoom-Strip evaluation + 2-Tier Competitor Guard)."""
@@ -363,6 +422,12 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
             self.catalog = {}
 
     def _allow_abstain(self) -> bool:
+        import os
+
+        if getattr(self, "allow_abstain", None) is not None:
+            return bool(self.allow_abstain)
+        if os.environ.get("SHELF_BENCH_ALLOW_ABSTAIN") == "1":
+            return True
         ds = str(getattr(self, "dataset", "") or "")
         return ds in ("ms_json_golden", "gtmerch_golden")
 
@@ -389,13 +454,13 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
         data = res.data if isinstance(res.data, dict) else {}
         raw_c = data.get("choice")
         slots = clef_logprob_select(res.meta.get("logprobs"), set(range(0, len(top) + 1)), n_slots=1)
-        choice = slots[0]["choice"] if slots else (raw_c if isinstance(raw_c, int) else None)
-        prob = slots[0]["top1_prob"] if slots else 1.0
+        slot = slots[0] if slots else None
+        choice = slot["choice"] if slot else (raw_c if isinstance(raw_c, int) else None)
         allow_abstain = self._allow_abstain() if hasattr(self, "_allow_abstain") else False
         psize_str = str(data.get("pack_size") or "")
-        ans, guard_mode = resolve_clef_choice(
+        ans, guard_mode, cal_meta = _resolve_and_calibrate_clef(
             choice,
-            prob,
+            slot,
             top,
             allow_abstain=allow_abstain,
             extracted_pack_size=psize_str,
@@ -403,17 +468,74 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
         )
         return ans, {
             "choice": choice,
-            "clef_prob": prob,
+            **cal_meta,
             "pack_size": psize_str,
             "guard_mode": guard_mode,
+        }
+
+    def _compute_stage2a_diagnostics(
+        self, top: list[tuple[float, int, str]], use_fast_gate: bool
+    ) -> dict[str, Any]:
+        from utils.clm import compute_zscore_and_lid, infonce_posterior
+        from utils.openjev import calibrated_shortlist_confidence
+
+        cat_map = getattr(self, "catalog", {})
+        s1, id1, _ = top[0]
+        s2, id2, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
+        c1 = cat_map.get(id1) or {}
+        c2 = cat_map.get(id2) or {}
+        same_brand = bool(c1.get("brand") and c1.get("brand") == c2.get("brand"))
+        same_variant = bool(
+            same_brand
+            and c1.get("base_variant") == c2.get("base_variant")
+            and c1.get("pack_size") != c2.get("pack_size")
+        )
+        req_margin = 0.035 if (same_brand or same_variant) else 0.009
+        cos_margin = round(float(s1 - s2), 4) if s2 >= -0.99 else round(float(s1), 4)
+        zlid = compute_zscore_and_lid([s for s, _, _ in top])
+        p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
+        cal_a = calibrated_shortlist_confidence(1, top, catalog=cat_map)
+        reasons: list[str] = []
+        if not use_fast_gate:
+            reasons.append("fast_gate_disabled")
+        else:
+            if s1 < 0.75:
+                reasons.append("top1_cosine_below_0.75")
+            if (s1 - s2) < req_margin:
+                reasons.append(
+                    "cosine_margin_below_0.035_sibling_guard"
+                    if (same_brand or same_variant)
+                    else "cosine_margin_below_0.009"
+                )
+            if p_clm < 0.30:
+                reasons.append("clm_top1_prob_below_0.30")
+            if zlid["z_margin"] < 0.80:
+                reasons.append("z_margin_below_0.80")
+            if zlid["lid"] > 11.5:
+                reasons.append("lid_above_11.5")
+        passed = bool(use_fast_gate and not reasons)
+        return {
+            "top1_sku_id": id1,
+            "top5_sku_ids": [i for _, i, _ in top],
+            "top1_cosine": round(float(s1), 4),
+            "top2_cosine": round(float(s2), 4) if s2 >= -0.99 else None,
+            "cosine_margin": cos_margin,
+            "required_margin": req_margin,
+            "same_brand_top2": same_brand,
+            "same_variant_sister": same_variant,
+            "clm_top1_prob": round(float(p_clm), 4),
+            "coarse_entropy_conf": round(float(ent_conf), 4),
+            "stage2a_sku_confidence": cal_a["sku_confidence"],
+            "stage2a_brand_confidence": cal_a["brand_confidence"],
+            **zlid,
+            "fast_gate_passed": passed,
+            "escalation_reason": None if passed else ",".join(reasons),
         }
 
     def identify(
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None
     ) -> int | None:
         import os
-
-        from utils.clm import compute_zscore_and_lid, infonce_posterior
 
         ranked = self.ranked(image, ctx, allowed_ids)
         if not ranked:
@@ -426,54 +548,31 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
                 and os.environ.get("SHELF_BENCH_PURE_CLEF") != "1"
             )
         )
-        if use_fast_gate:
-            cat_map = getattr(self, "catalog", {})
-            s1, id1, _ = top[0]
-            s2, id2, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
-            c1 = cat_map.get(id1) or {}
-            c2 = cat_map.get(id2) or {}
-            same_variant = bool(
-                c1.get("brand")
-                and c1.get("brand") == c2.get("brand")
-                and c1.get("base_variant") == c2.get("base_variant")
-                and c1.get("pack_size") != c2.get("pack_size")
+        diag_a = self._compute_stage2a_diagnostics(top, use_fast_gate)
+        s1, id1, _ = top[0]
+        if diag_a["fast_gate_passed"]:
+            ctx.trace.step(
+                "Stage A CLM System-1 Fast-Gate (0 VLM calls)",
+                f"#{id1} accepted (cos={s1:.3f}, margin={diag_a['cosine_margin']:.3f}, P_CLM={diag_a['clm_top1_prob']:.2f}, z_margin={diag_a['z_margin']:.2f})",
+                info={
+                    "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in top],
+                    **diag_a,
+                    "sku_confidence": diag_a["stage2a_sku_confidence"],
+                    "brand_confidence": diag_a["stage2a_brand_confidence"],
+                    "stage2a_bypassed": True,
+                    "fast_gated_boxes": 1,
+                    "answer": id1,
+                },
             )
-            req_margin = 0.025 if same_variant else 0.009
-            zlid = compute_zscore_and_lid([s for s, _, _ in top])
-            p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
-            if (
-                s1 >= 0.75
-                and (s1 - s2) >= req_margin
-                and p_clm >= 0.30
-                and zlid["z_margin"] >= 0.80
-                and zlid["lid"] <= 11.5
-            ):
-                ctx.trace.step(
-                    "Stage A CLM System-1 Fast-Gate (0 VLM calls)",
-                    f"#{id1} accepted (cos={s1:.3f}, margin={s1 - s2:.3f}, P_CLM={p_clm:.2f}, z_margin={zlid['z_margin']:.2f})",
-                    info={
-                        "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in top],
-                        "top1_sku_id": id1,
-                        "top5_sku_ids": [i for _, i, _ in top],
-                        "clm_top1_prob": p_clm,
-                        "coarse_entropy_conf": ent_conf,
-                        "same_variant_sister": same_variant,
-                        **zlid,
-                        "stage2a_bypassed": True,
-                        "fast_gated_boxes": 1,
-                        "answer": id1,
-                    },
-                )
-                return id1
+            return id1
         ans, meta = self._clef_single(image, top, ctx)
         ctx.trace.step(
             "Standalone CLEF Zoom-Strip",
             f"panel {meta['choice']} -> #{ans} (P_token={meta['clef_prob']:.2f}, size={meta['pack_size']!r}, mode={meta['guard_mode']})",
             info={
+                **diag_a,
                 **meta,
                 "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in top],
-                "top1_sku_id": top[0][1],
-                "top5_sku_ids": [i for _, i, _ in top],
                 "stage2a_bypassed": False,
             },
         )
@@ -484,11 +583,7 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
     ) -> list[int | None]:
         import os
 
-        from utils.clm import (
-            compute_zscore_and_lid,
-            group_adjacent_shelf_twins,
-            infonce_posterior,
-        )
+        from utils.clm import group_adjacent_shelf_twins
         from utils.photometry import inner_lab_zones, restore_photometry
 
         if not boxes:
@@ -528,51 +623,31 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
 
         ids: list[int | None] = [None] * len(boxes)
         valid_indices: list[int] = []
-        cat_map = getattr(self, "catalog", {})
+        stage2a_diags: dict[int, dict[str, Any]] = {}
         for i, r in enumerate(all_ranked):
             if not r:
                 continue
             top = r[:CLEF_K]
-            if use_fast_gate:
+            diag_a = self._compute_stage2a_diagnostics(top, use_fast_gate)
+            stage2a_diags[i] = diag_a
+            if diag_a["fast_gate_passed"]:
                 s1, id1, _ = top[0]
-                s2, id2, _ = top[1] if len(top) > 1 else (-1.0, -1, "")
-                c1 = cat_map.get(id1) or {}
-                c2 = cat_map.get(id2) or {}
-                same_variant = bool(
-                    c1.get("brand")
-                    and c1.get("brand") == c2.get("brand")
-                    and c1.get("base_variant") == c2.get("base_variant")
-                    and c1.get("pack_size") != c2.get("pack_size")
+                ids[i] = id1
+                ctx.trace.step(
+                    "Stage A CLM System-1 Fast-Gate",
+                    f"box {i + 1}: #{id1} accepted (cos={s1:.3f}, margin={diag_a['cosine_margin']:.3f}, P_CLM={diag_a['clm_top1_prob']:.2f}, z_margin={diag_a['z_margin']:.2f})",
+                    info={
+                        "box_index": i,
+                        "shortlist": [{"sku_id": k_id, "cosine": round(s, 4)} for s, k_id, _ in top],
+                        **diag_a,
+                        "sku_confidence": diag_a["stage2a_sku_confidence"],
+                        "brand_confidence": diag_a["stage2a_brand_confidence"],
+                        "stage2a_bypassed": True,
+                        "fast_gated_boxes": 1,
+                        "answer": id1,
+                    },
                 )
-                req_margin = 0.025 if same_variant else 0.009
-                zlid = compute_zscore_and_lid([s for s, _, _ in top])
-                p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
-                if (
-                    s1 >= 0.75
-                    and (s1 - s2) >= req_margin
-                    and p_clm >= 0.30
-                    and zlid["z_margin"] >= 0.80
-                    and zlid["lid"] <= 11.5
-                ):
-                    ids[i] = id1
-                    ctx.trace.step(
-                        "Stage A CLM System-1 Fast-Gate",
-                        f"box {i + 1}: #{id1} accepted (cos={s1:.3f}, margin={s1 - s2:.3f}, P_CLM={p_clm:.2f}, z_margin={zlid['z_margin']:.2f})",
-                        info={
-                            "box_index": i,
-                            "shortlist": [{"sku_id": k_id, "cosine": round(s, 4)} for s, k_id, _ in top],
-                            "top1_sku_id": id1,
-                            "top5_sku_ids": [k_id for _, k_id, _ in top],
-                            "clm_top1_prob": p_clm,
-                            "coarse_entropy_conf": ent_conf,
-                            "same_variant_sister": same_variant,
-                            **zlid,
-                            "stage2a_bypassed": True,
-                            "fast_gated_boxes": 1,
-                            "answer": id1,
-                        },
-                    )
-                    continue
+                continue
             valid_indices.append(i)
         batches = [valid_indices[i : i + CLEF_BATCH] for i in range(0, len(valid_indices), CLEF_BATCH)]
         allow_abstain = self._allow_abstain()
@@ -580,8 +655,20 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
         def run_batch(batch: list[int]) -> list[tuple[int, int | None, dict[str, Any]]]:
             if len(batch) == 1:
                 idx = batch[0]
-                ans, meta = self._clef_single(crops[idx], all_ranked[idx][:CLEF_K], ctx)
-                return [(idx, ans, meta)]
+                top_single = all_ranked[idx][:CLEF_K]
+                ans, meta = self._clef_single(crops[idx], top_single, ctx)
+                return [
+                    (
+                        idx,
+                        ans,
+                        {
+                            **stage2a_diags.get(idx, {}),
+                            **meta,
+                            "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in top_single],
+                            "stage2a_bypassed": False,
+                        },
+                    )
+                ]
             qs = [crops[idx] for idx in batch]
             tops = [all_ranked[idx][:CLEF_K] for idx in batch]
             refs_per_q = [
@@ -615,16 +702,16 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
             out: list[tuple[int, int | None, dict[str, Any]]] = []
             for b_i, idx in enumerate(batch):
                 top = tops[b_i]
+                slot = slots[b_i] if b_i < len(slots) else None
                 c = (
-                    slots[b_i]["choice"]
-                    if b_i < len(slots)
+                    slot["choice"]
+                    if slot
                     else (raw_choices[b_i] if b_i < len(raw_choices) else None)
                 )
-                prob = slots[b_i]["top1_prob"] if b_i < len(slots) else 1.0
                 psize = str(raw_sizes[b_i]) if b_i < len(raw_sizes) else ""
-                ans, guard_mode = resolve_clef_choice(
+                ans, guard_mode, cal_meta = _resolve_and_calibrate_clef(
                     c,
-                    prob,
+                    slot,
                     top,
                     allow_abstain=allow_abstain,
                     extracted_pack_size=psize,
@@ -635,11 +722,13 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
                         idx,
                         ans,
                         {
+                            **stage2a_diags.get(idx, {}),
                             "choice": c,
-                            "clef_prob": prob,
+                            **cal_meta,
                             "pack_size": psize,
                             "guard_mode": guard_mode,
                             "shortlist": [{"sku_id": i, "cosine": round(s, 4)} for s, i, _ in top],
+                            "stage2a_bypassed": False,
                         },
                     )
                 )
@@ -847,13 +936,13 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
         data = res.data if isinstance(res.data, dict) else {}
         raw_c = data.get("choice")
         slots = clef_logprob_select(res.meta.get("logprobs"), set(range(0, len(top) + 1)), n_slots=1)
-        choice = slots[0]["choice"] if slots else (raw_c if isinstance(raw_c, int) else None)
-        prob = slots[0]["top1_prob"] if slots else 1.0
+        slot = slots[0] if slots else None
+        choice = slot["choice"] if slot else (raw_c if isinstance(raw_c, int) else None)
         allow_abstain = self._allow_abstain() if hasattr(self, "_allow_abstain") else False
         psize_str = str(data.get("pack_size") or "")
-        ans, guard_mode = resolve_clef_choice(
+        ans, guard_mode, cal_meta = _resolve_and_calibrate_clef(
             choice,
-            prob,
+            slot,
             top,
             allow_abstain=allow_abstain,
             extracted_pack_size=psize_str,
@@ -861,7 +950,7 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
         )
         return ans, {
             "choice": choice,
-            "clef_prob": prob,
+            **cal_meta,
             "pack_size": psize_str,
             "guard_mode": guard_mode,
             "geometry": geom,
@@ -875,6 +964,7 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
         self, image: Image.Image, ctx: Context, allowed_ids: set[int] | None = None
     ) -> int | None:
         from utils.clm import compute_zscore_and_lid, infonce_posterior
+        from utils.openjev import calibrated_shortlist_confidence
 
         ranked, geom, pack_probs = self._rank_with_geometry(image, ctx, allowed_ids)
         if not ranked:
@@ -885,6 +975,7 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
         zlid = compute_zscore_and_lid([s for s, _, _ in top])
         p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
         if self._stage_a_accept(top, p_clm, zlid):
+            cal = calibrated_shortlist_confidence(1, top, catalog=getattr(self, "catalog", None))
             ctx.trace.step(
                 "Stage A CLM + Projective Scale Fast-Gate (0 VLM calls)",
                 f"#{id1} accepted (cos={s1:.3f}, margin={s1 - s2:.3f}, P_CLM={p_clm:.2f}, h/w={geom['aspect_ratio']:.2f})",
@@ -894,6 +985,8 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
                     "top5_sku_ids": [i for _, i, _ in top],
                     "clm_top1_prob": p_clm,
                     "coarse_entropy_conf": ent_conf,
+                    "sku_confidence": cal["sku_confidence"],
+                    "brand_confidence": cal["brand_confidence"],
                     "geometry": geom,
                     "lidstone_pack_probs": pack_probs or None,
                     **zlid,
@@ -928,6 +1021,7 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
             zoom_multi_sheet,
             zoom_multi_sheet_saliency_diff,
         )
+        from utils.openjev import calibrated_shortlist_confidence
         from utils.photometry import inner_lab_zones, restore_photometry
 
         if not boxes:
@@ -959,6 +1053,7 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
 
         ids: list[int | None] = [None] * len(boxes)
         valid_indices: list[int] = []
+        cat_map = getattr(self, "catalog", None)
         for i, r in enumerate(all_ranked):
             if not r:
                 continue
@@ -969,6 +1064,7 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
             p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
             if self._stage_a_accept(top, p_clm, zlid):
                 ids[i] = id1
+                cal = calibrated_shortlist_confidence(1, top, catalog=cat_map)
                 ctx.trace.step(
                     "Stage A CLM + Projective Scale Fast-Gate",
                     f"box {i + 1}: #{id1} accepted (cos={s1:.3f}, margin={s1 - s2:.3f}, P_CLM={p_clm:.2f})",
@@ -979,6 +1075,8 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
                         "top5_sku_ids": [k_id for _, k_id, _ in top],
                         "clm_top1_prob": p_clm,
                         "coarse_entropy_conf": ent_conf,
+                        "sku_confidence": cal["sku_confidence"],
+                        "brand_confidence": cal["brand_confidence"],
                         "geometry": all_geoms[i],
                         **zlid,
                         "stage2a_bypassed": True,
@@ -1045,16 +1143,16 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
             out: list[tuple[int, int | None, dict[str, Any]]] = []
             for b_i, idx in enumerate(batch):
                 top = tops[b_i]
+                slot = slots[b_i] if b_i < len(slots) else None
                 c = (
-                    slots[b_i]["choice"]
-                    if b_i < len(slots)
+                    slot["choice"]
+                    if slot
                     else (raw_choices[b_i] if b_i < len(raw_choices) else None)
                 )
-                prob = slots[b_i]["top1_prob"] if b_i < len(slots) else 1.0
                 psize = str(raw_sizes[b_i]) if b_i < len(raw_sizes) else ""
-                ans, guard_mode = resolve_clef_choice(
+                ans, guard_mode, cal_meta = _resolve_and_calibrate_clef(
                     c,
-                    prob,
+                    slot,
                     top,
                     allow_abstain=allow_abstain,
                     extracted_pack_size=psize,
@@ -1066,7 +1164,7 @@ class ClefAspectScalePrior(ClefContrastiveMetadata):
                         ans,
                         {
                             "choice": c,
-                            "clef_prob": prob,
+                            **cal_meta,
                             "pack_size": psize,
                             "guard_mode": guard_mode,
                             "geometry": all_geoms[idx],

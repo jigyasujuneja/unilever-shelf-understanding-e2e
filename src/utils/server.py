@@ -457,6 +457,7 @@ class Handler(BaseHTTPRequestHandler):
             eng = clef_contrastive_inference.get_engine()
             return self._json({
                 "status": "healthy",
+                "spec_version": "v0.2",
                 "pipeline": "clef_contrastive_contact_sheet",
                 "approach": clef_contrastive_inference.DEFAULT_APPROACH,
                 "model": clef_contrastive_inference.DEFAULT_MODEL,
@@ -465,6 +466,10 @@ class Handler(BaseHTTPRequestHandler):
                 "shelf_detector": clef_contrastive_inference.DEFAULT_SHELF_DETECTOR,
                 "dataset": clef_contrastive_inference.DEFAULT_CROP_DATASET,
                 "catalog_classes": len(eng.catalog) if eng.catalog else 2659,
+                "default_conf_threshold": clef_contrastive_inference.DEFAULT_CONF_THRESHOLD,
+                "sibling_margin_guard": 0.035,
+                "layer5_pack_size_verifier": True,
+                "confidence_range": [0.02, 0.985],
                 "is_ready": eng.is_ready,
                 "routes": {
                     "crop": "/api/predict/crop",

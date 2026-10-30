@@ -32,9 +32,12 @@ def _create_synthetic_jpeg_b64(width: int = 120, height: int = 240, color: tuple
 
 
 class _MockCropApproach:
-    def __init__(self, sku_id: int = 42):
+    def __init__(self, sku_id: int = 42, clm_prob: float = 0.942, sku_conf: float | None = None):
         self.sku_id = sku_id
+        self.clm_prob = clm_prob
+        self.sku_conf = sku_conf
         self.dataset = "hul_golden"
+        self.allow_abstain = False
         self.catalog = {
             42: {
                 "sku_id": 42,
@@ -62,15 +65,15 @@ class _MockCropApproach:
         pass
 
     def identify(self, image: Image.Image, ctx: Any) -> int | None:
-        ctx.trace.step(
-            "Stage A CLM Fast Gate",
-            "Accepted via CLM",
-            info={
-                "stage2a_bypassed": True,
-                "clm_top1_prob": 0.942,
-                "shortlist": [{"sku_id": self.sku_id, "cosine": 0.887}],
-            },
-        )
+        info: dict[str, Any] = {
+            "stage2a_bypassed": True,
+            "clm_top1_prob": self.clm_prob,
+            "shortlist": [{"sku_id": self.sku_id, "cosine": 0.887}],
+        }
+        if self.sku_conf is not None:
+            info["sku_confidence"] = self.sku_conf
+            info["brand_confidence"] = min(0.985, self.sku_conf + 0.02)
+        ctx.trace.step("Stage A CLM Fast Gate", "Accepted via CLM", info=info)
         return self.sku_id
 
     def identify_boxes(self, image: Image.Image, boxes: list[Any], ctx: Any) -> list[int | None]:
@@ -133,9 +136,56 @@ def test_predict_crop_payload_single(mock_engine):
     assert res["sku_id"] == 42
     assert res["stage"] == "stage2a_fast_gate"
     assert res["confidence"] == 0.942
+    assert res["sku_confidence"] == 0.942
+    assert res["conf_threshold"] == 0.78
+    assert res["abstained"] is False
+    assert res["abstain_recommended"] is False
     assert res["prediction"]["brand"] == "Dove"
     assert res["prediction"]["is_hul"] is True
+    assert res["embedding_output"]["fast_gate_passed"] is True
+    assert res["embedding_output"]["top1_sku_id"] == 42
+    assert res["embedding_output"]["prediction"]["brand"] == "Dove"
+    assert res["gemini_output"]["called"] is False
+    assert res["gemini_output"]["skipped_reason"] == "stage2a_fast_gate_accepted"
     assert len(res["predictions"]) == 1
+
+
+def test_v02_confidence_saturation_and_abstention():
+    b64 = _create_synthetic_jpeg_b64()
+    # 1. Verify 1.0 saturation is clamped to <= 0.985 and uses calibrated sku_confidence when present
+    crop_appr_sat = _MockCropApproach(sku_id=42, clm_prob=1.0, sku_conf=0.864)
+    eng_sat = ClefContrastiveEngine(
+        crop_appr=crop_appr_sat,
+        shelf_det=_MockShelfDetector(),
+        llm=lambda img, p, **kw: None,
+        catalog=crop_appr_sat.catalog,
+    )
+    res_sat = eng_sat.predict_crop_payload({"image_b64": b64})
+    assert res_sat["confidence"] == 0.864
+    assert res_sat["confidence"] < 1.0
+
+    # 2. Verify unified 0.78 threshold abstention when allow_abstain=True
+    crop_appr_low = _MockCropApproach(sku_id=42, clm_prob=0.61, sku_conf=0.61)
+    eng_low = ClefContrastiveEngine(
+        crop_appr=crop_appr_low,
+        shelf_det=_MockShelfDetector(),
+        llm=lambda img, p, **kw: None,
+        catalog=crop_appr_low.catalog,
+    )
+    res_forced = eng_low.predict_crop_payload({"image_b64": b64, "allow_abstain": False})
+    assert res_forced["sku_id"] == 42
+    assert res_forced["abstain_recommended"] is True
+    assert res_forced["abstained"] is False
+    assert res_forced["abstention_reason"] == "confidence_below_threshold_0.78"
+
+    res_abstain = eng_low.predict_crop_payload({"image_b64": b64, "allow_abstain": True})
+    assert res_abstain["sku_id"] is None
+    assert res_abstain["prediction"] is None
+    assert res_abstain["abstained"] is True
+    assert res_abstain["abstain_recommended"] is True
+    assert res_abstain["abstention_reason"] == "confidence_below_threshold_0.78"
+    assert res_abstain["embedding_output"]["top1_sku_id"] == 42
+    assert res_abstain["embedding_output"]["prediction"]["brand"] == "Dove"
 
 
 def test_predict_crop_payload_batch(mock_engine):
@@ -166,14 +216,18 @@ def test_predict_shelf_payload_single(mock_engine):
     assert res["hul_facings"] == 1
     assert res["competitor_facings"] == 1
     assert res["hul_facing_sos"] == 0.5
+    assert res["stage_breakdown"]["embedding_fast_gate_count"] == 2
+    assert res["stage_breakdown"]["gemini_vlm_count"] == 0
     assert len(res["detections"]) == 2
     assert res["detections"][0]["prediction"]["brand"] == "Dove"
+    assert res["detections"][0]["embedding_output"]["top1_sku_id"] == 42
+    assert res["detections"][0]["gemini_output"]["called"] is False
     assert res["detections"][1]["prediction"]["brand"] == "Pantene"
 
 
 def test_http_rest_endpoints(mock_engine):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
+        s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
@@ -184,12 +238,14 @@ def test_http_rest_endpoints(mock_engine):
     base = f"http://127.0.0.1:{port}"
     try:
         # 1. Test GET /api/predict/health
-        with urllib.request.urlopen(f"{base}/api/predict/health") as resp:
+        with urllib.request.urlopen(f"{base}/api/predict/health") as resp:  # noqa: S310
             assert resp.status == 200
             data = json.loads(resp.read().decode())
             assert data["status"] == "healthy"
             assert data["pipeline"] == "clef_contrastive_contact_sheet"
             assert data["approach"] == "clef_contrastive_metadata"
+            assert data["spec_version"] == "v0.2"
+            assert data["default_conf_threshold"] == 0.78
             assert data["is_ready"] is True
 
         # 2. Test POST /api/predict/crop
@@ -200,7 +256,7 @@ def test_http_rest_endpoints(mock_engine):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(crop_req) as resp:
+        with urllib.request.urlopen(crop_req) as resp:  # noqa: S310
             assert resp.status == 200
             data = json.loads(resp.read().decode())
             assert data["sku_id"] == 42
@@ -213,7 +269,7 @@ def test_http_rest_endpoints(mock_engine):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(shelf_req) as resp:
+        with urllib.request.urlopen(shelf_req) as resp:  # noqa: S310
             assert resp.status == 200
             data = json.loads(resp.read().decode())
             assert data["total_facings"] == 2

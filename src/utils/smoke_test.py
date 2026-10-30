@@ -1,7 +1,7 @@
 """CLEF Contrastive Contact-Sheet Cascade Smoke Test Runner for Google Cloud Run.
 
 Samples 5 crop images and 5 shelf images directly from GCS manifests,
-starts an in-container HTTP REST server, and verifies the endpoints:
+starts an in-container HTTP REST server on 127.0.0.1, and verifies the endpoints:
 - GET /api/predict/health
 - POST /api/predict/crop
 - POST /api/predict/shelf
@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from utils import dataset
 
@@ -27,8 +28,8 @@ logger = logging.getLogger("smoke_test")
 
 def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
 
 
 def _write_output_payload(payload_str: str, path_or_uri: str) -> None:
@@ -38,19 +39,27 @@ def _write_output_payload(payload_str: str, path_or_uri: str) -> None:
             payload_str, content_type="application/json"
         )
     else:
-        p = Path(path_or_uri)
+        p = Path(path_or_uri).resolve()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(payload_str, encoding="utf-8")
 
 
-def _http_request(url: str, method: str = "GET", data: dict | None = None, headers: dict | None = None) -> tuple[int, dict]:
+def _http_request(
+    url: str,
+    method: str = "GET",
+    data: dict | None = None,
+    headers: dict | None = None,
+) -> tuple[int, dict]:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
     req_headers = {"Content-Type": "application/json"}
     if headers:
         req_headers.update(headers)
     body_bytes = json.dumps(data).encode("utf-8") if data is not None else None
-    req = urllib.request.Request(url, data=body_bytes, headers=req_headers, method=method)
+    req = urllib.request.Request(url, data=body_bytes, headers=req_headers, method=method)  # noqa: S310
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310
             raw = resp.read().decode("utf-8")
             return resp.status, json.loads(raw) if raw else {}
     except urllib.error.HTTPError as he:
@@ -96,7 +105,7 @@ def run_smoke_test_clef(
     shelf_uris = [s.path for s in shelf_samples[:shelves_n]]
     log(f"  Found {len(shelf_uris)} shelf URIs: {shelf_uris}")
 
-    # 3. Setup test endpoint (local in-container server or remote service)
+    # 3. Setup test endpoint (local in-container server on 127.0.0.1 or remote service)
     server_thread = None
     httpd = None
     if service_url:
@@ -138,8 +147,13 @@ def run_smoke_test_clef(
             pred = resp.get("prediction") or {}
             stage = resp.get("stage")
             conf = resp.get("confidence")
-            log(f"  Status {status} in {dur:.2f}s | SKU #{sku_id} | Brand={pred.get('brand')} | "
-                f"Variant={pred.get('base_variant')} | Stage={stage} (conf={conf})")
+            sku_conf = resp.get("sku_confidence")
+            brand_conf = resp.get("brand_confidence")
+            abstain_rec = resp.get("abstain_recommended")
+            log(
+                f"  Status {status} in {dur:.2f}s | SKU #{sku_id} | Brand={pred.get('brand')} | "
+                f"Variant={pred.get('base_variant')} | Stage={stage} (conf={conf}, sku_conf={sku_conf}, brand_conf={brand_conf}, abstain_rec={abstain_rec})"
+            )
             crop_results.append({
                 "index": idx,
                 "image_uri": uri,
@@ -147,7 +161,14 @@ def run_smoke_test_clef(
                 "sku_id": sku_id,
                 "prediction": pred,
                 "stage": stage,
+                "guard_mode": resp.get("guard_mode"),
                 "confidence": conf,
+                "sku_confidence": sku_conf,
+                "brand_confidence": brand_conf,
+                "conf_threshold": resp.get("conf_threshold"),
+                "abstain_recommended": abstain_rec,
+                "abstained": resp.get("abstained"),
+                "abstention_reason": resp.get("abstention_reason"),
                 "top1_cosine": resp.get("top1_cosine"),
                 "latency_s": round(dur, 3),
             })
@@ -169,8 +190,10 @@ def run_smoke_test_clef(
             sos = resp.get("hul_facing_sos", 0.0)
             fg_count = resp.get("stage2a_fast_gate_count", 0)
             vlm_count = resp.get("stage2b_vlm_count", 0)
-            log(f"  Status {status} in {dur:.2f}s | Facings: {total_facings} total ({hul_facings} HUL, SoS={sos:.2%}) | "
-                f"FastGate={fg_count} / VLM={vlm_count}")
+            log(
+                f"  Status {status} in {dur:.2f}s | Facings: {total_facings} total ({hul_facings} HUL, SoS={sos:.2%}) | "
+                f"FastGate={fg_count} / VLM={vlm_count}"
+            )
             shelf_results.append({
                 "index": idx,
                 "image_uri": uri,
@@ -178,6 +201,8 @@ def run_smoke_test_clef(
                 "total_facings": total_facings,
                 "hul_facings": hul_facings,
                 "competitor_facings": resp.get("competitor_facings", 0),
+                "abstained_facings": resp.get("abstained_facings", 0),
+                "abstain_recommended_facings": resp.get("abstain_recommended_facings", 0),
                 "hul_facing_sos": sos,
                 "hul_area_sos": resp.get("hul_area_sos", 0.0),
                 "stage2a_fast_gate_count": fg_count,
@@ -200,6 +225,7 @@ def run_smoke_test_clef(
     report = {
         "status": "PASS" if all_passed else "FAIL",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "spec_version": "v0.2",
         "pipeline": "clef_contrastive_contact_sheet",
         "approach": "clef_contrastive_metadata",
         "model": "gemini-3.5-flash-lite",
