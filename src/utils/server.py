@@ -416,6 +416,39 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parts = [unquote(p) for p in urlparse(self.path).path.strip("/").split("/") if p]
+        if parts in (
+            ["api", "predict", "health"],
+            ["api", "clef-contrastive", "health"],
+            ["api", "clef_contrastive", "health"],
+            ["api", "marketshare", "health"],
+            ["api", "exp28", "health"],
+            ["api", "v1", "predict", "health"],
+        ):
+            from utils import clef_contrastive_inference
+
+            eng = clef_contrastive_inference.get_engine()
+            return self._json({
+                "status": "healthy",
+                "spec_version": "v0.2",
+                "pipeline": "clef_contrastive_contact_sheet",
+                "approach": clef_contrastive_inference.DEFAULT_APPROACH,
+                "model": clef_contrastive_inference.DEFAULT_MODEL,
+                "tier": clef_contrastive_inference.DEFAULT_TIER,
+                "embedding_model": "gemini-embedding-2",
+                "shelf_detector": clef_contrastive_inference.DEFAULT_SHELF_DETECTOR,
+                "dataset": clef_contrastive_inference.DEFAULT_CROP_DATASET,
+                "catalog_classes": len(eng.catalog) if eng.catalog else 2659,
+                "default_conf_threshold": clef_contrastive_inference.DEFAULT_CONF_THRESHOLD,
+                "sibling_margin_guard": 0.035,
+                "layer5_pack_size_verifier": True,
+                "confidence_range": [0.02, 0.985],
+                "is_ready": eng.is_ready,
+                "routes": {
+                    "crop": "/api/predict/crop",
+                    "shelf": "/api/predict/shelf",
+                    "health": "/api/predict/health",
+                },
+            })
         if parts == ["api", "cv", "health"]:  # Vertex AI health route (does not load the models)
             runners = _cv_pipeline().runners
             return self._json({"status": "healthy", "models": {r: m.source_uri for r, m in runners.items()}})
@@ -599,12 +632,73 @@ class Handler(BaseHTTPRequestHandler):
                 return self._v2_shelf_analyze()
             except Exception as e:
                 return self._json({"error": f"{type(e).__name__}: {e}"[:500]}, 500)
+        if parts in (
+            ["api", "predict", "crop"],
+            ["api", "clef-contrastive", "crop"],
+            ["api", "clef_contrastive", "crop"],
+            ["api", "marketshare", "crop"],
+            ["api", "exp28", "crop"],
+            ["api", "v1", "predict", "crop"],
+        ):
+            return self._clef_contrastive_predict(mode="crop")
+        if parts in (
+            ["api", "predict", "shelf"],
+            ["api", "clef-contrastive", "shelf"],
+            ["api", "clef_contrastive", "shelf"],
+            ["api", "marketshare", "shelf"],
+            ["api", "exp28", "shelf"],
+            ["api", "v1", "predict", "shelf"],
+        ):
+            return self._clef_contrastive_predict(mode="shelf")
+        if parts in (
+            ["api", "predict"],
+            ["api", "clef-contrastive", "predict"],
+            ["api", "clef_contrastive", "predict"],
+            ["api", "clef-contrastive"],
+            ["api", "marketshare", "predict"],
+            ["api", "marketshare"],
+            ["api", "exp28", "predict"],
+            ["api", "v1", "predict"],
+        ):
+            return self._clef_contrastive_predict(mode="auto")
         if parts != ["api", "cv", "predict"]:
             return self._json({"error": "not found"}, 404)
         try:
             self._cv_predict()
         except Exception as e:
             self._json({"error": f"{type(e).__name__}: {e}"[:500]}, 500)
+
+    def _clef_contrastive_predict(self, mode: str = "crop") -> None:
+        """Handle online inference requests for CLEF Contrastive Contact-Sheet Cascade."""
+        from utils import clef_contrastive_inference
+
+        try:
+            content_len = int(self.headers.get("Content-Length") or 0)
+            if content_len > 25 * 1024 * 1024:
+                return self._json({"error": "Payload exceeds maximum allowed size (25 MiB)"}, 413)
+            raw_body = self.rfile.read(content_len) if content_len > 0 else b"{}"
+            payload = json.loads(raw_body.decode("utf-8") if raw_body else "{}")
+        except Exception as e:
+            return self._json({"error": f"Invalid JSON payload: {e}"}, 400)
+
+        if not isinstance(payload, dict):
+            return self._json({"error": "Payload must be a JSON object"}, 400)
+
+        target_mode = mode
+        if target_mode == "auto":
+            target_mode = str(payload.get("mode") or "crop").lower()
+
+        eng = clef_contrastive_inference.get_engine()
+        try:
+            if target_mode == "shelf":
+                res = eng.predict_shelf_payload(payload)
+            else:
+                res = eng.predict_crop_payload(payload)
+            return self._json(res)
+        except (ValueError, TypeError) as ve:
+            return self._json({"error": str(ve)}, 400)
+        except Exception as exc:
+            return self._json({"error": f"Inference error: {type(exc).__name__}: {exc}"}, 500)
 
     def _v2_shelf_analyze(self) -> None:
         """Production v0.2 shelf analysis route exercising CPU medoid grouping, CLM vector scoring, Layer-5 pack-size verification, and Level-4 Total Contract."""

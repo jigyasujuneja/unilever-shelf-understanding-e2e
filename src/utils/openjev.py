@@ -633,7 +633,7 @@ def coarse_jev_triage(
         intra_brand_margin = cos_by_id[brand_ids[0]] - cos_by_id[brand_ids[1]]
     else:
         # Single-SKU brand: use margin against the runner-up neighbor (capped < 1.0)
-        intra_brand_margin = max(SISTER_MARGIN_DEFAULT := 0.05, min(0.98, margin))
+        intra_brand_margin = max(0.05, min(0.98, margin))
 
     brand_candidates = {pid: catalog[pid] for pid in brand_ids}
     return {

@@ -230,6 +230,51 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--results", type=Path, default=runner.RESULTS_DIR)
     s.add_argument("--alpha", type=float, default=0.05)
 
+    s = sub.add_parser(
+        "predict-crop",
+        help="CLEF Contrastive crop prediction (clef_contrastive_metadata + gemini-3.5-flash-lite)",
+    )
+    s.add_argument("images", nargs="+", help="image paths, gs:// URIs, or base64 strings")
+    s.add_argument("-m", "--model", default="gemini-3.5-flash-lite", help="model name (default: gemini-3.5-flash-lite)")
+    s.add_argument("-t", "--tier", choices=TIERS, default="priority", help="Gemini PayGo tier (default: priority)")
+    s.add_argument("--allow-abstain", action="store_true", help="abstain (sku_id=null) when confidence < conf-threshold")
+    s.add_argument("--conf-threshold", type=float, default=0.78, help="unified abstention confidence threshold (default: 0.78)")
+    s.add_argument("--output", default=None, help="write JSON output to file or gs:// URI")
+    s.add_argument("--cloud-run", action="store_true", help="execute on Cloud Run job")
+    s.add_argument("--image", default=None, help="Cloud Run container image override")
+
+    s = sub.add_parser(
+        "predict-shelf",
+        help="CLEF Contrastive shelf prediction (distilled_yolo_onnx + clef_contrastive_metadata)",
+    )
+    s.add_argument("images", nargs="+", help="image paths, gs:// URIs, or base64 strings")
+    s.add_argument("-m", "--model", default="gemini-3.5-flash-lite", help="model name (default: gemini-3.5-flash-lite)")
+    s.add_argument("-t", "--tier", choices=TIERS, default="priority", help="Gemini PayGo tier (default: priority)")
+    s.add_argument("--allow-abstain", action="store_true", help="abstain (sku_id=null) when confidence < conf-threshold")
+    s.add_argument("--conf-threshold", type=float, default=0.78, help="unified abstention confidence threshold (default: 0.78)")
+    s.add_argument("--output", default=None, help="write JSON output to file or gs:// URI")
+    s.add_argument("--cloud-run", action="store_true", help="execute on Cloud Run job")
+    s.add_argument("--image", default=None, help="Cloud Run container image override")
+
+    s = sub.add_parser(
+        "smoke-test-clef",
+        aliases=["smoke-test-api", "smoke-test-exp28"],
+        help="Run 5-crop + 5-shelf CLEF Contrastive API end-to-end smoke test on Cloud Run",
+    )
+    s.add_argument("--crops", type=int, default=5, help="number of crop images to test from hul_golden (default: 5)")
+    s.add_argument("--shelves", type=int, default=5, help="number of shelf images to test from gtmerch_golden (default: 5)")
+    s.add_argument("--service-url", default=None, help="deployed Cloud Run service URL to test")
+    s.add_argument("--output", default="gs://ul-fs-s-sandbx-16-prj-shelf-images/results/clef_contrastive_smoke_test.json", help="GCS URI or path for smoke test JSON report")
+    s.add_argument("--cloud-run", action="store_true", help="execute smoke test 100%% inside Cloud Run job")
+    s.add_argument("--image", default=None, help="Cloud Run container image override")
+
+    s = sub.add_parser(
+        "deploy-clef-api",
+        aliases=["deploy-api", "deploy-exp28"],
+        help="Deploy standalone CLEF Contrastive Cloud Run API service (clef-contrastive-api)",
+    )
+    s.add_argument("--image", default=None, help="pre-built container image")
+
     a = p.parse_args(argv)
     if a.cmd in ("run", "cloud-run"):
         if not a.model:
@@ -574,6 +619,150 @@ def main(argv: list[str] | None = None) -> int:
         res["run_a"] = a.run_a
         res["run_b"] = a.run_b
         print(json.dumps(res, indent=2))
+    elif a.cmd in ("deploy-clef-api", "deploy-api", "deploy-exp28"):
+        from utils import cloud
+
+        primary = cloud.deploy_clef_contrastive_api(image=a.image)
+        print(f"Primary deployed endpoint: {primary}")
+    elif a.cmd == "predict-crop":
+        if a.cloud_run:
+            from utils.cloud import run_cli_on_cloud
+
+            cli_args = [
+                "predict-crop",
+                *a.images,
+                "-m", a.model,
+                "-t", a.tier,
+                "--conf-threshold", str(a.conf_threshold),
+            ]
+            if a.allow_abstain:
+                cli_args.append("--allow-abstain")
+            if a.output:
+                cli_args.extend(["--output", a.output])
+            run_cli_on_cloud(
+                cli_args,
+                image=a.image,
+                tasks=1,
+                cpu=4,
+                memory_gib=8,
+                job_name="shelf-bench-predict-crop",
+                log=print,
+            )
+        else:
+            import json
+
+            from utils import clef_contrastive_inference
+            from utils.smoke_test import _write_output_payload
+
+            eng = clef_contrastive_inference.get_engine()
+            payload = (
+                {
+                    "images": a.images,
+                    "model": a.model,
+                    "tier": a.tier,
+                    "allow_abstain": a.allow_abstain,
+                    "conf_threshold": a.conf_threshold,
+                }
+                if len(a.images) > 1
+                else {
+                    "image_uri": a.images[0],
+                    "model": a.model,
+                    "tier": a.tier,
+                    "allow_abstain": a.allow_abstain,
+                    "conf_threshold": a.conf_threshold,
+                }
+            )
+            res = eng.predict_crop_payload(payload)
+            out_str = json.dumps(res, indent=2)
+            print(out_str)
+            if a.output:
+                _write_output_payload(out_str, a.output)
+    elif a.cmd == "predict-shelf":
+        if a.cloud_run:
+            from utils.cloud import run_cli_on_cloud
+
+            cli_args = [
+                "predict-shelf",
+                *a.images,
+                "-m", a.model,
+                "-t", a.tier,
+                "--conf-threshold", str(a.conf_threshold),
+            ]
+            if a.allow_abstain:
+                cli_args.append("--allow-abstain")
+            if a.output:
+                cli_args.extend(["--output", a.output])
+            run_cli_on_cloud(
+                cli_args,
+                image=a.image,
+                tasks=1,
+                cpu=4,
+                memory_gib=8,
+                job_name="shelf-bench-predict-shelf",
+                log=print,
+            )
+        else:
+            import json
+
+            from utils import clef_contrastive_inference
+            from utils.smoke_test import _write_output_payload
+
+            eng = clef_contrastive_inference.get_engine()
+            payload = (
+                {
+                    "images": a.images,
+                    "model": a.model,
+                    "tier": a.tier,
+                    "allow_abstain": a.allow_abstain,
+                    "conf_threshold": a.conf_threshold,
+                }
+                if len(a.images) > 1
+                else {
+                    "image_uri": a.images[0],
+                    "model": a.model,
+                    "tier": a.tier,
+                    "allow_abstain": a.allow_abstain,
+                    "conf_threshold": a.conf_threshold,
+                }
+            )
+            res = eng.predict_shelf_payload(payload)
+            out_str = json.dumps(res, indent=2)
+            print(out_str)
+            if a.output:
+                _write_output_payload(out_str, a.output)
+    elif a.cmd in ("smoke-test-clef", "smoke-test-api", "smoke-test-exp28"):
+        if a.cloud_run:
+            from utils.cloud import run_cli_on_cloud
+
+            cli_args = [
+                "smoke-test-clef",
+                "--crops", str(a.crops),
+                "--shelves", str(a.shelves),
+                "--output", str(a.output),
+            ]
+            if a.service_url:
+                cli_args.extend(["--service-url", a.service_url])
+            run_cli_on_cloud(
+                cli_args,
+                image=a.image,
+                tasks=1,
+                cpu=4,
+                memory_gib=8,
+                job_name="shelf-bench-clef-smoke",
+                log=print,
+            )
+        else:
+            import json
+
+            from utils.smoke_test import run_smoke_test_clef
+
+            report = run_smoke_test_clef(
+                crops_n=a.crops,
+                shelves_n=a.shelves,
+                service_url=a.service_url,
+                output_uri=a.output,
+            )
+            print(json.dumps(report, indent=2))
     return 0
 
 

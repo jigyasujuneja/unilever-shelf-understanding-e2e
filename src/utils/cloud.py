@@ -250,31 +250,41 @@ def run_on_cloud(
     return 0
 
 
+LAST_EXECUTION_NAME: str | None = None
+
+
 def run_cli_on_cloud(
     cli_args: list[str],
     image: str | None = None,
     tasks: int = 1,
     cpu: int = 4,
     memory_gib: int = 8,
+    job_name: str | None = None,
     log=print,
 ) -> str:
     """Execute any ``shelf-bench`` subcommand on Cloud Run Jobs in ``us-central1`` with zero local execution."""
+    global LAST_EXECUTION_NAME
     cfg = load_config()
     gcp = cfg["gcp"]
     project, region = gcp["project"], gcp["region"]
     s = _session()
     image = image or build_image(s, project, region, log)
+    log(f"Container image: {image}")
     job_cfg = dict(cfg)
     cr = dict(job_cfg.get("cloud_run", {}))
     cr["cpu"] = cpu
     cr["memory_gib"] = memory_gib
     cr["parallelism"] = tasks
+    if job_name:
+        cr["job"] = job_name
     job_cfg["cloud_run"] = cr
     job_url = deploy_job(s, project, region, image, cli_args, tasks, job_cfg)
     log(f"Executing `shelf-bench {' '.join(cli_args)}` on Cloud Run job {job_url.rsplit('/', 1)[-1]} ({region}) ...")
     op = _ok(s.post(f"{job_url}:run", json={}))
+    exec_id = op.get("metadata", {}).get("name", "").rsplit("/", 1)[-1]
+    LAST_EXECUTION_NAME = exec_id
     log(f"  execution: https://console.cloud.google.com/run/jobs/executions/details/{region}/"
-        f"{op.get('metadata', {}).get('name', '').rsplit('/', 1)[-1]}?project={project}")
+        f"{exec_id}?project={project}")
     _wait_op(s, op["name"], log=log, every=15)
     return image
 
@@ -334,6 +344,7 @@ def deploy_ui(image: str | None = None, log=print) -> str:
         log(f"Pushed {pushed} local run(s) + experiments_registry.json + qc_audit_report.json to {gcp['results']}")
     s = _session()
     image = image or build_image(s, project, region, log)
+    log(f"Container image: {image}")
     base = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services"
     body = {
         "launchStage": "BETA",
@@ -371,6 +382,42 @@ def deploy_ui(image: str | None = None, log=print) -> str:
         if svc_name == primary_name or not primary_uri:
             primary_uri = uri
     return primary_uri
+
+
+def deploy_clef_contrastive_api(image: str | None = None, log=print) -> str:
+    """Deploy the standalone CLEF Contrastive Cloud Run inference service (``clef-contrastive-api``)
+    without touching the UI services (``shelf-ui``, ``perfect-store-control-plane``)."""
+    cfg = load_config()
+    gcp = cfg["gcp"]
+    project, region = gcp["project"], gcp["region"]
+    svc_name = "clef-contrastive-api"
+    s = _session()
+    image = image or build_image(s, project, region, log)
+    log(f"Container image: {image}")
+    base = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services"
+    body = {
+        "launchStage": "BETA",
+        "iapEnabled": False,
+        "template": {
+            "scaling": {"minInstanceCount": 1, "maxInstanceCount": 10},
+            "containers": [{
+                "image": image,
+                "args": ["serve", "--host", "0.0.0.0", "--port", "8080"],
+                "ports": [{"containerPort": 8080}],
+                "resources": {"limits": {"cpu": "4", "memory": "8Gi"}},
+            }],
+        },
+    }
+    exists = s.get(f"{base}/{svc_name}", timeout=30).status_code == 200
+    op = _ok(s.patch(f"{base}/{svc_name}?updateMask=template,iapEnabled,launchStage", json=body, timeout=60) if exists
+             else s.post(f"{base}?serviceId={svc_name}", json=body, timeout=60))
+    uri = _wait_op(s, op["name"]).get("response", {}).get("uri", "")
+    log(f"Deployed {svc_name}: {uri} (Project IAM via gcloud token)")
+    return uri
+
+
+deploy_marketshare_api = deploy_clef_contrastive_api
+deploy_exp28_endpoints = deploy_clef_contrastive_api
 
 
 def _wait_vertex_op(s, region: str, name: str, log=print, every: int = 15) -> dict:
