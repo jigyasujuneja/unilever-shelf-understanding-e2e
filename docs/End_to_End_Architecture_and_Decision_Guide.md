@@ -172,6 +172,16 @@ If HTTP 5xx errors exceed 0.5%, P95 latency exceeds 15.0s, or `RETRY_PENDING` ca
 | **Stage 3: 50/50 Stratified A/B** | 50% of store clusters (~250,000 shelves/day) + 100% post-18:00 IST uploads routed to `v0.2` for 30 days | Full P2P monthly scoring and Share-of-Shelf continuity splice across control and treatment arms. | Treatment P2P Basepack W1 >= 70.0% vs. Control ~34.82%; AI inference unit cost <= $0.00160 (₹0.15) / shelf. |
 | **Stage 4: 100% Production Cutover** | 100% of 500,000 shelves/day served by Cloud Run CPU workers (`v0.2`) | Drain `v0.1` subscription, hold warm standby during burn-in, then retire all 14 GPU endpoints and Document AI. | Close security exception `IST0001092` in ServiceNow and decommission existing GPU endpoints. |
 
+### **3. Production Confidence Contract & Client Cutover Checklist (What We Have vs. What Is Needed)**
+
+By default, every prediction payload emits `confidence` (per-field), `joint_confidence` (`[0.02, 0.985]`, `0.0%` saturation at `1.0`), `category_threshold` ($\tau_{\text{cat}} \in [0.74, 0.82]$), `variant_abstain_recommended` (`True` when `confidence["base_variant"] < category_threshold`), and `abstain_recommended` (`True` when Stage-B returns `choice == 0` or `joint_confidence < 0.38`). Downstream services keep verified `brand`, `category`, and `packaging_type` for Share-of-Shelf and Bay Purity while holding back variant-level cross-sell whenever `variant_abstain_recommended = True` (or automatically nulling fields when `use_category_thresholds=True, abstain_per_field=True`).
+
+| **Cutover Area** | **What We Already Have & Verified (`v0.2`)** | **Client Artifacts Needed for 100% Live Cutover & Full Legacy Replay** |
+| --- | --- | --- |
+| **Market Share Legacy & E2E Comparison** | **100% Complete:** Live weight-to-weight comparison against legacy YOLO `.pt` + 13 Keras `.h5` category classifiers (`44.5%` / `42.32%` vs. **`83.6%–84.0%`**) on identical store-disjoint splits. | **None — 100% self-contained.** |
+| **Merchandising Pillar 1 & 3 (Bay, In-Bay SKU, & OOS Void)** | **Live Weight-to-Weight Complete:** Legacy 2-class `.onnx` detector (`51.1%` vs. **`98.8%`** Bay F2) and 209-class `.h5` classifier (`53.2%` vs. **`98.2%`** Brand/Cat/Pack, **`64.3%`** 5-Attr) plus outer `gt-merchandising-endpoint-prod.json` Logic App contract. | **1.** Inside-container Python `score.py` for exact contractual `AWP_Sim_Score`, `Envision_Sim_Score`, and rupee `Earning` math.<br>**2.** Official master table mapping all 63 `AWP_Code` × `Outlet_PLG` × `Tier` rules.<br>**3.** `Outlet_PLG × RSCode` distributor assortment table for cross-sell filtering. |
+| **Merchandising Pillar 2A & 2B (Promos & Shelf-Rail Talkers)** | **Metric Benchmark Complete:** Verified **`96.2%`** Promo 3-Attr (`92.9%` `"50% Free"`, `94.7%` `"Price Off"`) vs. `75.0%` legacy 240-class ViT, and **`90.0%`** Talker F2 (`98.2%` mAP@50) vs. `64.2%` legacy detector. | **4.** Legacy 240-class Promo ViT weights + Legacy Talker YOLO `.pt`/`.onnx` weights (only if live per-image legacy drawer overlays are desired) + `~200–300` MRP text labels if rail price-value OCR auditing is required. |
+
 ## **Appendix & Stakeholder Sign-Off**
 
 ### **1. Verification Suite & Stakeholder Approvals**

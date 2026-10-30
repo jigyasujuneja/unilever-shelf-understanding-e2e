@@ -146,6 +146,37 @@ In standard benchmark scoring (`shelf-bench`), the evaluator forces the model to
 | **Pillar 2 (Promotions & Talkers: `94.1%–95.6%` Key Offers vs. `40.3%` 9-Class Raw String; `90.0%` Talker F2)** | String-label fragmentation across 9 raw `promo_type` strings (`"Rs 10 Off"`, `"_Rs_10"`, `"10/- Off"`) and `9.5%` apparent talker false positives on unannotated shelf rails. | Human ground truth uses multiple spelling variants for identical price-off promotions and leaves ~23% of real bottom-row price tags unlabelled. | **Already Live in `v0.2`:** `promo_ocr_zoom_verifier.py` maps promo strings to canonical campaign families (`94.1%` `"50% Free"`, `95.6%` `"Price Off"`), and the talker evaluator scores precision/recall inside annotated shelf bands (`90.02%` F2, `98.2%` mAP@50). |
 | **Pillar 3 (Bay Display & Clutter Filtering: `77.3%` Full-Shelf Box F2, `61.0%` Clutter Pruned)** | Borderline hanging sachets clipped near bay frame edges (`IoA` near `0.45–0.50`) vs. printed 2D product illustrations on cardboard side wings. | Kirana merchants frequently clip sachet strips onto the outer metal rim of a bay right next to printed 2D pack graphics on the bay's cardboard header. | **Already Live in `v0.2`:** Stage 3 expands `Class 0` bay bounds by `±8%` width, enforces local Laplacian edge variance (`>= 4.2`) to reject flat printed wing artwork, and bypasses `Class 0` cropping automatically on frameless `HAN` strips. |
 
+### **5. Production Confidence Contract & Client Cutover Readiness (What We Have vs. What Is Needed)**
+
+#### **A. Default Confidence & Abstention Contract (Emitted on 100% of Predictions)**
+Every prediction returned by the pipeline (`hybrid_classify`, `clm_standalone_classify`, and `jev_laya_hybrid`) emits **calibrated per-attribute confidences and abstention flags by default**—while still returning the Top-1 label so forced-choice benchmarks and Share-of-Shelf counts remain 100% complete:
+
+| **Output Field (Emitted by Default)** | **Condition / Range** | **Production Meaning & Downstream Action (`DYNAMIC_TASK_API` / Analytics)** |
+| --- | --- | --- |
+| **`confidence["brand" \| "category" \| "packaging_type"]`** | `[0.02, 0.985]` (`0.0%` saturation at `1.0`) | Used for **Share of Shelf (`SoS`)**, **Brand-Block Purity**, and **Bay (`AWP_Code`) Presence** whenever `>= category_threshold`. |
+| **`confidence["base_variant" \| "product"]`** | `[0.02, 0.985]` (discounted by sibling margin $\Delta_{\text{sib}}$) | Reflects fine-print variant readability. Discounted when two sister variants of the same brand are nearly tied ($\Delta_{\text{sib}} < 0.025$). |
+| **`category_threshold`** | `0.74–0.75` (`Foods`, `HHC`), `0.78` (`PW`, `Hair_Care`, `Laundry`), `0.80` (`Skin`, `Beverages`, `Oral_Care`), `0.82` (`DMT`) | Category-specific operating cutoff calibrated to pack geometry and typography clarity. |
+| **`variant_abstain_recommended`** | `True` when `confidence["base_variant"] < category_threshold` | **Keep Brand + Category + Pack** for Share of Shelf and Bay Purity, but **suppress variant-level cross-sell or strict basepack failure** (`99.3%` Brand precision, `89.0%` Variant precision). |
+| **`abstain_recommended`** | `True` when Stage-B rejects (`choice == 0`), `joint_confidence < 0.38`, or `energy < 0.52` | **Full crop abstention (`UNVERIFIED_LOW_CONFIDENCE`):** Crop is severely blurred, glared, or out-of-catalog; exclude from SKU compliance and flag for store re-shoot if bay coverage is insufficient. |
+
+#### **B. Like-for-Like Legacy Model Comparison Readiness Across All 3 Pillars**
+
+| **Merchandising Pillar / Task** | **Legacy Weights Available in Repo / GCS?** | **Current Comparison Mode** | **Client Item Needed for Live Image-by-Image Legacy Replay** |
+| --- | --- | --- | --- |
+| **Pillar 1A & Pillar 3: Branded Bay (`Class 0`), In-Bay Box (`Class 1`), & OOS Void** | **YES** (`gs://sos-datasets/legacy-models/gtmerch/gtmerch_asset_sku_intermediary_17092026.onnx`) | **100% Live Weight-to-Weight Execution** on identical `gtmerch_golden` & `gt_hul_sessions` store photos (`51.1%` Legacy vs. **`98.8%`** Proposed Bay F2; `86.8%` vs. **`95.2%`** pre-cropped Box F2). | **None — Complete.** |
+| **Pillar 1B: In-Bay GT Basepack / SKU Classification** | **YES** (`17Sep26-moc10-model-gtmerch-pr-0050-0.9480.h5` + 9-model `.h5` suite) | **100% Live Weight-to-Weight Execution** on identical `gtmerch_golden` bays (`53.2%` Legacy E2E / `61.4%` Classifier vs. **`98.2%`** Brand/Cat/Pack & **`64.3%`** Strict 5-Attr SKU). | **None for classifier weights** (see Table C below for the outer `AWP_Sim_Score` payout script). |
+| **Pillar 2A: Promo Pack Classification (`hul_promos`)** | **NO** (Historical evaluation table in `docs/Customer_Inputs.md`) | **Metric-to-Metric Benchmark Comparison** against Unilever's 240-class ViT baseline (`75.0%` 3-Attr, `23.5%` `"50% Free"` vs. **`96.2%`** 3-Attr, **`92.9%`** `"50% Free"`). | **Legacy 240-class Promo ViT checkpoint + class index JSON** (if live per-crop legacy drawer replay is desired). |
+| **Pillar 2B: Shelf-Rail Talker & Price-Tag Detection (`hul_talkers_golden`)** | **NO** (Historical evaluation metric in `docs/Customer_Inputs.md`) | **Metric-to-Metric Benchmark Comparison** against Unilever's Talker detector (`64.2%` mAP@50 / `49.2%` F2 vs. **`98.2%`** mAP@50 / **`90.0%`** Talker F2). | **Legacy Talker YOLO `.pt` / `.onnx` checkpoint** (if live legacy bounding-box overlay is desired). |
+
+#### **C. End-to-End Production Cutover Checklist (What We Have vs. 4 Client Artifacts Needed)**
+
+| **Production Cutover Component** | **What Is Already Built & Verified in Repo (`v0.2`)** | **What Is Still Needed from Client / Unilever Team for 100% Live Cutover** |
+| --- | --- | --- |
+| **1. Contractual `AWP_Sim_Score`, `Envision_Sim_Score`, & Rupee `Earning` Formula** | We have the outer Azure Logic App spec (`gt-merchandising-endpoint-prod.json`) and our spatial-graph planogram scorer (`bay_planogram_verifier.py`). | **Inside-container Python scoring script (`score.py`)** from `gt-merchandising-endpoint-prod.eastus2.inference.ml.azure.com/score` so our rupee `Earning` slab calculation matches legacy contractual payouts 1-for-1. |
+| **2. Authoritative 63-`AWP_Code` × `Outlet_PLG` × `Tier` Planogram Rulebook** | Reconstructed 63 `AWP_Code` definitions (`data/awp_code_templates`) from dataset labels and class maps. | **Official master rule table (CSV/JSON)** mapping every `(AWP_Code, Outlet_PLG, Channel, Tier, Asset_Type)` to required basepack facings, shelf-row order, and minimum SoS thresholds. |
+| **3. Distributor (`RSCode`) Cross-Sell Assortment Eligibility Table** | Pipeline detects missing mandatory sister basepacks and gates recommendations using `variant_abstain_recommended`. | **`Outlet_PLG × RSCode` active assortment lookup table** so missing-SKU alerts only recommend basepacks actively stocked by that store's distributor. |
+| **4. Shelf-Rail Price-Tag MRP Ground Truth (Optional — Pillar 2B)** | 3-class detector (`promo_talker`, `printed_price_tag`, `handwritten_price_tag`) verified at **`90.0%` F2** on `hul_talkers_golden`. | If Unilever requires **written rupee price vs. official MRP verification**, provide `~200–300` price-tag crops annotated with ground-truth MRP/price strings. |
+
 ## **Appendix**
 
 ### **Key Parameters**

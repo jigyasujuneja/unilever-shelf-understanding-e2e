@@ -770,6 +770,7 @@ class HybridClassify(ClmStandaloneRetrieval):
             abstained_by_threshold = bool(
                 stage_b_abstained or (eff_min_conf > 0.0 and joint_conf < eff_min_conf)
             )
+        variant_abstain_rec = bool(abstain_rec or cal_conf.get("base_variant", joint_conf) < cat_tau)
         ctx.trace.step(
             "Hybrid decision",
             f"answered by Stage {answered_by}"
@@ -786,6 +787,7 @@ class HybridClassify(ClmStandaloneRetrieval):
                 "joint_confidence": joint_conf,
                 "category_threshold": cat_tau,
                 "abstain_recommended": abstain_rec,
+                "variant_abstain_recommended": variant_abstain_rec,
                 "abstained": abstained_by_threshold,
                 "abstained_fields": abstained_fields,
                 "raw_vote_share": {f: a["votes"][f]["conf"] for f in active},
@@ -808,7 +810,9 @@ class HybridClassify(ClmStandaloneRetrieval):
             out["sku_id"] = b_info["sku_id"]
         out["confidence"] = cal_conf
         out["joint_confidence"] = joint_conf
+        out["category_threshold"] = cat_tau
         out["abstain_recommended"] = abstain_rec
+        out["variant_abstain_recommended"] = variant_abstain_rec
         return out if any(out.get(f) for f in active) else None
 
     # ---- run summary -------------------------------------------------------------------------
