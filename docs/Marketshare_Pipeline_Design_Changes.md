@@ -81,6 +81,9 @@ For the remaining 32% of groups (~3.5 lookalike ties per shelf), Stage 2B sends 
 
 ### **Journey of a Store Image Across the 3 Core Market Share Tasks**
 
+![Visual Journey of an Actual Store Image Through the Market Share Pipeline](diagrams/ms_real_image_journey.png)
+*Figure 3: Step-by-step visual journey of an actual store shelf photo (`79.ckcap8618568263940695477.jpg`, 98 detected SKUs) and real HUL crops through Stage 0 Dual-Buffer Photometry, Stage 1 960px Detection & Row Twin Grouping, Stage 2A Vector Fast-Path (`68%` auto-accepted), Stage 2B Contact-Sheet Tie-Break (`32%` ties), and Stage 3 Unified $\tau = 0.78$ Two-Level Abstention Gate.*
+
 The table below traces how a store photo or crop moves through the four stages across the three core Market Share tasks (`MS 1: Full-Shelf SoS`, `MS 2: Single-Crop 5-Attr Match`, and `MS 3: Lookalike Sister-Variant Zoom`):
 
 | **Market Share Task** | **Stage 1: Photometry & Optical Gate** | **Stage 2 (Spatial): Tiled / ONNX Detection** | **Stage 2A (Fast Path): Vector Gate (`68%–80%` Skipped)** | **Stage 2B (Hard Path) & Calibrated P2P Output** |

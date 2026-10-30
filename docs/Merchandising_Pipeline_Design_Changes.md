@@ -37,7 +37,7 @@ All figures below come from **test-split runs** on store-disjoint splits built i
 | **3. Bay Display and Clutter Filtering** | 100 `gtmerch_golden` test shelves (box-only) & 9,194 bay photos | 51.1% Bay F2; 86.8% Class 1 F2 on 200 pre-cropped bays; 61.0% counter clutter | **98.8% Bay F2**; **prunes 61.0% of out-of-bay counter clutter** before SKU lookup; **77.3% bay-scoped F2 in 3.7 s** for fast box-only bay checks (filters printed wing and header art). |
 
 
-*Figure 1: Five-stage Merchandising pipeline. Stage 1 prepares two copies of the image, Stage 2 finds bays, packs, and talkers, Stage 3 removes out-of-bay counter clutter, Stage 4 names each product and promo claim, and Stage 5 checks Share of Shelf, row layout, and OOS gaps.*
+*Figure 1: Three-lane Merchandising pipeline architecture. Lane 1 prepares dual photometric buffers and runs 960px Bay/Pack + 3-Class Talker detection, Lane 2 applies the Stage 3 Bay Boundary Gate (`IoA >= 0.50`, `-61%` clutter pruned) and Stage 4 Hybrid SKU/Promo Recognition, and Lane 3 delivers 4 Ordered Key Outcomes across the 3 Merchandising Pillars (`Outcome 1: Pillar 3 Bay Gate`, `Outcome 2: Pillar 1A/1B In-Bay SoS & OOS`, `Outcome 3: Pillar 2A Promo Pack OCR`, and `Outcome 4: Pillar 2B 3-Class Shelf Talkers`).*
 
 ## **How the Pipeline Works**
 
@@ -92,6 +92,9 @@ Stage 1 therefore builds two aligned copies of each photo in memory (`12 ms` CPU
 *Figure 2: In a Kirana store photo, Stage 3 keeps products resting on shelf planks inside the Unilever display bay (39.0%) and ignores surrounding counter products and printed header art (61.0%). Stage 5 then checks Share of Shelf, brand blocks, and OOS gaps.*
 
 ### **Journey of a Store Image Across the 5 Merchandising Tasks (3 Pillars)**
+
+![Visual Journey of an Actual Store Image Across the 3 Merchandising Pillars](diagrams/merch_real_image_journey.png)
+*Figure 3: Step-by-step visual journey of actual store shelf photos, in-bay HUL facings, Horlicks/Red Label promo packs, and shelf-rail price tags across Pillar 3 (`Bay Boundary Gate & -61% Clutter Filter`), Pillar 1A (`In-Bay SKU & Brand SoS`), Pillar 1B (`Row Planogram & OOS Voids`), Pillar 2A (`Promo Pack Header/Footer OCR`), and Pillar 2B (`3-Class Talkers & Payout JSON`).*
 
 To make each pillar easy to trace end to end, the table below follows a concrete store image through all five simplified merchandising tasks (`Pillar 1A`, `1B`, `2A`, `2B`, and `3`):
 
