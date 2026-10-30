@@ -148,15 +148,15 @@ In standard benchmark scoring (`shelf-bench`), the evaluator forces the model to
 
 ### **5. Production Confidence Contract & Client Cutover Readiness (What We Have vs. What Is Needed)**
 
-#### **A. Default Confidence & Abstention Contract (Emitted on 100% of Predictions)**
-Every prediction returned by the pipeline (`hybrid_classify`, `clm_standalone_classify`, and `jev_laya_hybrid`) emits **calibrated per-attribute confidences and abstention flags by default**—while still returning the Top-1 label so forced-choice benchmarks and Share-of-Shelf counts remain 100% complete:
+#### **A. Default Confidence & Abstention Contract (Unified $\tau = 0.78$ — Emitted on 100% of Predictions)**
+Because Stage-A cosine similarity sits in a uniform `0.922–0.941` band across all 10 business categories and remaining errors are driven by **3D container geometry** (`Jar` / `Bar` curvature) and **same-brand sibling margin ($\Delta_{\text{sib}}$)** rather than category, our pipeline uses a **single unified threshold ($\tau = 0.78$, `use_category_thresholds = False` by default)**—which outperforms separate per-category thresholds (`88.0%` vs. `87.8%` Variant precision) without maintaining 10–13 separate category cutoffs. Every prediction emits these calibrated fields by default while still returning the Top-1 label:
 
 | **Output Field (Emitted by Default)** | **Condition / Range** | **Production Meaning & Downstream Action (`DYNAMIC_TASK_API` / Analytics)** |
 | --- | --- | --- |
-| **`confidence["brand" \| "category" \| "packaging_type"]`** | `[0.02, 0.985]` (`0.0%` saturation at `1.0`) | Used for **Share of Shelf (`SoS`)**, **Brand-Block Purity**, and **Bay (`AWP_Code`) Presence** whenever `>= category_threshold`. |
+| **`confidence["brand" \| "category" \| "packaging_type"]`** | `[0.02, 0.985]` (`0.0%` saturation at `1.0`) | Used for **Share of Shelf (`SoS`)**, **Brand-Block Purity**, and **Bay (`AWP_Code`) Presence** whenever `>= 0.78`. |
 | **`confidence["base_variant" \| "product"]`** | `[0.02, 0.985]` (discounted by sibling margin $\Delta_{\text{sib}}$) | Reflects fine-print variant readability. Discounted when two sister variants of the same brand are nearly tied ($\Delta_{\text{sib}} < 0.025$). |
-| **`category_threshold`** | `0.74–0.75` (`Foods`, `HHC`), `0.78` (`PW`, `Hair_Care`, `Laundry`), `0.80` (`Skin`, `Beverages`, `Oral_Care`), `0.82` (`DMT`) | Category-specific operating cutoff calibrated to pack geometry and typography clarity. |
-| **`variant_abstain_recommended`** | `True` when `confidence["base_variant"] < category_threshold` | **Keep Brand + Category + Pack** for Share of Shelf and Bay Purity, but **suppress variant-level cross-sell or strict basepack failure** (`99.3%` Brand precision, `89.0%` Variant precision). |
+| **`category_threshold`** | **`0.78` (Unified Global Default)** (`use_category_thresholds = False`) | Single self-calibrating cutoff across all categories (optional per-category override `0.74–0.82` available via config, proven unnecessary by ablation). |
+| **`variant_abstain_recommended`** | `True` when `confidence["base_variant"] < 0.78` | **Keep Brand + Category + Pack** for Share of Shelf and Bay Purity (`98.8%–99.3%` Brand precision), but **suppress variant-level cross-sell or strict basepack failure** (`88.0%–90.7%` Variant precision). |
 | **`abstain_recommended`** | `True` when Stage-B rejects (`choice == 0`), `joint_confidence < 0.38`, or `energy < 0.52` | **Full crop abstention (`UNVERIFIED_LOW_CONFIDENCE`):** Crop is severely blurred, glared, or out-of-catalog; exclude from SKU compliance and flag for store re-shoot if bay coverage is insufficient. |
 
 #### **B. Like-for-Like Legacy Model Comparison Readiness Across All 3 Pillars**

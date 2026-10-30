@@ -735,9 +735,10 @@ class HybridClassify(ClmStandaloneRetrieval):
             fields=active,
         )
         pred_cat = str(merged.get("category") or "")
-        cat_tau = CATEGORY_CONFIDENCE_THRESHOLDS.get(pred_cat, 0.78)
+        use_cat_tau = bool(getattr(self, "use_category_thresholds", False))
+        cat_tau = CATEGORY_CONFIDENCE_THRESHOLDS.get(pred_cat, 0.78) if use_cat_tau else 0.78
         eff_min_conf = float(getattr(self, "min_confidence", 0.0) or 0.0)
-        if bool(getattr(self, "use_category_thresholds", False)):
+        if use_cat_tau:
             eff_min_conf = max(eff_min_conf, cat_tau)
         env_min = os.environ.get("SHELF_BENCH_MIN_CONFIDENCE")
         if env_min:
