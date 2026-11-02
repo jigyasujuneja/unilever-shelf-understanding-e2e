@@ -108,6 +108,11 @@ This skill codifies the narrative, visual, and editorial principles required to 
   * **`Why It Matters & Quantitative Impact`**
   * **`Readiness Status`**
 
+### P13. Story-Driven Appendix Slides (Answer Questions Organically Without Defensive Framing)
+* Never title an appendix slide `"FAQ"`, `"Objections"`, or `"Addressing Pushback"`. Instead, build **story-driven Appendix slides** that naturally answer every technical, methodological, and operational question through a chronological narrative:
+  1. **Appendix A — Operational Story ("A Day in the Life of a Store Photo in Production"):** Follow 4 chronological moments (`9:00 AM Promo Launch` → `10:30 AM 80x Upload Rush` → `10:30:02 AM Sister-Size 2x Zoom Tie-Break` → `10:30:03 AM Blurry Kirana Shelf Payout Guard`) to organically explain why reference cards beat classifier retraining on long-tail SKUs (`<5` training images), how latency (`2.69s`) and cost (`$0.0013/photo`) stay bounded (`80.9%` Zero-LLM Vector-Only floor), why locked `2x2` reference sheets prevent VLM hallucination, and how Two-Level Scoring (`0.78` gate) protects store payouts.
+  2. **Appendix B — Validation & Sample-Size Story ("Behind the Numbers: How Every Sample Size & Ground-Truth Audit Was Verified"):** Trace the exact sample-size funnel (`60,305` store-separated crops → `2,137` raw `'Others'` folder crops → `1,544` agreed rival packs + `n = 593` discordant crops manually audited → `18 [6.4%]` true recoveries in the initial single-view POC baseline growing to `153 [25.8%]` in full v0.2) alongside the controlled step-by-step ablation ladder (`42.3%` `224x224` → `51.8%` `512x512` retrained classifier → `68.4%` single-view vector → `80.9%` multi-angle vector → `84.0%` full hybrid v0.2).
+
 ---
 
 ## 2. Pre-Delivery Visual & Editorial Audit Checklist
