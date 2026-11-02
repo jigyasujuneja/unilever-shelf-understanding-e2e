@@ -1,4 +1,4 @@
-# Unilever Perfect Store: CLEF Contrastive Contact-Sheet Cascade (`SPEC v0.2`) — Partner Quick-Start Guide
+# Unilever Perfect Store: CLEF Contrastive Contact-Sheet Cascade (`SPEC v0.2`) — API Quick-Start Guide
 
 Welcome to the **CLEF Contrastive Contact-Sheet Cascade API (`SPEC v0.2`)**. This guide provides copy-pasteable examples in `curl` and Python to identify products in **individual crop images** or detect and recognize all products in **full retail shelf photos**.
 
@@ -17,7 +17,7 @@ Welcome to the **CLEF Contrastive Contact-Sheet Cascade API (`SPEC v0.2`)**. Thi
   * **Legacy `"Others"` Backward Compatibility (`legacy_label`, `legacy_brand`, `catalog_scope`)**: Every response reports both the exact 2,659-SKU identity (covering `874` named competitor brands) and `"legacy_label": "Others"` whenever `"is_hul": false` or abstained (**`98.62%` L1 ownership accuracy**).
   * **Layer-5 `pack_size` Verifier**: Deterministically verifies extracted net-weight text against same-brand sister SKUs.
   * **Unified Abstention Threshold (`0.78`)**: Every response reports `abstain_recommended`, `abstained`, `abstention_reason`, and `conf_threshold` (default `0.78`). Pass `"allow_abstain": true` to emit `sku_id: null` when confidence falls below `conf_threshold`.
-  * **Deep-Dive & 10,000-Crop Benchmark Readout**: See [`docs/Algorithm_Deep_Dive_10k_Benchmark_and_Partner_FAQ.md`](Algorithm_Deep_Dive_10k_Benchmark_and_Partner_FAQ.md) for the complete mathematical formulation, `N=10,000` Cloud Run telemetry, and Partner Technical FAQ.
+  * **Deep-Dive & 10,000-Crop Benchmark Readout**: See [`docs/Algorithm_Deep_Dive_10k_Benchmark_and_Technical_FAQ.md`](Algorithm_Deep_Dive_10k_Benchmark_and_Technical_FAQ.md) for the complete mathematical formulation, `N=10,000` Cloud Run telemetry, and Technical FAQ.
 
 ### Service Endpoint
 

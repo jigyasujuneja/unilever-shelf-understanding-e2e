@@ -2385,7 +2385,7 @@ function renderHowItWorksTab() {
         </details>
         <details open style="margin-top:10px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:12px 14px;">
           <summary style="cursor:pointer;font-weight:700;color:#0f172a;">
-            C. Production Endpoint Contract (<code>SPEC v0.2</code>), 10,000-Crop Cloud Benchmark &amp; Partner Audit Resolution
+            C. Production Endpoint Contract (<code>SPEC v0.2</code>), 10,000-Crop Cloud Benchmark &amp; Calibration Verification
           </summary>
           <div style="margin-top:8px;overflow-x:auto;">
             <table class="cio-table" style="font-size:12px;">

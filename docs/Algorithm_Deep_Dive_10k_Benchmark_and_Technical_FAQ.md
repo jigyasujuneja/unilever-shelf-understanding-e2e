@@ -1,8 +1,8 @@
-# Unilever Perfect Store (`SPEC v0.2`): Algorithm Deep-Dive, 10,000-Crop Cloud Benchmark Analysis & Partner Technical FAQ
+# Unilever Perfect Store (`SPEC v0.2`): Algorithm Deep-Dive, 10,000-Crop Cloud Benchmark Analysis & Technical FAQ
 
 **Project:** `ul-fs-s-sandbx-16-prj` (`us-central1`)  
 **Production Cloud Run API:** `https://clef-contrastive-api-jbn2qgbina-uc.a.run.app`  
-**Control Plane & Dashboards:** `https://shelf-bench-ui-jbn2qgbina-uc.a.run.app` (`/engineering` & `/exec`)  
+**Control Plane & Dashboards:** `https://shelf-ui-jbn2qgbina-uc.a.run.app` (`/engineering` & `/exec`)  
 **Canonical Data & Results Bucket:** `gs://ul-fs-s-sandbx-16-prj-shelf-images`  
 **Specification Version:** `SPEC v0.2`
 
@@ -10,18 +10,18 @@
 
 ## Executive Summary
 
-This document provides the engineering specification, empirical **10,000-crop Cloud Run benchmark readout (`test_5k`)**, and **Adversarial Architecture Stress-Test & Partner Technical FAQ** for the **Unilever CLEF Contrastive Contact-Sheet Cascade (`SPEC v0.2`)**.
+This document provides the engineering specification, empirical **10,000-crop Cloud Run benchmark readout (`test_5k`)**, and **Architecture Edge-Case & Technical FAQ** for the **Unilever CLEF Contrastive Contact-Sheet Cascade (`SPEC v0.2`)**.
 
 Across **10,000 blind held-out evaluation crops** (`5,000` stratified crops in `hul_golden-test_5k` and `5,000` fine-grained variant crops in `hul_variants-test_5k`), the deployed `SPEC v0.2` pipeline achieves:
 
-| Benchmark Dimension | Partner Audit Baseline (`2,417` crops, pre-`v0.2` endpoint) | Verified `SPEC v0.2` (`hul_golden-test_5k`, `N=5,000`) | Verified `SPEC v0.2` (`hul_variants-test_5k`, `N=5,000`) | Combined 10,000-Crop Benchmark (`N=10,000`) |
+| Benchmark Dimension | Pre-`v0.2` Endpoint Baseline (`2,417` total crops / `n = 593` manually validated) | Verified `SPEC v0.2` (`hul_golden-test_5k`, `N=5,000`) | Verified `SPEC v0.2` (`hul_variants-test_5k`, `N=5,000`) | Combined 10,000-Crop Benchmark (`N=10,000`) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Stage 2A 0-VLM Fast-Gate Rate** | `22.9%` (`553 / 2,417`) | **`61.64%`** (`3,082 / 5,000`) | **`60.98%`** (`3,049 / 5,000`) | **`61.31%`** (`6,131 / 10,000`) |
 | **Stage 2B Gemini 3.5 Flash-Lite Rate** | `77.1%` (`1,864 / 2,417`) | **`38.36%`** (`1,918 / 5,000`) | **`39.02%`** (`1,951 / 5,000`) | **`38.69%`** (`3,869 / 10,000`) |
 | **Crops Clearing `0.78` Threshold** | `4.9%` (`119 / 2,417`) | **`82.86%`** (`4,143 / 5,000`) | **`83.30%`** (`4,165 / 5,000`) | **`83.08%`** (`8,308 / 10,000`) |
-| **Precision at `sku_confidence >= 0.78`** | Not calibrated | **`95.63%`** (`3,962 / 4,143`) | **`95.05%`** (`3,959 / 4,165`) | **`95.34%`** (`7,921 / 8,308`) |
+| **Precision at `sku_confidence >= 0.78`** | Uncalibrated (`AUC 0.55`) | **`95.63%`** (`3,962 / 4,143`) | **`95.05%`** (`3,959 / 4,165`) | **`95.34%`** (`7,921 / 8,308`) |
 | **Confidence Filtering `ROC-AUC`** | `0.5500` (un-pooled softmax) | **`0.9674`** | **`0.9690`** | **`0.9682`** |
-| **L1 Ownership Accuracy (`is_hul`)** | Conflated with legacy `"Others"` | **`98.60%`** (`4,930 / 5,000`) | **`98.64%`** (`4,932 / 5,000`) | **`98.62%`** (`9,862 / 10,000`) |
+| **L1 Ownership Accuracy (`is_hul` vs `"Others"`)** | `153 / 280` legacy-`"Others"` assigned SKU (`n = 593` validation) | **`98.60%`** (`4,930 / 5,000`) | **`98.64%`** (`4,932 / 5,000`) | **`98.62%`** (`9,862 / 10,000`) |
 | **L2 Category Accuracy** | — | **`96.46%`** (`4,823 / 5,000`) | **`96.38%`** (`4,819 / 5,000`) | **`96.42%`** (`9,642 / 10,000`) |
 | **L2 Packaging Form Accuracy** | — | **`91.68%`** (`4,584 / 5,000`) | **`91.64%`** (`4,582 / 5,000`) | **`91.66%`** (`9,166 / 10,000`) |
 | **L3 Brand Accuracy (`934` brands)** | — | **`96.12%`** (`4,806 / 5,000`) | **`96.56%`** (`4,828 / 5,000`) | **`96.34%`** (`9,634 / 10,000`) |
@@ -34,7 +34,7 @@ Across **10,000 blind held-out evaluation crops** (`5,000` stratified crops in `
 
 ## 1. Algorithm Deep-Dive: Mechanics, Mathematical Formulations & Design Trade-Offs
 
-The `SPEC v0.2` inference spine is designed around a strict separation of concerns: **photometric normalization (Stage 0)**, **zero-token geometric localization (Stage 1)**, **open-set vector fast-gating (Stage 2A)**, **contrastive visual-evidence verification (Stage 2B)**, and **pooled hierarchical confidence calibration (Stage 2C)**.
+The `SPEC v0.2` inference spine is structured into five deterministic stages: **photometric normalization (Stage 0)**, **zero-token geometric localization (Stage 1)**, **open-set vector fast-gating (Stage 2A)**, **contrastive visual-evidence verification (Stage 2B)**, and **pooled hierarchical confidence calibration (Stage 2C)**.
 
 ```mermaid
 flowchart LR
@@ -49,17 +49,17 @@ flowchart LR
 
 ### 1.1 Stage 0: Dual-Buffer Photometric Normalization (`src/utils/photometry.py`)
 
-Indian General Trade (Kirana) stores exhibit severe warm tungsten lighting casts ($\text{CCT} < 2800\text{K}$) and deep shadows inside recessed wooden alcoves. Naive histogram equalization (`CLAHE`) improves edge detection for bounding-box localization by `+4.2 pp Recall`, but distorts packaging hue in `CIELAB` space, degrading downstream brand/variant retrieval by `-6.0 pp` (verified in `EXP-40`).
+General Trade (Kirana) retail stores exhibit strong warm tungsten lighting casts ($\text{CCT} < 2800\text{K}$) and deep shadows inside recessed alcoves. Standard histogram equalization (`CLAHE`) improves edge detection for bounding-box localization by `+4.2 pp Recall`, but distorts packaging hue in `CIELAB` space, degrading downstream brand/variant retrieval by `-6.0 pp` (`EXP-40`).
 
-To eliminate this trade-off, Stage 0 splits every input image into two photometrically specialized buffers:
+Stage 0 splits every input image into two photometrically specialized buffers:
 1. **Buffer A (`color_image`, Minkowski $p=6$ Shades-of-Gray White Balance):** Estimates the scene illuminant vector $\mathbf{e}_c = \left(\frac{1}{N}\sum_{x,y} I_c(x,y)^p\right)^{1/p}$ with $p=6$ and normalizes RGB channels without altering local contrast. This buffer feeds `gemini-embedding-2` and `CIELAB` color verification.
 2. **Buffer B (`detector_image`, `CIELAB` $L^*$ `CLAHE`):** Applies contrast-limited adaptive histogram equalization (`clipLimit=2.0`, `tileGridSize=(8,8)`) strictly to the luminance channel $L^*$. This buffer feeds the Stage 1 ONNX detector and the Stage 2B bottom-30% net-weight OCR zoom strip.
 
 ### 1.2 Stage 1 & 1.5: `960px` Soft-NMS CPU ONNX Detector, Physical Plank Law & Spatial Medoid Grouping (`src/approaches/market_share/detection/onnx_yolo_detector.py`)
 
-1. **Aspect-Aware Gaussian Soft-NMS at `960px` (`EXP-24`):** Standard greedy NMS at $\text{IoU} > 0.45$ suppresses valid adjacent pouches and overlapping sachets in densely packed shelves. We apply Gaussian score decay $\tilde{s}_i = s_i \exp\left(-\frac{\text{IoU}(b_{\max}, b_i)^2}{\sigma}\right)$ ($\sigma=0.5$) with a duplicate cutoff at $\text{IoU} > 0.55$ (`Gate G12`).
-2. **Physical Shelf-Plank Support Law (`EXP-53`):** Real retail products rest on horizontal shelf planks (or hang from vertical sachet strips). Isolated floating detections whose bottom edge $y_{\max}$ deviates from the local horizontal RANSAC shelf-row line by $> 0.35 \cdot h_{\text{med}}$ (and which are not part of a vertical hanging strip) are pruned as background clutter.
-3. **Pre-Embedding Class-0 Bay Gate (`EXP-57`):** On merchandising compliance audits (`gtmerch_golden`), the dual-class ONNX detector simultaneously localizes `Class 0` Unilever display bays (`WIN`, `CTU`, `MB2`, `MB3`) and `Class 1` product facings, pruning **`61%` of out-of-bay store background crops** before any embedding RPC is invoked.
+1. **Aspect-Aware Gaussian Soft-NMS at `960px` (`EXP-24`):** Greedy NMS at $\text{IoU} > 0.45$ suppresses valid adjacent pouches and overlapping sachets in densely packed shelves. Gaussian score decay $\tilde{s}_i = s_i \exp\left(-\frac{\text{IoU}(b_{\max}, b_i)^2}{\sigma}\right)$ ($\sigma=0.5$) with a duplicate cutoff at $\text{IoU} > 0.55$ (`Gate G12`) preserves dense pack recall.
+2. **Physical Shelf-Plank Support Law (`EXP-53`):** Retail products rest on horizontal shelf planks or hang from vertical sachet strips. Isolated floating detections whose bottom edge $y_{\max}$ deviates from the local horizontal RANSAC shelf-row line by $> 0.35 \cdot h_{\text{med}}$ (and which are not part of a vertical hanging strip) are pruned as background clutter.
+3. **Pre-Embedding Class-0 Bay Gate (`EXP-57`):** On merchandising compliance evaluations (`gtmerch_golden`), the dual-class ONNX detector localizes `Class 0` display bays (`WIN`, `CTU`, `MB2`, `MB3`) and `Class 1` product facings, pruning **`61%` of out-of-bay store background crops** before any embedding RPC is invoked.
 4. **Spatial Neighbor Medoid Grouping (`shelf_960_softnms_e2e.py`):** On full-shelf photos, adjacent facings on the same shelf row with matching aspect ratio ($|\Delta \ln(w/h)| < 0.12$) and high Lab color histogram intersection ($\ge 0.92$) are grouped into a contiguous facing run; the medoid crop is resolved first and propagated across identical neighbors, reducing Stage 2B VLM calls to **`15.5%–22.4%`** on full shelves.
 
 ### 1.3 Stage 2A: CLM System-1 Fast Gate & Sister-Variant Margin Guard (`src/approaches/market_share/retrieval/clef_standalone.py`)
@@ -77,7 +77,7 @@ Let $s_1 \ge s_2 \ge \dots \ge s_5$ denote the top-5 distinct SKU cosine scores 
    - Two candidates $(c_1, c_2)$ are **sister pack-size variants** (`same_variant_sister = True`) if and only if they share the exact same `brand` and `base_variant` but differ in `pack_size` (e.g., *Surf Excel Easy Wash 500g* vs. *Surf Excel Easy Wash 1kg*).
    - Because global embeddings can have small cosine separation between identical front-of-pack artwork across different net weights, Stage 2A requires a **`0.025` cosine margin** (`s1 - s2 >= 0.025`) when `same_variant_sister` is `True`, and a **`0.009` cosine margin** otherwise:
      $$\Delta_{\text{req}}(c_1, c_2) = \begin{cases} 0.025 & \text{if } \text{brand}(c_1)=\text{brand}(c_2) \land \text{variant}(c_1)=\text{variant}(c_2) \land \text{size}(c_1)\neq\text{size}(c_2), \\ 0.009 & \text{otherwise.} \end{cases}$$
-   - **Why the Partner Audit Observed a `77.1%` VLM Call Rate (and How `SPEC v0.2` Fixed It):** A prior commit (`17de3b5`) broadened the sibling guard from `same_variant` to `(same_brand or same_variant)` with a `0.035` threshold. Because any brand with $\ge 2$ SKUs in the 2,659-SKU catalog almost always has another SKU of the same brand in the top-2 shortlist, that change forced `77.1%` of individual `/api/predict/crop` calls into Stage 2B. Restoring the exact sister-variant condition ($\Delta_{\text{req}} = 0.025$ for `same_variant`, $0.009$ otherwise) restores the **`61.31%` 0-VLM fast-gate rate** (`38.69%` VLM call rate) on individual crops without losing a single basis point of accuracy.
+   - **Why the Pre-`v0.2` Endpoint Logged a `77.1%` VLM Call Rate (and How `SPEC v0.2` Resolved It):** Commit `17de3b5` broadened the sibling guard from `same_variant` to `(same_brand or same_variant)` with a `0.035` threshold. Because any brand with $\ge 2$ SKUs in the 2,659-SKU catalog almost always has another SKU of the same brand in the top-2 shortlist, that change forced `77.1%` of individual `/api/predict/crop` calls into Stage 2B. Restoring the exact sister-variant condition ($\Delta_{\text{req}} = 0.025$ for `same_variant`, $0.009$ otherwise) restores the **`61.31%` 0-VLM fast-gate rate** (`38.69%` VLM call rate) on individual crops without losing accuracy.
 
 ### 1.4 Stage 2B: Contrastive Metadata CLEF Contact Sheet & Layer-5 Pack-Size Verifier (`src/approaches/market_share/retrieval/clef_standalone.py`)
 
@@ -89,11 +89,11 @@ When Stage 2A detects an ambiguous crop ($s_1 < 0.75$, $s_1 - s_2 < \Delta_{\tex
 
 ### 1.5 Stage 2C: Pooled Variant/Brand Confidence Calibration & `0.78` Abstention Contract (`src/utils/openjev.py`)
 
-In a fine-grained catalog of `2,659` SKUs, a single Unilever brand (such as *Dove*, *Lakme*, or *Red Label*) often has 4 or 5 sister variants in the top-5 embedding shortlist with nearly identical cosine scores ($s_1 = 0.84, s_2 = 0.83, s_3 = 0.82, s_4 = 0.81, s_5 = 0.80$).
+In a fine-grained catalog of `2,659` SKUs, a single Unilever brand (such as *Dove*, *Lakme*, or *Red Label*) often has 4 or 5 sister variants in the top-5 embedding shortlist with closely spaced cosine scores ($s_1 = 0.84, s_2 = 0.83, s_3 = 0.82, s_4 = 0.81, s_5 = 0.80$).
 
 - **Root Cause of the Pre-`v0.2` Confidence Dilution (`95.1%` below `0.78`, `ROC-AUC = 0.55`):**
   1. `gemini-3.5-flash-lite` with `thinking_level="low"` and `response_schema=True` does not populate `response_logprobs`.
-  2. When token logprobs were absent, the fallback formula in `calibrated_shortlist_confidence` weighted the un-pooled single-panel softmax share $p_{\text{chosen}} = \frac{\exp(\tau s_{\text{chosen}})}{\sum_{j=1}^5 \exp(\tau s_j) + \exp(\tau s_{\text{dustbin}})}$ by `0.52`. Whenever 5 sister SKUs of the same brand occupied the shortlist, $p_{\text{chosen}}$ was diluted to $\approx 1/5 = 0.20$, mathematically capping `sku_confidence` around `0.55–0.68`—even when the top-1 cosine was `0.90` and the VLM explicitly verified `choice = 1`! Conversely, an open-set crop with one isolated false-positive neighbor at $s_1 = 0.76$ and four weak neighbors at $0.65$ received a higher $p_{\text{chosen}} \approx 0.62$, inverting the confidence ordering (`ROC-AUC = 0.55`).
+  2. When token logprobs were absent, the fallback formula in `calibrated_shortlist_confidence` weighted the un-pooled single-panel softmax share $p_{\text{chosen}} = \frac{\exp(\tau s_{\text{chosen}})}{\sum_{j=1}^5 \exp(\tau s_j) + \exp(\tau s_{\text{dustbin}})}$ by `0.52`. Whenever 5 sister SKUs of the same brand occupied the shortlist, $p_{\text{chosen}}$ was diluted to $\approx 1/5 = 0.20$, capping `sku_confidence` around `0.55–0.68`—even when the top-1 cosine was `0.90` and the VLM explicitly verified `choice = 1`. Conversely, an open-set crop with one isolated false-positive neighbor at $s_1 = 0.76$ and four weak neighbors at $0.65$ received a higher $p_{\text{chosen}} \approx 0.62$, inverting the confidence ordering (`ROC-AUC = 0.55`).
 - **`SPEC v0.2` Pooled Variant/Brand Calibration (`calibrated_shortlist_confidence` in [`src/utils/openjev.py`](../src/utils/openjev.py)):**
   Instead of penalizing a prediction because its own sister SKUs are also in the shortlist, `SPEC v0.2` pools the shortlist probability mass across sister variants ($M_{\text{variant}}$) and same-brand candidates ($M_{\text{brand}}$), normalizes against the 6-way (`5 panels + dustbin`) baseline, and combines it with a piecewise visual cosine clarity curve $C_{\text{cos}}(s_{\text{chosen}})$ and effective non-sister margin $\Delta_{\text{eff}}$:
 
@@ -103,7 +103,7 @@ In a fine-grained catalog of `2,659` SKUs, a single Unilever brand (such as *Dov
 
   $$\text{conf}_{\text{SKU}} = \begin{cases} \text{clip}_{[0.05, 0.985]}\bigl(0.34 S_{\text{norm}} + 0.58 C_{\text{cos}}(s_{k^*}) + B(\Delta_{\text{eff}})\bigr) & \text{if } \text{choice} \in \{1..5\}, \\ \text{clip}_{[0.02, 0.34]}\bigl(0.38 p_1 C_{\text{cos}}(s_1)\bigr) & \text{if } \text{choice} = 0 \text{ (open-set reject)}. \end{cases}$$
 
-  As verified across `N=10,000` crops, this restores **`ROC-AUC = 0.9682`**, with **`83.08%` of crops clearing `0.78` at `95.34%` precision** while `choice == 0` open-set rejects are strictly capped $\le 0.34$.
+  Across `N=10,000` crops, this restores **`ROC-AUC = 0.9682`**, with **`83.08%` of crops clearing `0.78` at `95.34%` precision** while `choice == 0` open-set rejects are strictly capped $\le 0.34$.
 
 ---
 
@@ -177,7 +177,7 @@ Both 5,000-crop benchmark splits (`hul_golden-test_5k` and `hul_variants-test_5k
 
 ### 2.5 Error Taxonomy Breakdown (`1,793` Total SKU Errors Across `N=10,000` Crops)
 
-A forensic breakdown of the `1,793` exact-SKU mismatches (`17.93%` of `10,000` crops) demonstrates that **over `79%` of SKU errors preserve exact Brand and Ownership (`is_hul`)**, and **`78.4%` of all SKU errors are automatically flagged by `abstain_recommended = True` (`sku_confidence < 0.78`)**:
+A forensic breakdown of the `1,793` exact-SKU mismatches (`17.93%` of `10,000` crops) shows that **over `79%` of SKU errors preserve exact Brand and Ownership (`is_hul`)**, and **`78.4%` of all SKU errors are automatically flagged by `abstain_recommended = True` (`sku_confidence < 0.78`)**:
 
 | Error Mode Category | Share of Errors (`N=1,793`) | Share of Total Crops (`N=10,000`) | Impact on Brand / Ownership (`L1` / `L3`) | Caught by `sku_confidence < 0.78`? |
 | :--- | :--- | :--- | :--- | :--- |
@@ -187,88 +187,86 @@ A forensic breakdown of the `1,793` exact-SKU mismatches (`17.93%` of `10,000` c
 
 ---
 
-## 3. Adversarial Architecture Stress-Test & Client / Partner Technical FAQ
+## 3. Architecture Risk Analysis & Technical FAQ
 
-### Part A: Resolution of the 4 Partner Audit Findings
+### Part A: Resolution of Pre-`v0.2` Endpoint Validation Findings
 
-#### Audit Item 1: LLM Fallback Usage (`77.1%` Observed in Partner Audit vs. `38.69%` Verified on `N=10,000`)
-> **Partner Audit Claim:** *"Gemini was called on 1,864 of 2,417 crops (77.1%), and the fast gate handled the other 22.9%. The LLM path accounts for about 99.7% of total latency (1.619 s vs 0.016 s per crop)."*
-
-* **Technical Root Cause (2 Factors):**
-  1. **Endpoint Regression (`PR #75`, Commit `17de3b5`):** In `_compute_stage2a_diagnostics` (`src/approaches/market_share/retrieval/clef_standalone.py`), the sibling margin guard was temporarily widened from `same_variant` (`0.025`) to `(same_brand or same_variant)` (`0.035`). Because nearly every major FMCG brand has multiple SKUs in the 2,659-SKU gallery, top-1 and top-2 almost always share a brand (`same_brand = True`), forcing individual `/api/predict/crop` requests with cosine margins between `0.009` and `0.035` into Stage 2B.
-  2. **Crop Endpoint vs. Full-Shelf Endpoint:** When calling `/api/predict/crop` on isolated crops (`2,417` individual HTTP requests), the full-shelf spatial neighbor medoid deduplicator (`shelf_960_softnms_e2e.py`, which groups adjacent identical facings on a shelf row) is bypassed by design because no shelf coordinates exist.
-* **`SPEC v0.2` Engineering Fix & Empirical Proof:**
+#### Item 1: VLM Escalation Rate (`77.1%` on Pre-`v0.2` Endpoint vs. `38.69%` Verified on `N=10,000`)
+* **Observed Baseline Finding:** On `2,417` total crop calls, Gemini was invoked on `1,864` crops (`77.1%`), while the Stage 2A fast gate handled `553` crops (`22.9%`).
+* **Technical Root Cause:**
+  1. **Broadened Same-Brand Margin Guard (`17de3b5`):** `_compute_stage2a_diagnostics` (`src/approaches/market_share/retrieval/clef_standalone.py`) temporarily applied a `0.035` margin requirement whenever top-1 and top-2 shared the same brand (`same_brand or same_variant`), rather than strictly when they were pack-size sisters of the same variant (`same_variant`). Because nearly every major brand has multiple SKUs in the 2,659-SKU gallery, top-1 and top-2 almost always share a brand, escalating `77.1%` of single-crop calls into Stage 2B.
+  2. **Crop Endpoint vs. Full-Shelf Endpoint:** Calling `/api/predict/crop` on isolated crops bypasses the full-shelf spatial neighbor medoid deduplicator (`shelf_960_softnms_e2e.py`), which groups adjacent identical facings on a shelf row.
+* **`SPEC v0.2` Resolution:**
   - Restored `required_margin = 0.025 if same_variant else 0.009` and added a high-margin override (`margin >= 0.025`) for `lid_above_11.5`.
-  - Across **10,000 blind crops (`test_5k`)**, Stage 2A now resolves **`6,131 / 10,000` (`61.31%`) with 0 VLM calls**, and Stage 2B is called on only **`3,869 / 10,000` (`38.69%`)**. On full retail shelves (`/api/predict/shelf` on `ms_json_golden`), spatial medoid grouping further reduces VLM calls to **`15.5%–22.4%`** (`338` VLM calls across `2,175` detected shelf crops).
+  - Across **10,000 blind crops (`test_5k`)**, Stage 2A resolves **`6,131 / 10,000` (`61.31%`) with 0 VLM calls**, and Stage 2B is called on **`3,869 / 10,000` (`38.69%`)**. On full retail shelves (`/api/predict/shelf`), spatial medoid grouping reduces VLM calls to **`15.5%–22.4%`**.
 
 ---
 
-#### Audit Item 2: Abstention at the `0.78` Threshold (`95.1%` Recommended to Abstain in Audit vs. `16.92%` in `SPEC v0.2`)
-> **Partner Audit Claim:** *"poc_abstain_recommended is True on 2,298 crops (95.1%) because poc_conf is below 0.78. Only 119 crops (4.9%) clear the threshold. Abstention is recommended but not enforced, since poc_abstained is False on all rows."*
-
+#### Item 2: Abstention at the `0.78` Threshold (`95.1%` Below `0.78` in Pre-`v0.2` vs. `83.08%` Clearing `0.78` in `SPEC v0.2`)
+* **Observed Baseline Finding:** `abstain_recommended` was `True` on `2,298 / 2,417` crops (`95.1%`) because confidence fell below `0.78` (only `119` crops / `4.9%` cleared `0.78`), while `abstained` was `False` on all rows.
 * **Technical Root Cause:**
-  1. **Un-Pooled Sister-SKU Softmax Dilution:** When 4–5 sister SKUs of the same brand occupied the top-5 shortlist, the un-pooled single-panel softmax share $p_{\text{chosen}}$ was diluted to $\approx 0.20$. Because `gemini-3.5-flash-lite` (`thinking_level="low"`, `response_schema=True`) does not emit `response_logprobs`, the fallback confidence formula weighted $p_{\text{chosen}}$ by `0.52`, capping `sku_confidence` around `0.55–0.68` on valid Stage 2B matches.
-  2. **Advisory Default (`allow_abstain=False`) per `Gate G10`:** For Share-of-Shelf (SOS) denominator integrity (`Gate G10: closed_set_non_abstention`), the endpoint defaults to `allow_abstain=False` so `abstain_recommended` acts as an advisory flag without dropping facings from the shelf denominator unless the caller opts in.
-* **`SPEC v0.2` Engineering Fix & Empirical Proof:**
-  - Updated `calibrated_shortlist_confidence` (`src/utils/openjev.py`) to pool probability mass across sister variants (`variant_mass`) and same-brand candidates (`brand_mass`).
-  - Across `N=10,000` crops, **`8,308 / 10,000` (`83.08%`) now clear the `0.78` threshold** (only `16.92%` have `abstain_recommended = True`), and **precision on crops clearing `0.78` is `95.34%`**.
-  - Callers who want hard abstention enforcement simply pass `"allow_abstain": true` in the request body; when `sku_confidence < 0.78` or `choice == 0`, the endpoint enforces `"abstained": true` and returns `"sku_id": null` (`catalog_scope: "open_set_abstained"`).
+  1. **Un-Pooled Sister-SKU Softmax Dilution:** When 4–5 sister SKUs of the same brand occupied the top-5 shortlist, the un-pooled single-panel softmax share $p_{\text{chosen}}$ was diluted to $\approx 0.20$, capping `sku_confidence` around `0.55–0.68` on valid Stage 2B matches.
+  2. **Advisory Default (`allow_abstain=False`) per `Gate G10`:** For Share-of-Shelf (SOS) denominator completeness, the endpoint defaults to `allow_abstain=False` unless hard abstention is requested.
+* **`SPEC v0.2` Resolution:**
+  - `calibrated_shortlist_confidence` (`src/utils/openjev.py`) now pools probability mass across sister variants (`variant_mass`) and same-brand candidates (`brand_mass`).
+  - Across `N=10,000` crops, **`8,308 / 10,000` (`83.08%`) clear the `0.78` threshold** at **`95.34%` precision**.
+  - Passing `"allow_abstain": true` enforces `"abstained": true`, `"sku_id": null`, and `"legacy_label": "Others"` whenever `sku_confidence < 0.78` or `choice == 0`.
 
 ---
 
-#### Audit Item 3: Predictions on Legacy-`"Others"` Crops (`874` Competitor Brands vs. Open-Set Hallucination)
-> **Partner Audit Claim:** *"POC predicted a SKU on 153 of 280 legacy-'Others' crops (54.6%). These make up 64.8% of all flagged POC errors, and POC returned 'Others' on 0 crops."*
-
-* **Technical Root Cause (Taxonomy Granularity Upgrade, Not Model Hallucination):**
-  - In the legacy `.h5` annotation pipeline, human annotators labeled Unilever SKUs with their product names and collapsed **all competitor products and unannotated brands into a single catch-all string: `"Others"`**.
-  - In `SPEC v0.2` (`Gate G5: zero_unknown_taxonomy`), we eliminated the `"Others"` catch-all string from the 2,659-SKU master catalog and onboarded **874 named competitor brands (`1,586` competitor SKUs)** with explicit `"is_hul": false` metadata (e.g., *Nescafe*, *Society Tea*, *Patanjali*, *Colgate*, *head & shoulders*, *Gowardhan*, *ITC*).
-  - On the `216` legacy-`"Others"` crops in `ms_json_golden`, our pipeline resolved **`139 / 216` (`64.4%`)** to their exact named competitor brand/SKU with `"is_hul": false`. When an audit script compares our specific competitor SKU name (e.g., `"Society__One_Minute_Tea_Carton"`) against the legacy string `"Others"` via exact string equality (`pred != "Others"`), it flags every correct competitor identification as a "hallucination."
-* **`SPEC v0.2` Engineering Fix & Empirical Proof:**
-  - Every `/api/predict/crop` and `/api/predict/shelf` response now includes three backward-compatible fields alongside the 2,659-SKU prediction:
-    - `"legacy_label"`: Returns the exact product name when `"is_hul": true`, and `"Others"` whenever `"is_hul": false` or abstained.
-    - `"legacy_brand"`: Returns the Unilever brand when `"is_hul": true`, and `"Others"` whenever `"is_hul": false` or abstained.
-    - `"catalog_scope"`: Explicitly distinguishes `"unilever_sku"` vs. `"competitor_sku"` vs. `"open_set_abstained"`.
-  - Evaluated on L1 ownership (`is_hul`: Unilever vs. Competitor/`"Others"`), the pipeline achieves **`98.62%` accuracy (`9,862 / 10,000`)** with a **`1.19%` false HUL attribution rate**.
+#### Item 3: Manual Validation on `n = 593` Crops & Legacy-`"Others"` Behavior (`280` Legacy-`"Others"`, `18` True Unilever Recoveries vs. `153` False SKU Predictions)
+* **Observed Baseline Finding (`n = 593` Manually Validated Subset):**
+  - While `2,417` total crops were processed for latency/routing telemetry, **accuracy and error validation was conducted via manual validation on a sample of `n = 593` crops** (`313` labeled Unilever crops + **`280` crops labeled `"Others"`** in legacy ground truth).
+  - Out of those **`280` legacy-`"Others"` crops**:
+    - **`18` crops (`18 / 280 = 6.4%`)** were manually verified to be **true Unilever SKUs** that had been mislabeled as `"Others"` in the legacy ground truth; the pipeline recovered their exact Unilever SKU and manual validation credited those `18` as true positives (`"true value"`).
+    - **`153` crops (`153 / 280 = 54.6%` of legacy-`"Others"`, or `153 / 593 = 25.8%` of the `n = 593` manually validated set)** were genuinely non-Unilever / competitor / out-of-scope crops where the pre-`v0.2` endpoint predicted a catalog SKU instead of returning `"Others"`. Those `153` crops accounted for **`64.8%` (`153 / 236`) of all flagged errors** across the `n = 593` validation set (whereas the `313` labeled Unilever crops had only `83` errors, i.e., `73.5%` accuracy).
+* **Technical Root Cause (Two Compounding Pre-`v0.2` Endpoint Behaviors):**
+  1. **Zero `"Others"` Roll-Up on the `1,586` Competitor SKUs (`is_hul: false`):** The 2,659-SKU gallery contains `1,073` Unilever SKUs (`is_hul: true`) and `1,586` Competitor SKUs (`is_hul: false` across `874` non-HUL brands). Whenever the model matched a non-Unilever crop to one of the `1,586` competitor SKUs—or matched an uncatalogued regional pack to its nearest neighbor in the 2,659-SKU catalog—it returned that specific SKU string in `product` and never emitted `"Others"`.
+  2. **Closed-Set Fallback on `choice == 0` (`allow_abstain=False`):** When Stage 2B rejected all 5 candidate panels (`choice = 0`, *"none match"*), `resolve_clef_choice` forced a closed-set fallback to top-1 (`tier1_high_cos_top1` / `tier2_abstain_fallback_top1`) rather than abstaining to `"Others"`.
+* **`SPEC v0.2` Resolution:**
+  - Every `/api/predict/crop` and `/api/predict/shelf` response now emits:
+    - `"legacy_label"` and `"legacy_brand"`: Automatically outputs **`"Others"`** whenever `"is_hul": false` (all `1,586` competitor SKUs) or when `"abstained": true` (`choice == 0` or `sku_confidence < 0.78`), while emitting the exact Unilever SKU name when `"is_hul": true` and `sku_confidence >= 0.78` (preserving the **`18` / `6.4%` true Unilever SKU recoveries**).
+    - `"catalog_scope"`: Explicitly tags `"unilever_sku"` vs. `"competitor_sku"` vs. `"open_set_abstained"`.
+  - Evaluated on L1 ownership (`is_hul`: Unilever vs. `"Others"`), `SPEC v0.2` achieves **`98.62%` accuracy (`9,862 / 10,000`)** with a **`1.19%` false Unilever attribution rate**.
 
 ---
 
-#### Audit Item 4: Confidence-Based Filtering (`ROC-AUC = 0.55` in Audit vs. `0.9682` in `SPEC v0.2`)
-> **Partner Audit Claim:** *"A poc_conf cut-off does not reliably remove hallucinations (AUC 0.55)."*
-
+#### Item 4: Confidence-Based Filtering (`ROC-AUC = 0.55` in Pre-`v0.2` vs. `0.9682` in `SPEC v0.2`)
+* **Observed Baseline Finding:** Under the pre-`v0.2` confidence score, a confidence cutoff did not reliably separate true matches from false positives (`ROC-AUC = 0.55`).
 * **Technical Root Cause:**
-  - Under the pre-`v0.2` un-pooled softmax formula, popular Unilever brands with 5 sister SKUs in the shortlist were penalized with $p_{\text{chosen}} \approx 0.20$ (`poc_conf ~ 0.58`), whereas a noisy open-set crop matching a single isolated competitor SKU in the shortlist had $p_{\text{chosen}} \approx 0.60$ (`poc_conf ~ 0.72`). That sister-SKU dilution inverted the confidence ranking between true multi-variant matches and isolated false positives (`AUC = 0.55`).
-* **`SPEC v0.2` Engineering Fix & Empirical Proof:**
-  - By pooling `variant_mass` and `brand_mass` across sister SKUs in `calibrated_shortlist_confidence` and capping `choice == 0` open-set rejections at $\le 0.34$, confidence filtering `ROC-AUC` increases from `0.5500` to **`0.9674` on `hul_golden-test_5k`** and **`0.9690` on `hul_variants-test_5k`** (**`0.9682` across all `10,000` crops**).
-  - At the `0.78` operating point, **`96.53%` of all True Positives are retained** (`7,921 / 8,206`) while **`78.42%` of all False Positives are filtered out** (`1,407 / 1,794`), boosting precision from `82.07%` (unfiltered) to **`95.34%`** (filtered at `0.78`).
+  - Under the un-pooled softmax formula, major Unilever brands with 5 sister SKUs in the shortlist were penalized with $p_{\text{chosen}} \approx 0.20$ (`conf ~ 0.58`), whereas a noisy open-set crop matching a single isolated SKU in the shortlist had $p_{\text{chosen}} \approx 0.60$ (`conf ~ 0.72`), inverting the confidence ranking between true multi-variant matches and isolated false positives.
+* **`SPEC v0.2` Resolution:**
+  - Pooling `variant_mass` and `brand_mass` across sister SKUs in `calibrated_shortlist_confidence` and capping `choice == 0` open-set rejections at $\le 0.34$ raises `ROC-AUC` to **`0.9674` on `hul_golden-test_5k`** and **`0.9690` on `hul_variants-test_5k`** (**`0.9682` across all `10,000` crops**).
+  - At the `0.78` threshold, **`96.53%` of all True Positives are retained** (`7,921 / 8,206`) while **`78.42%` of all False Positives are filtered out** (`1,407 / 1,794`), increasing precision from `82.07%` (unfiltered) to **`95.34%`** (filtered at `0.78`).
 
 ---
 
-### Part B: Adversarial Stress-Test of Data Leakage, Cold Starts, Drift & Scalability Limits
+### Part B: Data Leakage, Cold Starts, Catalog Drift & Scalability Analysis
 
-#### Stress-Test 5: Data Leakage & Overfitting Risk Across Splits
-* **Potential Partner Objection:** *"Did tuning the `0.025` sister-variant margin guard or pooled confidence calibration overfit to the test crops, or do images from the same retail store leak between the reference gallery (`train`) and evaluation splits (`val`/`test`)?"*
-* **Engineering Defense & Hard Evidence:**
+#### 5. Data Leakage & Generalization Across Splits
+* **Question:** *Does tuning the `0.025` sister-variant margin guard or pooled confidence calibration overfit to the test crops, or do images from the same retail store leak between the reference gallery (`train`) and evaluation splits (`val`/`test`)?*
+* **Verification & Evidence:**
   1. **Zero Train/Val/Test Image or Outlet Overlap (`Gates G3, G6, G13`):** Every dataset manifest (`rpc.json`) is verified by `run_12_gate_qc()` (`src/utils/qc.py`). `Gate G3` enforces `0` URI overlap across `train` (`gallery`), `val`, and `test`/`test_5k`; `Gate G13` enforces **`0` `outlet_code` overlap and `0` image MD5 hash overlap** across splits; `Gate G6` verifies `0` ground-truth oracle injection into shortlists.
-  2. **Zero Learned Parameters in `SPEC v0.2` Calibration:** The `0.025` vs. `0.009` margin threshold is a structural domain rule (whether top-1 and top-2 are pack-size sisters of the same variant), and `calibrated_shortlist_confidence` is a monotonic analytical function of cosine similarity and shortlist brand/variant mass with zero per-class or per-dataset weights. Its performance is virtually identical across `hul_golden-test_5k` (`ROC-AUC 0.9674`, `82.28%` SKU acc) and `hul_variants-test_5k` (`ROC-AUC 0.9690`, `81.86%` SKU acc).
+  2. **Zero Learned Class Parameters in `SPEC v0.2` Calibration:** The `0.025` vs. `0.009` margin threshold is a structural rule (whether top-1 and top-2 are pack-size sisters of the same variant), and `calibrated_shortlist_confidence` is a monotonic analytical function of cosine similarity and shortlist brand/variant mass with zero per-class weights. Performance is consistent across `hul_golden-test_5k` (`ROC-AUC 0.9674`, `82.28%` SKU acc) and `hul_variants-test_5k` (`ROC-AUC 0.9690`, `81.86%` SKU acc).
 
-#### Stress-Test 6: Cloud Run Cold-Start Latency & Gallery Initialization
-* **Potential Partner Objection:** *"Loading 2,659 SKU embeddings and reference gallery metadata from GCS on a cold Cloud Run container start could cause request timeouts on the first incoming shelf photo."*
-* **Engineering Defense & Hard Evidence:**
+#### 6. Cloud Run Cold-Start Latency & Gallery Initialization
+* **Question:** *How does the service prevent request timeouts when loading 2,659 SKU embeddings and reference gallery metadata from GCS on container startup?*
+* **Verification & Evidence:**
   1. **Pre-Computed `.npz` Gallery Vector Cache in GCS:** The 2,659-SKU gallery matrix ($\mathbf{G} \in \mathbb{R}^{M \times 768}$, `~18 MB` compressed `.npz`) is pre-computed and loaded into memory once per container lifecycle in `6.4–8.2 seconds` (`setup_seconds: 8.2` in `summary.json`).
-  2. **Singleton Engine Caching & Warm Readiness Probe:** `server.py` caches the initialized `CLEFContrastiveStandalone` and `DistilledYolo960Stage0Clahe` instances in process-global singletons behind a thread lock, and `/api/predict/health` verifies warm readiness. For diurnal morning burst traffic (`09:00–11:00 IST`), `min-instances=1` eliminates cold-start latency entirely.
+  2. **Singleton Engine Caching & Warm Readiness Probe:** `server.py` caches the initialized `CLEFContrastiveStandalone` and `DistilledYolo960Stage0Clahe` instances in process-global singletons behind a thread lock, and `/api/predict/health` reports warm readiness (`min-instances=1` eliminates cold-start latency during peak windows).
 
-#### Stress-Test 7: Catalog Drift, New Packaging Relaunches & Seasonal Promotions
-* **Potential Partner Objection:** *"FMCG packaging changes every quarter (festive promos, `+20% Extra` bands, artwork relaunches). Will a new SKU launch require retraining the detector and classifier?"*
-* **Engineering Defense & Hard Evidence:**
+#### 7. Catalog Drift, New Packaging Relaunches & Seasonal Promotions
+* **Question:** *When FMCG packaging changes (festive promos, `+20% Extra` bands, artwork relaunches), does onboarding a new SKU require retraining the detector or classifier?*
+* **Verification & Evidence:**
   1. **Zero-Retraining Catalog Onboarding (`< 60 seconds`):** Because Stage 1 detects generic `Class 1` retail packages (`distilled_yolo_onnx`) and Stage 2A/2B operates over a non-parametric `gemini-embedding-2` vector index + dynamic reference contact sheet, adding a newly launched SKU requires **zero model retraining**—only inserting 1–3 reference pack photos into `rpc.json` and appending its `768-D` embedding row.
-  2. **Empirical Proof on Unseen SKU Launches (`94.4%` Accuracy):** In our zero-shot unseen SKU launch evaluation (`18` newly launched SKUs completely held out from training), `clef_contrastive_metadata` achieved **`94.4%` (`17 / 18`) exact SKU accuracy** immediately upon adding their reference photos to the gallery, compared to `0.0%` for closed-set classifiers prior to retraining.
+  2. **Unseen SKU Launch Benchmark (`94.4%` Accuracy):** On `18` newly launched SKUs held out from training, `clef_contrastive_metadata` achieved **`94.4%` (`17 / 18`) exact SKU accuracy** immediately upon adding their reference photos to the gallery.
 
-#### Stress-Test 8: Burst Scalability, Vertex AI Rate Limits & `PT180S` Payout Quarantine
-* **Potential Partner Objection:** *"During peak morning store audits in India (`10,000+` store sessions/hour), what happens if Vertex AI `gemini-3.5-flash-lite` experiences transient `429 RESOURCE_EXHAUSTED` throttling? Does the retailer lose their P2P merchandising payout?"*
-* **Engineering Defense & Hard Evidence:**
-  1. **`61.3%–84.5%` Traffic Shielded Before VLM:** Stage 1 (`CPU ONNX`) + Stage 1.5 (`-61%` Out-of-Bay Crop Pruning) + Stage 2A (`61.31%` Fast-Gate on crops, `84.5%` on full shelves with spatial medoid grouping) absorb the vast majority of facings before touching the generative VLM quota.
+#### 8. Burst Scalability, Vertex AI Rate Limits & `PT180S` Payout Quarantine
+* **Question:** *During peak morning store audits (`10,000+` store sessions/hour), what happens if Vertex AI `gemini-3.5-flash-lite` experiences transient `429 RESOURCE_EXHAUSTED` throttling?*
+* **Verification & Evidence:**
+  1. **`61.3%–84.5%` Traffic Shielded Before VLM:** Stage 1 (`CPU ONNX`) + Stage 1.5 (`-61%` Out-of-Bay Crop Pruning) + Stage 2A (`61.31%` Fast-Gate on crops, `84.5%` on full shelves with spatial medoid grouping) absorb the majority of facings before touching generative VLM quota.
   2. **Content-Addressed SHA-256 VLM Response Cache (`PR-17`):** Identical contact-sheet payloads short-circuit via GCS/memory SHA-256 cache (`vlm_cache/`).
-  3. **Level-4 Total Contract Payout Quarantine (`PT180S` SLA, `SPEC v0.2` Section 1.3):** Validated under `locust 2.46.7` load testing (`0.00%` unhandled failures), any store session exceeding the `180-second` SLA window or exhausting exponential backoff retries emits `contract_status = "RETRY_PENDING"`, `awp_presence = "PENDING"`, and `earning_override = None` to `PR19_pubsub_dlq`—**never** emitting a false `Earning = '0'` retailer payout denial.
+  3. **Level-4 Total Contract Payout Quarantine (`PT180S` SLA, `SPEC v0.2` Section 1.3):** Validated under `locust 2.46.7` load testing (`0.00%` unhandled failures), any store session exceeding the `180-second` SLA window or exhausting exponential backoff retries emits `contract_status = "RETRY_PENDING"`, `awp_presence = "PENDING"`, and `earning_override = None` to `PR19_pubsub_dlq`—never emitting a false `Earning = '0'` retailer payout denial.
 
 ---
 
@@ -290,7 +288,7 @@ curl -s -X POST "$BASE_URL/api/predict/crop" \
     "image_uri": "gs://marketshare-datasets/derived_manifests/hul_golden/images/sample.jpg",
     "dataset": "hul_golden",
     "tier": "priority",
-    "allow_abstain": false,
+    "allow_abstain": true,
     "conf_threshold": 0.78
   }' | jq .
 ```
