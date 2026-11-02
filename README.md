@@ -1,6 +1,8 @@
 # Unilever Retail Shelf Understanding and Merchandising Benchmark (`shelf-bench` v2.3 / SPEC v0.2)
 
-> 🚀 **Partner Quick-Start Guide (`SPEC v0.2`)**: See [`docs/Partner_CLEF_Contrastive_QuickStart_Guide.md`](docs/Partner_CLEF_Contrastive_QuickStart_Guide.md) for copy-pasteable `curl` and Python snippets to query the deployed CLEF Contrastive Contact-Sheet Cascade Cloud Run API (`clef-contrastive-api`) for individual crops (`POST /api/predict/crop`) and full shelves (`POST /api/predict/shelf`).
+> 🚀 **Partner Quick-Start Guide, Algorithm Deep-Dive & 10,000-Crop Cloud Benchmark (`SPEC v0.2`)**:
+> * **[`docs/Partner_CLEF_Contrastive_QuickStart_Guide.md`](docs/Partner_CLEF_Contrastive_QuickStart_Guide.md)**: Copy-pasteable `curl` and Python snippets to query the deployed CLEF Contrastive Contact-Sheet Cascade Cloud Run API (`clef-contrastive-api`) for individual crops (`POST /api/predict/crop`) and full shelves (`POST /api/predict/shelf`).
+> * **[`docs/Algorithm_Deep_Dive_10k_Benchmark_and_Partner_FAQ.md`](docs/Algorithm_Deep_Dive_10k_Benchmark_and_Partner_FAQ.md)**: Exhaustive mathematical deep-dive, **10,000-crop Cloud Run benchmark readout (`61.31%` 0-VLM fast-gate, `38.69%` VLM rate, `83.08%` clearing `0.78` at `95.34%` precision, `ROC-AUC = 0.9682`, `98.62%` L1 `is_hul` accuracy)**, and Partner Technical FAQ.
 
 End-to-end computer vision and multimodal benchmark for **Unilever Market Share (Share of Shelf)** and **In-Store Merchandising & Pay-for-Performance (`P2P`) Compliance** across Indian General Trade (Kirana) and Modern Trade supermarkets. All datasets, embedding caches, model registries, and experiment results run **100% on Google Cloud Platform (Google Cloud Storage, Vertex AI, BigQuery, Cloud SQL, and Cloud Run)** without storing datasets or results on local machines.
 

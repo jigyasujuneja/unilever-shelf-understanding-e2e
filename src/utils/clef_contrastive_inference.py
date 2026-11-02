@@ -211,19 +211,25 @@ class ClefContrastiveEngine:
     def _format_catalog_prediction(
         self, sku_id: int | None, catalog: dict[int, dict], step_info: dict | None = None
     ) -> dict | None:
-        """Format resolved SKU ID into clean 5-attribute dictionary."""
+        """Format resolved SKU ID into clean 5-attribute dictionary with legacy schema compatibility."""
         if sku_id is None:
             return None
         cat = catalog.get(int(sku_id)) or {}
+        is_hul = bool(cat.get("is_hul", False))
+        brand_str = str(cat.get("brand") or "")
+        product_str = str(cat.get("product") or cat.get("name") or "")
         return {
             "sku_id": int(sku_id),
-            "is_hul": bool(cat.get("is_hul", False)),
+            "is_hul": is_hul,
+            "catalog_scope": "unilever_sku" if is_hul else "competitor_sku",
             "category": str(cat.get("category") or ""),
             "packaging_type": str(cat.get("packaging_type") or ""),
-            "brand": str(cat.get("brand") or ""),
+            "brand": brand_str,
             "base_variant": str(cat.get("base_variant") or cat.get("variant") or cat.get("product") or ""),
-            "product": str(cat.get("product") or cat.get("name") or ""),
+            "product": product_str,
             "pack_size": str(cat.get("pack_size") or cat.get("size") or (step_info or {}).get("pack_size") or ""),
+            "legacy_label": product_str if is_hul else "Others",
+            "legacy_brand": brand_str if is_hul else "Others",
         }
 
     def _build_segregated_stage_outputs(
@@ -448,6 +454,9 @@ class ClefContrastiveEngine:
             "height": image.height,
             "sku_id": sku_id,
             "prediction": pred_dict,
+            "legacy_label": str(pred_dict["legacy_label"]) if pred_dict else "Others",
+            "legacy_brand": str(pred_dict["legacy_brand"]) if pred_dict else "Others",
+            "catalog_scope": str(pred_dict["catalog_scope"]) if pred_dict else "open_set_abstained",
             "stage": stage_name,
             "guard_mode": guard_mode,
             "confidence": conf,
@@ -622,6 +631,9 @@ class ClefContrastiveEngine:
                 "box": [round(float(v), 1) for v in b],
                 "sku_id": s_id,
                 "prediction": pred_dict,
+                "legacy_label": str(pred_dict["legacy_label"]) if pred_dict else "Others",
+                "legacy_brand": str(pred_dict["legacy_brand"]) if pred_dict else "Others",
+                "catalog_scope": str(pred_dict["catalog_scope"]) if pred_dict else "open_set_abstained",
                 "stage": stage_name,
                 "guard_mode": guard_mode,
                 "confidence": conf,

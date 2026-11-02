@@ -200,20 +200,57 @@ def calibrated_shortlist_confidence(
     chosen_idx = (choice_int - 1) if choice_int is not None else 0
     s_chosen = float(top[chosen_idx][0])
     p_chosen = probs[chosen_idx]
+    chosen_pid = int(top[chosen_idx][1])
 
-    # Absolute visual clarity factor in [0.08, 0.985] based on cosine similarity and top-2 margin
-    cos_clarity = max(0.08, min(0.985, (s_chosen - 0.42) / 0.54))
-    margin_bonus = min(0.08, margin * 1.2)
+    # Pool brand and base-variant probability mass across sister SKUs in the shortlist
+    chosen_meta = (catalog or {}).get(chosen_pid) or {}
+    chosen_brand = str(chosen_meta.get("brand") or "").strip().lower()
+    chosen_variant = str(chosen_meta.get("base_variant") or "").strip().lower()
+
+    brand_mass = 0.0
+    variant_mass = 0.0
+    best_non_variant_s: float | None = None
+    for prob_val, (score_val, pid, _) in zip(probs, top, strict=True):
+        pid_int = int(pid)
+        cand_meta = (catalog or {}).get(pid_int) or {}
+        cand_brand = str(cand_meta.get("brand") or "").strip().lower()
+        cand_variant = str(cand_meta.get("base_variant") or "").strip().lower()
+        same_brand = bool(chosen_brand and cand_brand == chosen_brand)
+        same_variant = bool(same_brand and chosen_variant and cand_variant == chosen_variant)
+        if same_brand:
+            brand_mass += prob_val
+        if pid_int == chosen_pid or same_variant:
+            variant_mass += prob_val
+        else:
+            if best_non_variant_s is None or float(score_val) > best_non_variant_s:
+                best_non_variant_s = float(score_val)
+
+    if variant_mass <= 0.0:
+        variant_mass = p_chosen
+    if brand_mass <= 0.0:
+        brand_mass = max(variant_mass, min(0.96, p_clm1 * 1.15))
+
+    eff_margin = max(margin, s_chosen - (best_non_variant_s if best_non_variant_s is not None else s2))
+    if s_chosen >= 0.75:
+        cos_clarity = min(0.985, 0.80 + (s_chosen - 0.75) * 0.78)
+    else:
+        cos_clarity = max(0.08, 0.08 + max(0.0, s_chosen - 0.42) * (0.72 / 0.33))
+
+    pooled_support = 0.45 * variant_mass + 0.35 * brand_mass + 0.20 * p_chosen
+    support_norm = min(0.985, 0.25 + 1.15 * pooled_support)
+    margin_bonus = min(0.12, eff_margin * 1.6 + margin * 0.6)
 
     if choice_int is not None:
-        base_sku = 0.52 * p_chosen + 0.40 * cos_clarity + margin_bonus
+        base_sku = 0.34 * support_norm + 0.58 * cos_clarity + margin_bonus
         if choice_int > 1:
             drop = max(0.0, s1 - s_chosen)
-            # When VLM selects panel k > 1, weight by visual proximity to rank-1
-            base_sku = (0.38 * p_chosen + 0.52 * cos_clarity + 0.05) * max(0.45, 1.0 - 2.5 * drop)
+            base_sku = (0.32 * support_norm + 0.60 * cos_clarity + margin_bonus) * max(0.55, 1.0 - 1.5 * drop)
         if slot is not None and "confidence" in slot:
             slot_c = max(0.05, min(0.985, float(slot["confidence"])))
-            base_sku = 0.55 * slot_c + 0.45 * base_sku
+            if s_chosen >= 0.72:
+                base_sku = 0.45 * slot_c + 0.55 * base_sku
+            else:
+                base_sku = min(base_sku, 0.35 * slot_c + 0.65 * base_sku)
         if vetoed:
             base_sku = min(0.46, base_sku * 0.62)
         elif pack_size_verified:
@@ -224,24 +261,9 @@ def calibrated_shortlist_confidence(
         # Cap strictly <= 0.34 so any standard confidence threshold filters it out.
         sku_conf = round(max(0.02, min(0.34, 0.38 * p_clm1 * cos_clarity)), 4)
 
-    # Brand-level probability mass across the shortlist (discounted by open-set dustbin & clarity)
-    chosen_pid = int(top[chosen_idx][1])
-    if catalog and chosen_pid in catalog:
-        chosen_brand = str((catalog.get(chosen_pid) or {}).get("brand") or "").strip().lower()
-        if chosen_brand:
-            brand_mass = sum(
-                p
-                for p, (_, pid, _) in zip(probs, top, strict=True)
-                if str((catalog.get(int(pid)) or {}).get("brand") or "").strip().lower() == chosen_brand
-            )
-        else:
-            brand_mass = p_chosen
-    else:
-        brand_mass = max(p_chosen, min(0.96, p_clm1 * 1.15))
-
     if is_valid_panel:
         brand_conf = round(
-            max(sku_conf, min(0.985, (0.60 * brand_mass + 0.40 * cos_clarity) * (0.72 if vetoed else 1.0))),
+            max(sku_conf, min(0.985, (0.50 * brand_mass + 0.50 * cos_clarity) * (0.72 if vetoed else 1.0))),
             4,
         )
     else:

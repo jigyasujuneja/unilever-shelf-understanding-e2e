@@ -3778,6 +3778,40 @@ function stepMore(st, d) {
         ])
     );
   }
+  if (st.info && typeof st.info === "object") {
+    const inf = st.info;
+    const stageRows = [
+      [
+        "Stage Routing",
+        inf.stage2a_bypassed === true
+          ? "Stage 2A CLM Fast-Gate (0 VLM calls)"
+          : inf.stage2a_bypassed === false
+            ? "Stage 2B CLEF Contact-Sheet Verifier"
+            : undefined,
+      ],
+      ["Guard Mode", inf.guard_mode != null ? String(inf.guard_mode) : undefined],
+      [
+        "SKU / Brand Confidence",
+        inf.sku_confidence != null
+          ? `${Number(inf.sku_confidence).toFixed(4)} / ${Number(inf.brand_confidence ?? inf.sku_confidence).toFixed(4)} (threshold 0.78)`
+          : undefined,
+      ],
+      [
+        "Top-1 Cosine / Margin",
+        inf.top1_cosine != null
+          ? `${Number(inf.top1_cosine).toFixed(4)} (margin ${Number(inf.cosine_margin ?? 0).toFixed(4)} vs req ${Number(inf.required_margin ?? 0.009).toFixed(3)})`
+          : undefined,
+      ],
+      [
+        "Abstain Recommended (<0.78)",
+        inf.abstain_recommended != null ? (inf.abstain_recommended ? "Yes" : "No") : undefined,
+      ],
+      ["Escalation Reason", inf.escalation_reason || undefined],
+    ];
+    if (stageRows.some(([, val]) => val !== undefined)) {
+      out.push(`<div class="more-h">SPEC v0.2 Stage Telemetry</div>` + kv(stageRows));
+    }
+  }
   (st.calls || []).forEach((c, i) => {
     const label = `${i + 1}${st.calls.length > 1 ? ` of ${st.calls.length}` : ""}`;
     out.push(

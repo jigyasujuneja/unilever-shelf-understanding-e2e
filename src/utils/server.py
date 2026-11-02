@@ -439,8 +439,9 @@ class Handler(BaseHTTPRequestHandler):
                 "dataset": clef_contrastive_inference.DEFAULT_CROP_DATASET,
                 "catalog_classes": len(eng.catalog) if eng.catalog else 2659,
                 "default_conf_threshold": clef_contrastive_inference.DEFAULT_CONF_THRESHOLD,
-                "sibling_margin_guard": 0.035,
+                "sibling_margin_guard": 0.025,
                 "layer5_pack_size_verifier": True,
+                "legacy_others_mapping": True,
                 "confidence_range": [0.02, 0.985],
                 "is_ready": eng.is_ready,
                 "routes": {

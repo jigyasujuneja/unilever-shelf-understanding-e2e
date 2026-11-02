@@ -12,10 +12,12 @@ Welcome to the **CLEF Contrastive Contact-Sheet Cascade API (`SPEC v0.2`)**. Thi
 * **Shelf Detector**: `distilled_yolo_onnx` (CPU ONNX Stage 1 detector in ~40ms)
 * **Master Catalog**: **2,659 SKUs** from `hul_golden` (Unilever + Competitor brands)
 * **v0.2 Calibration & Abstention Contract**:
-  * **Confidence Calibration**: Lidstone open-set smoothing + dustbin/cosine scaling in `[0.02, 0.985]` (never saturates to `1.0`).
-  * **Sibling-Variant Margin Guard**: Enforces $\cos_{\text{top1}} - \cos_{\text{top2}} \ge 0.035$ when top candidates share the same brand before bypassing Stage 2B.
+  * **Confidence Calibration**: Pooled sister-variant and brand probability mass + piecewise visual cosine clarity in `[0.02, 0.985]` (**`ROC-AUC = 0.9682`**, **`83.08%` clearing `0.78` at `95.34%` precision** across `N=10,000` crops).
+  * **Sister-Variant Margin Guard (`0.025` vs. `0.009`)**: Enforces $\cos_{\text{top1}} - \cos_{\text{top2}} \ge 0.025$ when top candidates are pack-size sisters of the same variant (`0.009` otherwise), achieving a **`61.31%` 0-VLM Stage 2A fast-gate rate** (`38.69%` VLM calls) across `N=10,000` crops.
+  * **Legacy `"Others"` Backward Compatibility (`legacy_label`, `legacy_brand`, `catalog_scope`)**: Every response reports both the exact 2,659-SKU identity (covering `874` named competitor brands) and `"legacy_label": "Others"` whenever `"is_hul": false` or abstained (**`98.62%` L1 ownership accuracy**).
   * **Layer-5 `pack_size` Verifier**: Deterministically verifies extracted net-weight text against same-brand sister SKUs.
   * **Unified Abstention Threshold (`0.78`)**: Every response reports `abstain_recommended`, `abstained`, `abstention_reason`, and `conf_threshold` (default `0.78`). Pass `"allow_abstain": true` to emit `sku_id: null` when confidence falls below `conf_threshold`.
+  * **Deep-Dive & 10,000-Crop Benchmark Readout**: See [`docs/Algorithm_Deep_Dive_10k_Benchmark_and_Partner_FAQ.md`](Algorithm_Deep_Dive_10k_Benchmark_and_Partner_FAQ.md) for the complete mathematical formulation, `N=10,000` Cloud Run telemetry, and Partner Technical FAQ.
 
 ### Service Endpoint
 
@@ -55,8 +57,9 @@ Expected health response:
   "dataset": "hul_golden",
   "catalog_classes": 2659,
   "default_conf_threshold": 0.78,
-  "sibling_margin_guard": 0.035,
+  "sibling_margin_guard": 0.025,
   "layer5_pack_size_verifier": true,
+  "legacy_others_mapping": true,
   "confidence_range": [0.02, 0.985],
   "is_ready": true,
   "routes": {
@@ -121,6 +124,9 @@ print(resp.json())
   "width": 180,
   "height": 360,
   "sku_id": 42,
+  "legacy_label": "Dove Daily Shine Shampoo",
+  "legacy_brand": "Dove",
+  "catalog_scope": "unilever_sku",
   "prediction": {
     "sku_id": 42,
     "is_hul": true,
@@ -129,7 +135,10 @@ print(resp.json())
     "brand": "Dove",
     "base_variant": "Dove__Daily_Shine",
     "product": "Dove Daily Shine Shampoo",
-    "pack_size": "180 ml"
+    "pack_size": "180 ml",
+    "legacy_label": "Dove Daily Shine Shampoo",
+    "legacy_brand": "Dove",
+    "catalog_scope": "unilever_sku"
   },
   "stage": "stage2a_fast_gate",
   "guard_mode": "stage2a_fast_gate",
