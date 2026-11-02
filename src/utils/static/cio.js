@@ -932,6 +932,8 @@ function bindNavigation() {
       experiments: 'performance',
       'how-it-works': 'how-it-works',
       architecture: 'how-it-works',
+      audit: 'audit',
+      'endpoint-audit': 'audit',
     };
     if (map[raw]) setActiveTab(map[raw], false);
   });
@@ -968,6 +970,8 @@ function render() {
   } else if (state.activeTab === 'performance') {
     main.innerHTML = renderPerformanceTab();
     bindPerformanceEvents();
+  } else if (state.activeTab === 'audit') {
+    main.innerHTML = renderAuditTab();
   } else {
     main.innerHTML = renderHowItWorksTab();
     bindHowItWorksEvents();
@@ -2555,5 +2559,236 @@ function openExperimentModal(expId) {
   backdrop.classList.remove('hidden');
 }
 
+/* ==========================================================================
+   TAB 4: 10,000-CROP CLOUD BENCHMARK, ENDPOINT AUDIT & ALGORITHM DEEP-DIVE
+   ========================================================================== */
+function renderAuditTab() {
+  return `
+    <section class="cio-hero" style="grid-template-columns:1fr;padding:22px 28px;margin-bottom:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;">
+        <div>
+          <span class="cio-hero-tag">SPEC v0.2 • 10,000-CROP CLOUD RUN BENCHMARK &amp; ENDPOINT CALIBRATION AUDIT</span>
+          <h2 style="font-size:22px;margin:6px 0 4px;">
+            Algorithm Deep-Dive, 10,000-Crop Cloud Benchmark (<code>test_5k</code>) &amp; Manual Validation Audit Resolution
+          </h2>
+          <p style="margin:0;font-size:13px;color:#cbd5e1;">
+            Live Cloud Run Endpoint: <code>https://clef-contrastive-api-jbn2qgbina-uc.a.run.app</code> &bull;
+            Verified across <strong>N = 10,000 blind crops</strong> (5,000 <code>hul_golden-test_5k</code> + 5,000 <code>hul_variants-test_5k</code>) &amp; <strong>n = 593 manually validated crops</strong>.
+          </p>
+        </div>
+      </div>
+      <div class="cio-kpi-grid" style="margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));">
+        <div class="cio-kpi-card">
+          <div class="cio-kpi-label">STAGE 2A 0-VLM FAST-GATE</div>
+          <div class="cio-kpi-value" style="color:#38bdf8;">61.31%</div>
+          <div class="cio-kpi-sub">6,131 / 10,000 crops (0.54s p50) &bull; 38.69% VLM calls</div>
+        </div>
+        <div class="cio-kpi-card">
+          <div class="cio-kpi-label">CLEAR 0.78 THRESHOLD</div>
+          <div class="cio-kpi-value" style="color:#4ade80;">83.08%</div>
+          <div class="cio-kpi-sub">8,308 / 10,000 crops clear 0.78 at <strong>95.34% precision</strong></div>
+        </div>
+        <div class="cio-kpi-card">
+          <div class="cio-kpi-label">CONFIDENCE FILTERING AUC</div>
+          <div class="cio-kpi-value" style="color:#a78bfa;">0.9682</div>
+          <div class="cio-kpi-sub">Up from 0.5500 via pooled sister-variant calibration</div>
+        </div>
+        <div class="cio-kpi-card">
+          <div class="cio-kpi-label">L1 OWNERSHIP (is_hul vs Others)</div>
+          <div class="cio-kpi-value" style="color:#facc15;">98.62%</div>
+          <div class="cio-kpi-sub">9,862 / 10,000 &bull; 1.19% false HUL attribution</div>
+        </div>
+        <div class="cio-kpi-card">
+          <div class="cio-kpi-label">L3 BRAND / L5 EXACT SKU</div>
+          <div class="cio-kpi-value" style="color:#f472b6;">96.34% / 82.07%</div>
+          <div class="cio-kpi-sub">0.19 pp Facing Share-of-Shelf abs error</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cio-card" style="margin-bottom:20px;">
+      <div class="cio-section-header">
+        <div>
+          <span class="cio-section-eyebrow">1. ENDPOINT VALIDATION AUDIT RESOLUTION (N = 2,417 ROUTED / n = 593 MANUALLY VALIDATED &rarr; N = 10,000 VERIFIED)</span>
+          <h3 class="cio-section-title">Pre-Update Baseline Findings, Root-Cause Forensics &amp; Deployed <code>SPEC v0.2</code> Verification</h3>
+        </div>
+      </div>
+      <div class="cio-table-wrap">
+        <table class="cio-table" style="font-size:12px;">
+          <thead>
+            <tr>
+              <th style="width:18%;">Validation Dimension</th>
+              <th style="width:24%;">Pre-Update Baseline Observation</th>
+              <th style="width:28%;">Root Cause Identified</th>
+              <th style="width:30%;">Deployed <code>SPEC v0.2</code> Fix &amp; 10,000-Crop Verification</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>1. VLM Fallback Usage &amp; Latency</strong></td>
+              <td>Gemini called on <strong>1,864 / 2,417 crops (77.1%)</strong>; fast gate handled 22.9% (1.619s vs 0.016s in-memory).</td>
+              <td><code>_compute_stage2a_diagnostics</code> temporarily applied a <code>0.035</code> margin guard to all <code>same_brand</code> pairs instead of strictly pack-size sisters (<code>same_variant</code>), escalating distinct SKUs of the same brand.</td>
+              <td>Restored <code>required_margin = 0.025 if same_variant else 0.009</code>. Across N=10,000 crops: <strong>61.31% (6,131) handled by 0-VLM fast gate</strong> (<code>0.54s</code> p50 with GCS read; <code>16ms</code> in-memory) and <strong>38.69% (3,869) VLM calls</strong> (<code>15.5%&ndash;22.4%</code> on full shelves).</td>
+            </tr>
+            <tr>
+              <td><strong>2. Abstention at <code>0.78</code> Threshold</strong></td>
+              <td><code>abstain_recommended = True</code> on <strong>2,298 / 2,417 crops (95.1%)</strong>; only 119 (4.9%) cleared <code>0.78</code>; <code>abstained = False</code> on all rows.</td>
+              <td>When 4&ndash;5 sister SKUs of the same brand occupied the top-5 shortlist, un-pooled single-panel softmax share was diluted to <code>~1/5 = 0.20</code>, capping valid matches at <code>0.55&ndash;0.68</code>.</td>
+              <td><code>calibrated_shortlist_confidence</code> now pools <code>variant_mass</code> and <code>brand_mass</code> across sister SKUs. <strong>83.08% (8,308 / 10,000) clear <code>0.78</code> at 95.34% precision</strong>; passing <code>"allow_abstain": true</code> enforces <code>abstained: true</code> (<code>sku_id: null</code>) below <code>0.78</code>.</td>
+            </tr>
+            <tr>
+              <td><strong>3. Manual Validation on <code>n = 593</code> &amp; Legacy <code>&ldquo;Others&rdquo;</code> (280 Crops)</strong></td>
+              <td>In the <strong><code>n = 593</code> manually validated sample</strong> (313 Unilever + 280 legacy-<code>&ldquo;Others&rdquo;</code>, 236 total errors):<br>&bull; <strong>18 / 280 (6.4%)</strong> were true Unilever SKUs recovered by the pipeline (credited as true positives).<br>&bull; <strong>153 / 280 (54.6% of <code>&ldquo;Others&rdquo;</code> / 25.8% of <code>n = 593</code> / 64.8% of all 236 errors)</strong> were non-Unilever crops assigned a catalog SKU; <code>&ldquo;Others&rdquo;</code> returned on 0 crops.</td>
+              <td>1) Our 2,659-SKU gallery includes <strong>1,586 Competitor SKUs (<code>is_hul: false</code>)</strong> alongside 1,073 Unilever SKUs; matching a non-Unilever crop to a competitor SKU emitted that SKU name instead of <code>&ldquo;Others&rdquo;</code>.<br>2) With <code>allow_abstain: false</code>, <code>choice == 0</code> fell back to top-1 instead of abstaining to <code>&ldquo;Others&rdquo;</code>.</td>
+              <td>Every response now emits <code>"legacy_label"</code> and <code>"legacy_brand"</code>, which automatically return <strong><code>"Others"</code></strong> whenever <code>is_hul: false</code> (<code>catalog_scope: "competitor_sku"</code>) or <code>abstained: true</code> (<code>choice == 0</code> or <code>conf &lt; 0.78</code>), while preserving the <strong>18 (6.4%) true Unilever recoveries</strong>. L1 Unilever vs. <code>&ldquo;Others&rdquo;</code> accuracy is <strong>98.62% (9,862 / 10,000)</strong>.</td>
+            </tr>
+            <tr>
+              <td><strong>4. Confidence-Based Filtering (<code>ROC-AUC</code>)</strong></td>
+              <td>A confidence cut-off did not reliably remove false positives (<strong>AUC = 0.5500</strong>) prior to pooling.</td>
+              <td>Popular Unilever brands with 5 sister SKUs in the shortlist were penalized (<code>p ~ 0.20</code>), whereas an open-set crop matching 1 isolated SKU in the shortlist received a higher share (<code>p ~ 0.60</code>), inverting the ranking.</td>
+              <td>Pooling sister-variant probability mass and capping <code>choice == 0</code> rejects at <code>&le; 0.34</code> raises <strong>ROC-AUC to 0.9682</strong> across N=10,000 crops (<strong>96.53% of True Positives retained</strong> and <strong>78.42% of False Positives filtered</strong> at <code>0.78</code>).</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="cio-card" style="margin-bottom:20px;">
+      <div class="cio-section-header">
+        <div>
+          <span class="cio-section-eyebrow">2. 10,000-CROP CLOUD BENCHMARK ANALYSIS (test_5k)</span>
+          <h3 class="cio-section-title">Quantitative Metrics, Runtime, Latency Percentiles &amp; Error Taxonomy Across N = 10,000 Blind Crops</h3>
+        </div>
+      </div>
+      <div class="cio-table-wrap" style="margin-bottom:16px;">
+        <table class="cio-table" style="font-size:12px;">
+          <thead>
+            <tr>
+              <th>Metric / Telemetry Dimension</th>
+              <th><code>hul_golden-test_5k</code> (N = 5,000)</th>
+              <th><code>hul_variants-test_5k</code> (N = 5,000)</th>
+              <th>Combined 10k Benchmark (N = 10,000)</th>
+              <th>95% Bootstrap CI / Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Cloud Run Execution &amp; Runtime</strong></td>
+              <td><code>604.20 s</code> (8.28 crops/s, 16 workers)</td>
+              <td><code>689.20 s</code> (7.25 crops/s, 16 workers)</td>
+              <td><strong>1,293.40 s</strong> (7.73 crops/s, 0 errors)</td>
+              <td>4 vCPU / 16 GiB Cloud Run Jobs (<code>us-central1</code>)</td>
+            </tr>
+            <tr>
+              <td><strong>Stage 2A Fast-Gate / Stage 2B VLM Split</strong></td>
+              <td><strong>61.64%</strong> (3,082) / <strong>38.36%</strong> (1,918)</td>
+              <td><strong>60.98%</strong> (3,049) / <strong>39.02%</strong> (1,951)</td>
+              <td><strong>61.31% (6,131) / 38.69% (3,869)</strong></td>
+              <td>Zero VLM tokens on 6,131 / 10,000 crops</td>
+            </tr>
+            <tr>
+              <td><strong>Latency Percentiles (<code>p50</code> / <code>p95</code> / <code>p99</code>)</strong></td>
+              <td><code>0.819s</code> / <code>4.075s</code> / <code>21.708s</code></td>
+              <td><code>0.826s</code> / <code>4.729s</code> / <code>29.490s</code></td>
+              <td><strong>0.822s / 4.402s / 25.599s</strong></td>
+              <td>Stage 2A p50: <code>0.539s</code> &bull; Stage 2B p50: <code>2.729s</code></td>
+            </tr>
+            <tr>
+              <td><strong>L1 Ownership Accuracy (<code>is_hul</code> vs <code>&ldquo;Others&rdquo;</code>)</strong></td>
+              <td><strong>98.60%</strong> (4,930 / 5,000)</td>
+              <td><strong>98.64%</strong> (4,932 / 5,000)</td>
+              <td><strong>98.62%</strong> (9,862 / 10,000)</td>
+              <td><code>[98.39%, 98.85%]</code> &bull; 1.19% false HUL rate</td>
+            </tr>
+            <tr>
+              <td><strong>L2 Category / Packaging Form Accuracy</strong></td>
+              <td><strong>96.46%</strong> / <strong>91.68%</strong></td>
+              <td><strong>96.38%</strong> / <strong>91.64%</strong></td>
+              <td><strong>96.42% / 91.66%</strong></td>
+              <td>10 FMCG categories &bull; 16 container forms</td>
+            </tr>
+            <tr>
+              <td><strong>L3 Brand Accuracy (934 Brands)</strong></td>
+              <td><strong>96.12%</strong> (4,806 / 5,000)</td>
+              <td><strong>96.56%</strong> (4,828 / 5,000)</td>
+              <td><strong>96.34%</strong> (9,634 / 10,000)</td>
+              <td>HUL Brand Acc: <strong>98.16%</strong> &bull; Competitor: <strong>94.50%</strong></td>
+            </tr>
+            <tr>
+              <td><strong>L4 Base Variant / L5 Exact 5-Attr SKU Accuracy</strong></td>
+              <td><strong>82.28%</strong> (4,114 / 5,000)</td>
+              <td><strong>81.86%</strong> (4,093 / 5,000)</td>
+              <td><strong>82.07%</strong> (8,207 / 10,000)</td>
+              <td>Stage 2A Embedding R@5: <strong>97.31%</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Crops Clearing <code>0.78</code> &amp; Precision &ge; <code>0.78</code></strong></td>
+              <td><strong>82.86%</strong> clearing &bull; <strong>95.63%</strong> prec</td>
+              <td><strong>83.30%</strong> clearing &bull; <strong>95.05%</strong> prec</td>
+              <td><strong>83.08% clearing &bull; 95.34% precision</strong></td>
+              <td><strong>ROC-AUC = 0.9682</strong> (96.53% of TPs retained)</td>
+            </tr>
+            <tr>
+              <td><strong>Error Breakdown (1,793 Total SKU Errors)</strong></td>
+              <td colspan="4">
+                &bull; <strong>79.48% (1,425 / 1,793)</strong> are same-brand sister-variant / pack-form ambiguities (zero impact on Brand or HUL Share of Shelf; 76.8% caught below <code>0.78</code>).<br>
+                &bull; <strong>12.83% (230 / 1,793)</strong> are competitor-to-competitor swaps (both <code>is_hul: false</code> &rarr; <code>legacy_label: "Others"</code>; zero impact on HUL SOS; 83.0% caught below <code>0.78</code>).<br>
+                &bull; <strong>7.69% (138 / 1,793, or 1.38% of 10k crops)</strong> cross the <code>is_hul</code> boundary on blurred sub-45px crops (87.7% caught below <code>0.78</code>; 0.19 pp net SOS error).
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="cio-card">
+      <div class="cio-section-header">
+        <div>
+          <span class="cio-section-eyebrow">3. ALGORITHM DEEP-DIVE &amp; ARCHITECTURE RISK ANALYSIS</span>
+          <h3 class="cio-section-title">Stage 0&ndash;2C Mathematical Mechanics, Data De-Leakage, Cold Starts, Drift &amp; Scale</h3>
+        </div>
+      </div>
+      <div class="cio-table-wrap">
+        <table class="cio-table" style="font-size:12px;">
+          <thead>
+            <tr>
+              <th style="width:24%;">Stage / Risk Topic</th>
+              <th style="width:76%;">Mathematical Mechanics, Trade-Offs &amp; Empirical Proof</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Stage 0: Dual-Buffer Photometry</strong><br>(<code>src/utils/photometry.py</code>)</td>
+              <td>Splits every image into <strong>Buffer A</strong> (Minkowski $p=6$ Shades-of-Gray white balance in linear RGB for <code>gemini-embedding-2</code> and CIELAB color verification, avoiding the <code>-6.0 pp</code> CLAHE color distortion) and <strong>Buffer B</strong> (CIELAB $L^*$ CLAHE for Stage 1 ONNX edge detection and Stage 2B bottom-30% net-weight OCR zoom strips, lifting box recall by <code>+4.2 pp</code>).</td>
+            </tr>
+            <tr>
+              <td><strong>Stage 1 &amp; 1.5: 960px Soft-NMS CPU ONNX + Plank Law + Medoid Grouping</strong></td>
+              <td>Dual-class CPU ONNX detector (<code>&lt;100ms</code>, ₹0 token cost) with Gaussian Soft-NMS ($\sigma=0.5$), Physical Shelf-Plank Support Law ($y_{\\max}$ alignment), Pre-Embedding Class-0 Bay Gate (pruning <strong>61% of out-of-bay counter clutter</strong>), and Spatial Neighbor Medoid Grouping (reducing full-shelf Stage 2B VLM calls to <strong>15.5%&ndash;22.4%</strong>).</td>
+            </tr>
+            <tr>
+              <td><strong>Stage 2A: CLM System-1 Fast Gate</strong><br>(<code>clef_standalone.py</code>)</td>
+              <td>Computes 768-D <code>gemini-embedding-2</code> cosine similarity against the 2,659-SKU gallery, InfoNCE dustbin posterior ($\\tau=28.0, s_{\\text{dustbin}}=0.72$), local Z-score margin, LID, and the <strong>Sister-Variant Margin Guard</strong> ($\\Delta_{\\text{req}} = 0.025$ when top-2 share brand+variant but differ in pack size; $0.009$ otherwise), fast-gating <strong>61.31% of crops with 0 VLM calls</strong>.</td>
+            </tr>
+            <tr>
+              <td><strong>Stage 2B &amp; 2C: CLEF Contact Sheet, Layer-5 Verifier &amp; Pooled Calibration</strong></td>
+              <td>Renders Query $Q$ against Top-5 reference panels with 2.0x bottom-30% weight zoom strips and pairwise token contrastive diffs. <code>gemini-3.5-flash-lite</code> decodes visible <code>pack_size</code> before <code>choice</code> (verified by Layer-5 against sister SKUs). Stage 2C pools <code>variant_mass</code> and <code>brand_mass</code> across sister SKUs in the shortlist, achieving <strong>ROC-AUC = 0.9682</strong>.</td>
+            </tr>
+            <tr>
+              <td><strong>Data Leakage, Cold Starts, Catalog Drift &amp; Burst Scale</strong></td>
+              <td>
+                &bull; <strong>Zero Data Leakage (15/15 QC Gates):</strong> <code>Gates G3, G6, G13</code> enforce 0 URI, 0 MD5 digest, and 0 store <code>outlet_code</code> overlap across <code>train</code>/<code>val</code>/<code>test_5k</code>.<br>
+                &bull; <strong>Cold Starts:</strong> Pre-computed <code>~18 MB</code> <code>.npz</code> gallery loads in <code>6.4&ndash;8.2s</code> into process-global singletons behind a thread lock.<br>
+                &bull; <strong>Catalog Drift &amp; Day-0 Launches:</strong> Adding 1&ndash;3 reference packshots to <code>rpc.json</code> takes <code>&lt;60s</code> with zero retraining and achieves <strong>94.4% (17/18) accuracy on unseen SKU launches</strong>.<br>
+                &bull; <strong>Burst Scale &amp; PT180S Quarantine:</strong> Verified under Locust load testing (<code>0.00%</code> HTTP failures); any timeout emits <code>RETRY_PENDING</code> to <code>PR19_pubsub_dlq</code> and never triggers a false zero retailer payout.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 document.addEventListener('DOMContentLoaded', init);
+
 
