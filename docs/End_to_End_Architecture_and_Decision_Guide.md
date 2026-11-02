@@ -84,7 +84,7 @@ Every benchmark dataset in [Data Analysis and Enrichment](https://docs.google.co
 
 ### **1. Executive Map Across Document Tabs**
 
-The six tabs of this document follow a direct sequence from raw data forensics and baseline root-cause analysis to pipeline design, capacity sizing, and governance:
+The seven tabs of this document follow a direct sequence from raw data forensics and baseline root-cause analysis to pipeline design, capacity sizing, governance, and the 10k benchmark & endpoint audit:
 
 
 | **Document Tab** | **How It Connects to Other Tabs** | **Headline Validated Outcome** |
