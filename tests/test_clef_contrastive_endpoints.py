@@ -300,3 +300,108 @@ def test_cli_parsing():
     with pytest.raises(SystemExit) as exc:
         cli.main(["deploy-clef-api", "--help"])
     assert exc.value.code == 0
+
+
+def test_stage2a_sister_variant_gate_and_legacy_others_mapping():
+    from approaches.market_share.retrieval.clef_standalone import (
+        ClefContrastiveMetadata,
+        resolve_clef_choice,
+    )
+    from utils.openjev import calibrated_shortlist_confidence
+
+    appr = ClefContrastiveMetadata()
+    appr.catalog = {
+        42: {
+            "sku_id": 42,
+            "is_hul": True,
+            "brand": "Dove",
+            "base_variant": "Dove__Daily_Shine",
+            "product": "Dove Daily Shine 180ml",
+            "pack_size": "180ml",
+        },
+        43: {
+            "sku_id": 43,
+            "is_hul": True,
+            "brand": "Dove",
+            "base_variant": "Dove__Daily_Shine",
+            "product": "Dove Daily Shine 340ml",
+            "pack_size": "340ml",
+        },
+        44: {
+            "sku_id": 44,
+            "is_hul": True,
+            "brand": "Dove",
+            "base_variant": "Dove__Intense_Repair",
+            "product": "Dove Intense Repair 180ml",
+            "pack_size": "180ml",
+        },
+        99: {
+            "sku_id": 99,
+            "is_hul": False,
+            "brand": "Pantene",
+            "base_variant": "Pantene__Pro_V",
+            "product": "Pantene Pro V 200ml",
+            "pack_size": "200ml",
+        },
+    }
+
+    # 1. Same-brand non-sister variants (42 vs 44) with margin 0.020 >= 0.009 and z_margin >= 0.80 pass Stage 2A fast gate
+    top_non_sister = [
+        (0.850, 42, "p42"),
+        (0.830, 44, "p44"),
+        (0.822, 43, "p43"),
+        (0.818, 99, "p99"),
+        (0.814, 99, "p99b"),
+    ]
+    diag_non_sister = appr._compute_stage2a_diagnostics(top_non_sister, use_fast_gate=True)
+    assert diag_non_sister["same_brand_top2"] is True
+    assert diag_non_sister["same_variant_sister"] is False
+    assert diag_non_sister["required_margin"] == 0.009
+    assert diag_non_sister["fast_gate_passed"] is True
+    assert diag_non_sister["stage2a_sku_confidence"] >= 0.78
+
+    # 2. Same-variant sister SKUs (42 vs 43, differing only in pack_size) with margin 0.020 < 0.025 escalate to Stage 2B
+    top_sister = [
+        (0.850, 42, "p42"),
+        (0.830, 43, "p43"),
+        (0.822, 44, "p44"),
+        (0.818, 99, "p99"),
+        (0.814, 99, "p99b"),
+    ]
+    diag_sister = appr._compute_stage2a_diagnostics(top_sister, use_fast_gate=True)
+    assert diag_sister["same_variant_sister"] is True
+    assert diag_sister["required_margin"] == 0.025
+    assert diag_sister["fast_gate_passed"] is False
+    assert "cosine_margin_below_0.025_sister_variant_guard" in str(diag_sister["escalation_reason"])
+
+    # 3. Pooled variant/brand confidence clears 0.78 on verified match even with sister SKUs in shortlist
+    cal_verified = calibrated_shortlist_confidence(1, top_sister, catalog=appr.catalog)
+    assert cal_verified["sku_confidence"] >= 0.78
+    cal_reject = calibrated_shortlist_confidence(0, top_sister, catalog=appr.catalog)
+    assert cal_reject["sku_confidence"] <= 0.34
+
+    # 4. Tier-2 open-set choice=0 abstains when allow_abstain=True and 0.45 <= s1 < 0.72
+    top_open_set = [(0.68, 99, "p99"), (0.64, 42, "p42")]
+    ans_abs, mode_abs = resolve_clef_choice(0, 0.95, top_open_set, allow_abstain=True, catalog=appr.catalog)
+    assert ans_abs is None
+    assert mode_abs == "tier2_open_set_competitor_abstain"
+
+    # 5. Competitor SKU (is_hul=False) exposes legacy_label='Others' while preserving named competitor brand
+    b64 = _create_synthetic_jpeg_b64()
+    comp_appr = _MockCropApproach(sku_id=99, clm_prob=0.91, sku_conf=0.88)
+    comp_engine = ClefContrastiveEngine(
+        crop_appr=comp_appr,
+        shelf_det=_MockShelfDetector(),
+        llm=lambda img, p, **kw: None,
+        catalog=comp_appr.catalog,
+    )
+    comp_res = comp_engine.predict_crop_payload({"image_b64": b64})
+    assert comp_res["sku_id"] == 99
+    assert comp_res["prediction"]["brand"] == "Pantene"
+    assert comp_res["prediction"]["is_hul"] is False
+    assert comp_res["prediction"]["catalog_scope"] == "competitor_sku"
+    assert comp_res["prediction"]["legacy_label"] == "Others"
+    assert comp_res["prediction"]["legacy_brand"] == "Others"
+    assert comp_res["legacy_label"] == "Others"
+    assert comp_res["legacy_brand"] == "Others"
+

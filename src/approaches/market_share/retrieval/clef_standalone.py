@@ -348,7 +348,13 @@ def _resolve_and_calibrate_clef(
 
     from utils.openjev import calibrated_shortlist_confidence
 
-    token_prob = float(slot["top1_prob"]) if slot and "top1_prob" in slot else 0.95
+    slot_prob: float | None = None
+    if slot:
+        if "top1_prob" in slot and slot["top1_prob"] is not None:
+            slot_prob = float(slot["top1_prob"])
+        elif "confidence" in slot and slot["confidence"] is not None:
+            slot_prob = float(slot["confidence"])
+    token_prob = slot_prob if slot_prob is not None else 0.95
     ans, guard_mode = resolve_clef_choice(
         choice,
         token_prob,
@@ -362,14 +368,14 @@ def _resolve_and_calibrate_clef(
     cal = calibrated_shortlist_confidence(
         choice,
         top,
-        slot={"confidence": float(slot["top1_prob"])} if slot and "top1_prob" in slot else None,
+        slot={"confidence": slot_prob} if slot_prob is not None else None,
         catalog=catalog,
         vetoed=vetoed,
         pack_size_verified=pack_verified,
     )
     sku_conf = cal["sku_confidence"]
     brand_conf = cal["brand_confidence"]
-    clef_prob = float(slot["top1_prob"]) if slot and "top1_prob" in slot else sku_conf
+    clef_prob = slot_prob if slot_prob is not None else sku_conf
     is_fallback = not (isinstance(choice, int) and 1 <= choice <= len(top))
     if is_fallback:
         clef_prob = sku_conf
@@ -377,7 +383,7 @@ def _resolve_and_calibrate_clef(
     if env_min:
         try:
             min_c = float(env_min)
-            if ans is not None and clef_prob < min_c:
+            if ans is not None and sku_conf < min_c:
                 ans = None
                 guard_mode = f"{guard_mode}+abstain_low_confidence"
         except ValueError:
@@ -386,7 +392,7 @@ def _resolve_and_calibrate_clef(
         "clef_prob": round(min(0.985, clef_prob), 4),
         "sku_confidence": sku_conf,
         "brand_confidence": brand_conf,
-        "abstain_recommended": bool(is_fallback or clef_prob < 0.38),
+        "abstain_recommended": bool(is_fallback or sku_conf < 0.78),
     }
 
 
@@ -490,7 +496,7 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
             and c1.get("base_variant") == c2.get("base_variant")
             and c1.get("pack_size") != c2.get("pack_size")
         )
-        req_margin = 0.035 if (same_brand or same_variant) else 0.009
+        req_margin = 0.025 if same_variant else 0.009
         cos_margin = round(float(s1 - s2), 4) if s2 >= -0.99 else round(float(s1), 4)
         zlid = compute_zscore_and_lid([s for s, _, _ in top])
         p_clm, ent_conf = infonce_posterior(top, inv_temp=28.0, k=CLEF_K)
@@ -503,15 +509,15 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
                 reasons.append("top1_cosine_below_0.75")
             if (s1 - s2) < req_margin:
                 reasons.append(
-                    "cosine_margin_below_0.035_sibling_guard"
-                    if (same_brand or same_variant)
+                    "cosine_margin_below_0.025_sister_variant_guard"
+                    if same_variant
                     else "cosine_margin_below_0.009"
                 )
             if p_clm < 0.30:
                 reasons.append("clm_top1_prob_below_0.30")
             if zlid["z_margin"] < 0.80:
                 reasons.append("z_margin_below_0.80")
-            if zlid["lid"] > 11.5:
+            if zlid["lid"] > 11.5 and (s1 - s2) < 0.025:
                 reasons.append("lid_above_11.5")
         passed = bool(use_fast_gate and not reasons)
         return {
@@ -544,7 +550,7 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
         use_fast_gate = (
             os.environ.get("SHELF_BENCH_CLEF_FAST_GATE") == "1"
             or (
-                self.dataset.startswith(("hul", "gt_hul", "gtmerch", "ms_json"))
+                self.dataset.startswith(("hul", "gt_hul", "gtmerch", "ms_json", "mt_json"))
                 and os.environ.get("SHELF_BENCH_PURE_CLEF") != "1"
             )
         )
@@ -592,7 +598,7 @@ class ClefStandaloneRetrieval(EmbeddingRetrieval):
         use_fast_gate = (
             os.environ.get("SHELF_BENCH_CLEF_FAST_GATE") == "1"
             or (
-                self.dataset.startswith(("hul", "gt_hul", "gtmerch", "ms_json"))
+                self.dataset.startswith(("hul", "gt_hul", "gtmerch", "ms_json", "mt_json"))
                 and os.environ.get("SHELF_BENCH_PURE_CLEF") != "1"
             )
         )
